@@ -1,0 +1,82 @@
+name: Probe Direct shadPS4 iOS Port
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ maxps4-shadps4-direct ]
+    paths:
+      - '.github/workflows/shadps4-direct-ios.yml'
+      - 'MaxPS4-iOS/Core/**'
+
+jobs:
+  probe-direct-shadps4-ios:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout MaxPS4
+        uses: actions/checkout@v4
+
+      - name: Prepare tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          brew install ninja protobuf || true
+
+      - name: Checkout official shadPS4
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ENGINE_ROOT="$RUNNER_TEMP/shadps4-official"
+          git clone https://github.com/shadps4-emu/shadPS4.git "$ENGINE_ROOT"
+          git -C "$ENGINE_ROOT" checkout b3452cf6a9bd0969771fcfbf919c359368473d1b
+          git -C "$ENGINE_ROOT" submodule update --init --recursive
+          echo "ENGINE_ROOT=$ENGINE_ROOT" >> "$GITHUB_ENV"
+
+      - name: Verify no AetherPS4 dependency
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ! grep -Rni --exclude-dir=.git 'AetherPS4' MaxPS4-iOS/Core .github/workflows/shadps4-direct-ios.yml
+
+      - name: Compile MaxPS4 bridge against upstream headers
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
+          xcrun --sdk iphoneos clang++ \
+            -std=c++20 -arch arm64 -miphoneos-version-min=18.0 \
+            -isysroot "$SDKROOT" \
+            -I"$ENGINE_ROOT/src" \
+            -I"$ENGINE_ROOT" \
+            -c "$GITHUB_WORKSPACE/MaxPS4-iOS/Core/MaxPS4CoreBridge.cpp" \
+            -o "$RUNNER_TEMP/MaxPS4CoreBridge.o"
+
+      - name: Probe official shadPS4 iOS configuration
+        shell: bash
+        run: |
+          set -o pipefail
+          BUILD="$RUNNER_TEMP/shadps4-ios-probe"
+          LOG="$RUNNER_TEMP/shadps4-ios-probe.log"
+          set +e
+          cmake -S "$ENGINE_ROOT" -B "$BUILD" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_SYSTEM_PROCESSOR=arm64 \
+            -DCMAKE_OSX_SYSROOT=iphoneos \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 \
+            -DENABLE_TESTS=OFF \
+            -DENABLE_UPDATER=OFF \
+            -DENABLE_DISCORD_RPC=OFF \
+            2>&1 | tee "$LOG"
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          echo "CMAKE_STATUS=$STATUS" >> "$GITHUB_ENV"
+          exit "$STATUS"
+
+      - name: Upload iOS probe log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shadps4-direct-ios-probe-log
+          path: ${{ runner.temp }}/shadps4-ios-probe.log
+          if-no-files-found: ignore
