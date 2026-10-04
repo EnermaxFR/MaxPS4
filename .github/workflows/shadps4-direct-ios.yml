@@ -49,6 +49,12 @@ jobs:
             -isysroot "$SDKROOT" \
             -I"$ENGINE_ROOT/src" \
             -I"$ENGINE_ROOT" \
+            -I"$ENGINE_ROOT/externals/fmt/include" \
+            -I"$ENGINE_ROOT/externals/robin-map/include" \
+            -I"$ENGINE_ROOT/externals/magic_enum/include" \
+            -I"$ENGINE_ROOT/externals/json/include" \
+            -I"$ENGINE_ROOT/externals/boost" \
+            -I"$ENGINE_ROOT/externals/vulkan-headers/include" \
             -c "$GITHUB_WORKSPACE/MaxPS4-iOS/Core/MaxPS4CoreBridge.cpp" \
             -o "$RUNNER_TEMP/MaxPS4CoreBridge.o"
 
