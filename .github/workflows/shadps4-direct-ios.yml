@@ -25,6 +25,7 @@ jobs:
           SPIRV_PREFIX="$(brew --prefix spirv-llvm-translator)"
           SPIRV_TOOLS_PREFIX="$(brew --prefix spirv-tools)"
           GLSLANG_PREFIX="$(brew --prefix glslang)"
+          PROTOBUF_PREFIX="$(brew --prefix protobuf)"
           echo "$LLVM_PREFIX/bin" >> "$GITHUB_PATH"
           echo "$SPIRV_TOOLS_PREFIX/bin" >> "$GITHUB_PATH"
           echo "$GLSLANG_PREFIX/bin" >> "$GITHUB_PATH"
@@ -33,11 +34,14 @@ jobs:
           echo "SPIRV_LLVM_TRANSLATOR_ROOT=$SPIRV_PREFIX" >> "$GITHUB_ENV"
           echo "SPIRV_TOOLS_ROOT=$SPIRV_TOOLS_PREFIX" >> "$GITHUB_ENV"
           echo "HOST_GLSLANG_VALIDATOR=$GLSLANG_PREFIX/bin/glslangValidator" >> "$GITHUB_ENV"
+          echo "HOST_PROTOC=$PROTOBUF_PREFIX/bin/protoc" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$SPIRV_TOOLS_PREFIX/lib/pkgconfig:$SPIRV_PREFIX/lib/pkgconfig:$LLVM_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$GLSLANG_PREFIX:$SPIRV_TOOLS_PREFIX:$SPIRV_PREFIX:$LLVM_PREFIX:${CMAKE_PREFIX_PATH:-}" >> "$GITHUB_ENV"
           "$LLVM_PREFIX/bin/llvm-config" --version
           "$GLSLANG_PREFIX/bin/glslangValidator" --version
+          "$PROTOBUF_PREFIX/bin/protoc" --version
           test -x "$GLSLANG_PREFIX/bin/glslangValidator"
+          test -x "$PROTOBUF_PREFIX/bin/protoc"
           python3 -m venv "$RUNNER_TEMP/maxps4-python"
           "$RUNNER_TEMP/maxps4-python/bin/python" -m pip install --upgrade pip packaging mako pyyaml meson
           echo "$RUNNER_TEMP/maxps4-python/bin" >> "$GITHUB_PATH"
@@ -166,6 +170,14 @@ jobs:
           ext.write_text(e.replace(old,new,1))
           PY
 
+          python3 - "$ROOT_CMAKE" "$HOST_PROTOC" <<'PY'
+          import pathlib,sys
+          p=pathlib.Path(sys.argv[1]); protoc=sys.argv[2]; s=p.read_text()
+          needle='COMMAND protobuf::protoc'
+          if needle not in s: raise SystemExit('shadnet protoc command not found')
+          p.write_text(s.replace(needle, f'COMMAND "{protoc}"', 1))
+          PY
+
           HOST_FONT_TOOL="$RUNNER_TEMP/Dear_ImGui_FontEmbed"
           xcrun --sdk macosx clang++ "$ENGINE_ROOT/externals/imgui/misc/fonts/binary_to_compressed_c.cpp" -O2 -o "$HOST_FONT_TOOL"
           test -x "$HOST_FONT_TOOL"
@@ -195,6 +207,7 @@ jobs:
           test -f "$ENGINE_ROOT/src/emulator.h"
           test -f "$GITHUB_WORKSPACE/MaxPS4-iOS/Core/MaxPS4CoreBridge.cpp"
           test -x "$HOST_GLSLANG_VALIDATOR"
+          test -x "$HOST_PROTOC"
           git -C "$ENGINE_ROOT" remote get-url origin | grep -F 'shadps4-emu/shadPS4.git'
 
       - name: Compile MaxPS4 bridge against upstream headers
