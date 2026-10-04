@@ -129,12 +129,24 @@ jobs:
         run: |
           set -euxo pipefail
           cd "$GITHUB_WORKSPACE/MaxPS4-iOS"
+
+          # shadps4_ios is a static core. Link every arm64 archive produced by its
+          # clean iOS CMake build, matching the upstream iOS project generator,
+          # while keeping the AetherPS4 frontend completely out of MaxPS4.app.
+          mapfile -t IOS_LIBS < <(find "$ENGINE_BUILD" -type f -name '*.a' ! -path '*/CMakeFiles/*' -print | sort)
+          test ${#IOS_LIBS[@]} -gt 0
+          LINK_ARGS='$(inherited) -ObjC -lc++ -liconv'
+          for lib in "${IOS_LIBS[@]}"; do
+            LINK_ARGS="$LINK_ARGS $lib"
+          done
+          LINK_ARGS="$LINK_ARGS -framework Metal -framework QuartzCore -framework GameController -framework CoreHaptics -framework AVFoundation -framework CoreAudio -framework AudioToolbox -framework CoreBluetooth -framework CoreMedia -framework CoreMotion"
+
           xcodebuild -project MaxPS4.xcodeproj -scheme MaxPS4 -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/MaxPS4DerivedData" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' \
             SWIFT_OBJC_BRIDGING_HEADER="$GITHUB_WORKSPACE/MaxPS4-iOS/Sources/MaxPS4-Bridging-Header.h" \
-            OTHER_LDFLAGS="\$(inherited) $CORE_LIB -lc++" build
+            OTHER_LDFLAGS="$LINK_ARGS" build
 
       - name: Validate MaxPS4 executable
         shell: bash
