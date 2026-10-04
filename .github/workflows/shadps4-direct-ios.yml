@@ -131,15 +131,7 @@ jobs:
           p=pathlib.Path(sys.argv[1]); s=p.read_text()
           anchor='#define CPPHTTPLIB_HTTPLIB_H'
           if anchor not in s: raise SystemExit('cpp-httplib header anchor missing')
-          guard='''#define CPPHTTPLIB_HTTPLIB_H
-
-#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
-// SecTrustCopyAnchorCertificates is a macOS-only API. iOS must not compile
-// cpp-httplib's macOS Keychain certificate enumeration path.
-#ifdef CPPHTTPLIB_USE_CERTS_FROM_MACOSX_KEYCHAIN
-#undef CPPHTTPLIB_USE_CERTS_FROM_MACOSX_KEYCHAIN
-#endif
-#endif'''
+          guard='#define CPPHTTPLIB_HTTPLIB_H\n\n#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n#ifdef CPPHTTPLIB_USE_CERTS_FROM_MACOSX_KEYCHAIN\n#undef CPPHTTPLIB_USE_CERTS_FROM_MACOSX_KEYCHAIN\n#endif\n#endif'
           p.write_text(s.replace(anchor,guard,1))
           PY
 
