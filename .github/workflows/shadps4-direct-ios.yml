@@ -215,6 +215,16 @@ jobs:
           sig.write_text(s.replace(old,new,1))
           PY
 
+          STUBS="$ENGINE_ROOT/src/core/aerolib/stubs.cpp"
+          python3 - "$STUBS" <<'PY'
+          import pathlib,sys
+          p=pathlib.Path(sys.argv[1]); s=p.read_text()
+          old='''    e.code = std::make_unique<Xbyak::CodeGenerator>(32, Xbyak::AutoGrow);\n    e.code->mov(e.code->rdi, index);\n    e.code->mov(e.code->rax, reinterpret_cast<u64>(&CommonStub));\n    e.code->jmp(e.code->rax);\n    e.code->ready();\n\n    g_stub_entries.push_back(std::move(e));\n    return reinterpret_cast<u64>(g_stub_entries.back().code->getCode());'''
+          new='''#if defined(ARCH_ARM64)\n    // Xbyak emits x86-64 trampolines and cannot execute them on an ARM64 iOS host.\n    // Keep the direct iOS build safe until the ARM64 guest-call/JIT bridge supplies a native trampoline.\n    static const auto Arm64MissingStub = +[]() -> u64 { return 0; };\n    g_stub_entries.push_back(std::move(e));\n    return reinterpret_cast<u64>(Arm64MissingStub);\n#else\n    e.code = std::make_unique<Xbyak::CodeGenerator>(32, Xbyak::AutoGrow);\n    e.code->mov(e.code->rdi, index);\n    e.code->mov(e.code->rax, reinterpret_cast<u64>(&CommonStub));\n    e.code->jmp(e.code->rax);\n    e.code->ready();\n\n    g_stub_entries.push_back(std::move(e));\n    return reinterpret_cast<u64>(g_stub_entries.back().code->getCode());\n#endif'''
+          if old not in s: raise SystemExit('AeroLib Xbyak stub anchor not found')
+          p.write_text(s.replace(old,new,1))
+          PY
+
       - name: Verify clean direct dependency tree
         shell: bash
         run: |
