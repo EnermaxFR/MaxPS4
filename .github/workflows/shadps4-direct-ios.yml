@@ -58,10 +58,10 @@ jobs:
             grep -RInE --include='*.c' --include='*.cc' --include='*.cpp' --include='*.m' --include='*.mm' '(std::system|[^[:alnum:]_]system|fork|vfork|posix_spawn|exec[lvpe]*|popen)[[:space:]]*\(' "$ENGINE_ROOT/src" "$ENGINE_ROOT/externals" || true
             echo '=== Mach VM APIs ==='
             grep -RInE --include='*.c' --include='*.cc' --include='*.cpp' --include='*.m' --include='*.mm' '(mach_vm_|<mach/mach_vm\.h>)' "$ENGINE_ROOT/src" "$ENGINE_ROOT/externals" || true
-            echo '=== macOS-only Metal surface hints ==='
-            grep -RInE --include='*.c' --include='*.cc' --include='*.cpp' --include='*.m' --include='*.mm' '(displaySyncEnabled|NSApplication|NSWindow|AppKit)' "$ENGINE_ROOT/src" "$ENGINE_ROOT/externals" || true
+            echo '=== macOS-only APIs/frameworks ==='
+            grep -RInE --include='*.c' --include='*.h' --include='*.cc' --include='*.cpp' --include='*.m' --include='*.mm' '(displaySyncEnabled|NSApplication|NSWindow|AppKit|IOKit/|IOCFBundle|IOService)' "$ENGINE_ROOT/src" "$ENGINE_ROOT/externals" || true
             echo '=== Linux-only APIs ==='
-            grep -RInE --include='*.c' --include='*.cc' --include='*.cpp' '(eventfd|timerfd_|memfd_create|epoll_|inotify_|/proc/|sys/epoll\.h|sys/eventfd\.h)' "$ENGINE_ROOT/src" "$ENGINE_ROOT/externals" || true
+            grep -RInE --include='*.c' --include='*.h' --include='*.cc' --include='*.cpp' '(eventfd|timerfd_|memfd_create|epoll_|inotify_|/proc/|sys/epoll\.h|sys/eventfd\.h)' "$ENGINE_ROOT/src" "$ENGINE_ROOT/externals" || true
           } | tee "$AUDIT"
           echo "IOS_API_AUDIT=$AUDIT" >> "$GITHUB_ENV"
 
@@ -127,29 +127,61 @@ jobs:
           p.write_text(s)
           PY
 
-          # ImGuiFileDialog uses std::system() as a shell fallback for directory creation.
-          # system() is explicitly unavailable on iOS. Patch every real call, regardless
-          # of the local variable name used by the pinned upstream revision.
           IGFD="$ENGINE_ROOT/externals/ImGuiFileDialog/ImGuiFileDialog.cpp"
           python3 - "$IGFD" <<'PY'
           import pathlib, re, sys
           p = pathlib.Path(sys.argv[1]); s = p.read_text()
           pattern = re.compile(r'(?P<indent>^[ \t]*)(?P<decl>(?:const\s+)?int\s+\w+\s*=\s*)std::system\((?P<arg>[^;]+)\);', re.MULTILINE)
-          matches = list(pattern.finditer(s))
-          if not matches:
-              raise SystemExit('No std::system() assignment found in ImGuiFileDialog.cpp')
+          if not pattern.search(s): raise SystemExit('No std::system() assignment found')
           def repl(m):
               i=m.group('indent'); d=m.group('decl'); a=m.group('arg')
-              return (f'{i}#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n'
-                      f'{i}{d}-1; // shell execution is unavailable on iOS\n'
-                      f'{i}#else\n'
-                      f'{i}{d}std::system({a});\n'
-                      f'{i}#endif')
-          s, count = pattern.subn(repl, s)
-          p.write_text(s)
-          print(f'Patched {count} std::system() call(s) for iOS')
+              return f'{i}#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n{i}{d}-1;\n{i}#else\n{i}{d}std::system({a});\n{i}#endif'
+          p.write_text(pattern.sub(repl, s))
           PY
-          grep -n -A7 -B3 'shell execution is unavailable' "$IGFD"
+
+          # iOS cannot spawn a replacement emulator process. Keep restart code for desktop,
+          # but make the iOS branch terminate cleanly instead of compiling fork/exec.
+          EMU="$ENGINE_ROOT/src/emulator.cpp"
+          python3 - "$EMU" <<'PY'
+          import pathlib, sys
+          p=pathlib.Path(sys.argv[1]); s=p.read_text()
+          marker='#else\n    std::vector<char*> argv;'
+          if marker in s:
+              s=s.replace(marker, '#elif defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n    // iOS applications cannot fork/exec a replacement process.\n    std::quick_exit(0);\n#else\n    std::vector<char*> argv;', 1)
+          else:
+              raise SystemExit('emulator restart fork branch not found')
+          p.write_text(s)
+          PY
+
+          # libusb's Darwin backend is macOS-oriented and includes IOKit headers unavailable
+          # in the iPhoneOS SDK. Disable USB backend sources for the iOS probe while keeping
+          # the rest of shadPS4 available; PS4 USB emulation can be replaced by an iOS backend later.
+          ROOT_CMAKE="$ENGINE_ROOT/CMakeLists.txt"
+          EXT_CMAKE="$ENGINE_ROOT/externals/CMakeLists.txt"
+          python3 - "$ROOT_CMAKE" "$EXT_CMAKE" <<'PY'
+          import pathlib, re, sys
+          root=pathlib.Path(sys.argv[1]); ext=pathlib.Path(sys.argv[2])
+          s=root.read_text()
+          # Remove USBD source list from the main executable source expansion on iOS only.
+          # Preserve definitions/registration source compatibility by filtering concrete USB files.
+          injection='''\nif(CMAKE_SYSTEM_NAME STREQUAL "iOS")\n    message(STATUS "MaxPS4 iOS: disabling desktop USB backend")\n    list(FILTER USBD_LIB EXCLUDE REGEX "src/core/libraries/usbd/.*")\nendif()\n'''
+          anchor='set(AUDIO_LIB '
+          if 'MaxPS4 iOS: disabling desktop USB backend' not in s:
+              idx=s.find(anchor)
+              if idx < 0: raise SystemExit('AUDIO_LIB anchor not found')
+              # Insert after USBD_LIB has been defined, if possible; otherwise later before target creation.
+              target_anchor='add_executable(shadps4'
+              pos=s.find(target_anchor)
+              if pos < 0: raise SystemExit('main executable anchor not found')
+              s=s[:pos]+injection+s[pos:]
+          root.write_text(s)
+
+          e=ext.read_text()
+          old='''# libusb\nif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'''
+          new='''# libusb\nif (CMAKE_SYSTEM_NAME STREQUAL "iOS")\n    add_library(usb-1.0 INTERFACE)\n    add_library(libusb::usb ALIAS usb-1.0)\nelseif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'''
+          if old not in e: raise SystemExit('libusb block anchor not found')
+          ext.write_text(e.replace(old,new,1))
+          PY
 
           HOST_FONT_TOOL="$RUNNER_TEMP/Dear_ImGui_FontEmbed"
           xcrun --sdk macosx clang++ "$ENGINE_ROOT/externals/imgui/misc/fonts/binary_to_compressed_c.cpp" -O2 -o "$HOST_FONT_TOOL"
