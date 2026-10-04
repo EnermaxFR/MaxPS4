@@ -19,7 +19,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          brew install ninja protobuf llvm || true
+          brew install ninja meson protobuf llvm || true
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
       - name: Checkout official shadPS4
