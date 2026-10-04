@@ -102,9 +102,27 @@ jobs:
           endian = 'little'
           EOF
 
+          # CAMetalLayer.displaySyncEnabled exists on macOS but is explicitly
+          # unavailable on iOS. Keep upstream behavior on macOS and omit only
+          # those two assignments for the iPhoneOS target.
+          WSI="$KK/externals/mesa/src/vulkan/wsi/wsi_common_metal_layer.m"
+          python3 - "$WSI" <<'PY'
+          import pathlib, sys
+          p = pathlib.Path(sys.argv[1])
+          s = p.read_text()
+          needle = '   metal_layer.displaySyncEnabled = !enable_immediate;'
+          count = s.count(needle)
+          if count != 2:
+              raise SystemExit(f'Expected 2 displaySyncEnabled assignments, found {count}')
+          guarded = '''#if defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__)\n   metal_layer.displaySyncEnabled = !enable_immediate;\n#endif'''
+          s = s.replace(needle, guarded)
+          p.write_text(s)
+          PY
+
           echo '--- patched KosmicKrisp environment ---'
           grep -n -A10 'MESA_ENVIRONMENT_TOOLS' "$KK/CMakeLists.txt"
           grep -n -A12 'MESA_ENVIRONMENT_TARGET' "$KK/CMakeLists.txt"
+          grep -n -B2 -A3 'displaySyncEnabled' "$WSI"
           cat "$KK/crossfiles/mesa-ios-aarch64.ini"
 
       - name: Verify clean direct dependency tree
