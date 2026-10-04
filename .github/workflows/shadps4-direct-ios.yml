@@ -136,7 +136,7 @@ jobs:
           ROOT="$ENGINE_ROOT/CMakeLists.txt"; EXT="$ENGINE_ROOT/externals/CMakeLists.txt"
           python3 - "$ROOT" "$EXT" "$HOST_PROTOC" <<'PY'
           import pathlib,sys
-          root,ext,protoc=map(pathlib.Path,sys.argv[1:3])+() if False else (pathlib.Path(sys.argv[1]),pathlib.Path(sys.argv[2]),sys.argv[3])
+          root,ext,protoc=(pathlib.Path(sys.argv[1]),pathlib.Path(sys.argv[2]),sys.argv[3])
           s=root.read_text(); pos=s.find('add_executable(shadps4')
           if pos<0: raise SystemExit('executable anchor missing')
           s=s[:pos]+'\nif(CMAKE_SYSTEM_NAME STREQUAL "iOS")\n list(FILTER USBD_LIB EXCLUDE REGEX "src/core/libraries/usbd/.*")\nendif()\n'+s[pos:]
@@ -146,6 +146,32 @@ jobs:
           new='# libusb\nif (CMAKE_SYSTEM_NAME STREQUAL "iOS")\n    add_library(usb-1.0 INTERFACE)\n    add_library(libusb::usb ALIAS usb-1.0)\nelseif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'
           if old not in e: raise SystemExit('libusb anchor missing')
           ext.write_text(e.replace(old,new,1))
+          PY
+
+          # iOS has no desktop libusb backend. Remove every non-USBD consumer so libusb headers
+          # and symbols cannot leak back into the ARM64 target through IPC or HLE registration.
+          python3 - "$ENGINE_ROOT/src/core/ipc/ipc.cpp" "$ENGINE_ROOT/src/core/libraries/libs.cpp" <<'PY'
+          import pathlib,sys
+          ipc=pathlib.Path(sys.argv[1]); s=ipc.read_text()
+          inc='#include "src/core/libraries/usbd/usbd.h"'
+          if inc not in s: raise SystemExit('IPC USBD include anchor missing')
+          s=s.replace(inc,'#if !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n'+inc+'\n#endif',1)
+          start='        } else if (cmd == "USB_LOAD_FIGURE") {'
+          end='        } else if (cmd == "RELOAD_INPUTS") {'
+          a=s.find(start); b=s.find(end,a)
+          if a<0 or b<0: raise SystemExit('IPC USB command block anchors missing')
+          block=s[a:b]
+          s=s[:a]+'#if !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n'+block+'#endif\n'+s[b:]
+          ipc.write_text(s)
+
+          libs=pathlib.Path(sys.argv[2]); s=libs.read_text()
+          inc='#include "core/libraries/usbd/usbd.h"'
+          if inc not in s: raise SystemExit('libs USBD include anchor missing')
+          s=s.replace(inc,'#if !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n'+inc+'\n#endif',1)
+          reg='            {"libSceUsbd.sprx", Libraries::Usbd::RegisterLib},'
+          if reg not in s: raise SystemExit('libs USBD registration anchor missing')
+          s=s.replace(reg,'#if !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n'+reg+'\n#endif',1)
+          libs.write_text(s)
           PY
 
           HOST_FONT_TOOL="$RUNNER_TEMP/Dear_ImGui_FontEmbed"
