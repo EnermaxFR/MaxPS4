@@ -145,7 +145,7 @@ jobs:
           p=pathlib.Path(sys.argv[1]); s=p.read_text()
           marker='#else\n    std::vector<char*> argv;'
           if marker in s:
-              s=s.replace(marker, '#elif defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n    // iOS applications cannot fork/exec a replacement process.\n    std::quick_exit(0);\n#else\n    std::vector<char*> argv;', 1)
+              s=s.replace(marker, '#elif defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n    std::quick_exit(0);\n#else\n    std::vector<char*> argv;', 1)
           else:
               raise SystemExit('emulator restart fork branch not found')
           p.write_text(s)
@@ -159,8 +159,7 @@ jobs:
           s=root.read_text()
           injection='''\nif(CMAKE_SYSTEM_NAME STREQUAL "iOS")\n    message(STATUS "MaxPS4 iOS: disabling desktop USB backend")\n    list(FILTER USBD_LIB EXCLUDE REGEX "src/core/libraries/usbd/.*")\nendif()\n'''
           if 'MaxPS4 iOS: disabling desktop USB backend' not in s:
-              target_anchor='add_executable(shadps4'
-              pos=s.find(target_anchor)
+              pos=s.find('add_executable(shadps4')
               if pos < 0: raise SystemExit('main executable anchor not found')
               s=s[:pos]+injection+s[pos:]
           root.write_text(s)
@@ -221,7 +220,7 @@ jobs:
             -DCMAKE_PREFIX_PATH="$(brew --prefix spirv-tools);$(brew --prefix spirv-llvm-translator);$(brew --prefix llvm)" \
             -DLLVM_DIR="$(brew --prefix llvm)/lib/cmake/llvm" \
             -DENABLE_TESTS=OFF -DENABLE_UPDATER=OFF -DENABLE_DISCORD_RPC=OFF \
-            -DHWINFO_BATTERY=OFF \
+            -DHWINFO_BATTERY=OFF -DHWINFO_DISK=OFF -DHWINFO_MAINBOARD=OFF -DHWINFO_GPU=OFF -DHWINFO_NETWORK=OFF \
             -DALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO=FALSE -DALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO_EXITCODE=1 \
             -DKK_LLVM_CONFIG="$LLVM_CONFIG" 2>&1 | tee "$LOG"
           STATUS=${PIPESTATUS[0]}
