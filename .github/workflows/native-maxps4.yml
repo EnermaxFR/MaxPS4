@@ -130,12 +130,14 @@ jobs:
           set -uo pipefail
           cd "$GITHUB_WORKSPACE/MaxPS4-iOS"
 
-          mapfile -t IOS_LIBS < <(find "$ENGINE_BUILD" -type f -name '*.a' ! -path '*/CMakeFiles/*' -print | sort)
-          test ${#IOS_LIBS[@]} -gt 0
           LINK_ARGS='$(inherited) -ObjC -lc++ -liconv'
-          for lib in "${IOS_LIBS[@]}"; do
+          LIB_COUNT=0
+          while IFS= read -r lib; do
             LINK_ARGS="$LINK_ARGS $lib"
-          done
+            LIB_COUNT=$((LIB_COUNT + 1))
+          done < <(find "$ENGINE_BUILD" -type f -name '*.a' ! -path '*/CMakeFiles/*' -print | sort)
+          test "$LIB_COUNT" -gt 0
+          echo "Linking $LIB_COUNT iOS static libraries"
           LINK_ARGS="$LINK_ARGS -framework Metal -framework QuartzCore -framework GameController -framework CoreHaptics -framework AVFoundation -framework CoreAudio -framework AudioToolbox -framework CoreBluetooth -framework CoreMedia -framework CoreMotion"
 
           LOG="$RUNNER_TEMP/maxps4-xcodebuild.log"
