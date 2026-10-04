@@ -196,8 +196,23 @@ jobs:
           anchor='if (TARGET glslang-standalone)'
           if anchor not in s: raise SystemExit('host shader glslang anchor not found')
           prefix=f'if(CMAKE_SYSTEM_NAME STREQUAL "iOS")\n    set(GLSLANG_COMPILER "{tool}")\nelseif (TARGET glslang-standalone)'
-          s=s.replace(anchor,prefix,1)
-          p.write_text(s)
+          p.write_text(s.replace(anchor,prefix,1))
+          PY
+
+          ARCH_H="$ENGINE_ROOT/src/common/arch.h"
+          SIGNAL_CONTEXT="$ENGINE_ROOT/src/common/signal_context.cpp"
+          python3 - "$ARCH_H" "$SIGNAL_CONTEXT" <<'PY'
+          import pathlib,sys
+          arch=pathlib.Path(sys.argv[1]); sig=pathlib.Path(sys.argv[2])
+          s=arch.read_text()
+          old='#elif defined(__aarch64__) || defined(_M_ARM64)'
+          if old not in s: raise SystemExit('ARM64 architecture anchor not found')
+          arch.write_text(s.replace(old, '#elif defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64)', 1))
+          s=sig.read_text()
+          old='#elif defined(__FreeBSD__) && defined(ARCH_X86_64)\n    return ((ucontext_t*)ctx)->uc_mcontext.mc_err & 0x10;'
+          new='#elif defined(__APPLE__) && defined(ARCH_ARM64)\n    const auto esr = ((ucontext_t*)ctx)->uc_mcontext->__es.__esr;\n    const auto ec = (esr >> 26) & 0x3f;\n    return ec == 0x20 || ec == 0x21;\n#elif defined(__FreeBSD__) && defined(ARCH_X86_64)\n    return ((ucontext_t*)ctx)->uc_mcontext.mc_err & 0x10;'
+          if old not in s: raise SystemExit('ARM64 execute-error anchor not found')
+          sig.write_text(s.replace(old,new,1))
           PY
 
       - name: Verify clean direct dependency tree
