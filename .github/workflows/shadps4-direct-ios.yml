@@ -48,31 +48,23 @@ jobs:
           git -C "$ENGINE_ROOT" submodule update --init --recursive
           echo "ENGINE_ROOT=$ENGINE_ROOT" >> "$GITHUB_ENV"
 
-      - name: Patch KosmicKrisp host tools and iOS target environment
+      - name: Patch host tools and iOS target environment
         shell: bash
         run: |
           set -euxo pipefail
           KK="$ENGINE_ROOT/externals/mesa-kosmickrisp"
           MAC_SDK="$(xcrun --sdk macosx --show-sdk-path)"
           IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          MAC_VER="$(xcrun --sdk macosx --show-sdk-platform-version)"
           LLVM_CONFIG="$(brew --prefix llvm)/bin/llvm-config"
 
-          # Native Mesa helper programs must run on the macOS Actions host.
-          # The target Mesa pass is cross-compiled for arm64 iPhoneOS.
-          python3 - "$KK/CMakeLists.txt" "$MAC_SDK" "$IOS_SDK" "$LLVM_CONFIG" <<'PY'
+          python3 - "$KK/CMakeLists.txt" "$MAC_SDK" "$IOS_SDK" "$LLVM_CONFIG" "$MAC_VER" <<'PY'
           import pathlib, sys
-          p = pathlib.Path(sys.argv[1])
-          mac, ios, llvm = sys.argv[2:]
+          p = pathlib.Path(sys.argv[1]); mac, ios, llvm, macver = sys.argv[2:]
           s = p.read_text()
-          s = s.replace(
-              'set(MESA_ENVIRONMENT_TOOLS\n    LLVM_CONFIG=${KK_LLVM_CONFIG})',
-              f'''set(MESA_ENVIRONMENT_TOOLS\n    LLVM_CONFIG={llvm}\n    SDKROOT={mac}\n    MACOSX_DEPLOYMENT_TARGET=15.0\n    CFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min=15.0\n    CXXFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min=15.0\n    LDFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min=15.0)''')
-          s = s.replace(
-              'set(MESA_CROSS_FILE_TARGET ${MESA_CROSSFILES_DIR}/mesa-${KK_TARGET_ARCHITECTURE}.ini)',
-              'set(MESA_CROSS_FILE_TARGET ${MESA_CROSSFILES_DIR}/mesa-ios-aarch64.ini)')
-          s = s.replace(
-              'set(MESA_ENVIRONMENT_TARGET\n    MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}\n    PATH=',
-              f'''set(MESA_ENVIRONMENT_TARGET\n    SDKROOT={ios}\n    IPHONEOS_DEPLOYMENT_TARGET=18.0\n    CFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    CXXFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    LDFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    PATH=''')
+          s = s.replace('set(MESA_ENVIRONMENT_TOOLS\n    LLVM_CONFIG=${KK_LLVM_CONFIG})', f'''set(MESA_ENVIRONMENT_TOOLS\n    LLVM_CONFIG={llvm}\n    SDKROOT={mac}\n    MACOSX_DEPLOYMENT_TARGET={macver}\n    CFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver}\n    CXXFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver}\n    LDFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver})''')
+          s = s.replace('set(MESA_CROSS_FILE_TARGET ${MESA_CROSSFILES_DIR}/mesa-${KK_TARGET_ARCHITECTURE}.ini)', 'set(MESA_CROSS_FILE_TARGET ${MESA_CROSSFILES_DIR}/mesa-ios-aarch64.ini)')
+          s = s.replace('set(MESA_ENVIRONMENT_TARGET\n    MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}\n    PATH=', f'''set(MESA_ENVIRONMENT_TARGET\n    SDKROOT={ios}\n    IPHONEOS_DEPLOYMENT_TARGET=18.0\n    CFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    CXXFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    LDFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    PATH=''')
           p.write_text(s)
           PY
 
@@ -84,7 +76,6 @@ jobs:
           objcpp = 'clang++'
           ar = 'ar'
           strip = 'strip'
-
           [built-in options]
           c_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
           cpp_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
@@ -94,7 +85,6 @@ jobs:
           cpp_link_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
           objc_link_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
           objcpp_link_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
-
           [host_machine]
           system = 'darwin'
           cpu_family = 'aarch64'
@@ -102,28 +92,31 @@ jobs:
           endian = 'little'
           EOF
 
-          # CAMetalLayer.displaySyncEnabled exists on macOS but is explicitly
-          # unavailable on iOS. Keep upstream behavior on macOS and omit only
-          # those two assignments for the iPhoneOS target.
           WSI="$KK/externals/mesa/src/vulkan/wsi/wsi_common_metal_layer.m"
           python3 - "$WSI" <<'PY'
           import pathlib, sys
-          p = pathlib.Path(sys.argv[1])
-          s = p.read_text()
-          needle = '   metal_layer.displaySyncEnabled = !enable_immediate;'
-          count = s.count(needle)
-          if count != 2:
-              raise SystemExit(f'Expected 2 displaySyncEnabled assignments, found {count}')
-          guarded = '''#if defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__)\n   metal_layer.displaySyncEnabled = !enable_immediate;\n#endif'''
-          s = s.replace(needle, guarded)
-          p.write_text(s)
+          p=pathlib.Path(sys.argv[1]); s=p.read_text(); needle='   metal_layer.displaySyncEnabled = !enable_immediate;'
+          if s.count(needle) != 2: raise SystemExit('Unexpected displaySyncEnabled count')
+          p.write_text(s.replace(needle, '#if defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__)\n   metal_layer.displaySyncEnabled = !enable_immediate;\n#endif'))
           PY
 
-          echo '--- patched KosmicKrisp environment ---'
+          # Build-time ImGui font generator must be a native macOS executable.
+          HOST_FONT_TOOL="$RUNNER_TEMP/Dear_ImGui_FontEmbed"
+          xcrun --sdk macosx clang++ "$ENGINE_ROOT/externals/imgui/misc/fonts/binary_to_compressed_c.cpp" -O2 -o "$HOST_FONT_TOOL"
+          test -x "$HOST_FONT_TOOL"
+          IMGUI_CMAKE="$ENGINE_ROOT/src/imgui/renderer/CMakeLists.txt"
+          python3 - "$IMGUI_CMAKE" "$HOST_FONT_TOOL" <<'PY'
+          import pathlib, sys
+          p=pathlib.Path(sys.argv[1]); tool=sys.argv[2]; s=p.read_text()
+          old='add_executable(Dear_ImGui_FontEmbed ${CMAKE_SOURCE_DIR}/externals/imgui/misc/fonts/binary_to_compressed_c.cpp)'
+          new=f'add_executable(Dear_ImGui_FontEmbed IMPORTED GLOBAL)\nset_target_properties(Dear_ImGui_FontEmbed PROPERTIES IMPORTED_LOCATION "{tool}")'
+          if old not in s: raise SystemExit('Dear_ImGui_FontEmbed declaration not found')
+          p.write_text(s.replace(old,new,1))
+          PY
+
           grep -n -A10 'MESA_ENVIRONMENT_TOOLS' "$KK/CMakeLists.txt"
           grep -n -A12 'MESA_ENVIRONMENT_TARGET' "$KK/CMakeLists.txt"
-          grep -n -B2 -A3 'displaySyncEnabled' "$WSI"
-          cat "$KK/crossfiles/mesa-ios-aarch64.ini"
+          grep -n -A2 'Dear_ImGui_FontEmbed' "$IMGUI_CMAKE"
 
       - name: Verify clean direct dependency tree
         shell: bash
@@ -153,27 +146,17 @@ jobs:
           LOG="$RUNNER_TEMP/shadps4-ios-configure.log"
           LLVM_CONFIG="$(brew --prefix llvm)/bin/llvm-config"
           IOS_SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
-
-          # Do not export target CFLAGS globally here: native ExternalProject
-          # tools must remain executable on the macOS host.
           export IPHONEOS_DEPLOYMENT_TARGET=18.0
           unset MACOSX_DEPLOYMENT_TARGET SDKROOT CFLAGS CXXFLAGS LDFLAGS || true
-
           cmake -S "$ENGINE_ROOT" -B "$BUILD" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_STANDARD=23 \
-            -DCMAKE_SYSTEM_NAME=iOS \
-            -DCMAKE_SYSTEM_PROCESSOR=arm64 \
-            -DCMAKE_OSX_SYSROOT="$IOS_SDKROOT" \
-            -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=23 \
+            -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64 \
+            -DCMAKE_OSX_SYSROOT="$IOS_SDKROOT" -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 \
             -DCMAKE_PREFIX_PATH="$(brew --prefix spirv-tools);$(brew --prefix spirv-llvm-translator);$(brew --prefix llvm)" \
             -DLLVM_DIR="$(brew --prefix llvm)/lib/cmake/llvm" \
             -DENABLE_TESTS=OFF -DENABLE_UPDATER=OFF -DENABLE_DISCORD_RPC=OFF \
-            -DALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO=FALSE \
-            -DALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO_EXITCODE=1 \
-            -DKK_LLVM_CONFIG="$LLVM_CONFIG" \
-            2>&1 | tee "$LOG"
+            -DALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO=FALSE -DALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO_EXITCODE=1 \
+            -DKK_LLVM_CONFIG="$LLVM_CONFIG" 2>&1 | tee "$LOG"
           STATUS=${PIPESTATUS[0]}
           echo "SHADPS4_IOS_BUILD=$BUILD" >> "$GITHUB_ENV"
           exit "$STATUS"
@@ -185,7 +168,8 @@ jobs:
           LOG="$RUNNER_TEMP/shadps4-ios-build.log"
           unset MACOSX_DEPLOYMENT_TARGET SDKROOT CFLAGS CXXFLAGS LDFLAGS || true
           export IPHONEOS_DEPLOYMENT_TARGET=18.0
-          cmake --build "$SHADPS4_IOS_BUILD" --parallel 4 2>&1 | tee "$LOG"
+          cmake --build "$SHADPS4_IOS_BUILD" --parallel 2 2>&1 | tee "$LOG"
+          exit ${PIPESTATUS[0]}
 
       - name: Upload iOS build logs
         if: always()
