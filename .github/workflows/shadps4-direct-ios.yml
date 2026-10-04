@@ -45,7 +45,7 @@ jobs:
           set -euxo pipefail
           SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
           xcrun --sdk iphoneos clang++ \
-            -std=c++20 -arch arm64 -miphoneos-version-min=18.0 \
+            -std=c++23 -arch arm64 -miphoneos-version-min=18.0 \
             -isysroot "$SDKROOT" \
             -I"$ENGINE_ROOT/src" \
             -I"$ENGINE_ROOT" \
@@ -53,8 +53,9 @@ jobs:
             -I"$ENGINE_ROOT/externals/robin-map/include" \
             -I"$ENGINE_ROOT/externals/magic_enum/include" \
             -I"$ENGINE_ROOT/externals/json/include" \
-            -I"$ENGINE_ROOT/externals/boost" \
+            -I"$ENGINE_ROOT/externals/ext-boost" \
             -I"$ENGINE_ROOT/externals/vulkan-headers/include" \
+            -I"$ENGINE_ROOT/externals/sdl3/include" \
             -c "$GITHUB_WORKSPACE/MaxPS4-iOS/Core/MaxPS4CoreBridge.cpp" \
             -o "$RUNNER_TEMP/MaxPS4CoreBridge.o"
 
@@ -67,6 +68,7 @@ jobs:
           set +e
           cmake -S "$ENGINE_ROOT" -B "$BUILD" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_STANDARD=23 \
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_SYSTEM_PROCESSOR=arm64 \
             -DCMAKE_OSX_SYSROOT=iphoneos \
