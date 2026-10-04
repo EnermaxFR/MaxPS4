@@ -1,0 +1,23 @@
+name: MaxPS4
+options:
+  bundleIdPrefix: com.enermaxfr
+  deploymentTarget:
+    iOS: "18.0"
+targets:
+  MaxPS4:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - Sources
+    settings:
+      base:
+        PRODUCT_NAME: MaxPS4
+        PRODUCT_BUNDLE_IDENTIFIER: com.enermaxfr.maxps4
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: MaxPS4
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
