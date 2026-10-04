@@ -19,7 +19,8 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          brew install ninja protobuf || true
+          brew install ninja protobuf llvm || true
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
       - name: Checkout official shadPS4
         shell: bash
@@ -65,6 +66,7 @@ jobs:
           set -o pipefail
           BUILD="$RUNNER_TEMP/shadps4-ios-probe"
           LOG="$RUNNER_TEMP/shadps4-ios-probe.log"
+          LLVM_CONFIG="$(brew --prefix llvm)/bin/llvm-config"
           set +e
           cmake -S "$ENGINE_ROOT" -B "$BUILD" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
@@ -77,6 +79,9 @@ jobs:
             -DENABLE_TESTS=OFF \
             -DENABLE_UPDATER=OFF \
             -DENABLE_DISCORD_RPC=OFF \
+            -DALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO=FALSE \
+            -DALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO_EXITCODE=1 \
+            -DKK_LLVM_CONFIG="$LLVM_CONFIG" \
             2>&1 | tee "$LOG"
           STATUS=${PIPESTATUS[0]}
           set -e
