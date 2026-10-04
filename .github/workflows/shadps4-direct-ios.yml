@@ -48,6 +48,23 @@ jobs:
           git -C "$ENGINE_ROOT" submodule update --init --recursive
           echo "ENGINE_ROOT=$ENGINE_ROOT" >> "$GITHUB_ENV"
 
+      - name: Audit upstream for iOS-incompatible APIs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          AUDIT="$RUNNER_TEMP/shadps4-ios-api-audit.log"
+          {
+            echo '=== shell/process APIs ==='
+            grep -RInE --include='*.c' --include='*.cc' --include='*.cpp' --include='*.m' --include='*.mm' '(std::system|[^[:alnum:]_]system|fork|vfork|posix_spawn|exec[lvpe]*|popen)[[:space:]]*\(' "$ENGINE_ROOT/src" "$ENGINE_ROOT/externals" || true
+            echo '=== Mach VM APIs ==='
+            grep -RInE --include='*.c' --include='*.cc' --include='*.cpp' --include='*.m' --include='*.mm' '(mach_vm_|<mach/mach_vm\.h>)' "$ENGINE_ROOT/src" "$ENGINE_ROOT/externals" || true
+            echo '=== macOS-only Metal surface hints ==='
+            grep -RInE --include='*.c' --include='*.cc' --include='*.cpp' --include='*.m' --include='*.mm' '(displaySyncEnabled|NSApplication|NSWindow|AppKit)' "$ENGINE_ROOT/src" "$ENGINE_ROOT/externals" || true
+            echo '=== Linux-only APIs ==='
+            grep -RInE --include='*.c' --include='*.cc' --include='*.cpp' '(eventfd|timerfd_|memfd_create|epoll_|inotify_|/proc/|sys/epoll\.h|sys/eventfd\.h)' "$ENGINE_ROOT/src" "$ENGINE_ROOT/externals" || true
+          } | tee "$AUDIT"
+          echo "IOS_API_AUDIT=$AUDIT" >> "$GITHUB_ENV"
+
       - name: Patch host tools and iOS target environment
         shell: bash
         run: |
@@ -100,23 +117,29 @@ jobs:
           p.write_text(s.replace(needle, '#if defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__)\n   metal_layer.displaySyncEnabled = !enable_immediate;\n#endif'))
           PY
 
-          # iPhoneOS does not expose mach_vm.h / mach_vm_* APIs. KosmicKrisp
-          # only needs their legacy vm_* equivalents here, which are present
-          # in the iOS Mach SDK. Keep the patch scoped to the iOS CI checkout.
           KK_BO="$(find "$KK/externals/mesa" -name kk_bo.c -print -quit)"
           test -n "$KK_BO"
           python3 - "$KK_BO" <<'PY'
           import pathlib, sys
-          p = pathlib.Path(sys.argv[1])
-          s = p.read_text()
-          if '<mach/mach_vm.h>' not in s:
-              raise SystemExit('mach_vm.h include not found in kk_bo.c')
+          p = pathlib.Path(sys.argv[1]); s = p.read_text()
+          if '<mach/mach_vm.h>' not in s: raise SystemExit('mach_vm.h include not found in kk_bo.c')
           s = s.replace('#include <mach/mach_vm.h>', '''#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n#include <mach/vm_map.h>\n#define mach_vm_address_t vm_address_t\n#define mach_vm_size_t vm_size_t\n#define mach_vm_offset_t vm_offset_t\n#define mach_vm_remap vm_remap\n#define mach_vm_map vm_map\n#define mach_vm_deallocate vm_deallocate\n#else\n#include <mach/mach_vm.h>\n#endif''', 1)
           p.write_text(s)
           PY
-          grep -n -A14 'vm_map.h' "$KK_BO"
 
-          # Build-time ImGui font generator must be a native macOS executable.
+          # ImGuiFileDialog uses system() as a shell fallback for directory creation.
+          # system() is explicitly unavailable on iOS; disable only that fallback.
+          IGFD="$ENGINE_ROOT/externals/ImGuiFileDialog/ImGuiFileDialog.cpp"
+          python3 - "$IGFD" <<'PY'
+          import pathlib, sys
+          p=pathlib.Path(sys.argv[1]); s=p.read_text()
+          needle='const int dir_err = std::system(buffer);'
+          if needle not in s: raise SystemExit('ImGuiFileDialog system() call not found')
+          repl='''#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n                const int dir_err = -1; // shell execution is unavailable on iOS\n#else\n                const int dir_err = std::system(buffer);\n#endif'''
+          p.write_text(s.replace(needle, repl, 1))
+          PY
+          grep -n -A6 -B3 'shell execution is unavailable' "$IGFD"
+
           HOST_FONT_TOOL="$RUNNER_TEMP/Dear_ImGui_FontEmbed"
           xcrun --sdk macosx clang++ "$ENGINE_ROOT/externals/imgui/misc/fonts/binary_to_compressed_c.cpp" -O2 -o "$HOST_FONT_TOOL"
           test -x "$HOST_FONT_TOOL"
@@ -129,10 +152,6 @@ jobs:
           if old not in s: raise SystemExit('Dear_ImGui_FontEmbed declaration not found')
           p.write_text(s.replace(old,new,1))
           PY
-
-          grep -n -A10 'MESA_ENVIRONMENT_TOOLS' "$KK/CMakeLists.txt"
-          grep -n -A12 'MESA_ENVIRONMENT_TARGET' "$KK/CMakeLists.txt"
-          grep -n -A2 'Dear_ImGui_FontEmbed' "$IMGUI_CMAKE"
 
       - name: Verify clean direct dependency tree
         shell: bash
@@ -195,4 +214,5 @@ jobs:
           path: |
             ${{ runner.temp }}/shadps4-ios-configure.log
             ${{ runner.temp }}/shadps4-ios-build.log
+            ${{ runner.temp }}/shadps4-ios-api-audit.log
           if-no-files-found: ignore
