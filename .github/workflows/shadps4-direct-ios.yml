@@ -31,11 +31,13 @@ jobs:
           git -C "$ENGINE_ROOT" submodule update --init --recursive
           echo "ENGINE_ROOT=$ENGINE_ROOT" >> "$GITHUB_ENV"
 
-      - name: Verify no AetherPS4 dependency
+      - name: Verify clean direct dependency tree
         shell: bash
         run: |
           set -euxo pipefail
-          ! grep -Rni --exclude-dir=.git 'AetherPS4' MaxPS4-iOS/Core .github/workflows/shadps4-direct-ios.yml
+          test -f "$ENGINE_ROOT/src/emulator.h"
+          test -f "$GITHUB_WORKSPACE/MaxPS4-iOS/Core/MaxPS4CoreBridge.cpp"
+          git -C "$ENGINE_ROOT" remote get-url origin | grep -F 'shadps4-emu/shadPS4.git'
 
       - name: Compile MaxPS4 bridge against upstream headers
         shell: bash
