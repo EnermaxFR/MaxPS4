@@ -134,7 +134,7 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/MaxPS4DerivedData" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' \
             SWIFT_OBJC_BRIDGING_HEADER="$GITHUB_WORKSPACE/MaxPS4-iOS/Sources/MaxPS4-Bridging-Header.h" \
-            OTHER_LDFLAGS="$(inherited) $CORE_LIB -lc++" build
+            OTHER_LDFLAGS="\$(inherited) $CORE_LIB -lc++" build
 
       - name: Validate MaxPS4 executable
         shell: bash
