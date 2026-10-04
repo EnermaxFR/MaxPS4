@@ -199,8 +199,9 @@ jobs:
           p=pathlib.Path(sys.argv[1]); s=p.read_text()
           old='#else\n#error "ucontext_t conversion not implemented for current architecture."\n#endif'
           if s.count(old) != 2: raise SystemExit(f'Unexpected exception context fallback count: {s.count(old)}')
-          constructor='#elif defined(__APPLE__) && defined(ARCH_ARM64)\n    // ARM64 host registers are not PS4 x86-64 guest registers. Keep a safe guest context\n    // placeholder until the ARM64 JIT bridge provides the translated guest register state.\n    uc_mcontext = {};\n    uc_mcontext.mc_addr = reinterpret_cast<uint64_t>(inf->si_addr);\n#else\n#error "ucontext_t conversion not implemented for current architecture."\n#endif'
-          sync='#elif defined(__APPLE__) && defined(ARCH_ARM64)\n    // Guest x86-64 register state cannot be copied into the native ARM64 ucontext directly.\n    // The ARM64 JIT bridge will synchronize translated guest state here later.\n    return;\n#else\n#error "ucontext_t conversion not implemented for current architecture."\n#endif'
+          arm64='#elif defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64))'
+          constructor=arm64+'\n    // ARM64 host registers are not PS4 x86-64 guest registers. Keep a safe guest context\n    // placeholder until the ARM64 JIT bridge provides the translated guest register state.\n    uc_mcontext = {};\n    uc_mcontext.mc_addr = reinterpret_cast<uint64_t>(inf->si_addr);\n#else\n#error "ucontext_t conversion not implemented for current architecture."\n#endif'
+          sync=arm64+'\n    // Guest x86-64 register state cannot be copied into the native ARM64 ucontext directly.\n    // The ARM64 JIT bridge will synchronize translated guest state here later.\n    return;\n#else\n#error "ucontext_t conversion not implemented for current architecture."\n#endif'
           s=s.replace(old,constructor,1).replace(old,sync,1)
           p.write_text(s)
           PY
