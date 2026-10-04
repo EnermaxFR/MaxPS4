@@ -60,14 +60,13 @@ jobs:
             -c "$GITHUB_WORKSPACE/MaxPS4-iOS/Core/MaxPS4CoreBridge.cpp" \
             -o "$RUNNER_TEMP/MaxPS4CoreBridge.o"
 
-      - name: Probe official shadPS4 iOS configuration
+      - name: Configure official shadPS4 for iOS
         shell: bash
         run: |
-          set -o pipefail
-          BUILD="$RUNNER_TEMP/shadps4-ios-probe"
-          LOG="$RUNNER_TEMP/shadps4-ios-probe.log"
+          set -euxo pipefail
+          BUILD="$RUNNER_TEMP/shadps4-ios-build"
+          LOG="$RUNNER_TEMP/shadps4-ios-configure.log"
           LLVM_CONFIG="$(brew --prefix llvm)/bin/llvm-config"
-          set +e
           cmake -S "$ENGINE_ROOT" -B "$BUILD" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_STANDARD=23 \
@@ -83,15 +82,21 @@ jobs:
             -DALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO_EXITCODE=1 \
             -DKK_LLVM_CONFIG="$LLVM_CONFIG" \
             2>&1 | tee "$LOG"
-          STATUS=${PIPESTATUS[0]}
-          set -e
-          echo "CMAKE_STATUS=$STATUS" >> "$GITHUB_ENV"
-          exit "$STATUS"
+          echo "SHADPS4_IOS_BUILD=$BUILD" >> "$GITHUB_ENV"
 
-      - name: Upload iOS probe log
+      - name: Build official shadPS4 for iOS
+        shell: bash
+        run: |
+          set -o pipefail
+          LOG="$RUNNER_TEMP/shadps4-ios-build.log"
+          cmake --build "$SHADPS4_IOS_BUILD" --parallel 4 2>&1 | tee "$LOG"
+
+      - name: Upload iOS build logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: shadps4-direct-ios-probe-log
-          path: ${{ runner.temp }}/shadps4-ios-probe.log
+          name: shadps4-direct-ios-build-logs
+          path: |
+            ${{ runner.temp }}/shadps4-ios-configure.log
+            ${{ runner.temp }}/shadps4-ios-build.log
           if-no-files-found: ignore
