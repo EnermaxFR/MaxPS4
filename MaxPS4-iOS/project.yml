@@ -19,5 +19,6 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: MaxPS4
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
         TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_ENTITLEMENTS: MaxPS4.entitlements
         CODE_SIGNING_ALLOWED: NO
         CODE_SIGNING_REQUIRED: NO
