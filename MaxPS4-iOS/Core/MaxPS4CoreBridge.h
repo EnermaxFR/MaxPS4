@@ -12,8 +12,8 @@ typedef struct MaxPS4CoreOptions {
     int network_enabled;
 } MaxPS4CoreOptions;
 
-// Stable C ABI exposed to the Swift frontend. Implementation will bind directly
-// to upstream shadPS4 Core::Emulator; no AetherPS4 frontend/API is used here.
+// Stable C ABI exposed to the Swift frontend and implemented directly against
+// the official upstream shadPS4 Core::Emulator interface.
 int maxps4_core_initialize(const MaxPS4CoreOptions *options);
 int maxps4_core_prepare_game(const char *eboot_path);
 int maxps4_core_run(void);
