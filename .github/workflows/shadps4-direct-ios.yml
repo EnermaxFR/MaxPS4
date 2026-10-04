@@ -21,8 +21,9 @@ jobs:
           set -euxo pipefail
           brew install ninja meson protobuf llvm || true
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
-          python3 -m pip install --user --upgrade packaging mako pyyaml
-          echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
+          python3 -m venv "$RUNNER_TEMP/maxps4-python"
+          "$RUNNER_TEMP/maxps4-python/bin/python" -m pip install --upgrade pip packaging mako pyyaml
+          echo "$RUNNER_TEMP/maxps4-python/bin" >> "$GITHUB_PATH"
 
       - name: Checkout official shadPS4
         shell: bash
