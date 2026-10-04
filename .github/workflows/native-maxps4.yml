@@ -135,9 +135,9 @@ jobs:
           while IFS= read -r lib; do
             LINK_ARGS="$LINK_ARGS $lib"
             LIB_COUNT=$((LIB_COUNT + 1))
-          done < <(find "$ENGINE_BUILD" -type f -name '*.a' ! -path '*/CMakeFiles/*' -print | sort)
+          done < <(find "$ENGINE_BUILD" -type f -name '*.a' ! -path '*/CMakeFiles/*' ! -path '*/ffmpeg-*/*' -print | sort)
           test "$LIB_COUNT" -gt 0
-          echo "Linking $LIB_COUNT iOS static libraries"
+          echo "Linking $LIB_COUNT iOS static libraries (host FFmpeg archives excluded)"
           LINK_ARGS="$LINK_ARGS -framework Metal -framework QuartzCore -framework GameController -framework CoreHaptics -framework AVFoundation -framework CoreAudio -framework AudioToolbox -framework CoreBluetooth -framework CoreMedia -framework CoreMotion"
 
           LOG="$RUNNER_TEMP/maxps4-xcodebuild.log"
