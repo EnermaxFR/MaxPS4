@@ -20,22 +20,27 @@ jobs:
         run: |
           set -euxo pipefail
           brew update
-          brew install ninja protobuf llvm spirv-llvm-translator pkgconf cmake || true
+          brew install ninja protobuf llvm spirv-llvm-translator spirv-tools pkgconf cmake || true
 
           LLVM_PREFIX="$(brew --prefix llvm)"
           SPIRV_PREFIX="$(brew --prefix spirv-llvm-translator)"
+          SPIRV_TOOLS_PREFIX="$(brew --prefix spirv-tools)"
           echo "$LLVM_PREFIX/bin" >> "$GITHUB_PATH"
+          echo "$SPIRV_TOOLS_PREFIX/bin" >> "$GITHUB_PATH"
           echo "LLVM_DIR=$LLVM_PREFIX/lib/cmake/llvm" >> "$GITHUB_ENV"
           echo "LLVM_ROOT=$LLVM_PREFIX" >> "$GITHUB_ENV"
           echo "SPIRV_LLVM_TRANSLATOR_ROOT=$SPIRV_PREFIX" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH=$SPIRV_PREFIX/lib/pkgconfig:$LLVM_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
-          echo "CMAKE_PREFIX_PATH=$SPIRV_PREFIX:$LLVM_PREFIX:${CMAKE_PREFIX_PATH:-}" >> "$GITHUB_ENV"
+          echo "SPIRV_TOOLS_ROOT=$SPIRV_TOOLS_PREFIX" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$SPIRV_TOOLS_PREFIX/lib/pkgconfig:$SPIRV_PREFIX/lib/pkgconfig:$LLVM_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$SPIRV_TOOLS_PREFIX:$SPIRV_PREFIX:$LLVM_PREFIX:${CMAKE_PREFIX_PATH:-}" >> "$GITHUB_ENV"
 
           "$LLVM_PREFIX/bin/llvm-config" --version
           "$LLVM_PREFIX/bin/llvm-config" --prefix
           brew info llvm || true
           brew info spirv-llvm-translator || true
+          brew info spirv-tools || true
           find "$SPIRV_PREFIX" -maxdepth 4 -type f \( -name '*SPIRV*Config.cmake' -o -name '*spirv*config.cmake' -o -name '*.pc' \) -print || true
+          find "$SPIRV_TOOLS_PREFIX" -maxdepth 4 -type f \( -name '*SPIRV*Config.cmake' -o -name '*spirv*config.cmake' -o -name '*.pc' \) -print || true
 
           python3 -m venv "$RUNNER_TEMP/maxps4-python"
           "$RUNNER_TEMP/maxps4-python/bin/python" -m pip install --upgrade pip packaging mako pyyaml meson
@@ -94,7 +99,7 @@ jobs:
             -DCMAKE_OSX_SYSROOT=iphoneos \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 \
-            -DCMAKE_PREFIX_PATH="$(brew --prefix spirv-llvm-translator);$(brew --prefix llvm)" \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix spirv-tools);$(brew --prefix spirv-llvm-translator);$(brew --prefix llvm)" \
             -DLLVM_DIR="$(brew --prefix llvm)/lib/cmake/llvm" \
             -DENABLE_TESTS=OFF \
             -DENABLE_UPDATER=OFF \
