@@ -19,8 +19,9 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          brew install ninja protobuf llvm || true
+          brew install ninja protobuf llvm spirv-llvm-translator pkgconf || true
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+          echo "PKG_CONFIG_PATH=$(brew --prefix spirv-llvm-translator)/lib/pkgconfig:$(brew --prefix llvm)/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
           python3 -m venv "$RUNNER_TEMP/maxps4-python"
           "$RUNNER_TEMP/maxps4-python/bin/python" -m pip install --upgrade pip packaging mako pyyaml meson
           echo "$RUNNER_TEMP/maxps4-python/bin" >> "$GITHUB_PATH"
