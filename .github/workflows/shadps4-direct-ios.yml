@@ -21,7 +21,6 @@ jobs:
           set -euxo pipefail
           brew update
           brew install ninja protobuf llvm spirv-llvm-translator spirv-tools pkgconf cmake || true
-
           LLVM_PREFIX="$(brew --prefix llvm)"
           SPIRV_PREFIX="$(brew --prefix spirv-llvm-translator)"
           SPIRV_TOOLS_PREFIX="$(brew --prefix spirv-tools)"
@@ -33,15 +32,8 @@ jobs:
           echo "SPIRV_TOOLS_ROOT=$SPIRV_TOOLS_PREFIX" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$SPIRV_TOOLS_PREFIX/lib/pkgconfig:$SPIRV_PREFIX/lib/pkgconfig:$LLVM_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$SPIRV_TOOLS_PREFIX:$SPIRV_PREFIX:$LLVM_PREFIX:${CMAKE_PREFIX_PATH:-}" >> "$GITHUB_ENV"
-
           "$LLVM_PREFIX/bin/llvm-config" --version
-          "$LLVM_PREFIX/bin/llvm-config" --prefix
-          brew info llvm || true
-          brew info spirv-llvm-translator || true
           brew info spirv-tools || true
-          find "$SPIRV_PREFIX" -maxdepth 4 -type f \( -name '*SPIRV*Config.cmake' -o -name '*spirv*config.cmake' -o -name '*.pc' \) -print || true
-          find "$SPIRV_TOOLS_PREFIX" -maxdepth 4 -type f \( -name '*SPIRV*Config.cmake' -o -name '*spirv*config.cmake' -o -name '*.pc' \) -print || true
-
           python3 -m venv "$RUNNER_TEMP/maxps4-python"
           "$RUNNER_TEMP/maxps4-python/bin/python" -m pip install --upgrade pip packaging mako pyyaml meson
           echo "$RUNNER_TEMP/maxps4-python/bin" >> "$GITHUB_PATH"
@@ -56,6 +48,65 @@ jobs:
           git -C "$ENGINE_ROOT" submodule update --init --recursive
           echo "ENGINE_ROOT=$ENGINE_ROOT" >> "$GITHUB_ENV"
 
+      - name: Patch KosmicKrisp host tools and iOS target environment
+        shell: bash
+        run: |
+          set -euxo pipefail
+          KK="$ENGINE_ROOT/externals/mesa-kosmickrisp"
+          MAC_SDK="$(xcrun --sdk macosx --show-sdk-path)"
+          IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          LLVM_CONFIG="$(brew --prefix llvm)/bin/llvm-config"
+
+          # Native Mesa helper programs must run on the macOS Actions host.
+          # The target Mesa pass is cross-compiled for arm64 iPhoneOS.
+          python3 - "$KK/CMakeLists.txt" "$MAC_SDK" "$IOS_SDK" "$LLVM_CONFIG" <<'PY'
+          import pathlib, sys
+          p = pathlib.Path(sys.argv[1])
+          mac, ios, llvm = sys.argv[2:]
+          s = p.read_text()
+          s = s.replace(
+              'set(MESA_ENVIRONMENT_TOOLS\n    LLVM_CONFIG=${KK_LLVM_CONFIG})',
+              f'''set(MESA_ENVIRONMENT_TOOLS\n    LLVM_CONFIG={llvm}\n    SDKROOT={mac}\n    MACOSX_DEPLOYMENT_TARGET=15.0\n    CFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min=15.0\n    CXXFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min=15.0\n    LDFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min=15.0)''')
+          s = s.replace(
+              'set(MESA_CROSS_FILE_TARGET ${MESA_CROSSFILES_DIR}/mesa-${KK_TARGET_ARCHITECTURE}.ini)',
+              'set(MESA_CROSS_FILE_TARGET ${MESA_CROSSFILES_DIR}/mesa-ios-aarch64.ini)')
+          s = s.replace(
+              'set(MESA_ENVIRONMENT_TARGET\n    MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}\n    PATH=',
+              f'''set(MESA_ENVIRONMENT_TARGET\n    SDKROOT={ios}\n    IPHONEOS_DEPLOYMENT_TARGET=18.0\n    CFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    CXXFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    LDFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    PATH=''')
+          p.write_text(s)
+          PY
+
+          cat > "$KK/crossfiles/mesa-ios-aarch64.ini" <<EOF
+          [binaries]
+          c = 'clang'
+          cpp = 'clang++'
+          objc = 'clang'
+          objcpp = 'clang++'
+          ar = 'ar'
+          strip = 'strip'
+
+          [built-in options]
+          c_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
+          cpp_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
+          objc_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
+          objcpp_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
+          c_link_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
+          cpp_link_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
+          objc_link_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
+          objcpp_link_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
+
+          [host_machine]
+          system = 'darwin'
+          cpu_family = 'aarch64'
+          cpu = 'aarch64'
+          endian = 'little'
+          EOF
+
+          echo '--- patched KosmicKrisp environment ---'
+          grep -n -A10 'MESA_ENVIRONMENT_TOOLS' "$KK/CMakeLists.txt"
+          grep -n -A12 'MESA_ENVIRONMENT_TARGET' "$KK/CMakeLists.txt"
+          cat "$KK/crossfiles/mesa-ios-aarch64.ini"
+
       - name: Verify clean direct dependency tree
         shell: bash
         run: |
@@ -69,20 +120,12 @@ jobs:
         run: |
           set -euxo pipefail
           SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
-          xcrun --sdk iphoneos clang++ \
-            -std=c++23 -arch arm64 -miphoneos-version-min=18.0 \
-            -isysroot "$SDKROOT" \
-            -I"$ENGINE_ROOT/src" \
-            -I"$ENGINE_ROOT" \
-            -I"$ENGINE_ROOT/externals/fmt/include" \
-            -I"$ENGINE_ROOT/externals/robin-map/include" \
-            -I"$ENGINE_ROOT/externals/magic_enum/include" \
-            -I"$ENGINE_ROOT/externals/json/include" \
-            -I"$ENGINE_ROOT/externals/ext-boost" \
-            -I"$ENGINE_ROOT/externals/vulkan-headers/include" \
-            -I"$ENGINE_ROOT/externals/sdl3/include" \
-            -c "$GITHUB_WORKSPACE/MaxPS4-iOS/Core/MaxPS4CoreBridge.cpp" \
-            -o "$RUNNER_TEMP/MaxPS4CoreBridge.o"
+          xcrun --sdk iphoneos clang++ -std=c++23 -arch arm64 -miphoneos-version-min=18.0 -isysroot "$SDKROOT" \
+            -I"$ENGINE_ROOT/src" -I"$ENGINE_ROOT" -I"$ENGINE_ROOT/externals/fmt/include" \
+            -I"$ENGINE_ROOT/externals/robin-map/include" -I"$ENGINE_ROOT/externals/magic_enum/include" \
+            -I"$ENGINE_ROOT/externals/json/include" -I"$ENGINE_ROOT/externals/ext-boost" \
+            -I"$ENGINE_ROOT/externals/vulkan-headers/include" -I"$ENGINE_ROOT/externals/sdl3/include" \
+            -c "$GITHUB_WORKSPACE/MaxPS4-iOS/Core/MaxPS4CoreBridge.cpp" -o "$RUNNER_TEMP/MaxPS4CoreBridge.o"
 
       - name: Configure official shadPS4 for iOS
         shell: bash
@@ -93,15 +136,10 @@ jobs:
           LLVM_CONFIG="$(brew --prefix llvm)/bin/llvm-config"
           IOS_SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
 
-          # shadPS4's KosmicKrisp/Mesa ExternalProject inherits the host
-          # environment. Keep Apple sub-builds on iPhoneOS instead of
-          # interpreting 18.0 as a macOS deployment target.
-          export SDKROOT="$IOS_SDKROOT"
+          # Do not export target CFLAGS globally here: native ExternalProject
+          # tools must remain executable on the macOS host.
           export IPHONEOS_DEPLOYMENT_TARGET=18.0
-          unset MACOSX_DEPLOYMENT_TARGET || true
-          export CFLAGS="-arch arm64 -isysroot $IOS_SDKROOT -miphoneos-version-min=18.0"
-          export CXXFLAGS="-arch arm64 -isysroot $IOS_SDKROOT -miphoneos-version-min=18.0"
-          export LDFLAGS="-arch arm64 -isysroot $IOS_SDKROOT -miphoneos-version-min=18.0"
+          unset MACOSX_DEPLOYMENT_TARGET SDKROOT CFLAGS CXXFLAGS LDFLAGS || true
 
           cmake -S "$ENGINE_ROOT" -B "$BUILD" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
@@ -113,9 +151,7 @@ jobs:
             -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 \
             -DCMAKE_PREFIX_PATH="$(brew --prefix spirv-tools);$(brew --prefix spirv-llvm-translator);$(brew --prefix llvm)" \
             -DLLVM_DIR="$(brew --prefix llvm)/lib/cmake/llvm" \
-            -DENABLE_TESTS=OFF \
-            -DENABLE_UPDATER=OFF \
-            -DENABLE_DISCORD_RPC=OFF \
+            -DENABLE_TESTS=OFF -DENABLE_UPDATER=OFF -DENABLE_DISCORD_RPC=OFF \
             -DALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO=FALSE \
             -DALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO_EXITCODE=1 \
             -DKK_LLVM_CONFIG="$LLVM_CONFIG" \
@@ -129,13 +165,8 @@ jobs:
         run: |
           set -o pipefail
           LOG="$RUNNER_TEMP/shadps4-ios-build.log"
-          IOS_SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
-          export SDKROOT="$IOS_SDKROOT"
+          unset MACOSX_DEPLOYMENT_TARGET SDKROOT CFLAGS CXXFLAGS LDFLAGS || true
           export IPHONEOS_DEPLOYMENT_TARGET=18.0
-          unset MACOSX_DEPLOYMENT_TARGET || true
-          export CFLAGS="-arch arm64 -isysroot $IOS_SDKROOT -miphoneos-version-min=18.0"
-          export CXXFLAGS="-arch arm64 -isysroot $IOS_SDKROOT -miphoneos-version-min=18.0"
-          export LDFLAGS="-arch arm64 -isysroot $IOS_SDKROOT -miphoneos-version-min=18.0"
           cmake --build "$SHADPS4_IOS_BUILD" --parallel 4 2>&1 | tee "$LOG"
 
       - name: Upload iOS build logs
