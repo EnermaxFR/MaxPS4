@@ -91,12 +91,24 @@ jobs:
           BUILD="$RUNNER_TEMP/shadps4-ios-build"
           LOG="$RUNNER_TEMP/shadps4-ios-configure.log"
           LLVM_CONFIG="$(brew --prefix llvm)/bin/llvm-config"
+          IOS_SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
+
+          # shadPS4's KosmicKrisp/Mesa ExternalProject inherits the host
+          # environment. Keep Apple sub-builds on iPhoneOS instead of
+          # interpreting 18.0 as a macOS deployment target.
+          export SDKROOT="$IOS_SDKROOT"
+          export IPHONEOS_DEPLOYMENT_TARGET=18.0
+          unset MACOSX_DEPLOYMENT_TARGET || true
+          export CFLAGS="-arch arm64 -isysroot $IOS_SDKROOT -miphoneos-version-min=18.0"
+          export CXXFLAGS="-arch arm64 -isysroot $IOS_SDKROOT -miphoneos-version-min=18.0"
+          export LDFLAGS="-arch arm64 -isysroot $IOS_SDKROOT -miphoneos-version-min=18.0"
+
           cmake -S "$ENGINE_ROOT" -B "$BUILD" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_STANDARD=23 \
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_SYSTEM_PROCESSOR=arm64 \
-            -DCMAKE_OSX_SYSROOT=iphoneos \
+            -DCMAKE_OSX_SYSROOT="$IOS_SDKROOT" \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 \
             -DCMAKE_PREFIX_PATH="$(brew --prefix spirv-tools);$(brew --prefix spirv-llvm-translator);$(brew --prefix llvm)" \
@@ -117,6 +129,13 @@ jobs:
         run: |
           set -o pipefail
           LOG="$RUNNER_TEMP/shadps4-ios-build.log"
+          IOS_SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
+          export SDKROOT="$IOS_SDKROOT"
+          export IPHONEOS_DEPLOYMENT_TARGET=18.0
+          unset MACOSX_DEPLOYMENT_TARGET || true
+          export CFLAGS="-arch arm64 -isysroot $IOS_SDKROOT -miphoneos-version-min=18.0"
+          export CXXFLAGS="-arch arm64 -isysroot $IOS_SDKROOT -miphoneos-version-min=18.0"
+          export LDFLAGS="-arch arm64 -isysroot $IOS_SDKROOT -miphoneos-version-min=18.0"
           cmake --build "$SHADPS4_IOS_BUILD" --parallel 4 2>&1 | tee "$LOG"
 
       - name: Upload iOS build logs
