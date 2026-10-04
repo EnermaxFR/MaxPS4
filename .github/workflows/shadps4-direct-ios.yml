@@ -15,7 +15,7 @@ jobs:
       - name: Checkout MaxPS4
         uses: actions/checkout@v4
 
-      - name: Prepare tools and diagnose LLVM/SPIR-V
+      - name: Prepare tools
         shell: bash
         run: |
           set -euxo pipefail
@@ -37,9 +37,6 @@ jobs:
           echo "HOST_PROTOC=$PROTOBUF_PREFIX/bin/protoc" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$SPIRV_TOOLS_PREFIX/lib/pkgconfig:$SPIRV_PREFIX/lib/pkgconfig:$LLVM_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$GLSLANG_PREFIX:$SPIRV_TOOLS_PREFIX:$SPIRV_PREFIX:$LLVM_PREFIX:${CMAKE_PREFIX_PATH:-}" >> "$GITHUB_ENV"
-          "$LLVM_PREFIX/bin/llvm-config" --version
-          "$GLSLANG_PREFIX/bin/glslangValidator" --version
-          "$PROTOBUF_PREFIX/bin/protoc" --version
           test -x "$GLSLANG_PREFIX/bin/glslangValidator"
           test -x "$PROTOBUF_PREFIX/bin/protoc"
           python3 -m venv "$RUNNER_TEMP/maxps4-python"
@@ -61,17 +58,7 @@ jobs:
         run: |
           set -euxo pipefail
           AUDIT="$RUNNER_TEMP/shadps4-ios-api-audit.log"
-          {
-            echo '=== shell/process APIs ==='
-            grep -RInE --include='*.c' --include='*.cc' --include='*.cpp' --include='*.m' --include='*.mm' '(std::system|[^[:alnum:]_]system|fork|vfork|posix_spawn|exec[lvpe]*|popen)[[:space:]]*\(' "$ENGINE_ROOT/src" "$ENGINE_ROOT/externals" || true
-            echo '=== Mach VM APIs ==='
-            grep -RInE --include='*.c' --include='*.cc' --include='*.cpp' --include='*.m' --include='*.mm' '(mach_vm_|<mach/mach_vm\.h>)' "$ENGINE_ROOT/src" "$ENGINE_ROOT/externals" || true
-            echo '=== macOS-only APIs/frameworks ==='
-            grep -RInE --include='*.c' --include='*.h' --include='*.cc' --include='*.cpp' --include='*.m' --include='*.mm' '(displaySyncEnabled|NSApplication|NSWindow|AppKit|IOKit/|IOCFBundle|IOService)' "$ENGINE_ROOT/src" "$ENGINE_ROOT/externals" || true
-            echo '=== Linux-only APIs ==='
-            grep -RInE --include='*.c' --include='*.h' --include='*.cc' --include='*.cpp' '(eventfd|timerfd_|memfd_create|epoll_|inotify_|/proc/|sys/epoll\.h|sys/eventfd\.h)' "$ENGINE_ROOT/src" "$ENGINE_ROOT/externals" || true
-          } | tee "$AUDIT"
-          echo "IOS_API_AUDIT=$AUDIT" >> "$GITHUB_ENV"
+          grep -RInE --include='*.c' --include='*.h' --include='*.cc' --include='*.cpp' --include='*.m' --include='*.mm' '(std::system|fork|vfork|posix_spawn|exec[lvpe]*|popen|mach_vm_|<mach/mach_vm\.h>|displaySyncEnabled|NSApplication|NSWindow|AppKit|IOKit/|IOCFBundle|IOService|eventfd|timerfd_|memfd_create|epoll_|inotify_|/proc/)' "$ENGINE_ROOT/src" "$ENGINE_ROOT/externals" > "$AUDIT" || true
 
       - name: Patch host tools and iOS target environment
         shell: bash
@@ -84,144 +71,116 @@ jobs:
           LLVM_CONFIG="$(brew --prefix llvm)/bin/llvm-config"
 
           python3 - "$KK/CMakeLists.txt" "$MAC_SDK" "$IOS_SDK" "$LLVM_CONFIG" "$MAC_VER" <<'PY'
-          import pathlib, sys
+          import pathlib,sys
           p=pathlib.Path(sys.argv[1]); mac,ios,llvm,macver=sys.argv[2:]; s=p.read_text()
-          s=s.replace('set(MESA_ENVIRONMENT_TOOLS\n    LLVM_CONFIG=${KK_LLVM_CONFIG})', f'''set(MESA_ENVIRONMENT_TOOLS\n    LLVM_CONFIG={llvm}\n    SDKROOT={mac}\n    MACOSX_DEPLOYMENT_TARGET={macver}\n    CFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver}\n    CXXFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver}\n    LDFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver})''')
-          s=s.replace('set(MESA_CROSS_FILE_TARGET ${MESA_CROSSFILES_DIR}/mesa-${KK_TARGET_ARCHITECTURE}.ini)', 'set(MESA_CROSS_FILE_TARGET ${MESA_CROSSFILES_DIR}/mesa-ios-aarch64.ini)')
-          s=s.replace('set(MESA_ENVIRONMENT_TARGET\n    MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}\n    PATH=', f'''set(MESA_ENVIRONMENT_TARGET\n    SDKROOT={ios}\n    IPHONEOS_DEPLOYMENT_TARGET=18.0\n    CFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    CXXFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    LDFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    PATH=''')
+          s=s.replace('set(MESA_ENVIRONMENT_TOOLS\n    LLVM_CONFIG=${KK_LLVM_CONFIG})',f'''set(MESA_ENVIRONMENT_TOOLS\n    LLVM_CONFIG={llvm}\n    SDKROOT={mac}\n    MACOSX_DEPLOYMENT_TARGET={macver}\n    CFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver}\n    CXXFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver}\n    LDFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver})''')
+          s=s.replace('set(MESA_CROSS_FILE_TARGET ${MESA_CROSSFILES_DIR}/mesa-${KK_TARGET_ARCHITECTURE}.ini)','set(MESA_CROSS_FILE_TARGET ${MESA_CROSSFILES_DIR}/mesa-ios-aarch64.ini)')
+          s=s.replace('set(MESA_ENVIRONMENT_TARGET\n    MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}\n    PATH=',f'''set(MESA_ENVIRONMENT_TARGET\n    SDKROOT={ios}\n    IPHONEOS_DEPLOYMENT_TARGET=18.0\n    CFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    CXXFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    LDFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    PATH=''')
           p.write_text(s)
           PY
 
           cat > "$KK/crossfiles/mesa-ios-aarch64.ini" <<EOF
           [binaries]
-          c = 'clang'
-          cpp = 'clang++'
-          objc = 'clang'
-          objcpp = 'clang++'
-          ar = 'ar'
-          strip = 'strip'
+          c='clang'
+          cpp='clang++'
+          objc='clang'
+          objcpp='clang++'
+          ar='ar'
+          strip='strip'
           [built-in options]
-          c_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
-          cpp_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
-          objc_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
-          objcpp_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
-          c_link_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
-          cpp_link_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
-          objc_link_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
-          objcpp_link_args = ['-target', 'arm64-apple-ios18.0', '-isysroot', '$IOS_SDK']
+          c_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          cpp_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          objc_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          objcpp_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          c_link_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          cpp_link_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          objc_link_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          objcpp_link_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
           [host_machine]
-          system = 'darwin'
-          cpu_family = 'aarch64'
-          cpu = 'aarch64'
-          endian = 'little'
+          system='darwin'
+          cpu_family='aarch64'
+          cpu='aarch64'
+          endian='little'
           EOF
 
           WSI="$KK/externals/mesa/src/vulkan/wsi/wsi_common_metal_layer.m"
           python3 - "$WSI" <<'PY'
           import pathlib,sys
-          p=pathlib.Path(sys.argv[1]); s=p.read_text(); needle='   metal_layer.displaySyncEnabled = !enable_immediate;'
-          if s.count(needle)!=2: raise SystemExit('Unexpected displaySyncEnabled count')
-          p.write_text(s.replace(needle,'#if defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__)\n   metal_layer.displaySyncEnabled = !enable_immediate;\n#endif'))
+          p=pathlib.Path(sys.argv[1]); s=p.read_text(); n='   metal_layer.displaySyncEnabled = !enable_immediate;'
+          if s.count(n)!=2: raise SystemExit('Unexpected displaySyncEnabled count')
+          p.write_text(s.replace(n,'#if defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__)\n   metal_layer.displaySyncEnabled = !enable_immediate;\n#endif'))
           PY
 
           KK_BO="$(find "$KK/externals/mesa" -name kk_bo.c -print -quit)"
-          test -n "$KK_BO"
           python3 - "$KK_BO" <<'PY'
           import pathlib,sys
-          p=pathlib.Path(sys.argv[1]); s=p.read_text()
-          if '<mach/mach_vm.h>' not in s: raise SystemExit('mach_vm.h include not found')
-          s=s.replace('#include <mach/mach_vm.h>','#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n#include <mach/vm_map.h>\n#define mach_vm_address_t vm_address_t\n#define mach_vm_size_t vm_size_t\n#define mach_vm_offset_t vm_offset_t\n#define mach_vm_remap vm_remap\n#define mach_vm_map vm_map\n#define mach_vm_deallocate vm_deallocate\n#else\n#include <mach/mach_vm.h>\n#endif',1)
-          p.write_text(s)
+          p=pathlib.Path(sys.argv[1]); s=p.read_text(); old='#include <mach/mach_vm.h>'
+          if old not in s: raise SystemExit('mach_vm include not found')
+          p.write_text(s.replace(old,'#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n#include <mach/vm_map.h>\n#define mach_vm_address_t vm_address_t\n#define mach_vm_size_t vm_size_t\n#define mach_vm_offset_t vm_offset_t\n#define mach_vm_remap vm_remap\n#define mach_vm_map vm_map\n#define mach_vm_deallocate vm_deallocate\n#else\n#include <mach/mach_vm.h>\n#endif',1))
           PY
 
-          IGFD="$ENGINE_ROOT/externals/ImGuiFileDialog/ImGuiFileDialog.cpp"
-          python3 - "$IGFD" <<'PY'
+          python3 - "$ENGINE_ROOT/externals/ImGuiFileDialog/ImGuiFileDialog.cpp" <<'PY'
           import pathlib,re,sys
-          p=pathlib.Path(sys.argv[1]); s=p.read_text()
-          pat=re.compile(r'(?P<indent>^[ \t]*)(?P<decl>(?:const\s+)?int\s+\w+\s*=\s*)std::system\((?P<arg>[^;]+)\);',re.MULTILINE)
-          if not pat.search(s): raise SystemExit('No std::system assignment found')
-          def repl(m):
-              i=m.group('indent'); d=m.group('decl'); a=m.group('arg')
-              return f'{i}#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n{i}{d}-1;\n{i}#else\n{i}{d}std::system({a});\n{i}#endif'
-          p.write_text(pat.sub(repl,s))
+          p=pathlib.Path(sys.argv[1]); s=p.read_text(); pat=re.compile(r'(?P<i>^[ \t]*)(?P<d>(?:const\s+)?int\s+\w+\s*=\s*)std::system\((?P<a>[^;]+)\);',re.M)
+          if not pat.search(s): raise SystemExit('system anchor not found')
+          p.write_text(pat.sub(lambda m:f"{m.group('i')}#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n{m.group('i')}{m.group('d')}-1;\n{m.group('i')}#else\n{m.group('i')}{m.group('d')}std::system({m.group('a')});\n{m.group('i')}#endif",s))
           PY
 
-          EMU="$ENGINE_ROOT/src/emulator.cpp"
-          python3 - "$EMU" <<'PY'
+          python3 - "$ENGINE_ROOT/src/emulator.cpp" <<'PY'
           import pathlib,sys
-          p=pathlib.Path(sys.argv[1]); s=p.read_text(); marker='#else\n    std::vector<char*> argv;'
-          if marker not in s: raise SystemExit('emulator restart branch not found')
-          p.write_text(s.replace(marker,'#elif defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n    std::quick_exit(0);\n#else\n    std::vector<char*> argv;',1))
+          p=pathlib.Path(sys.argv[1]); s=p.read_text(); old='#else\n    std::vector<char*> argv;'
+          if old not in s: raise SystemExit('restart anchor not found')
+          p.write_text(s.replace(old,'#elif defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n    std::quick_exit(0);\n#else\n    std::vector<char*> argv;',1))
           PY
 
-          ROOT_CMAKE="$ENGINE_ROOT/CMakeLists.txt"
-          EXT_CMAKE="$ENGINE_ROOT/externals/CMakeLists.txt"
-          python3 - "$ROOT_CMAKE" "$EXT_CMAKE" <<'PY'
+          ROOT="$ENGINE_ROOT/CMakeLists.txt"; EXT="$ENGINE_ROOT/externals/CMakeLists.txt"
+          python3 - "$ROOT" "$EXT" "$HOST_PROTOC" <<'PY'
           import pathlib,sys
-          root=pathlib.Path(sys.argv[1]); ext=pathlib.Path(sys.argv[2]); s=root.read_text()
-          injection='\nif(CMAKE_SYSTEM_NAME STREQUAL "iOS")\n    message(STATUS "MaxPS4 iOS: disabling desktop USB backend")\n    list(FILTER USBD_LIB EXCLUDE REGEX "src/core/libraries/usbd/.*")\nendif()\n'
-          if 'MaxPS4 iOS: disabling desktop USB backend' not in s:
-              pos=s.find('add_executable(shadps4')
-              if pos<0: raise SystemExit('main executable anchor not found')
-              s=s[:pos]+injection+s[pos:]
-          root.write_text(s)
-          e=ext.read_text(); old='# libusb\nif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'; new='# libusb\nif (CMAKE_SYSTEM_NAME STREQUAL "iOS")\n    add_library(usb-1.0 INTERFACE)\n    add_library(libusb::usb ALIAS usb-1.0)\nelseif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'
-          if old not in e: raise SystemExit('libusb block anchor not found')
+          root,ext,protoc=map(pathlib.Path,sys.argv[1:3])+() if False else (pathlib.Path(sys.argv[1]),pathlib.Path(sys.argv[2]),sys.argv[3])
+          s=root.read_text(); pos=s.find('add_executable(shadps4')
+          if pos<0: raise SystemExit('executable anchor missing')
+          s=s[:pos]+'\nif(CMAKE_SYSTEM_NAME STREQUAL "iOS")\n list(FILTER USBD_LIB EXCLUDE REGEX "src/core/libraries/usbd/.*")\nendif()\n'+s[pos:]
+          if 'COMMAND protobuf::protoc' not in s: raise SystemExit('protoc anchor missing')
+          root.write_text(s.replace('COMMAND protobuf::protoc',f'COMMAND "{protoc}"',1))
+          e=ext.read_text(); old='# libusb\nif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'
+          new='# libusb\nif (CMAKE_SYSTEM_NAME STREQUAL "iOS")\n    add_library(usb-1.0 INTERFACE)\n    add_library(libusb::usb ALIAS usb-1.0)\nelseif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'
+          if old not in e: raise SystemExit('libusb anchor missing')
           ext.write_text(e.replace(old,new,1))
-          PY
-
-          python3 - "$ROOT_CMAKE" "$HOST_PROTOC" <<'PY'
-          import pathlib,sys
-          p=pathlib.Path(sys.argv[1]); protoc=sys.argv[2]; s=p.read_text()
-          needle='COMMAND protobuf::protoc'
-          if needle not in s: raise SystemExit('shadnet protoc command not found')
-          p.write_text(s.replace(needle, f'COMMAND "{protoc}"', 1))
           PY
 
           HOST_FONT_TOOL="$RUNNER_TEMP/Dear_ImGui_FontEmbed"
           xcrun --sdk macosx clang++ "$ENGINE_ROOT/externals/imgui/misc/fonts/binary_to_compressed_c.cpp" -O2 -o "$HOST_FONT_TOOL"
-          test -x "$HOST_FONT_TOOL"
-          IMGUI_CMAKE="$ENGINE_ROOT/src/imgui/renderer/CMakeLists.txt"
-          python3 - "$IMGUI_CMAKE" "$HOST_FONT_TOOL" <<'PY'
+          python3 - "$ENGINE_ROOT/src/imgui/renderer/CMakeLists.txt" "$HOST_FONT_TOOL" <<'PY'
           import pathlib,sys
-          p=pathlib.Path(sys.argv[1]); tool=sys.argv[2]; s=p.read_text(); old='add_executable(Dear_ImGui_FontEmbed ${CMAKE_SOURCE_DIR}/externals/imgui/misc/fonts/binary_to_compressed_c.cpp)'; new=f'add_executable(Dear_ImGui_FontEmbed IMPORTED GLOBAL)\nset_target_properties(Dear_ImGui_FontEmbed PROPERTIES IMPORTED_LOCATION "{tool}")'
-          if old not in s: raise SystemExit('Dear_ImGui_FontEmbed declaration not found')
+          p=pathlib.Path(sys.argv[1]); t=sys.argv[2]; s=p.read_text(); old='add_executable(Dear_ImGui_FontEmbed ${CMAKE_SOURCE_DIR}/externals/imgui/misc/fonts/binary_to_compressed_c.cpp)'
+          if old not in s: raise SystemExit('font tool anchor missing')
+          p.write_text(s.replace(old,f'add_executable(Dear_ImGui_FontEmbed IMPORTED GLOBAL)\nset_target_properties(Dear_ImGui_FontEmbed PROPERTIES IMPORTED_LOCATION "{t}")',1))
+          PY
+
+          python3 - "$ENGINE_ROOT/src/video_core/host_shaders/CMakeLists.txt" "$HOST_GLSLANG_VALIDATOR" <<'PY'
+          import pathlib,sys
+          p=pathlib.Path(sys.argv[1]); t=sys.argv[2]; s=p.read_text(); old='if (TARGET glslang-standalone)'
+          if old not in s: raise SystemExit('glslang anchor missing')
+          p.write_text(s.replace(old,f'if(CMAKE_SYSTEM_NAME STREQUAL "iOS")\n    set(GLSLANG_COMPILER "{t}")\nelseif (TARGET glslang-standalone)',1))
+          PY
+
+          python3 - "$ENGINE_ROOT/src/common/arch.h" "$ENGINE_ROOT/src/common/signal_context.cpp" <<'PY'
+          import pathlib,sys
+          a=pathlib.Path(sys.argv[1]); s=a.read_text(); old='#elif defined(__aarch64__) || defined(_M_ARM64)'
+          if old not in s: raise SystemExit('arch anchor missing')
+          a.write_text(s.replace(old,'#elif defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64)',1))
+          p=pathlib.Path(sys.argv[2]); s=p.read_text(); old='#elif defined(__FreeBSD__) && defined(ARCH_X86_64)\n    return ((ucontext_t*)ctx)->uc_mcontext.mc_err & 0x10;'
+          new='#elif defined(__APPLE__) && defined(ARCH_ARM64)\n    const auto esr = ((ucontext_t*)ctx)->uc_mcontext->__es.__esr;\n    const auto ec = (esr >> 26) & 0x3f;\n    return ec == 0x20 || ec == 0x21;\n#elif defined(__FreeBSD__) && defined(ARCH_X86_64)\n    return ((ucontext_t*)ctx)->uc_mcontext.mc_err & 0x10;'
+          if old not in s: raise SystemExit('signal anchor missing')
           p.write_text(s.replace(old,new,1))
           PY
 
-          HOST_SHADERS="$ENGINE_ROOT/src/video_core/host_shaders/CMakeLists.txt"
-          python3 - "$HOST_SHADERS" "$HOST_GLSLANG_VALIDATOR" <<'PY'
-          import pathlib,sys
-          p=pathlib.Path(sys.argv[1]); tool=sys.argv[2]; s=p.read_text()
-          anchor='if (TARGET glslang-standalone)'
-          if anchor not in s: raise SystemExit('host shader glslang anchor not found')
-          prefix=f'if(CMAKE_SYSTEM_NAME STREQUAL "iOS")\n    set(GLSLANG_COMPILER "{tool}")\nelseif (TARGET glslang-standalone)'
-          p.write_text(s.replace(anchor,prefix,1))
-          PY
-
-          ARCH_H="$ENGINE_ROOT/src/common/arch.h"
-          SIGNAL_CONTEXT="$ENGINE_ROOT/src/common/signal_context.cpp"
-          python3 - "$ARCH_H" "$SIGNAL_CONTEXT" <<'PY'
-          import pathlib,sys
-          arch=pathlib.Path(sys.argv[1]); sig=pathlib.Path(sys.argv[2])
-          s=arch.read_text()
-          old='#elif defined(__aarch64__) || defined(_M_ARM64)'
-          if old not in s: raise SystemExit('ARM64 architecture anchor not found')
-          arch.write_text(s.replace(old, '#elif defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64)', 1))
-          s=sig.read_text()
-          old='#elif defined(__FreeBSD__) && defined(ARCH_X86_64)\n    return ((ucontext_t*)ctx)->uc_mcontext.mc_err & 0x10;'
-          new='#elif defined(__APPLE__) && defined(ARCH_ARM64)\n    const auto esr = ((ucontext_t*)ctx)->uc_mcontext->__es.__esr;\n    const auto ec = (esr >> 26) & 0x3f;\n    return ec == 0x20 || ec == 0x21;\n#elif defined(__FreeBSD__) && defined(ARCH_X86_64)\n    return ((ucontext_t*)ctx)->uc_mcontext.mc_err & 0x10;'
-          if old not in s: raise SystemExit('ARM64 execute-error anchor not found')
-          sig.write_text(s.replace(old,new,1))
-          PY
-
-          STUBS="$ENGINE_ROOT/src/core/aerolib/stubs.cpp"
-          python3 - "$STUBS" <<'PY'
+          python3 - "$ENGINE_ROOT/src/core/aerolib/stubs.cpp" <<'PY'
           import pathlib,sys
           p=pathlib.Path(sys.argv[1]); s=p.read_text()
           old='''    e.code = std::make_unique<Xbyak::CodeGenerator>(32, Xbyak::AutoGrow);\n    e.code->mov(e.code->rdi, index);\n    e.code->mov(e.code->rax, reinterpret_cast<u64>(&CommonStub));\n    e.code->jmp(e.code->rax);\n    e.code->ready();\n\n    g_stub_entries.push_back(std::move(e));\n    return reinterpret_cast<u64>(g_stub_entries.back().code->getCode());'''
-          new='''#if defined(ARCH_ARM64)\n    // Xbyak emits x86-64 trampolines and cannot execute them on an ARM64 iOS host.\n    // Keep the direct iOS build safe until the ARM64 guest-call/JIT bridge supplies a native trampoline.\n    static const auto Arm64MissingStub = +[]() -> u64 { return 0; };\n    g_stub_entries.push_back(std::move(e));\n    return reinterpret_cast<u64>(Arm64MissingStub);\n#else\n    e.code = std::make_unique<Xbyak::CodeGenerator>(32, Xbyak::AutoGrow);\n    e.code->mov(e.code->rdi, index);\n    e.code->mov(e.code->rax, reinterpret_cast<u64>(&CommonStub));\n    e.code->jmp(e.code->rax);\n    e.code->ready();\n\n    g_stub_entries.push_back(std::move(e));\n    return reinterpret_cast<u64>(g_stub_entries.back().code->getCode());\n#endif'''
-          if old not in s: raise SystemExit('AeroLib Xbyak stub anchor not found')
+          new='''#if defined(__arm64__) || defined(__aarch64__)\n    // iOS ARM64 cannot execute Xbyak x86-64 trampolines.\n    // Return a native ARM64-safe placeholder until the guest-call JIT bridge supplies trampolines.\n    static const auto Arm64MissingStub = +[]() -> u64 { return 0; };\n    g_stub_entries.push_back(std::move(e));\n    return reinterpret_cast<u64>(Arm64MissingStub);\n#else\n    e.code = std::make_unique<Xbyak::CodeGenerator>(32, Xbyak::AutoGrow);\n    e.code->mov(e.code->rdi, index);\n    e.code->mov(e.code->rax, reinterpret_cast<u64>(&CommonStub));\n    e.code->jmp(e.code->rax);\n    e.code->ready();\n\n    g_stub_entries.push_back(std::move(e));\n    return reinterpret_cast<u64>(g_stub_entries.back().code->getCode());\n#endif'''
+          if old not in s: raise SystemExit('AeroLib Xbyak anchor missing')
           p.write_text(s.replace(old,new,1))
           PY
 
@@ -233,7 +192,6 @@ jobs:
           test -f "$GITHUB_WORKSPACE/MaxPS4-iOS/Core/MaxPS4CoreBridge.cpp"
           test -x "$HOST_GLSLANG_VALIDATOR"
           test -x "$HOST_PROTOC"
-          git -C "$ENGINE_ROOT" remote get-url origin | grep -F 'shadps4-emu/shadPS4.git'
 
       - name: Compile MaxPS4 bridge against upstream headers
         shell: bash
@@ -251,32 +209,24 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          BUILD="$RUNNER_TEMP/shadps4-ios-build"
-          LOG="$RUNNER_TEMP/shadps4-ios-configure.log"
-          LLVM_CONFIG="$(brew --prefix llvm)/bin/llvm-config"
-          IOS_SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
-          export IPHONEOS_DEPLOYMENT_TARGET=18.0
+          BUILD="$RUNNER_TEMP/shadps4-ios-build"; LOG="$RUNNER_TEMP/shadps4-ios-configure.log"
+          IOS_SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"; export IPHONEOS_DEPLOYMENT_TARGET=18.0
           unset MACOSX_DEPLOYMENT_TARGET SDKROOT CFLAGS CXXFLAGS LDFLAGS || true
           cmake -S "$ENGINE_ROOT" -B "$BUILD" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=23 \
-            -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64 \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=23 -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64 \
             -DCMAKE_OSX_SYSROOT="$IOS_SDKROOT" -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 \
             -DCMAKE_PREFIX_PATH="$(brew --prefix glslang);$(brew --prefix spirv-tools);$(brew --prefix spirv-llvm-translator);$(brew --prefix llvm)" \
-            -DLLVM_DIR="$(brew --prefix llvm)/lib/cmake/llvm" \
-            -DENABLE_TESTS=OFF -DENABLE_UPDATER=OFF -DENABLE_DISCORD_RPC=OFF \
+            -DLLVM_DIR="$(brew --prefix llvm)/lib/cmake/llvm" -DENABLE_TESTS=OFF -DENABLE_UPDATER=OFF -DENABLE_DISCORD_RPC=OFF \
             -DHWINFO_BATTERY=OFF -DHWINFO_DISK=OFF -DHWINFO_MAINBOARD=OFF -DHWINFO_GPU=OFF -DHWINFO_NETWORK=OFF \
             -DALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO=FALSE -DALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO_EXITCODE=1 \
-            -DKK_LLVM_CONFIG="$LLVM_CONFIG" 2>&1 | tee "$LOG"
-          STATUS=${PIPESTATUS[0]}
-          echo "SHADPS4_IOS_BUILD=$BUILD" >> "$GITHUB_ENV"
-          exit "$STATUS"
+            -DKK_LLVM_CONFIG="$(brew --prefix llvm)/bin/llvm-config" 2>&1 | tee "$LOG"
+          STATUS=${PIPESTATUS[0]}; echo "SHADPS4_IOS_BUILD=$BUILD" >> "$GITHUB_ENV"; exit "$STATUS"
 
       - name: Build official shadPS4 for iOS
         shell: bash
         run: |
           set -o pipefail
-          LOG="$RUNNER_TEMP/shadps4-ios-build.log"
-          unset MACOSX_DEPLOYMENT_TARGET SDKROOT CFLAGS CXXFLAGS LDFLAGS || true
+          LOG="$RUNNER_TEMP/shadps4-ios-build.log"; unset MACOSX_DEPLOYMENT_TARGET SDKROOT CFLAGS CXXFLAGS LDFLAGS || true
           export IPHONEOS_DEPLOYMENT_TARGET=18.0
           cmake --build "$SHADPS4_IOS_BUILD" --parallel 2 2>&1 | tee "$LOG"
           exit ${PIPESTATUS[0]}
