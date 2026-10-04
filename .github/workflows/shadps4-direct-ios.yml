@@ -15,13 +15,28 @@ jobs:
       - name: Checkout MaxPS4
         uses: actions/checkout@v4
 
-      - name: Prepare tools
+      - name: Prepare tools and diagnose LLVM/SPIR-V
         shell: bash
         run: |
           set -euxo pipefail
-          brew install ninja protobuf llvm spirv-llvm-translator pkgconf || true
-          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
-          echo "PKG_CONFIG_PATH=$(brew --prefix spirv-llvm-translator)/lib/pkgconfig:$(brew --prefix llvm)/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
+          brew update
+          brew install ninja protobuf llvm spirv-llvm-translator pkgconf cmake || true
+
+          LLVM_PREFIX="$(brew --prefix llvm)"
+          SPIRV_PREFIX="$(brew --prefix spirv-llvm-translator)"
+          echo "$LLVM_PREFIX/bin" >> "$GITHUB_PATH"
+          echo "LLVM_DIR=$LLVM_PREFIX/lib/cmake/llvm" >> "$GITHUB_ENV"
+          echo "LLVM_ROOT=$LLVM_PREFIX" >> "$GITHUB_ENV"
+          echo "SPIRV_LLVM_TRANSLATOR_ROOT=$SPIRV_PREFIX" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$SPIRV_PREFIX/lib/pkgconfig:$LLVM_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$SPIRV_PREFIX:$LLVM_PREFIX:${CMAKE_PREFIX_PATH:-}" >> "$GITHUB_ENV"
+
+          "$LLVM_PREFIX/bin/llvm-config" --version
+          "$LLVM_PREFIX/bin/llvm-config" --prefix
+          brew info llvm || true
+          brew info spirv-llvm-translator || true
+          find "$SPIRV_PREFIX" -maxdepth 4 -type f \( -name '*SPIRV*Config.cmake' -o -name '*spirv*config.cmake' -o -name '*.pc' \) -print || true
+
           python3 -m venv "$RUNNER_TEMP/maxps4-python"
           "$RUNNER_TEMP/maxps4-python/bin/python" -m pip install --upgrade pip packaging mako pyyaml meson
           echo "$RUNNER_TEMP/maxps4-python/bin" >> "$GITHUB_PATH"
@@ -67,7 +82,7 @@ jobs:
       - name: Configure official shadPS4 for iOS
         shell: bash
         run: |
-          set -euxo pipefail
+          set -o pipefail
           BUILD="$RUNNER_TEMP/shadps4-ios-build"
           LOG="$RUNNER_TEMP/shadps4-ios-configure.log"
           LLVM_CONFIG="$(brew --prefix llvm)/bin/llvm-config"
@@ -79,6 +94,8 @@ jobs:
             -DCMAKE_OSX_SYSROOT=iphoneos \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix spirv-llvm-translator);$(brew --prefix llvm)" \
+            -DLLVM_DIR="$(brew --prefix llvm)/lib/cmake/llvm" \
             -DENABLE_TESTS=OFF \
             -DENABLE_UPDATER=OFF \
             -DENABLE_DISCORD_RPC=OFF \
@@ -86,7 +103,9 @@ jobs:
             -DALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO_EXITCODE=1 \
             -DKK_LLVM_CONFIG="$LLVM_CONFIG" \
             2>&1 | tee "$LOG"
+          STATUS=${PIPESTATUS[0]}
           echo "SHADPS4_IOS_BUILD=$BUILD" >> "$GITHUB_ENV"
+          exit "$STATUS"
 
       - name: Build official shadPS4 for iOS
         shell: bash
