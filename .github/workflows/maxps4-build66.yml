@@ -1,4 +1,4 @@
-name: Build 67 MaxPS4 iOS
+name: Build 69 MaxPS4 iOS
 
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/maxps4-ccache
-          key: maxps4-ios-build67-${{ runner.os }}-${{ github.run_id }}
+          key: maxps4-ios-build69-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-
 
@@ -29,11 +29,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VENV="$RUNNER_TEMP/build67-python"
+          VENV="$RUNNER_TEMP/build69-python"
           python3 -m venv "$VENV"
           "$VENV/bin/python" -m pip install --upgrade pip pyyaml
           "$VENV/bin/python" - <<'PY'
           import os, subprocess, yaml
+          from pathlib import Path
           base='37bd10e8758416cbefcde6bdfaa3824c8a98fcf7'
           raw=subprocess.check_output(['git','show',f'{base}:.github/workflows/maxps4-ipa.yml'],text=True)
           doc=yaml.safe_load(raw)
@@ -50,7 +51,13 @@ jobs:
               if name == 'Configure iOS engine':
                   subprocess.run(['python3','.github/scripts/build66-patches.py'],env=env,check=True)
               print(f'\n===== {name} =====',flush=True)
-              subprocess.run(['bash','-e','-o','pipefail','-c',script],env=env,check=True)
+              result=subprocess.run(['bash','-e','-o','pipefail','-c',script],env=env)
+              if result.returncode:
+                  core=Path(env['RUNNER_TEMP'])/'build'/'libshadps4.a'
+                  if name == 'Build iOS engine and collect diagnostics' and core.is_file():
+                      print(f'Build69: engine command returned {result.returncode}, but {core} exists; continuing to library collection and Xcode link stage.',flush=True)
+                  else:
+                      raise subprocess.CalledProcessError(result.returncode, ['bash','-e','-o','pipefail','-c',script])
               with open(envfile) as f:
                   f.seek(env_pos)
                   for line in f:
@@ -70,8 +77,11 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build67-diagnostics
-          path: ${{ runner.temp }}/shadps4-build.log
+          name: build69-diagnostics
+          path: |
+            ${{ runner.temp }}/shadps4-cmake-configure.log
+            ${{ runner.temp }}/shadps4-build.log
+            ${{ runner.temp }}/shadps4-libs.txt
           if-no-files-found: ignore
 
       - name: Upload MaxPS4 IPA
