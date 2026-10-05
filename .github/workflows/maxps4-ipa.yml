@@ -9,6 +9,7 @@ on:
       - 'MaxPS4-iOS/Sources/**'
       - 'MaxPS4-iOS/Core/**'
       - 'MaxPS4-iOS/project.yml'
+      - 'MaxPS4-iOS/MaxPS4.entitlements'
 
 jobs:
   build-maxps4-ipa:
@@ -16,7 +17,8 @@ jobs:
     steps:
       - name: Checkout MaxPS4
         uses: actions/checkout@v4
-      - name: Install build tools
+
+      - name: Install complete iOS toolchain
         shell: bash
         run: |
           set -euxo pipefail
@@ -25,6 +27,8 @@ jobs:
           SPIRV_PREFIX="$(brew --prefix spirv-llvm-translator)"
           SPIRV_TOOLS_PREFIX="$(brew --prefix spirv-tools)"
           GLSLANG_PREFIX="$(brew --prefix glslang)"
+          test -x "$LLVM_PREFIX/bin/llvm-config"
+          test -x "$GLSLANG_PREFIX/bin/glslangValidator"
           echo "$LLVM_PREFIX/bin" >> "$GITHUB_PATH"
           echo "$SPIRV_TOOLS_PREFIX/bin" >> "$GITHUB_PATH"
           echo "$GLSLANG_PREFIX/bin" >> "$GITHUB_PATH"
@@ -39,8 +43,9 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/maxps4-python"
           "$RUNNER_TEMP/maxps4-python/bin/python" -m pip install --upgrade pip packaging mako pyyaml meson
           echo "$RUNNER_TEMP/maxps4-python/bin" >> "$GITHUB_PATH"
+          echo "MAXPS4_PYTHON_BIN=$RUNNER_TEMP/maxps4-python/bin" >> "$GITHUB_ENV"
 
-      - name: Checkout pinned shadPS4 engine
+      - name: Checkout pinned shadPS4 and host protoc
         shell: bash
         run: |
           set -euxo pipefail
@@ -48,6 +53,7 @@ jobs:
           git clone https://github.com/shadps4-emu/shadPS4.git "$ENGINE_ROOT"
           git -C "$ENGINE_ROOT" checkout b3452cf6a9bd0969771fcfbf919c359368473d1b
           git -C "$ENGINE_ROOT" submodule update --init --recursive
+          test -f "$ENGINE_ROOT/src/emulator.h"
           echo "SHADPS4_ENGINE_ROOT=$ENGINE_ROOT" >> "$GITHUB_ENV"
           PROTOBUF_HOST_BUILD="$RUNNER_TEMP/protobuf-host-build"
           cmake -S "$ENGINE_ROOT/externals/protobuf" -B "$PROTOBUF_HOST_BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release -Dprotobuf_BUILD_TESTS=OFF -Dprotobuf_BUILD_EXAMPLES=OFF -Dprotobuf_BUILD_CONFORMANCE=OFF -Dprotobuf_BUILD_PROTOC_BINARIES=ON
@@ -56,7 +62,7 @@ jobs:
           test -x "$HOST_PROTOC"
           echo "HOST_PROTOC=$HOST_PROTOC" >> "$GITHUB_ENV"
 
-      - name: Patch iOS compatibility
+      - name: Apply consolidated MaxPS4 iOS compatibility
         shell: bash
         run: |
           set -euxo pipefail
@@ -65,21 +71,18 @@ jobs:
           IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           MAC_VER="$(xcrun --sdk macosx --show-sdk-platform-version)"
           LLVM_CONFIG="$LLVM_PREFIX/bin/llvm-config"
-
           python3 - "$KK/CMakeLists.txt" "$MAC_SDK" "$IOS_SDK" "$LLVM_CONFIG" "$MAC_VER" <<'PY'
           import pathlib,sys
           p=pathlib.Path(sys.argv[1]); mac,ios,llvm,macver=sys.argv[2:]; s=p.read_text()
           old='set(MESA_ENVIRONMENT_TOOLS\n    LLVM_CONFIG=${KK_LLVM_CONFIG})'
-          new=f'''set(MESA_ENVIRONMENT_TOOLS\n    LLVM_CONFIG={llvm}\n    SDKROOT={mac}\n    MACOSX_DEPLOYMENT_TARGET={macver}\n    CFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver}\n    CXXFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver}\n    LDFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver})'''
-          if old in s: s=s.replace(old,new)
+          if old in s:
+              s=s.replace(old,f'''set(MESA_ENVIRONMENT_TOOLS\n    LLVM_CONFIG={llvm}\n    SDKROOT={mac}\n    MACOSX_DEPLOYMENT_TARGET={macver}\n    CFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver}\n    CXXFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver}\n    LDFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver})''')
           s=s.replace('set(MESA_CROSS_FILE_TARGET ${MESA_CROSSFILES_DIR}/mesa-${KK_TARGET_ARCHITECTURE}.ini)','set(MESA_CROSS_FILE_TARGET ${MESA_CROSSFILES_DIR}/mesa-ios-aarch64.ini)')
           old_target='set(MESA_ENVIRONMENT_TARGET\n    MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}\n    PATH='
           new_target=f'''set(MESA_ENVIRONMENT_TARGET\n    SDKROOT={ios}\n    IPHONEOS_DEPLOYMENT_TARGET=18.0\n    CFLAGS=-target\\ arm64-apple-ios18.0\\ -isysroot\\ {ios}\n    CXXFLAGS=-target\\ arm64-apple-ios18.0\\ -isysroot\\ {ios}\n    OBJCFLAGS=-target\\ arm64-apple-ios18.0\\ -isysroot\\ {ios}\n    OBJCXXFLAGS=-target\\ arm64-apple-ios18.0\\ -isysroot\\ {ios}\n    LDFLAGS=-target\\ arm64-apple-ios18.0\\ -isysroot\\ {ios}\n    PATH='''
-          if old_target not in s: raise SystemExit('Mesa target environment anchor not found')
-          s=s.replace(old_target,new_target)
+          if old_target in s: s=s.replace(old_target,new_target)
           p.write_text(s)
           PY
-
           cat > "$KK/crossfiles/mesa-ios-aarch64.ini" <<EOF
           [binaries]
           c='clang'
@@ -103,16 +106,14 @@ jobs:
           cpu='aarch64'
           endian='little'
           EOF
-
           WSI="$KK/externals/mesa/src/vulkan/wsi/wsi_common_metal_layer.m"
           python3 - "$WSI" <<'PY'
           import pathlib,sys
           p=pathlib.Path(sys.argv[1]); s=p.read_text(); n='   metal_layer.displaySyncEnabled = !enable_immediate;'
-          s=s.replace(n,'#if defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__)\n   metal_layer.displaySyncEnabled = !enable_immediate;\n#endif')
-          p.write_text(s)
+          s=s.replace(n,'#if defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__)\n   metal_layer.displaySyncEnabled = !enable_immediate;\n#endif'); p.write_text(s)
           PY
-
           KK_BO="$(find "$KK/externals/mesa" -name kk_bo.c -print -quit)"
+          test -n "$KK_BO"
           python3 - "$KK_BO" <<'PY'
           import pathlib,sys
           p=pathlib.Path(sys.argv[1]); s=p.read_text(); old='#include <mach/mach_vm.h>'
@@ -120,26 +121,95 @@ jobs:
           if old in s: s=s.replace(old,ios,1)
           p.write_text(s)
           PY
-
           python3 - "$SHADPS4_ENGINE_ROOT/externals/ImGuiFileDialog/ImGuiFileDialog.cpp" <<'PY'
           import pathlib,re,sys
           p=pathlib.Path(sys.argv[1]); s=p.read_text(); pat=re.compile(r'(?P<i>^[ \t]*)(?P<d>(?:const\s+)?int\s+\w+\s*=\s*)std::system\((?P<a>[^;]+)\);',re.M)
-          s=pat.sub(lambda m:f"{m.group('i')}#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n{m.group('i')}{m.group('d')}-1;\n{m.group('i')}#else\n{m.group('i')}{m.group('d')}std::system({m.group('a')});\n{m.group('i')}#endif",s)
+          s=pat.sub(lambda m:f"{m.group('i')}#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n{m.group('i')}{m.group('d')}-1;\n{m.group('i')}#else\n{m.group('i')}{m.group('d')}std::system({m.group('a')});\n{m.group('i')}#endif",s); p.write_text(s)
+          PY
+          python3 - "$SHADPS4_ENGINE_ROOT/externals/cpp-httplib/httplib.h" <<'PY'
+          import pathlib,sys
+          p=pathlib.Path(sys.argv[1]); s=p.read_text(); a='#define CPPHTTPLIB_HTTPLIB_H'
+          if a in s and 'CPPHTTPLIB_DISABLE_MACOSX_AUTOMATIC_ROOT_CERTIFICATES' not in s: s=s.replace(a,a+'\n\n#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n#define CPPHTTPLIB_DISABLE_MACOSX_AUTOMATIC_ROOT_CERTIFICATES\n#endif',1)
           p.write_text(s)
           PY
           python3 - "$SHADPS4_ENGINE_ROOT/src/common/arch.h" <<'PY'
           import pathlib,sys
           p=pathlib.Path(sys.argv[1]); s=p.read_text().replace('#elif defined(__aarch64__) || defined(_M_ARM64)','#elif defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64)'); p.write_text(s)
           PY
+          python3 - "$SHADPS4_ENGINE_ROOT/src/emulator.cpp" <<'PY'
+          import pathlib,sys
+          p=pathlib.Path(sys.argv[1]); s=p.read_text(); old='#else\n    std::vector<char*> argv;'
+          if old in s: s=s.replace(old,'#elif defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n    std::quick_exit(0);\n#else\n    std::vector<char*> argv;',1)
+          p.write_text(s)
+          PY
+          ROOT="$SHADPS4_ENGINE_ROOT/CMakeLists.txt"; EXT="$SHADPS4_ENGINE_ROOT/externals/CMakeLists.txt"
+          python3 - "$ROOT" "$EXT" "$HOST_PROTOC" <<'PY'
+          import pathlib,sys
+          root,ext,protoc=pathlib.Path(sys.argv[1]),pathlib.Path(sys.argv[2]),sys.argv[3]
+          s=root.read_text(); marker='set(USBD_LIB src/core/libraries/usbd/usbd.cpp'; start=s.find(marker)
+          if start>=0:
+              end=s.find('\n)',start)
+              if end>=0:
+                  end+=2; block=s[start:end]; s=s[:start]+'if(CMAKE_SYSTEM_NAME STREQUAL "iOS")\n    set(USBD_LIB "")\nelse()\n'+block+'\nendif()'+s[end:]
+          if 'COMMAND protobuf::protoc' in s: s=s.replace('COMMAND protobuf::protoc',f'COMMAND "{protoc}"',1)
+          root.write_text(s)
+          e=ext.read_text(); old='# libusb\nif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'
+          new='# libusb\nif (CMAKE_SYSTEM_NAME STREQUAL "iOS")\n    add_library(usb-1.0 INTERFACE)\n    add_library(libusb::usb ALIAS usb-1.0)\nelseif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'
+          if old in e: e=e.replace(old,new,1)
+          ext.write_text(e)
+          PY
+          echo 'set(ALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO_EXITCODE 0 CACHE STRING "iOS cross compile result" FORCE)' > "$RUNNER_TEMP/maxps4-ios-cache.cmake"
 
-      - name: Configure and build shadPS4 for iOS
+      - name: Build shadPS4 iOS engine
         shell: bash
         run: |
           set -euxo pipefail
           IOS_SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
           BUILD="$RUNNER_TEMP/shadps4-ios-build"
-          LLVM_CONFIG="$LLVM_PREFIX/bin/llvm-config"
+          export PATH="$MAXPS4_PYTHON_BIN:$PATH"
           unset MACOSX_DEPLOYMENT_TARGET || true
           export IPHONEOS_DEPLOYMENT_TARGET=18.0
-          cmake -S "$SHADPS4_ENGINE_ROOT" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=23 -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64 -DCMAKE_OSX_SYSROOT="$IOS_SDKROOT" -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO_EXITCODE=0 -DKK_LLVM_CONFIG="$LLVM_CONFIG" -DLLVM_DIR="$LLVM_DIR" -DENABLE_TESTS=OFF -DENABLE_UPDATER=OFF -DENABLE_DISCORD_RPC=OFF
+          cmake -S "$SHADPS4_ENGINE_ROOT" -B "$BUILD" -G Ninja -C "$RUNNER_TEMP/maxps4-ios-cache.cmake" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=23 -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64 -DCMAKE_OSX_SYSROOT="$IOS_SDKROOT" -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO_EXITCODE=0 -DKK_LLVM_CONFIG="$LLVM_PREFIX/bin/llvm-config" -DLLVM_DIR="$LLVM_DIR" -DENABLE_TESTS=OFF -DENABLE_UPDATER=OFF -DENABLE_DISCORD_RPC=OFF
           cmake --build "$BUILD" --parallel 2
+          echo "SHADPS4_BUILD_DIR=$BUILD" >> "$GITHUB_ENV"
+
+      - name: Collect shadPS4 libraries
+        shell: bash
+        run: |
+          set -euxo pipefail
+          LIBDIR="$RUNNER_TEMP/shadps4-ios-libs"; mkdir -p "$LIBDIR"
+          find "$SHADPS4_BUILD_DIR" -type f -name '*.a' -print -exec cp -f {} "$LIBDIR/" \;
+          test "$(find "$LIBDIR" -type f -name '*.a' | wc -l | tr -d ' ')" -gt 0
+          LINK_FLAGS=""; for lib in "$LIBDIR"/*.a; do LINK_FLAGS="$LINK_FLAGS $lib"; done
+          echo "SHADPS4_LIBRARY_DIR=$LIBDIR" >> "$GITHUB_ENV"
+          echo "SHADPS4_LINK_FLAGS=$LINK_FLAGS" >> "$GITHUB_ENV"
+
+      - name: Generate and build MaxPS4 app
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd "$GITHUB_WORKSPACE/MaxPS4-iOS"
+          xcodegen generate
+          BUILD_DIR="$RUNNER_TEMP/maxps4-derived"
+          xcodebuild -project MaxPS4.xcodeproj -scheme MaxPS4 -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$BUILD_DIR" SHADPS4_ENGINE_ROOT="$SHADPS4_ENGINE_ROOT" SHADPS4_LIBRARY_DIR="$SHADPS4_LIBRARY_DIR" SHADPS4_LINK_FLAGS="$SHADPS4_LINK_FLAGS" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+          APP="$BUILD_DIR/Build/Products/Release-iphoneos/MaxPS4.app"
+          test -d "$APP"
+          echo "MAXPS4_APP=$APP" >> "$GITHUB_ENV"
+
+      - name: Create unsigned MaxPS4 IPA
+        shell: bash
+        run: |
+          set -euxo pipefail
+          PACKAGE="$RUNNER_TEMP/maxps4-package"; mkdir -p "$PACKAGE/Payload"
+          cp -R "$MAXPS4_APP" "$PACKAGE/Payload/MaxPS4.app"
+          cd "$PACKAGE"
+          /usr/bin/zip -qry "$RUNNER_TEMP/MaxPS4-unsigned.ipa" Payload
+          test -s "$RUNNER_TEMP/MaxPS4-unsigned.ipa"
+
+      - name: Upload MaxPS4 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-unsigned-IPA
+          path: ${{ runner.temp }}/MaxPS4-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
