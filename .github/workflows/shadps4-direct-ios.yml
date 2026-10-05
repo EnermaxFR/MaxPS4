@@ -165,6 +165,16 @@ jobs:
           ext.write_text(e.replace(old,new,1))
           PY
 
+          FFMPEG_CMAKE="$ENGINE_ROOT/externals/ffmpeg-core/CMakeLists.txt"
+          python3 - "$FFMPEG_CMAKE" <<'PY'
+          import pathlib,sys
+          p=pathlib.Path(sys.argv[1]); s=p.read_text()
+          old='''elseif (APPLE)\n\ttarget_link_libraries(${FFMPEG_CORE_NAME} INTERFACE\n\t\t"-framework CoreServices" "-framework CoreFoundation" "-framework AudioUnit"\n\t\t"-framework AudioToolbox" "-framework CoreAudio" "-framework CoreMedia"\n\t\t"-framework VideoToolbox" "-framework CoreVideo" "-framework Security")'''
+          new='''elseif (APPLE)\n\tif (CMAKE_SYSTEM_NAME STREQUAL "iOS")\n\t\ttarget_link_libraries(${FFMPEG_CORE_NAME} INTERFACE\n\t\t\t"-framework CoreFoundation" "-framework AudioToolbox" "-framework CoreAudio"\n\t\t\t"-framework CoreMedia" "-framework VideoToolbox" "-framework CoreVideo" "-framework Security")\n\telse()\n\t\ttarget_link_libraries(${FFMPEG_CORE_NAME} INTERFACE\n\t\t\t"-framework CoreServices" "-framework CoreFoundation" "-framework AudioUnit"\n\t\t\t"-framework AudioToolbox" "-framework CoreAudio" "-framework CoreMedia"\n\t\t\t"-framework VideoToolbox" "-framework CoreVideo" "-framework Security")\n\tendif()'''
+          if old not in s: raise SystemExit('FFmpeg Apple framework anchor missing')
+          p.write_text(s.replace(old,new,1))
+          PY
+
           python3 - "$ENGINE_ROOT/src/sdl_window_apple.mm" <<'PY'
           import pathlib,sys
           p=pathlib.Path(sys.argv[1])
