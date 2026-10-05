@@ -3,43 +3,31 @@ name: Build MaxPS4 IPA
 on:
   workflow_dispatch:
   push:
-    branches: [ maxps4-shadps4-direct ]
+    branches: [maxps4-shadps4-direct]
     paths:
       - '.github/workflows/maxps4-ipa.yml'
-      - 'MaxPS4-iOS/Sources/**'
-      - 'MaxPS4-iOS/Core/**'
-      - 'MaxPS4-iOS/project.yml'
-      - 'MaxPS4-iOS/MaxPS4.entitlements'
+      - 'MaxPS4-iOS/**'
 
 jobs:
   build-maxps4-ipa:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Restore compiler cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/maxps4-ccache
-          key: maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-v1-${{ github.run_id }}
-          restore-keys: |
-            maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-v1-
+
       - name: Install toolchain
+        shell: bash
         run: |
           set -euxo pipefail
-          brew install cmake ninja llvm meson python glslang xcodegen protobuf ccache
+          brew install cmake ninja llvm python glslang xcodegen protobuf ccache
           PYTHON="$(brew --prefix python)/bin/python3"
           "$PYTHON" -m venv "$RUNNER_TEMP/maxps4-python"
-          "$RUNNER_TEMP/maxps4-python/bin/python" -m pip install --upgrade pip
-          "$RUNNER_TEMP/maxps4-python/bin/python" -m pip install packaging mako pyyaml meson
+          "$RUNNER_TEMP/maxps4-python/bin/python" -m pip install --upgrade pip packaging mako pyyaml meson
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
           echo "$RUNNER_TEMP/maxps4-python/bin" >> "$GITHUB_PATH"
-          echo "PYTHON=$RUNNER_TEMP/maxps4-python/bin/python" >> "$GITHUB_ENV"
-          echo "MESON=$RUNNER_TEMP/maxps4-python/bin/meson" >> "$GITHUB_ENV"
           echo "CCACHE_DIR=$HOME/.cache/maxps4-ccache" >> "$GITHUB_ENV"
-          echo "CCACHE_COMPRESS=true" >> "$GITHUB_ENV"
-          echo "CCACHE_MAXSIZE=5G" >> "$GITHUB_ENV"
-          "$RUNNER_TEMP/maxps4-python/bin/python" -c 'import packaging, mako, yaml; print("Mesa Python dependencies OK")'
+
       - name: Checkout shadPS4
+        shell: bash
         run: |
           set -euxo pipefail
           git clone --filter=blob:none https://github.com/shadps4-emu/shadPS4.git "$RUNNER_TEMP/shadps4"
@@ -47,108 +35,105 @@ jobs:
           git -C "$RUNNER_TEMP/shadps4" submodule update --init --recursive --depth 1
           test -f "$RUNNER_TEMP/shadps4/src/emulator.h"
           echo "SHADPS4_ENGINE_ROOT=$RUNNER_TEMP/shadps4" >> "$GITHUB_ENV"
+
       - name: Apply iOS Mach VM compatibility
+        shell: bash
         run: |
           set -euxo pipefail
-          KK_BO="$(find "$SHADPS4_ENGINE_ROOT/externals/mesa-kosmickrisp/externals/mesa" -name kk_bo.c -print -quit)"
+          KK_BO="$(find "$SHADPS4_ENGINE_ROOT/externals/mesa-kosmickrisp/externals/mesa" -path '*/src/kosmickrisp/vulkan/kk_bo.c' -print -quit)"
           test -n "$KK_BO"
           python3 - "$KK_BO" <<'PY'
-          import pathlib,sys
-          p=pathlib.Path(sys.argv[1]); s=p.read_text()
-          s=s.replace('#include <mach/mach_vm.h>', '#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n#include <mach/mach.h>\n#include <mach/vm_map.h>\n#else\n#include <mach/mach_vm.h>\n#endif', 1)
-          old='''   mach_vm_address_t src_addr = (mach_vm_address_t)bo->cpu;
-   mach_vm_address_t dst_addr = (mach_vm_address_t)*addr;'''
-          new='''#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
-   vm_address_t src_addr = (vm_address_t)bo->cpu;
-   vm_address_t dst_addr = (vm_address_t)*addr;
-#else
-   mach_vm_address_t src_addr = (mach_vm_address_t)bo->cpu;
-   mach_vm_address_t dst_addr = (mach_vm_address_t)*addr;
-#endif'''
-          if old not in s: raise SystemExit('kk_bo_map_placed declarations not found')
-          s=s.replace(old,new,1)
-          old='''   kern_return_t ret = mach_vm_remap(mach_task_self(), &dst_addr, bo->size_B, 0,
-                                     flags, mach_task_self(), src_addr, false,
-                                     &cur_prot, &max_prot, VM_INHERIT_DEFAULT);'''
-          new='''#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
-   vm_address_t src_remap_addr = src_addr;
-   kern_return_t ret = vm_remap(mach_task_self(), &dst_addr,
-                                (vm_size_t)bo->size_B, 0, flags,
-                                mach_task_self(), src_remap_addr, false,
-                                &cur_prot, &max_prot, VM_INHERIT_DEFAULT);
-#else
-   kern_return_t ret = mach_vm_remap(mach_task_self(), &dst_addr, bo->size_B, 0,
-                                     flags, mach_task_self(), src_addr, false,
-                                     &cur_prot, &max_prot, VM_INHERIT_DEFAULT);
-#endif'''
-          if old not in s: raise SystemExit('mach_vm_remap call not found')
-          s=s.replace(old,new,1)
-          old='''   mach_vm_address_t unmap_addr = (mach_vm_address_t)addr;
-   if (reserved) {
-      /* Replace with a reserved mapping using mach_vm_map */
-      kern_return_t ret = mach_vm_map(
-         mach_task_self(), &unmap_addr, bo->size_B, 0,
-         VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, MEMORY_OBJECT_NULL, 0, false,
-         VM_PROT_NONE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_DEFAULT);'''
-          new='''#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
-   vm_address_t unmap_addr = (vm_address_t)addr;
-#else
-   mach_vm_address_t unmap_addr = (mach_vm_address_t)addr;
-#endif
-   if (reserved) {
-      /* Replace with a reserved mapping using the platform VM API. */
-#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
-      kern_return_t ret = vm_map(
-         mach_task_self(), &unmap_addr, (vm_size_t)bo->size_B, 0,
-         VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, MEMORY_OBJECT_NULL, 0, false,
-         VM_PROT_NONE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_DEFAULT);
-#else
-      kern_return_t ret = mach_vm_map(
-         mach_task_self(), &unmap_addr, bo->size_B, 0,
-         VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, MEMORY_OBJECT_NULL, 0, false,
-         VM_PROT_NONE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_DEFAULT);
-#endif'''
-          if old not in s: raise SystemExit('mach_vm_map block not found')
-          s=s.replace(old,new,1)
-          old='''      mach_vm_deallocate(mach_task_self(), unmap_addr, bo->size_B);'''
-          new='''#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
-      vm_deallocate(mach_task_self(), unmap_addr, (vm_size_t)bo->size_B);
-#else
-      mach_vm_deallocate(mach_task_self(), unmap_addr, bo->size_B);
-#endif'''
-          if old not in s: raise SystemExit('mach_vm_deallocate call not found')
-          s=s.replace(old,new,1)
+          import pathlib
+          import sys
+
+          p = pathlib.Path(sys.argv[1])
+          s = p.read_text()
+
+          s = s.replace(
+              '#include <mach/mach_vm.h>',
+              '#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n#include <mach/mach.h>\n#include <mach/vm_map.h>\n#else\n#include <mach/mach_vm.h>\n#endif',
+              1,
+          )
+
+          s = s.replace(
+              '   mach_vm_address_t src_addr = (mach_vm_address_t)bo->cpu;\n   mach_vm_address_t dst_addr = (mach_vm_address_t)*addr;',
+              '#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n   vm_address_t src_addr = (vm_address_t)bo->cpu;\n   vm_address_t dst_addr = (vm_address_t)*addr;\n#else\n   mach_vm_address_t src_addr = (mach_vm_address_t)bo->cpu;\n   mach_vm_address_t dst_addr = (mach_vm_address_t)*addr;\n#endif',
+              1,
+          )
+
+          s = s.replace(
+              '   kern_return_t ret = mach_vm_remap(mach_task_self(), &dst_addr, bo->size_B, 0,\n                                     flags, mach_task_self(), src_addr, false,\n                                     &cur_prot, &max_prot, VM_INHERIT_DEFAULT);',
+              '#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n   kern_return_t ret = vm_remap(mach_task_self(), &dst_addr, (vm_size_t)bo->size_B, 0,\n                                flags, mach_task_self(), src_addr, false,\n                                &cur_prot, &max_prot, VM_INHERIT_DEFAULT);\n#else\n   kern_return_t ret = mach_vm_remap(mach_task_self(), &dst_addr, bo->size_B, 0,\n                                     flags, mach_task_self(), src_addr, false,\n                                     &cur_prot, &max_prot, VM_INHERIT_DEFAULT);\n#endif',
+              1,
+          )
+
+          s = s.replace(
+              '   mach_vm_address_t unmap_addr = (mach_vm_address_t)addr;',
+              '#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n   vm_address_t unmap_addr = (vm_address_t)addr;\n#else\n   mach_vm_address_t unmap_addr = (mach_vm_address_t)addr;\n#endif',
+              1,
+          )
+
+          s = s.replace(
+              '      kern_return_t ret = mach_vm_map(\n         mach_task_self(), &unmap_addr, bo->size_B, 0,\n         VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, MEMORY_OBJECT_NULL, 0, false,\n         VM_PROT_NONE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_DEFAULT);',
+              '#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n      kern_return_t ret = vm_map(\n         mach_task_self(), &unmap_addr, (vm_size_t)bo->size_B, 0,\n         VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, MEMORY_OBJECT_NULL, 0, false,\n         VM_PROT_NONE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_DEFAULT);\n#else\n      kern_return_t ret = mach_vm_map(\n         mach_task_self(), &unmap_addr, bo->size_B, 0,\n         VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, MEMORY_OBJECT_NULL, 0, false,\n         VM_PROT_NONE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_DEFAULT);\n#endif',
+              1,
+          )
+
+          s = s.replace(
+              '      mach_vm_deallocate(mach_task_self(), unmap_addr, bo->size_B);',
+              '#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n      vm_deallocate(mach_task_self(), unmap_addr, (vm_size_t)bo->size_B);\n#else\n      mach_vm_deallocate(mach_task_self(), unmap_addr, bo->size_B);\n#endif',
+              1,
+          )
+
           p.write_text(s)
           PY
+
       - name: Configure iOS engine
+        shell: bash
         run: |
           set -euxo pipefail
           IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           LLVM="$(brew --prefix llvm)"
-          echo 'set(ALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO_EXITCODE 0 CACHE STRING "iOS cross compile result" FORCE)' > "$RUNNER_TEMP/ios-cache.cmake"
-          cmake -S "$SHADPS4_ENGINE_ROOT" -B "$RUNNER_TEMP/build" -G Ninja -C "$RUNNER_TEMP/ios-cache.cmake" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=23 -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64 -DCMAKE_OSX_SYSROOT="$IOS_SDK" -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DKK_LLVM_CONFIG="$LLVM/bin/llvm-config" -DLLVM_DIR="$LLVM/lib/cmake/llvm" -DENABLE_TESTS=OFF -DENABLE_UPDATER=OFF -DENABLE_DISCORD_RPC=OFF
-      - name: Build iOS engine fast
+          printf '%s\n' 'set(ALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO_EXITCODE 0 CACHE STRING "iOS cross compile result" FORCE)' > "$RUNNER_TEMP/ios-cache.cmake"
+          cmake -S "$SHADPS4_ENGINE_ROOT" -B "$RUNNER_TEMP/build" -G Ninja -C "$RUNNER_TEMP/ios-cache.cmake" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_STANDARD=23 \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_SYSTEM_PROCESSOR=arm64 \
+            -DCMAKE_OSX_SYSROOT="$IOS_SDK" \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DKK_LLVM_CONFIG="$LLVM/bin/llvm-config" \
+            -DLLVM_DIR="$LLVM/lib/cmake/llvm" \
+            -DENABLE_TESTS=OFF \
+            -DENABLE_UPDATER=OFF \
+            -DENABLE_DISCORD_RPC=OFF
+
+      - name: Build iOS engine
         shell: bash
         run: |
           set -euxo pipefail
-          JOBS="$(sysctl -n hw.logicalcpu)"
-          echo "Using $JOBS parallel jobs"
-          cmake --build "$RUNNER_TEMP/build" --parallel "$JOBS"
-          ccache --show-stats || true
+          cmake --build "$RUNNER_TEMP/build" --parallel "$(sysctl -n hw.logicalcpu)"
           echo "SHADPS4_BUILD_DIR=$RUNNER_TEMP/build" >> "$GITHUB_ENV"
+
       - name: Collect engine libraries
+        shell: bash
         run: |
           set -euxo pipefail
           LIBDIR="$RUNNER_TEMP/shadps4-ios-libs"
           mkdir -p "$LIBDIR"
-          while IFS= read -r lib; do cp -f "$lib" "$LIBDIR/$(basename "$lib")"; done < <(find "$SHADPS4_BUILD_DIR" -type f -name '*.a' -print)
-          COUNT="$(find "$LIBDIR" -type f -name '*.a' | wc -l | tr -d ' ')"
-          test "$COUNT" -gt 0
-          LINK_FLAGS=""; for lib in "$LIBDIR"/*.a; do LINK_FLAGS="$LINK_FLAGS $lib"; done
-          echo "Collected $COUNT engine libraries"
+          find "$SHADPS4_BUILD_DIR" -type f -name '*.a' -exec cp -f {} "$LIBDIR/" \;
+          test "$(find "$LIBDIR" -type f -name '*.a' | wc -l | tr -d ' ')" -gt 0
+          LINK_FLAGS=""
+          for lib in "$LIBDIR"/*.a; do LINK_FLAGS="$LINK_FLAGS $lib"; done
           echo "SHADPS4_LIBRARY_DIR=$LIBDIR" >> "$GITHUB_ENV"
           echo "SHADPS4_LINK_FLAGS=$LINK_FLAGS" >> "$GITHUB_ENV"
-      - name: Build MaxPS4 app with engine
+
+      - name: Build MaxPS4 app
+        shell: bash
         run: |
           set -euxo pipefail
           cd "$GITHUB_WORKSPACE/MaxPS4-iOS"
@@ -158,14 +143,18 @@ jobs:
           APP="$DERIVED/Build/Products/Release-iphoneos/MaxPS4.app"
           test -d "$APP"
           echo "MAXPS4_APP=$APP" >> "$GITHUB_ENV"
+
       - name: Create unsigned IPA
+        shell: bash
         run: |
           set -euxo pipefail
-          PACKAGE="$RUNNER_TEMP/maxps4-package"; mkdir -p "$PACKAGE/Payload"
+          PACKAGE="$RUNNER_TEMP/maxps4-package"
+          mkdir -p "$PACKAGE/Payload"
           cp -R "$MAXPS4_APP" "$PACKAGE/Payload/MaxPS4.app"
           cd "$PACKAGE"
           /usr/bin/zip -qry "$RUNNER_TEMP/MaxPS4-unsigned.ipa" Payload
           test -s "$RUNNER_TEMP/MaxPS4-unsigned.ipa"
+
       - name: Upload MaxPS4 IPA
         uses: actions/upload-artifact@v4
         with:
