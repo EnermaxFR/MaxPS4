@@ -128,11 +128,9 @@ jobs:
 
           python3 - "$ENGINE_ROOT/externals/cpp-httplib/httplib.h" <<'PY'
           import pathlib,sys
-          p=pathlib.Path(sys.argv[1]); s=p.read_text()
-          anchor='#define CPPHTTPLIB_HTTPLIB_H'
+          p=pathlib.Path(sys.argv[1]); s=p.read_text(); anchor='#define CPPHTTPLIB_HTTPLIB_H'
           if anchor not in s: raise SystemExit('cpp-httplib header anchor missing')
-          guard='#define CPPHTTPLIB_HTTPLIB_H\n\n#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n#define CPPHTTPLIB_DISABLE_MACOSX_AUTOMATIC_ROOT_CERTIFICATES\n#endif'
-          p.write_text(s.replace(anchor,guard,1))
+          p.write_text(s.replace(anchor,anchor+'\n\n#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n#define CPPHTTPLIB_DISABLE_MACOSX_AUTOMATIC_ROOT_CERTIFICATES\n#endif',1))
           PY
 
           python3 - "$ENGINE_ROOT/src/emulator.cpp" <<'PY'
@@ -159,21 +157,32 @@ jobs:
 
           python3 - "$ENGINE_ROOT/src/core/ipc/ipc.cpp" "$ENGINE_ROOT/src/core/libraries/libs.cpp" <<'PY'
           import pathlib,sys
-          ipc=pathlib.Path(sys.argv[1]); s=ipc.read_text()
-          inc='#include "src/core/libraries/usbd/usbd.h"'
+          ipc=pathlib.Path(sys.argv[1]); s=ipc.read_text(); inc='#include "src/core/libraries/usbd/usbd.h"'
           if inc not in s: raise SystemExit('IPC USBD include anchor missing')
           s=s.replace(inc,'#if !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n'+inc+'\n#endif',1)
           start='        } else if (cmd == "USB_LOAD_FIGURE") {'; end='        } else if (cmd == "RELOAD_INPUTS") {'
           a=s.find(start); b=s.find(end,a)
           if a<0 or b<0: raise SystemExit('IPC USB command block anchors missing')
-          s=s[:a]+'#if !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n'+s[a:b]+'#endif\n'+s[b:]
-          ipc.write_text(s)
+          s=s[:a]+'#if !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n'+s[a:b]+'#endif\n'+s[b:]; ipc.write_text(s)
           libs=pathlib.Path(sys.argv[2]); s=libs.read_text(); inc='#include "core/libraries/usbd/usbd.h"'
           if inc not in s: raise SystemExit('libs USBD include anchor missing')
           s=s.replace(inc,'#if !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n'+inc+'\n#endif',1)
           reg='            {"libSceUsbd.sprx", Libraries::Usbd::RegisterLib},'
           if reg not in s: raise SystemExit('libs USBD registration anchor missing')
           libs.write_text(s.replace(reg,'#if !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n'+reg+'\n#endif',1))
+          PY
+
+          python3 - "$ENGINE_ROOT/src/core/libraries/network/net_util.cpp" <<'PY'
+          import pathlib,sys
+          p=pathlib.Path(sys.argv[1]); s=p.read_text()
+          old='#if defined(__APPLE__)\n#include <net/if_dl.h>\n#include <net/route.h>\n#endif'
+          new='#if defined(__APPLE__)\n#include <net/if_dl.h>\n#if !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n#include <net/route.h>\n#endif\n#endif'
+          if old not in s: raise SystemExit('Apple route include anchor missing')
+          s=s.replace(old,new,1)
+          old='#elif defined(__APPLE__)\n    // adapted from'
+          new='#elif defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n    return false;\n#elif defined(__APPLE__)\n    // adapted from'
+          if old not in s: raise SystemExit('Apple default gateway anchor missing')
+          p.write_text(s.replace(old,new,1))
           PY
 
           HOST_FONT_TOOL="$RUNNER_TEMP/Dear_ImGui_FontEmbed"
@@ -205,9 +214,7 @@ jobs:
 
           python3 - "$ENGINE_ROOT/src/core/libraries/kernel/threads/exception.cpp" <<'PY'
           import pathlib,sys
-          p=pathlib.Path(sys.argv[1]); s=p.read_text()
-          old='#else\n#error "ucontext_t conversion not implemented for current architecture."\n#endif'
-          parts=s.split(old)
+          p=pathlib.Path(sys.argv[1]); s=p.read_text(); old='#else\n#error "ucontext_t conversion not implemented for current architecture."\n#endif'; parts=s.split(old)
           if len(parts) != 3: raise SystemExit(f'Unexpected exception context fallback count: {len(parts)-1}')
           arm64='#elif defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64))'
           constructor=arm64+'\n    uc_mcontext = {};\n    uc_mcontext.mc_addr = reinterpret_cast<uint64_t>(inf->si_addr);\n#else\n#error "ucontext_t conversion not implemented for current architecture."\n#endif'
