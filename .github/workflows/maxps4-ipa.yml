@@ -6,6 +6,10 @@ on:
     branches: [ maxps4-shadps4-direct ]
     paths:
       - '.github/workflows/maxps4-ipa.yml'
+      - 'MaxPS4-iOS/Sources/**'
+      - 'MaxPS4-iOS/Core/**'
+      - 'MaxPS4-iOS/project.yml'
+      - 'MaxPS4-iOS/MaxPS4.entitlements'
 
 jobs:
   build-maxps4-ipa:
@@ -25,13 +29,13 @@ jobs:
           echo "PYTHON=$RUNNER_TEMP/maxps4-python/bin/python" >> "$GITHUB_ENV"
           echo "MESON=$RUNNER_TEMP/maxps4-python/bin/meson" >> "$GITHUB_ENV"
           "$RUNNER_TEMP/maxps4-python/bin/python" -c 'import packaging, mako, yaml; print("Mesa Python dependencies OK")'
-          "$RUNNER_TEMP/maxps4-python/bin/meson" --version
       - name: Checkout shadPS4
         run: |
           set -euxo pipefail
           git clone --filter=blob:none https://github.com/shadps4-emu/shadPS4.git "$RUNNER_TEMP/shadps4"
           git -C "$RUNNER_TEMP/shadps4" checkout b3452cf6a9bd0969771fcfbf919c359368473d1b
           git -C "$RUNNER_TEMP/shadps4" submodule update --init --recursive --depth 1
+          test -f "$RUNNER_TEMP/shadps4/src/emulator.h"
           echo "SHADPS4_ENGINE_ROOT=$RUNNER_TEMP/shadps4" >> "$GITHUB_ENV"
       - name: Apply iOS Mach VM compatibility
         run: |
@@ -46,12 +50,55 @@ jobs:
           s=s.replace('mach_vm_address_t ', 'vm_address_t ').replace('mach_vm_size_t ', 'vm_size_t ').replace('mach_vm_offset_t ', 'vm_offset_t ')
           p.write_text(s)
           PY
-      - name: Configure fast iOS build
+      - name: Configure iOS engine
         run: |
           set -euxo pipefail
           IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           LLVM="$(brew --prefix llvm)"
           echo 'set(ALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO_EXITCODE 0 CACHE STRING "iOS cross compile result" FORCE)' > "$RUNNER_TEMP/ios-cache.cmake"
-          cmake -S "$SHADPS4_ENGINE_ROOT" -B "$RUNNER_TEMP/build" -G Ninja -C "$RUNNER_TEMP/ios-cache.cmake" -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64 -DCMAKE_OSX_SYSROOT="$IOS_SDK" -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DKK_LLVM_CONFIG="$LLVM/bin/llvm-config" -DLLVM_DIR="$LLVM/lib/cmake/llvm" -DENABLE_TESTS=OFF -DENABLE_UPDATER=OFF -DENABLE_DISCORD_RPC=OFF
-      - name: Build engine fast
-        run: cmake --build "$RUNNER_TEMP/build" --parallel 4
+          cmake -S "$SHADPS4_ENGINE_ROOT" -B "$RUNNER_TEMP/build" -G Ninja -C "$RUNNER_TEMP/ios-cache.cmake" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=23 -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64 -DCMAKE_OSX_SYSROOT="$IOS_SDK" -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DKK_LLVM_CONFIG="$LLVM/bin/llvm-config" -DLLVM_DIR="$LLVM/lib/cmake/llvm" -DENABLE_TESTS=OFF -DENABLE_UPDATER=OFF -DENABLE_DISCORD_RPC=OFF
+      - name: Build iOS engine
+        run: |
+          set -euxo pipefail
+          cmake --build "$RUNNER_TEMP/build" --parallel 4
+          echo "SHADPS4_BUILD_DIR=$RUNNER_TEMP/build" >> "$GITHUB_ENV"
+      - name: Collect engine libraries
+        run: |
+          set -euxo pipefail
+          LIBDIR="$RUNNER_TEMP/shadps4-ios-libs"
+          mkdir -p "$LIBDIR"
+          while IFS= read -r lib; do
+            cp -f "$lib" "$LIBDIR/$(basename "$lib")"
+          done < <(find "$SHADPS4_BUILD_DIR" -type f -name '*.a' -print)
+          COUNT="$(find "$LIBDIR" -type f -name '*.a' | wc -l | tr -d ' ')"
+          test "$COUNT" -gt 0
+          LINK_FLAGS=""
+          for lib in "$LIBDIR"/*.a; do LINK_FLAGS="$LINK_FLAGS $lib"; done
+          echo "Collected $COUNT engine libraries"
+          echo "SHADPS4_LIBRARY_DIR=$LIBDIR" >> "$GITHUB_ENV"
+          echo "SHADPS4_LINK_FLAGS=$LINK_FLAGS" >> "$GITHUB_ENV"
+      - name: Build MaxPS4 app with engine
+        run: |
+          set -euxo pipefail
+          cd "$GITHUB_WORKSPACE/MaxPS4-iOS"
+          xcodegen generate
+          DERIVED="$RUNNER_TEMP/maxps4-derived"
+          xcodebuild -project MaxPS4.xcodeproj -scheme MaxPS4 -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$DERIVED" SHADPS4_ENGINE_ROOT="$SHADPS4_ENGINE_ROOT" SHADPS4_LIBRARY_DIR="$SHADPS4_LIBRARY_DIR" SHADPS4_LINK_FLAGS="$SHADPS4_LINK_FLAGS" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+          APP="$DERIVED/Build/Products/Release-iphoneos/MaxPS4.app"
+          test -d "$APP"
+          echo "MAXPS4_APP=$APP" >> "$GITHUB_ENV"
+      - name: Create unsigned IPA
+        run: |
+          set -euxo pipefail
+          PACKAGE="$RUNNER_TEMP/maxps4-package"
+          mkdir -p "$PACKAGE/Payload"
+          cp -R "$MAXPS4_APP" "$PACKAGE/Payload/MaxPS4.app"
+          cd "$PACKAGE"
+          /usr/bin/zip -qry "$RUNNER_TEMP/MaxPS4-unsigned.ipa" Payload
+          test -s "$RUNNER_TEMP/MaxPS4-unsigned.ipa"
+      - name: Upload MaxPS4 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-unsigned-IPA
+          path: ${{ runner.temp }}/MaxPS4-unsigned.ipa
+          if-no-files-found: error
