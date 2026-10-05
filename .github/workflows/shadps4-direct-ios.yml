@@ -49,17 +49,8 @@ jobs:
           git -C "$ENGINE_ROOT" checkout b3452cf6a9bd0969771fcfbf919c359368473d1b
           git -C "$ENGINE_ROOT" submodule update --init --recursive
           echo "ENGINE_ROOT=$ENGINE_ROOT" >> "$GITHUB_ENV"
-
-          # Build the host protoc from the exact Protobuf sources embedded by
-          # this shadPS4 revision. This guarantees generated C++ code matches
-          # the headers/runtime used later by the iOS target build.
           PROTOBUF_HOST_BUILD="$RUNNER_TEMP/protobuf-host-build"
-          cmake -S "$ENGINE_ROOT/externals/protobuf" -B "$PROTOBUF_HOST_BUILD" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -Dprotobuf_BUILD_TESTS=OFF \
-            -Dprotobuf_BUILD_EXAMPLES=OFF \
-            -Dprotobuf_BUILD_CONFORMANCE=OFF \
-            -Dprotobuf_BUILD_PROTOC_BINARIES=ON
+          cmake -S "$ENGINE_ROOT/externals/protobuf" -B "$PROTOBUF_HOST_BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release -Dprotobuf_BUILD_TESTS=OFF -Dprotobuf_BUILD_EXAMPLES=OFF -Dprotobuf_BUILD_CONFORMANCE=OFF -Dprotobuf_BUILD_PROTOC_BINARIES=ON
           cmake --build "$PROTOBUF_HOST_BUILD" --target protoc --parallel 2
           HOST_PROTOC="$PROTOBUF_HOST_BUILD/protoc"
           test -x "$HOST_PROTOC"
@@ -159,7 +150,7 @@ jobs:
           root,ext,protoc=(pathlib.Path(sys.argv[1]),pathlib.Path(sys.argv[2]),sys.argv[3])
           s=root.read_text(); pos=s.find('add_executable(shadps4')
           if pos<0: raise SystemExit('executable anchor missing')
-          s=s[:pos]+'\nif(CMAKE_SYSTEM_NAME STREQUAL "iOS")\n list(FILTER USBD_LIB EXCLUDE REGEX "src/core/libraries/usbd/.*")\nendif()\n'+s[pos:]
+          s=s[:pos]+'\nif(CMAKE_SYSTEM_NAME STREQUAL "iOS")\n set(USBD_LIB "")\nendif()\n'+s[pos:]
           if 'COMMAND protobuf::protoc' not in s: raise SystemExit('protoc anchor missing')
           root.write_text(s.replace('COMMAND protobuf::protoc',f'COMMAND "{protoc}"',1))
           e=ext.read_text(); old='# libusb\nif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'
