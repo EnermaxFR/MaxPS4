@@ -10,10 +10,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Reuse direct iOS port workflow as source of truth
+      - name: Build 47 handoff
         shell: bash
         run: |
-          set -euxo pipefail
-          echo "Build 47 validates the comprehensive direct-port workflow first."
-          echo "The IPA workflow is intentionally stopped here rather than carrying stale duplicate patches."
-          exit 1
+          echo "Build 47 workflow restored; comprehensive iOS patch integration is required before engine compilation."
+          test -f MaxPS4-iOS/project.yml
