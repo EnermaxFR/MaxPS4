@@ -6,8 +6,10 @@ struct MaxPS4App: App {
 
     var body: some Scene {
         WindowGroup {
-            MaxPS4HomeView()
-                .environmentObject(emulator)
+            NavigationStack {
+                MaxPS4HomeView()
+            }
+            .environmentObject(emulator)
         }
     }
 }
