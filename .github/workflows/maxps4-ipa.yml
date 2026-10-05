@@ -37,15 +37,38 @@ jobs:
           echo "CCACHE_COMPRESS=true" >> "$GITHUB_ENV"
           echo "CCACHE_MAXSIZE=5G" >> "$GITHUB_ENV"
 
-      - name: Checkout shadPS4
+      - name: Checkout and verify shadPS4 submodules
         shell: bash
         run: |
           set -euxo pipefail
-          git clone --filter=blob:none https://github.com/shadps4-emu/shadPS4.git "$RUNNER_TEMP/shadps4"
-          git -C "$RUNNER_TEMP/shadps4" checkout b3452cf6a9bd0969771fcfbf919c359368473d1b
-          git -C "$RUNNER_TEMP/shadps4" submodule update --init --recursive --depth 1
-          test -f "$RUNNER_TEMP/shadps4/src/emulator.h"
-          echo "SHADPS4_ENGINE_ROOT=$RUNNER_TEMP/shadps4" >> "$GITHUB_ENV"
+          ROOT="$RUNNER_TEMP/shadps4"
+          git clone --filter=blob:none https://github.com/shadps4-emu/shadPS4.git "$ROOT"
+          git -C "$ROOT" checkout b3452cf6a9bd0969771fcfbf919c359368473d1b
+          git -C "$ROOT" submodule sync --recursive
+          git -C "$ROOT" -c protocol.version=2 submodule update --init --recursive --jobs 8
+
+          # A recursive update can leave nested modules absent when an ancestor's
+          # metadata was not initialized during a shallow/filtered checkout.
+          # Re-run sync/update from every initialized submodule to repair those.
+          git -C "$ROOT" submodule foreach --recursive 'git submodule sync --recursive || true; git submodule update --init --recursive --jobs 8 || true'
+
+          # Validate all registered submodules before spending time in CMake.
+          BAD="$RUNNER_TEMP/bad-submodules.txt"
+          git -C "$ROOT" submodule status --recursive | tee "$RUNNER_TEMP/submodules.txt"
+          git -C "$ROOT" submodule status --recursive | grep -E '^[+-U]' > "$BAD" || true
+          if test -s "$BAD"; then
+            echo 'Broken/uninitialized submodules:'
+            cat "$BAD"
+            exit 1
+          fi
+
+          # Explicit critical dependency checks (Zydis -> Zycore was Build 56 blocker).
+          test -f "$ROOT/src/emulator.h"
+          test -f "$ROOT/externals/zydis/CMakeLists.txt"
+          test -f "$ROOT/externals/zydis/dependencies/zycore/CMakeLists.txt"
+          test -f "$ROOT/externals/mesa-kosmickrisp/externals/mesa/meson.build"
+          test -f "$ROOT/externals/protobuf/CMakeLists.txt"
+          echo "SHADPS4_ENGINE_ROOT=$ROOT" >> "$GITHUB_ENV"
 
       - name: Apply grouped iOS compatibility
         shell: bash
@@ -70,8 +93,6 @@ jobs:
           s = s.replace('(mach_vm_address_t)addr', '(vm_address_t)addr')
           s = s.replace('mach_vm_remap(mach_task_self(), &dst_addr, bo->size_B, 0,',
                         'vm_remap(mach_task_self(), &dst_addr, (vm_size_t)bo->size_B, 0,')
-          s = s.replace('flags, mach_task_self(), src_addr, false,',
-                        'flags, mach_task_self(), src_addr, false,')
           old_map = '''      /* Replace with a reserved mapping using mach_vm_map */\n      kern_return_t ret = mach_vm_map(\n         mach_task_self(), &unmap_addr, bo->size_B, 0,\n         VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, MEMORY_OBJECT_NULL, 0, false,\n         VM_PROT_NONE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_DEFAULT);\n      if (ret != KERN_SUCCESS)\n         return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED,\n                          "mach_vm_map failed: %d", ret);'''
           new_map = '''      /* iOS does not expose mach_vm_map; reserve the same address with vm_allocate. */\n      kern_return_t ret = vm_allocate(mach_task_self(), &unmap_addr,\n                                      (vm_size_t)bo->size_B, VM_FLAGS_FIXED);\n      if (ret != KERN_SUCCESS)\n         return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED,\n                          "vm_allocate failed: %d", ret);'''
           if old_map not in s:
