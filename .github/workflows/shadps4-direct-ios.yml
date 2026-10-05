@@ -131,7 +131,7 @@ jobs:
           p=pathlib.Path(sys.argv[1]); s=p.read_text()
           anchor='#define CPPHTTPLIB_HTTPLIB_H'
           if anchor not in s: raise SystemExit('cpp-httplib header anchor missing')
-          guard='#define CPPHTTPLIB_HTTPLIB_H\n\n#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n#ifdef CPPHTTPLIB_USE_CERTS_FROM_MACOSX_KEYCHAIN\n#undef CPPHTTPLIB_USE_CERTS_FROM_MACOSX_KEYCHAIN\n#endif\n#endif'
+          guard='#define CPPHTTPLIB_HTTPLIB_H\n\n#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n#define CPPHTTPLIB_DISABLE_MACOSX_AUTOMATIC_ROOT_CERTIFICATES\n#endif'
           p.write_text(s.replace(anchor,guard,1))
           PY
 
@@ -210,8 +210,8 @@ jobs:
           parts=s.split(old)
           if len(parts) != 3: raise SystemExit(f'Unexpected exception context fallback count: {len(parts)-1}')
           arm64='#elif defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64))'
-          constructor=arm64+'\n    // ARM64 host registers are not PS4 x86-64 guest registers. Keep a safe guest context\n    // placeholder until the ARM64 JIT bridge provides the translated guest register state.\n    uc_mcontext = {};\n    uc_mcontext.mc_addr = reinterpret_cast<uint64_t>(inf->si_addr);\n#else\n#error "ucontext_t conversion not implemented for current architecture."\n#endif'
-          sync=arm64+'\n    // Guest x86-64 register state cannot be copied into the native ARM64 ucontext directly.\n    // The ARM64 JIT bridge will synchronize translated guest state here later.\n    return;\n#else\n#error "ucontext_t conversion not implemented for current architecture."\n#endif'
+          constructor=arm64+'\n    uc_mcontext = {};\n    uc_mcontext.mc_addr = reinterpret_cast<uint64_t>(inf->si_addr);\n#else\n#error "ucontext_t conversion not implemented for current architecture."\n#endif'
+          sync=arm64+'\n    return;\n#else\n#error "ucontext_t conversion not implemented for current architecture."\n#endif'
           p.write_text(parts[0]+constructor+parts[1]+sync+parts[2])
           PY
 
