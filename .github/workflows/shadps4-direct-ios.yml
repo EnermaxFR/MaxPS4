@@ -148,9 +148,15 @@ jobs:
           python3 - "$ROOT" "$EXT" "$HOST_PROTOC" <<'PY'
           import pathlib,sys
           root,ext,protoc=(pathlib.Path(sys.argv[1]),pathlib.Path(sys.argv[2]),sys.argv[3])
-          s=root.read_text(); pos=s.find('add_executable(shadps4')
-          if pos<0: raise SystemExit('executable anchor missing')
-          s=s[:pos]+'\nif(CMAKE_SYSTEM_NAME STREQUAL "iOS")\n set(USBD_LIB "")\nendif()\n'+s[pos:]
+          s=root.read_text()
+          marker='set(USBD_LIB src/core/libraries/usbd/usbd.cpp'
+          start=s.find(marker)
+          if start<0: raise SystemExit('USBD source-list anchor missing')
+          end=s.find('\n)', start)
+          if end<0: raise SystemExit('USBD source-list end missing')
+          end += 2
+          block=s[start:end]
+          s=s[:start]+'if(CMAKE_SYSTEM_NAME STREQUAL "iOS")\n    set(USBD_LIB "")\nelse()\n'+block+'\nendif()'+s[end:]
           if 'COMMAND protobuf::protoc' not in s: raise SystemExit('protoc anchor missing')
           root.write_text(s.replace('COMMAND protobuf::protoc',f'COMMAND "{protoc}"',1))
           e=ext.read_text(); old='# libusb\nif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'
