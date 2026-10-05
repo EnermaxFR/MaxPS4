@@ -1,0 +1,73 @@
+name: Build MaxPS4 IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ maxps4-shadps4-direct ]
+    paths:
+      - '.github/workflows/maxps4-ipa.yml'
+      - 'MaxPS4-iOS/Sources/**'
+      - 'MaxPS4-iOS/project.yml'
+      - 'MaxPS4-iOS/MaxPS4.entitlements'
+
+jobs:
+  build-maxps4-ipa:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout MaxPS4
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        shell: bash
+        run: |
+          set -euxo pipefail
+          brew install xcodegen || true
+          xcodegen --version
+
+      - name: Generate Xcode project
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd "$GITHUB_WORKSPACE/MaxPS4-iOS"
+          xcodegen generate
+          test -d MaxPS4.xcodeproj
+
+      - name: Build MaxPS4 for iPhone
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd "$GITHUB_WORKSPACE/MaxPS4-iOS"
+          BUILD_DIR="$RUNNER_TEMP/maxps4-derived"
+          xcodebuild \
+            -project MaxPS4.xcodeproj \
+            -scheme MaxPS4 \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$BUILD_DIR" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+          APP="$BUILD_DIR/Build/Products/Release-iphoneos/MaxPS4.app"
+          test -d "$APP"
+          echo "MAXPS4_APP=$APP" >> "$GITHUB_ENV"
+
+      - name: Create unsigned IPA
+        shell: bash
+        run: |
+          set -euxo pipefail
+          PACKAGE="$RUNNER_TEMP/maxps4-package"
+          mkdir -p "$PACKAGE/Payload"
+          cp -R "$MAXPS4_APP" "$PACKAGE/Payload/MaxPS4.app"
+          cd "$PACKAGE"
+          /usr/bin/zip -qry "$RUNNER_TEMP/MaxPS4-unsigned.ipa" Payload
+          test -s "$RUNNER_TEMP/MaxPS4-unsigned.ipa"
+          /usr/bin/unzip -l "$RUNNER_TEMP/MaxPS4-unsigned.ipa" | head -40
+
+      - name: Upload MaxPS4 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-unsigned-IPA
+          path: ${{ runner.temp }}/MaxPS4-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
