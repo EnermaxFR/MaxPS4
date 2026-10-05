@@ -157,6 +157,10 @@ jobs:
           end += 2
           block=s[start:end]
           s=s[:start]+'if(CMAKE_SYSTEM_NAME STREQUAL "iOS")\n    set(USBD_LIB "")\nelse()\n'+block+'\nendif()'+s[end:]
+          apple='if (APPLE)\n    list(APPEND EMULATOR src/sdl_window_apple.mm)\nendif()'
+          ios_safe='if (APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")\n    list(APPEND EMULATOR src/sdl_window_apple.mm)\nendif()'
+          if apple not in s: raise SystemExit('Apple SDL window anchor missing')
+          s=s.replace(apple,ios_safe,1)
           if 'COMMAND protobuf::protoc' not in s: raise SystemExit('protoc anchor missing')
           root.write_text(s.replace('COMMAND protobuf::protoc',f'COMMAND "{protoc}"',1))
           e=ext.read_text(); old='# libusb\nif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'
