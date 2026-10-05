@@ -16,10 +16,17 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/maxps4-ccache
+          key: maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-v1-${{ github.run_id }}
+          restore-keys: |
+            maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-v1-
       - name: Install toolchain
         run: |
           set -euxo pipefail
-          brew install cmake ninja llvm meson python glslang xcodegen protobuf
+          brew install cmake ninja llvm meson python glslang xcodegen protobuf ccache
           PYTHON="$(brew --prefix python)/bin/python3"
           "$PYTHON" -m venv "$RUNNER_TEMP/maxps4-python"
           "$RUNNER_TEMP/maxps4-python/bin/python" -m pip install --upgrade pip
@@ -28,6 +35,9 @@ jobs:
           echo "$RUNNER_TEMP/maxps4-python/bin" >> "$GITHUB_PATH"
           echo "PYTHON=$RUNNER_TEMP/maxps4-python/bin/python" >> "$GITHUB_ENV"
           echo "MESON=$RUNNER_TEMP/maxps4-python/bin/meson" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=$HOME/.cache/maxps4-ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_COMPRESS=true" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=5G" >> "$GITHUB_ENV"
           "$RUNNER_TEMP/maxps4-python/bin/python" -c 'import packaging, mako, yaml; print("Mesa Python dependencies OK")'
       - name: Checkout shadPS4
         run: |
@@ -56,24 +66,25 @@ jobs:
           IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           LLVM="$(brew --prefix llvm)"
           echo 'set(ALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO_EXITCODE 0 CACHE STRING "iOS cross compile result" FORCE)' > "$RUNNER_TEMP/ios-cache.cmake"
-          cmake -S "$SHADPS4_ENGINE_ROOT" -B "$RUNNER_TEMP/build" -G Ninja -C "$RUNNER_TEMP/ios-cache.cmake" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=23 -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64 -DCMAKE_OSX_SYSROOT="$IOS_SDK" -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DKK_LLVM_CONFIG="$LLVM/bin/llvm-config" -DLLVM_DIR="$LLVM/lib/cmake/llvm" -DENABLE_TESTS=OFF -DENABLE_UPDATER=OFF -DENABLE_DISCORD_RPC=OFF
-      - name: Build iOS engine
+          cmake -S "$SHADPS4_ENGINE_ROOT" -B "$RUNNER_TEMP/build" -G Ninja -C "$RUNNER_TEMP/ios-cache.cmake" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=23 -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64 -DCMAKE_OSX_SYSROOT="$IOS_SDK" -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DKK_LLVM_CONFIG="$LLVM/bin/llvm-config" -DLLVM_DIR="$LLVM/lib/cmake/llvm" -DENABLE_TESTS=OFF -DENABLE_UPDATER=OFF -DENABLE_DISCORD_RPC=OFF
+      - name: Build iOS engine fast
+        shell: bash
         run: |
           set -euxo pipefail
-          cmake --build "$RUNNER_TEMP/build" --parallel 4
+          JOBS="$(sysctl -n hw.logicalcpu)"
+          echo "Using $JOBS parallel jobs"
+          cmake --build "$RUNNER_TEMP/build" --parallel "$JOBS"
+          ccache --show-stats || true
           echo "SHADPS4_BUILD_DIR=$RUNNER_TEMP/build" >> "$GITHUB_ENV"
       - name: Collect engine libraries
         run: |
           set -euxo pipefail
           LIBDIR="$RUNNER_TEMP/shadps4-ios-libs"
           mkdir -p "$LIBDIR"
-          while IFS= read -r lib; do
-            cp -f "$lib" "$LIBDIR/$(basename "$lib")"
-          done < <(find "$SHADPS4_BUILD_DIR" -type f -name '*.a' -print)
+          while IFS= read -r lib; do cp -f "$lib" "$LIBDIR/$(basename "$lib")"; done < <(find "$SHADPS4_BUILD_DIR" -type f -name '*.a' -print)
           COUNT="$(find "$LIBDIR" -type f -name '*.a' | wc -l | tr -d ' ')"
           test "$COUNT" -gt 0
-          LINK_FLAGS=""
-          for lib in "$LIBDIR"/*.a; do LINK_FLAGS="$LINK_FLAGS $lib"; done
+          LINK_FLAGS=""; for lib in "$LIBDIR"/*.a; do LINK_FLAGS="$LINK_FLAGS $lib"; done
           echo "Collected $COUNT engine libraries"
           echo "SHADPS4_LIBRARY_DIR=$LIBDIR" >> "$GITHUB_ENV"
           echo "SHADPS4_LINK_FLAGS=$LINK_FLAGS" >> "$GITHUB_ENV"
@@ -90,8 +101,7 @@ jobs:
       - name: Create unsigned IPA
         run: |
           set -euxo pipefail
-          PACKAGE="$RUNNER_TEMP/maxps4-package"
-          mkdir -p "$PACKAGE/Payload"
+          PACKAGE="$RUNNER_TEMP/maxps4-package"; mkdir -p "$PACKAGE/Payload"
           cp -R "$MAXPS4_APP" "$PACKAGE/Payload/MaxPS4.app"
           cd "$PACKAGE"
           /usr/bin/zip -qry "$RUNNER_TEMP/MaxPS4-unsigned.ipa" Payload
