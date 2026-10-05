@@ -19,7 +19,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/maxps4-ccache
-          key: maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-v7-${{ github.run_id }}
+          key: maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-v8-${{ github.run_id }}
           restore-keys: |
             maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-
 
@@ -27,7 +27,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          brew install cmake ninja llvm python glslang spirv-tools spirv-llvm-translator pkgconf xcodegen protobuf ccache
+          brew install cmake ninja llvm python glslang spirv-tools spirv-llvm-translator pkgconf xcodegen protobuf ccache libusb
           PYTHON="$(brew --prefix python)/bin/python3"
           "$PYTHON" -m venv "$RUNNER_TEMP/maxps4-python"
           "$RUNNER_TEMP/maxps4-python/bin/python" -m pip install --upgrade pip packaging mako pyyaml meson
@@ -127,9 +127,12 @@ jobs:
           p.write_text(pat.sub(lambda m:f"{m.group('i')}#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n{m.group('i')}{m.group('d')}-1;\n{m.group('i')}#else\n{m.group('i')}{m.group('d')}std::system({m.group('a')});\n{m.group('i')}#endif",s))
           PY
 
-          python3 - "$ROOT/externals/CMakeLists.txt" <<'PY'
+          LIBUSB_INC="$(brew --prefix libusb)/include/libusb-1.0"
+          python3 - "$ROOT/externals/CMakeLists.txt" "$LIBUSB_INC" <<'PY'
           import pathlib,sys
-          p=pathlib.Path(sys.argv[1]); s=p.read_text(); old='# libusb\nif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'; new='# libusb\nif (CMAKE_SYSTEM_NAME STREQUAL "iOS")\n    add_library(usb-1.0 INTERFACE)\n    add_library(libusb::usb ALIAS usb-1.0)\nelseif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'
+          p=pathlib.Path(sys.argv[1]); inc=sys.argv[2]; s=p.read_text()
+          old='# libusb\nif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'
+          new=f'# libusb\nif (CMAKE_SYSTEM_NAME STREQUAL "iOS")\n    add_library(usb-1.0 INTERFACE)\n    target_include_directories(usb-1.0 INTERFACE "{inc}")\n    add_library(libusb::usb ALIAS usb-1.0)\nelseif (NOT TARGET libusb::usb)\n    if (${{CMAKE_SYSTEM_NAME}} STREQUAL "FreeBSD")'
           if old not in s: raise SystemExit('libusb anchor not found')
           p.write_text(s.replace(old,new,1))
           PY
@@ -141,6 +144,53 @@ jobs:
           PY
           done
 
+          # ARM64/iOS compatibility: signal context, guest exception context and AeroLib x86 trampolines.
+          python3 - "$ROOT/src/common/signal_context.cpp" "$ROOT/src/core/libraries/kernel/threads/exception.cpp" "$ROOT/src/core/aerolib/stubs.cpp" <<'PY'
+          import pathlib,sys
+          sig,exc,stub=map(pathlib.Path,sys.argv[1:])
+          s=sig.read_text()
+          anchor='#elif defined(__FreeBSD__) && defined(ARCH_X86_64)\n    return ((ucontext_t*)ctx)->uc_mcontext.mc_err & 0x10;'
+          if anchor not in s: raise SystemExit('signal execute anchor not found')
+          s=s.replace(anchor,'#elif defined(__APPLE__) && defined(ARCH_ARM64)\n    return false;\n'+anchor,1)
+          sig.write_text(s)
+          s=exc.read_text(); old='#else\n#error "ucontext_t conversion not implemented for current architecture."\n#endif'
+          if s.count(old)!=2: raise SystemExit('exception ARM64 anchors changed')
+          s=s.replace(old,'#elif defined(ARCH_ARM64)\n    return;\n#else\n#error "ucontext_t conversion not implemented for current architecture."\n#endif')
+          exc.write_text(s)
+          s=stub.read_text()
+          if '#include "common/logging/log.h"' not in s: raise SystemExit('AeroLib include anchor not found')
+          s=s.replace('#include "common/logging/log.h"','#include "common/arch.h"\n#include "common/logging/log.h"',1)
+          start='u64 GetStub(const char* nid) {'; end='\n}\n\n} // namespace Core::AeroLib'
+          if start not in s or end not in s: raise SystemExit('AeroLib GetStub anchors changed')
+          pre,rest=s.split(start,1); body,tail=rest.split(end,1)
+          replacement='''u64 GetStub(const char* nid) {\n#if defined(ARCH_ARM64)\n    // Xbyak emits x86-64 trampolines only. Keep a harmless placeholder on iOS ARM64.\n    (void)nid;\n    return reinterpret_cast<u64>(&CommonStub);\n#else'''+body+'''\n#endif\n}\n\n} // namespace Core::AeroLib'''
+          stub.write_text(pre+replacement+tail)
+          PY
+
+          # iOS does not expose the macOS routing API or Cocoa desktop window API.
+          python3 - "$ROOT/src/core/libraries/network/net_util.cpp" "$ROOT/src/sdl_window_apple.mm" <<'PY'
+          import pathlib,sys
+          net,sdl=map(pathlib.Path,sys.argv[1:])
+          s=net.read_text()
+          s=s.replace('#include <net/route.h>','#if !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n#include <net/route.h>\n#endif',1)
+          marker='#elif defined(__APPLE__)\n    // adapted from'
+          if marker not in s: raise SystemExit('Apple route anchor not found')
+          s=s.replace(marker,'#elif defined(__APPLE__) && !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n    // adapted from',1)
+          net.write_text(s)
+          s=sdl.read_text()
+          sdl.write_text('''#include <TargetConditionals.h>\n#if TARGET_OS_IPHONE\n#include <SDL3/SDL_video.h>\n#include "sdl_window.h"\nnamespace Frontend {\nvoid SetWindowIcon(SDL_Window*, const std::vector<u8>&) {}\n} // namespace Frontend\n#else\n'''+s+'\n#endif\n')
+          PY
+
+          # cpp-httplib's macOS Keychain root enumeration uses a Security API unavailable on iOS.
+          python3 - "$ROOT/externals/cpp-httplib/httplib.h" <<'PY'
+          import pathlib,sys
+          p=pathlib.Path(sys.argv[1]); s=p.read_text()
+          old='#if defined(__APPLE__) && defined(__clang__) &&                                \\\n    !defined(CPPHTTPLIB_DISABLE_MACOSX_AUTOMATIC_ROOT_CERTIFICATES) &&'
+          new='#if defined(__APPLE__) && defined(__clang__) && !TARGET_OS_IPHONE &&           \\\n    !defined(CPPHTTPLIB_DISABLE_MACOSX_AUTOMATIC_ROOT_CERTIFICATES) &&'
+          if old not in s: raise SystemExit('httplib Keychain anchor not found')
+          p.write_text(s.replace(old,new,1))
+          PY
+
           HOST_FONT_TOOL="$RUNNER_TEMP/Dear_ImGui_FontEmbed"
           xcrun --sdk macosx clang++ "$ROOT/externals/imgui/misc/fonts/binary_to_compressed_c.cpp" -O2 -o "$HOST_FONT_TOOL"
           python3 - "$ROOT/src/imgui/renderer/CMakeLists.txt" "$HOST_FONT_TOOL" <<'PY'
@@ -150,14 +200,18 @@ jobs:
           p.write_text(s.replace(old,f'add_executable(Dear_ImGui_FontEmbed IMPORTED GLOBAL)\nset_target_properties(Dear_ImGui_FontEmbed PROPERTIES IMPORTED_LOCATION "{tool}")',1))
           PY
 
-          HOST_PROTOC="$(brew --prefix protobuf)/bin/protoc"
+          # Build protoc natively from the exact bundled protobuf revision so generated code matches the iOS runtime.
+          cmake -S "$ROOT/externals/protobuf" -B "$RUNNER_TEMP/host-protobuf" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_SYSROOT="$MAC_SDK" \
+            -Dprotobuf_BUILD_TESTS=OFF -Dprotobuf_BUILD_SHARED_LIBS=OFF
+          cmake --build "$RUNNER_TEMP/host-protobuf" --target protoc --parallel 4
+          HOST_PROTOC="$RUNNER_TEMP/host-protobuf/protoc"
+          test -x "$HOST_PROTOC"
           python3 - "$ROOT/CMakeLists.txt" "$HOST_PROTOC" <<'PY'
           import pathlib,sys
           p=pathlib.Path(sys.argv[1]); protoc=sys.argv[2]; s=p.read_text()
           if '    COMMAND protobuf::protoc\n' not in s: raise SystemExit('protoc anchor not found')
           s=s.replace('    COMMAND protobuf::protoc\n',f'    COMMAND "{protoc}"\n',1)
-          # iOS integration needs the emulator objects as a library; linking the upstream desktop executable
-          # pulls host-only FFmpeg symbols and fails before MaxPS4 can consume the core.
           anchor='add_executable(shadps4\n'
           if anchor not in s: raise SystemExit('shadps4 target anchor not found')
           s=s.replace(anchor,'add_library(shadps4 STATIC\n',1)
