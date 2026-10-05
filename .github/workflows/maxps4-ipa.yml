@@ -18,24 +18,35 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/maxps4-ccache
-          key: maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-v2-${{ github.run_id }}
+          key: maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-v3-${{ github.run_id }}
           restore-keys: |
+            maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-v3-
             maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-v2-
-            maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-
 
       - name: Install toolchain
         shell: bash
         run: |
           set -euxo pipefail
-          brew install cmake ninja llvm python glslang xcodegen protobuf ccache
+          brew install cmake ninja llvm python glslang spirv-tools spirv-llvm-translator pkgconf xcodegen protobuf ccache
           PYTHON="$(brew --prefix python)/bin/python3"
           "$PYTHON" -m venv "$RUNNER_TEMP/maxps4-python"
           "$RUNNER_TEMP/maxps4-python/bin/python" -m pip install --upgrade pip packaging mako pyyaml meson
-          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+          LLVM="$(brew --prefix llvm)"
+          GLSLANG="$(brew --prefix glslang)"
+          SPIRV_TOOLS="$(brew --prefix spirv-tools)"
+          SPIRV_LLVM="$(brew --prefix spirv-llvm-translator)"
+          echo "$LLVM/bin" >> "$GITHUB_PATH"
+          echo "$GLSLANG/bin" >> "$GITHUB_PATH"
+          echo "$SPIRV_TOOLS/bin" >> "$GITHUB_PATH"
           echo "$RUNNER_TEMP/maxps4-python/bin" >> "$GITHUB_PATH"
+          echo "HOST_GLSLANG_VALIDATOR=$GLSLANG/bin/glslangValidator" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$SPIRV_TOOLS/lib/pkgconfig:$SPIRV_LLVM/lib/pkgconfig:$LLVM/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$GLSLANG:$SPIRV_TOOLS:$SPIRV_LLVM:$LLVM:${CMAKE_PREFIX_PATH:-}" >> "$GITHUB_ENV"
           echo "CCACHE_DIR=$HOME/.cache/maxps4-ccache" >> "$GITHUB_ENV"
           echo "CCACHE_COMPRESS=true" >> "$GITHUB_ENV"
           echo "CCACHE_MAXSIZE=5G" >> "$GITHUB_ENV"
+          test -x "$GLSLANG/bin/glslangValidator"
+          pkg-config --modversion SPIRV-Tools || pkg-config --modversion SPIRV-Tools-shared || true
 
       - name: Checkout and verify shadPS4 submodules
         shell: bash
@@ -46,23 +57,11 @@ jobs:
           git -C "$ROOT" checkout b3452cf6a9bd0969771fcfbf919c359368473d1b
           git -C "$ROOT" submodule sync --recursive
           git -C "$ROOT" -c protocol.version=2 submodule update --init --recursive --jobs 8
-
-          # A recursive update can leave nested modules absent when an ancestor's
-          # metadata was not initialized during a shallow/filtered checkout.
-          # Re-run sync/update from every initialized submodule to repair those.
           git -C "$ROOT" submodule foreach --recursive 'git submodule sync --recursive || true; git submodule update --init --recursive --jobs 8 || true'
-
-          # Validate all registered submodules before spending time in CMake.
           BAD="$RUNNER_TEMP/bad-submodules.txt"
           git -C "$ROOT" submodule status --recursive | tee "$RUNNER_TEMP/submodules.txt"
           git -C "$ROOT" submodule status --recursive | grep -E '^[+-U]' > "$BAD" || true
-          if test -s "$BAD"; then
-            echo 'Broken/uninitialized submodules:'
-            cat "$BAD"
-            exit 1
-          fi
-
-          # Explicit critical dependency checks (Zydis -> Zycore was Build 56 blocker).
+          if test -s "$BAD"; then cat "$BAD"; exit 1; fi
           test -f "$ROOT/src/emulator.h"
           test -f "$ROOT/externals/zydis/CMakeLists.txt"
           test -f "$ROOT/externals/zydis/dependencies/zycore/CMakeLists.txt"
@@ -78,35 +77,56 @@ jobs:
           test -n "$KK_BO"
           python3 - "$KK_BO" <<'PY'
           import pathlib, sys
-          p = pathlib.Path(sys.argv[1])
-          s = p.read_text()
-          old = '''#include <mach/mach_init.h>\n#include <mach/mach_vm.h>'''
-          new = '''#include <mach/mach.h>\n#include <mach/vm_map.h>'''
-          if old not in s:
-              raise SystemExit('Expected Mach includes not found')
-          s = s.replace(old, new, 1)
-          s = s.replace('mach_vm_address_t src_addr', 'vm_address_t src_addr')
-          s = s.replace('mach_vm_address_t dst_addr', 'vm_address_t dst_addr')
-          s = s.replace('(mach_vm_address_t)bo->cpu', '(vm_address_t)bo->cpu')
-          s = s.replace('(mach_vm_address_t)*addr', '(vm_address_t)*addr')
-          s = s.replace('mach_vm_address_t unmap_addr', 'vm_address_t unmap_addr')
-          s = s.replace('(mach_vm_address_t)addr', '(vm_address_t)addr')
-          s = s.replace('mach_vm_remap(mach_task_self(), &dst_addr, bo->size_B, 0,',
-                        'vm_remap(mach_task_self(), &dst_addr, (vm_size_t)bo->size_B, 0,')
-          old_map = '''      /* Replace with a reserved mapping using mach_vm_map */\n      kern_return_t ret = mach_vm_map(\n         mach_task_self(), &unmap_addr, bo->size_B, 0,\n         VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, MEMORY_OBJECT_NULL, 0, false,\n         VM_PROT_NONE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_DEFAULT);\n      if (ret != KERN_SUCCESS)\n         return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED,\n                          "mach_vm_map failed: %d", ret);'''
-          new_map = '''      /* iOS does not expose mach_vm_map; reserve the same address with vm_allocate. */\n      kern_return_t ret = vm_allocate(mach_task_self(), &unmap_addr,\n                                      (vm_size_t)bo->size_B, VM_FLAGS_FIXED);\n      if (ret != KERN_SUCCESS)\n         return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED,\n                          "vm_allocate failed: %d", ret);'''
-          if old_map not in s:
-              raise SystemExit('Expected reserved mach_vm_map block not found')
-          s = s.replace(old_map, new_map, 1)
-          s = s.replace('mach_vm_deallocate(mach_task_self(), unmap_addr, bo->size_B);',
-                        'vm_deallocate(mach_task_self(), unmap_addr, (vm_size_t)bo->size_B);')
-          forbidden = ['mach_vm_address_t', 'mach_vm_remap(', 'mach_vm_map(', 'mach_vm_deallocate(']
-          bad = [x for x in forbidden if x in s]
-          if bad:
-              raise SystemExit('Unpatched iOS VM symbols: ' + ', '.join(bad))
+          p=pathlib.Path(sys.argv[1]); s=p.read_text()
+          old='#include <mach/mach_init.h>\n#include <mach/mach_vm.h>'
+          new='#include <mach/mach.h>\n#include <mach/vm_map.h>'
+          if old not in s: raise SystemExit('Expected Mach includes not found')
+          s=s.replace(old,new,1)
+          s=s.replace('mach_vm_address_t src_addr','vm_address_t src_addr').replace('mach_vm_address_t dst_addr','vm_address_t dst_addr')
+          s=s.replace('(mach_vm_address_t)bo->cpu','(vm_address_t)bo->cpu').replace('(mach_vm_address_t)*addr','(vm_address_t)*addr')
+          s=s.replace('mach_vm_address_t unmap_addr','vm_address_t unmap_addr').replace('(mach_vm_address_t)addr','(vm_address_t)addr')
+          s=s.replace('mach_vm_remap(mach_task_self(), &dst_addr, bo->size_B, 0,','vm_remap(mach_task_self(), &dst_addr, (vm_size_t)bo->size_B, 0,')
+          old_map='''      /* Replace with a reserved mapping using mach_vm_map */
+      kern_return_t ret = mach_vm_map(
+         mach_task_self(), &unmap_addr, bo->size_B, 0,
+         VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, MEMORY_OBJECT_NULL, 0, false,
+         VM_PROT_NONE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_DEFAULT);
+      if (ret != KERN_SUCCESS)
+         return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED,
+                          "mach_vm_map failed: %d", ret);'''
+          new_map='''      /* iOS does not expose mach_vm_map; reserve the same address with vm_allocate. */
+      kern_return_t ret = vm_allocate(mach_task_self(), &unmap_addr,
+                                      (vm_size_t)bo->size_B, VM_FLAGS_FIXED);
+      if (ret != KERN_SUCCESS)
+         return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED,
+                          "vm_allocate failed: %d", ret);'''
+          if old_map not in s: raise SystemExit('Expected reserved mach_vm_map block not found')
+          s=s.replace(old_map,new_map,1)
+          s=s.replace('mach_vm_deallocate(mach_task_self(), unmap_addr, bo->size_B);','vm_deallocate(mach_task_self(), unmap_addr, (vm_size_t)bo->size_B);')
+          bad=[x for x in ['mach_vm_address_t','mach_vm_remap(','mach_vm_map(','mach_vm_deallocate('] if x in s]
+          if bad: raise SystemExit('Unpatched iOS VM symbols: '+', '.join(bad))
           p.write_text(s)
           PY
-          grep -nE 'vm_(remap|allocate|deallocate)|mach_vm_' "$KK_BO" | tail -40
+
+          HOST_SHADERS="$SHADPS4_ENGINE_ROOT/src/video_core/host_shaders/CMakeLists.txt"
+          python3 - "$HOST_SHADERS" <<'PY'
+          import pathlib,sys
+          p=pathlib.Path(sys.argv[1]); s=p.read_text()
+          anchor='endif()\n\nset(SHADER_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/include)'
+          replacement='''endif()
+
+# Cross-compiling for iOS: glslang is a host tool and cannot be an iOS target.
+if (CMAKE_CROSSCOMPILING AND DEFINED ENV{HOST_GLSLANG_VALIDATOR})
+    set(GLSLANG_COMPILER "$ENV{HOST_GLSLANG_VALIDATOR}")
+endif()
+if (NOT GLSLANG_COMPILER)
+    message(FATAL_ERROR "No host glslangValidator available")
+endif()
+
+set(SHADER_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/include)'''
+          if anchor not in s: raise SystemExit('host shader glslang anchor missing')
+          p.write_text(s.replace(anchor,replacement,1))
+          PY
 
       - name: Configure iOS engine
         shell: bash
@@ -116,21 +136,11 @@ jobs:
           LLVM="$(brew --prefix llvm)"
           printf '%s\n' 'set(ALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO_EXITCODE 0 CACHE STRING "iOS cross compile result" FORCE)' > "$RUNNER_TEMP/ios-cache.cmake"
           cmake -S "$SHADPS4_ENGINE_ROOT" -B "$RUNNER_TEMP/build" -G Ninja -C "$RUNNER_TEMP/ios-cache.cmake" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_STANDARD=23 \
-            -DCMAKE_SYSTEM_NAME=iOS \
-            -DCMAKE_SYSTEM_PROCESSOR=arm64 \
-            -DCMAKE_OSX_SYSROOT="$IOS_SDK" \
-            -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 \
-            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DKK_LLVM_CONFIG="$LLVM/bin/llvm-config" \
-            -DLLVM_DIR="$LLVM/lib/cmake/llvm" \
-            -DENABLE_TESTS=OFF \
-            -DENABLE_UPDATER=OFF \
-            -DENABLE_DISCORD_RPC=OFF
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=23 -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64 \
+            -DCMAKE_OSX_SYSROOT="$IOS_SDK" -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DKK_LLVM_CONFIG="$LLVM/bin/llvm-config" -DLLVM_DIR="$LLVM/lib/cmake/llvm" \
+            -DENABLE_TESTS=OFF -DENABLE_UPDATER=OFF -DENABLE_DISCORD_RPC=OFF
 
       - name: Build iOS engine and collect diagnostics
         shell: bash
