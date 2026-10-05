@@ -1,0 +1,81 @@
+name: Build 66 MaxPS4 iOS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [maxps4-shadps4-direct]
+    paths:
+      - '.github/workflows/maxps4-build66.yml'
+      - '.github/scripts/build66-patches.py'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/maxps4-ccache
+          key: maxps4-ios-build66-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-
+
+      - name: Run Build64 pipeline with Build66 grouped fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user pyyaml
+          python3 - <<'PY'
+          import os, subprocess, tempfile, yaml
+          base='37bd10e8758416cbefcde6bdfaa3824c8a98fcf7'
+          raw=subprocess.check_output(['git','show',f'{base}:.github/workflows/maxps4-ipa.yml'],text=True)
+          doc=yaml.safe_load(raw)
+          steps=doc['jobs']['build-maxps4-ipa']['steps']
+          env=os.environ.copy()
+          envfile=env['GITHUB_ENV']; pathfile=env['GITHUB_PATH']
+          open(envfile,'w').close(); open(pathfile,'w').close()
+          env_pos=0; path_pos=0
+          for step in steps:
+              name=step.get('name','')
+              script=step.get('run')
+              if not script:
+                  continue
+              if name == 'Configure iOS engine':
+                  subprocess.run(['python3','.github/scripts/build66-patches.py'],env=env,check=True)
+              print(f'\n===== {name} =====',flush=True)
+              subprocess.run(['bash','-e','-o','pipefail','-c',script],env=env,check=True)
+              with open(envfile) as f:
+                  f.seek(env_pos)
+                  for line in f:
+                      line=line.rstrip('\n')
+                      if '=' in line:
+                          k,v=line.split('=',1); env[k]=v
+                  env_pos=f.tell()
+              with open(pathfile) as f:
+                  f.seek(path_pos)
+                  new=[x.rstrip('\n') for x in f if x.rstrip('\n')]
+                  path_pos=f.tell()
+              if new:
+                  env['PATH']=':'.join(new)+':'+env.get('PATH','')
+          PY
+
+      - name: Upload engine diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build66-diagnostics
+          path: ${{ runner.temp }}/shadps4-build.log
+          if-no-files-found: ignore
+
+      - name: Upload MaxPS4 IPA
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-unsigned-IPA
+          path: ${{ runner.temp }}/MaxPS4-unsigned.ipa
+          if-no-files-found: error
