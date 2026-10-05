@@ -11,6 +11,7 @@ on:
 jobs:
   build-maxps4-ipa:
     runs-on: macos-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -18,7 +19,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/maxps4-ccache
-          key: maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-v4-${{ github.run_id }}
+          key: maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-v5-${{ github.run_id }}
           restore-keys: |
             maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-
 
@@ -59,52 +60,115 @@ jobs:
           BAD="$RUNNER_TEMP/bad-submodules.txt"
           git -C "$ROOT" submodule status --recursive | tee "$RUNNER_TEMP/submodules.txt"
           git -C "$ROOT" submodule status --recursive | grep -E '^[+-U]' > "$BAD" || true
-          if test -s "$BAD"; then
-            cat "$BAD"
-            exit 1
-          fi
+          if test -s "$BAD"; then cat "$BAD"; exit 1; fi
           test -f "$ROOT/src/emulator.h"
-          test -f "$ROOT/externals/zydis/CMakeLists.txt"
           test -f "$ROOT/externals/zydis/dependencies/zycore/CMakeLists.txt"
           test -f "$ROOT/externals/mesa-kosmickrisp/externals/mesa/meson.build"
-          test -f "$ROOT/externals/protobuf/CMakeLists.txt"
           echo "SHADPS4_ENGINE_ROOT=$ROOT" >> "$GITHUB_ENV"
 
       - name: Apply grouped iOS compatibility
         shell: bash
         run: |
           set -euxo pipefail
-          KK_BO="$(find "$SHADPS4_ENGINE_ROOT/externals/mesa-kosmickrisp/externals/mesa" -path '*/src/kosmickrisp/vulkan/kk_bo.c' -print -quit)"
+          ROOT="$SHADPS4_ENGINE_ROOT"
+          KK="$ROOT/externals/mesa-kosmickrisp"
+          IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          MAC_SDK="$(xcrun --sdk macosx --show-sdk-path)"
+          MAC_VER="$(xcrun --sdk macosx --show-sdk-platform-version)"
+          LLVM_CONFIG="$(brew --prefix llvm)/bin/llvm-config"
+
+          KK_BO="$(find "$KK/externals/mesa" -path '*/src/kosmickrisp/vulkan/kk_bo.c' -print -quit)"
           test -n "$KK_BO"
           python3 - "$KK_BO" <<'PY'
           import pathlib, sys
-          p = pathlib.Path(sys.argv[1])
-          s = p.read_text()
-          old = '''#include <mach/mach_init.h>\n#include <mach/mach_vm.h>'''
-          new = '''#include <mach/mach.h>\n#include <mach/vm_map.h>'''
-          if old not in s:
-              raise SystemExit('Expected Mach includes not found')
-          s = s.replace(old, new, 1)
-          s = s.replace('mach_vm_address_t src_addr', 'vm_address_t src_addr')
-          s = s.replace('mach_vm_address_t dst_addr', 'vm_address_t dst_addr')
-          s = s.replace('(mach_vm_address_t)bo->cpu', '(vm_address_t)bo->cpu')
-          s = s.replace('(mach_vm_address_t)*addr', '(vm_address_t)*addr')
-          s = s.replace('mach_vm_address_t unmap_addr', 'vm_address_t unmap_addr')
-          s = s.replace('(mach_vm_address_t)addr', '(vm_address_t)addr')
-          s = s.replace('mach_vm_remap(mach_task_self(), &dst_addr, bo->size_B, 0,',
-                        'vm_remap(mach_task_self(), &dst_addr, (vm_size_t)bo->size_B, 0,')
-          old_map = '''      /* Replace with a reserved mapping using mach_vm_map */\n      kern_return_t ret = mach_vm_map(\n         mach_task_self(), &unmap_addr, bo->size_B, 0,\n         VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, MEMORY_OBJECT_NULL, 0, false,\n         VM_PROT_NONE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_DEFAULT);\n      if (ret != KERN_SUCCESS)\n         return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED,\n                          "mach_vm_map failed: %d", ret);'''
-          new_map = '''      /* iOS replacement for mach_vm_map. */\n      kern_return_t ret = vm_allocate(mach_task_self(), &unmap_addr,\n                                      (vm_size_t)bo->size_B, VM_FLAGS_FIXED);\n      if (ret != KERN_SUCCESS)\n         return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED,\n                          "vm_allocate failed: %d", ret);'''
-          if old_map not in s:
-              raise SystemExit('Expected reserved mach_vm_map block not found')
-          s = s.replace(old_map, new_map, 1)
-          s = s.replace('mach_vm_deallocate(mach_task_self(), unmap_addr, bo->size_B);',
-                        'vm_deallocate(mach_task_self(), unmap_addr, (vm_size_t)bo->size_B);')
-          bad = [x for x in ['mach_vm_address_t','mach_vm_remap(','mach_vm_map(','mach_vm_deallocate('] if x in s]
-          if bad:
-              raise SystemExit('Unpatched iOS VM symbols: ' + ', '.join(bad))
+          p=pathlib.Path(sys.argv[1]); s=p.read_text()
+          old='#include <mach/mach_init.h>\n#include <mach/mach_vm.h>'
+          new='#include <mach/mach.h>\n#include <mach/vm_map.h>'
+          if old not in s: raise SystemExit('Expected Mach includes not found')
+          s=s.replace(old,new,1)
+          s=s.replace('mach_vm_address_t src_addr','vm_address_t src_addr').replace('mach_vm_address_t dst_addr','vm_address_t dst_addr')
+          s=s.replace('(mach_vm_address_t)bo->cpu','(vm_address_t)bo->cpu').replace('(mach_vm_address_t)*addr','(vm_address_t)*addr')
+          s=s.replace('mach_vm_address_t unmap_addr','vm_address_t unmap_addr').replace('(mach_vm_address_t)addr','(vm_address_t)addr')
+          s=s.replace('mach_vm_remap(mach_task_self(), &dst_addr, bo->size_B, 0,','vm_remap(mach_task_self(), &dst_addr, (vm_size_t)bo->size_B, 0,')
+          old_map='''      /* Replace with a reserved mapping using mach_vm_map */\n      kern_return_t ret = mach_vm_map(\n         mach_task_self(), &unmap_addr, bo->size_B, 0,\n         VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, MEMORY_OBJECT_NULL, 0, false,\n         VM_PROT_NONE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_DEFAULT);\n      if (ret != KERN_SUCCESS)\n         return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED,\n                          "mach_vm_map failed: %d", ret);'''
+          new_map='''      /* iOS replacement for mach_vm_map. */\n      kern_return_t ret = vm_allocate(mach_task_self(), &unmap_addr,\n                                      (vm_size_t)bo->size_B, VM_FLAGS_FIXED);\n      if (ret != KERN_SUCCESS)\n         return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED,\n                          "vm_allocate failed: %d", ret);'''
+          if old_map not in s: raise SystemExit('Expected reserved mach_vm_map block not found')
+          s=s.replace(old_map,new_map,1)
+          s=s.replace('mach_vm_deallocate(mach_task_self(), unmap_addr, bo->size_B);','vm_deallocate(mach_task_self(), unmap_addr, (vm_size_t)bo->size_B);')
+          bad=[x for x in ['mach_vm_address_t','mach_vm_remap(','mach_vm_map(','mach_vm_deallocate('] if x in s]
+          if bad: raise SystemExit('Unpatched iOS VM symbols: '+', '.join(bad))
           p.write_text(s)
           PY
+
+          # Mesa has separate host and target Meson builds. Never pass the iOS 18
+          # deployment version as MACOSX_DEPLOYMENT_TARGET to host clang.
+          python3 - "$KK/CMakeLists.txt" "$MAC_SDK" "$IOS_SDK" "$LLVM_CONFIG" "$MAC_VER" <<'PY'
+          import pathlib,sys
+          p=pathlib.Path(sys.argv[1]); mac,ios,llvm,macver=sys.argv[2:]; s=p.read_text()
+          old='set(MESA_ENVIRONMENT_TOOLS\n    LLVM_CONFIG=${KK_LLVM_CONFIG})'
+          if old in s:
+              s=s.replace(old,f'''set(MESA_ENVIRONMENT_TOOLS\n    LLVM_CONFIG={llvm}\n    SDKROOT={mac}\n    MACOSX_DEPLOYMENT_TARGET={macver}\n    CFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver}\n    CXXFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver}\n    LDFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver})''',1)
+          s=s.replace('set(MESA_CROSS_FILE_TARGET ${MESA_CROSSFILES_DIR}/mesa-${KK_TARGET_ARCHITECTURE}.ini)','set(MESA_CROSS_FILE_TARGET ${MESA_CROSSFILES_DIR}/mesa-ios-aarch64.ini)')
+          old='set(MESA_ENVIRONMENT_TARGET\n    MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}\n    PATH='
+          if old in s:
+              s=s.replace(old,f'''set(MESA_ENVIRONMENT_TARGET\n    SDKROOT={ios}\n    IPHONEOS_DEPLOYMENT_TARGET=18.0\n    CFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    CXXFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    LDFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    PATH=''')
+          p.write_text(s)
+          PY
+          cat > "$KK/crossfiles/mesa-ios-aarch64.ini" <<EOF
+          [binaries]
+          c='clang'
+          cpp='clang++'
+          objc='clang'
+          objcpp='clang++'
+          ar='ar'
+          strip='strip'
+          [built-in options]
+          c_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          cpp_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          objc_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          objcpp_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          c_link_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          cpp_link_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          [host_machine]
+          system='darwin'
+          cpu_family='aarch64'
+          cpu='aarch64'
+          endian='little'
+          EOF
+
+          # std::system is explicitly unavailable on iOS.
+          python3 - "$ROOT/externals/ImGuiFileDialog/ImGuiFileDialog.cpp" <<'PY'
+          import pathlib,re,sys
+          p=pathlib.Path(sys.argv[1]); s=p.read_text()
+          pat=re.compile(r'(?P<i>^[ \t]*)(?P<d>(?:const\s+)?int\s+\w+\s*=\s*)std::system\((?P<a>[^;]+)\);',re.M)
+          if not pat.search(s): raise SystemExit('ImGuiFileDialog std::system anchor not found')
+          s=pat.sub(lambda m:f"{m.group('i')}#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n{m.group('i')}{m.group('d')}-1;\n{m.group('i')}#else\n{m.group('i')}{m.group('d')}std::system({m.group('a')});\n{m.group('i')}#endif",s)
+          p.write_text(s)
+          PY
+
+          # libusb's macOS backend depends on desktop-only IOKit and POSIX APIs.
+          # USB is not required for the first iOS core bring-up, so provide the
+          # target expected by shadPS4 without compiling the desktop backend.
+          python3 - "$ROOT/externals/CMakeLists.txt" <<'PY'
+          import pathlib,sys
+          p=pathlib.Path(sys.argv[1]); s=p.read_text()
+          old='# libusb\nif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'
+          new='# libusb\nif (CMAKE_SYSTEM_NAME STREQUAL "iOS")\n    add_library(usb-1.0 INTERFACE)\n    add_library(libusb::usb ALIAS usb-1.0)\nelseif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'
+          if old not in s: raise SystemExit('libusb CMake anchor not found')
+          p.write_text(s.replace(old,new,1))
+          PY
+
+          # hwinfo builds desktop macOS probes that use IOKit APIs unavailable on
+          # iOS. Keep CPU/RAM/OS/GPU probes but turn the three desktop-only Apple
+          # implementations into harmless iOS translation units.
+          for f in "$ROOT/externals/hwinfo/src/apple/battery.cpp" "$ROOT/externals/hwinfo/src/apple/disk.cpp" "$ROOT/externals/hwinfo/src/apple/mainboard.cpp"; do
+            test -f "$f"
+            python3 - "$f" <<'PY'
+          import pathlib,sys
+          p=pathlib.Path(sys.argv[1]); s=p.read_text()
+          p.write_text('#if !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n'+s+'\n#endif\n')
+          PY
+          done
 
       - name: Configure iOS engine
         shell: bash
@@ -127,15 +191,19 @@ jobs:
             -DKK_LLVM_CONFIG="$LLVM/bin/llvm-config" \
             -DLLVM_DIR="$LLVM/lib/cmake/llvm" \
             -DGLSLANG_COMPILER="$HOST_GLSLANG_VALIDATOR" \
-            -DENABLE_TESTS=OFF \
-            -DENABLE_UPDATER=OFF \
-            -DENABLE_DISCORD_RPC=OFF
+            -DENABLE_TESTS=OFF -DENABLE_UPDATER=OFF -DENABLE_DISCORD_RPC=OFF
 
       - name: Build iOS engine and collect diagnostics
+        timeout-minutes: 45
         shell: bash
+        env:
+          NINJA_STATUS: '[%e sec | %f/%t] '
         run: |
           set -uo pipefail
           JOBS="$(sysctl -n hw.logicalcpu)"
+          # Avoid OOM kills from several simultaneous font-embed processes.
+          if test "$JOBS" -gt 4; then JOBS=4; fi
+          echo "Building shadPS4 with $JOBS parallel jobs"
           set +e
           cmake --build "$RUNNER_TEMP/build" --parallel "$JOBS" -- -k 50 2>&1 | tee "$RUNNER_TEMP/shadps4-build.log"
           STATUS=${PIPESTATUS[0]}
