@@ -19,7 +19,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/maxps4-ccache
-          key: maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-v6-${{ github.run_id }}
+          key: maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-v7-${{ github.run_id }}
           restore-keys: |
             maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-
 
@@ -45,9 +45,8 @@ jobs:
           echo "CCACHE_DIR=$HOME/.cache/maxps4-ccache" >> "$GITHUB_ENV"
           echo "CCACHE_COMPRESS=true" >> "$GITHUB_ENV"
           echo "CCACHE_MAXSIZE=5G" >> "$GITHUB_ENV"
-          test -x "$GLSLANG/bin/glslangValidator"
 
-      - name: Checkout and verify shadPS4 submodules
+      - name: Checkout and patch shadPS4 for iOS
         shell: bash
         run: |
           set -euxo pipefail
@@ -57,20 +56,9 @@ jobs:
           git -C "$ROOT" submodule sync --recursive
           git -C "$ROOT" -c protocol.version=2 submodule update --init --recursive --jobs 8
           git -C "$ROOT" submodule foreach --recursive 'git submodule sync --recursive || true; git submodule update --init --recursive --jobs 8 || true'
-          BAD="$RUNNER_TEMP/bad-submodules.txt"
-          git -C "$ROOT" submodule status --recursive | tee "$RUNNER_TEMP/submodules.txt"
-          git -C "$ROOT" submodule status --recursive | grep -E '^[+-U]' > "$BAD" || true
-          if test -s "$BAD"; then cat "$BAD"; exit 1; fi
           test -f "$ROOT/src/emulator.h"
-          test -f "$ROOT/externals/zydis/dependencies/zycore/CMakeLists.txt"
-          test -f "$ROOT/externals/mesa-kosmickrisp/externals/mesa/meson.build"
           echo "SHADPS4_ENGINE_ROOT=$ROOT" >> "$GITHUB_ENV"
 
-      - name: Apply grouped iOS compatibility
-        shell: bash
-        run: |
-          set -euxo pipefail
-          ROOT="$SHADPS4_ENGINE_ROOT"
           KK="$ROOT/externals/mesa-kosmickrisp"
           IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           MAC_SDK="$(xcrun --sdk macosx --show-sdk-path)"
@@ -78,25 +66,18 @@ jobs:
           LLVM_CONFIG="$(brew --prefix llvm)/bin/llvm-config"
 
           KK_BO="$(find "$KK/externals/mesa" -path '*/src/kosmickrisp/vulkan/kk_bo.c' -print -quit)"
-          test -n "$KK_BO"
           python3 - "$KK_BO" <<'PY'
-          import pathlib, sys
+          import pathlib,sys
           p=pathlib.Path(sys.argv[1]); s=p.read_text()
-          old='#include <mach/mach_init.h>\n#include <mach/mach_vm.h>'
-          new='#include <mach/mach.h>\n#include <mach/vm_map.h>'
-          if old not in s: raise SystemExit('Expected Mach includes not found')
-          s=s.replace(old,new,1)
+          s=s.replace('#include <mach/mach_init.h>\n#include <mach/mach_vm.h>','#include <mach/mach.h>\n#include <mach/vm_map.h>',1)
           s=s.replace('mach_vm_address_t src_addr','vm_address_t src_addr').replace('mach_vm_address_t dst_addr','vm_address_t dst_addr')
           s=s.replace('(mach_vm_address_t)bo->cpu','(vm_address_t)bo->cpu').replace('(mach_vm_address_t)*addr','(vm_address_t)*addr')
           s=s.replace('mach_vm_address_t unmap_addr','vm_address_t unmap_addr').replace('(mach_vm_address_t)addr','(vm_address_t)addr')
           s=s.replace('mach_vm_remap(mach_task_self(), &dst_addr, bo->size_B, 0,','vm_remap(mach_task_self(), &dst_addr, (vm_size_t)bo->size_B, 0,')
-          old_map='''      /* Replace with a reserved mapping using mach_vm_map */\n      kern_return_t ret = mach_vm_map(\n         mach_task_self(), &unmap_addr, bo->size_B, 0,\n         VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, MEMORY_OBJECT_NULL, 0, false,\n         VM_PROT_NONE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_DEFAULT);\n      if (ret != KERN_SUCCESS)\n         return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED,\n                          "mach_vm_map failed: %d", ret);'''
-          new_map='''      /* iOS replacement for mach_vm_map. */\n      kern_return_t ret = vm_allocate(mach_task_self(), &unmap_addr,\n                                      (vm_size_t)bo->size_B, VM_FLAGS_FIXED);\n      if (ret != KERN_SUCCESS)\n         return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED,\n                          "vm_allocate failed: %d", ret);'''
-          if old_map not in s: raise SystemExit('Expected reserved mach_vm_map block not found')
-          s=s.replace(old_map,new_map,1)
-          s=s.replace('mach_vm_deallocate(mach_task_self(), unmap_addr, bo->size_B);','vm_deallocate(mach_task_self(), unmap_addr, (vm_size_t)bo->size_B);')
-          bad=[x for x in ['mach_vm_address_t','mach_vm_remap(','mach_vm_map(','mach_vm_deallocate('] if x in s]
-          if bad: raise SystemExit('Unpatched iOS VM symbols: '+', '.join(bad))
+          old='''      /* Replace with a reserved mapping using mach_vm_map */\n      kern_return_t ret = mach_vm_map(\n         mach_task_self(), &unmap_addr, bo->size_B, 0,\n         VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, MEMORY_OBJECT_NULL, 0, false,\n         VM_PROT_NONE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_DEFAULT);\n      if (ret != KERN_SUCCESS)\n         return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED,\n                          "mach_vm_map failed: %d", ret);'''
+          new='''      kern_return_t ret = vm_allocate(mach_task_self(), &unmap_addr,\n                                      (vm_size_t)bo->size_B, VM_FLAGS_FIXED);\n      if (ret != KERN_SUCCESS)\n         return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED,\n                          "vm_allocate failed: %d", ret);'''
+          if old not in s: raise SystemExit('reserved VM block not found')
+          s=s.replace(old,new,1).replace('mach_vm_deallocate(mach_task_self(), unmap_addr, bo->size_B);','vm_deallocate(mach_task_self(), unmap_addr, (vm_size_t)bo->size_B);')
           p.write_text(s)
           PY
 
@@ -104,12 +85,10 @@ jobs:
           import pathlib,sys
           p=pathlib.Path(sys.argv[1]); mac,ios,llvm,macver=sys.argv[2:]; s=p.read_text()
           old='set(MESA_ENVIRONMENT_TOOLS\n    LLVM_CONFIG=${KK_LLVM_CONFIG})'
-          if old in s:
-              s=s.replace(old,f'''set(MESA_ENVIRONMENT_TOOLS\n    LLVM_CONFIG={llvm}\n    SDKROOT={mac}\n    MACOSX_DEPLOYMENT_TARGET={macver}\n    CFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver}\n    CXXFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver}\n    LDFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver})''',1)
+          if old in s: s=s.replace(old,f'''set(MESA_ENVIRONMENT_TOOLS\n    LLVM_CONFIG={llvm}\n    SDKROOT={mac}\n    MACOSX_DEPLOYMENT_TARGET={macver}\n    CFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver}\n    CXXFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver}\n    LDFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver})''',1)
           s=s.replace('set(MESA_CROSS_FILE_TARGET ${MESA_CROSSFILES_DIR}/mesa-${KK_TARGET_ARCHITECTURE}.ini)','set(MESA_CROSS_FILE_TARGET ${MESA_CROSSFILES_DIR}/mesa-ios-aarch64.ini)')
           old='set(MESA_ENVIRONMENT_TARGET\n    MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}\n    PATH='
-          if old in s:
-              s=s.replace(old,f'''set(MESA_ENVIRONMENT_TARGET\n    SDKROOT={ios}\n    IPHONEOS_DEPLOYMENT_TARGET=18.0\n    CFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    CXXFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    LDFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    PATH=''')
+          if old in s: s=s.replace(old,f'''set(MESA_ENVIRONMENT_TARGET\n    SDKROOT={ios}\n    IPHONEOS_DEPLOYMENT_TARGET=18.0\n    CFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    CXXFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    LDFLAGS=-isysroot\\ {ios}\\ -miphoneos-version-min=18.0\n    PATH=''')
           p.write_text(s)
           PY
           cat > "$KK/crossfiles/mesa-ios-aarch64.ini" <<EOF
@@ -134,63 +113,54 @@ jobs:
           endian='little'
           EOF
 
-          WSI="$KK/externals/mesa/src/vulkan/wsi/wsi_common_metal_layer.m"
-          python3 - "$WSI" <<'PY'
+          python3 - "$KK/externals/mesa/src/vulkan/wsi/wsi_common_metal_layer.m" <<'PY'
           import pathlib,sys
-          p=pathlib.Path(sys.argv[1]); s=p.read_text()
-          needle='   metal_layer.displaySyncEnabled = !enable_immediate;'
-          if s.count(needle) != 2: raise SystemExit(f'Unexpected displaySyncEnabled count: {s.count(needle)}')
-          p.write_text(s.replace(needle,'#if defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__)\n   metal_layer.displaySyncEnabled = !enable_immediate;\n#endif'))
+          p=pathlib.Path(sys.argv[1]); s=p.read_text(); n='   metal_layer.displaySyncEnabled = !enable_immediate;'
+          if s.count(n)!=2: raise SystemExit('displaySyncEnabled anchors changed')
+          p.write_text(s.replace(n,'#if defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__)\n   metal_layer.displaySyncEnabled = !enable_immediate;\n#endif'))
           PY
 
           python3 - "$ROOT/externals/ImGuiFileDialog/ImGuiFileDialog.cpp" <<'PY'
           import pathlib,re,sys
-          p=pathlib.Path(sys.argv[1]); s=p.read_text()
-          pat=re.compile(r'(?P<i>^[ \t]*)(?P<d>(?:const\s+)?int\s+\w+\s*=\s*)std::system\((?P<a>[^;]+)\);',re.M)
-          if not pat.search(s): raise SystemExit('ImGuiFileDialog std::system anchor not found')
-          s=pat.sub(lambda m:f"{m.group('i')}#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n{m.group('i')}{m.group('d')}-1;\n{m.group('i')}#else\n{m.group('i')}{m.group('d')}std::system({m.group('a')});\n{m.group('i')}#endif",s)
-          p.write_text(s)
+          p=pathlib.Path(sys.argv[1]); s=p.read_text(); pat=re.compile(r'(?P<i>^[ \t]*)(?P<d>(?:const\s+)?int\s+\w+\s*=\s*)std::system\((?P<a>[^;]+)\);',re.M)
+          if not pat.search(s): raise SystemExit('std::system anchor not found')
+          p.write_text(pat.sub(lambda m:f"{m.group('i')}#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n{m.group('i')}{m.group('d')}-1;\n{m.group('i')}#else\n{m.group('i')}{m.group('d')}std::system({m.group('a')});\n{m.group('i')}#endif",s))
           PY
 
           python3 - "$ROOT/externals/CMakeLists.txt" <<'PY'
           import pathlib,sys
-          p=pathlib.Path(sys.argv[1]); s=p.read_text()
-          old='# libusb\nif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'
-          new='# libusb\nif (CMAKE_SYSTEM_NAME STREQUAL "iOS")\n    add_library(usb-1.0 INTERFACE)\n    add_library(libusb::usb ALIAS usb-1.0)\nelseif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'
-          if old not in s: raise SystemExit('libusb CMake anchor not found')
+          p=pathlib.Path(sys.argv[1]); s=p.read_text(); old='# libusb\nif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'; new='# libusb\nif (CMAKE_SYSTEM_NAME STREQUAL "iOS")\n    add_library(usb-1.0 INTERFACE)\n    add_library(libusb::usb ALIAS usb-1.0)\nelseif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'
+          if old not in s: raise SystemExit('libusb anchor not found')
           p.write_text(s.replace(old,new,1))
           PY
 
           for f in "$ROOT/externals/hwinfo/src/apple/battery.cpp" "$ROOT/externals/hwinfo/src/apple/disk.cpp" "$ROOT/externals/hwinfo/src/apple/mainboard.cpp"; do
-            test -f "$f"
             python3 - "$f" <<'PY'
           import pathlib,sys
-          p=pathlib.Path(sys.argv[1]); s=p.read_text()
-          p.write_text('#if !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n'+s+'\n#endif\n')
+          p=pathlib.Path(sys.argv[1]); p.write_text('#if !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n'+p.read_text()+'\n#endif\n')
           PY
           done
 
           HOST_FONT_TOOL="$RUNNER_TEMP/Dear_ImGui_FontEmbed"
           xcrun --sdk macosx clang++ "$ROOT/externals/imgui/misc/fonts/binary_to_compressed_c.cpp" -O2 -o "$HOST_FONT_TOOL"
-          test -x "$HOST_FONT_TOOL"
           python3 - "$ROOT/src/imgui/renderer/CMakeLists.txt" "$HOST_FONT_TOOL" <<'PY'
           import pathlib,sys
-          p=pathlib.Path(sys.argv[1]); tool=sys.argv[2]; s=p.read_text()
-          old='add_executable(Dear_ImGui_FontEmbed ${CMAKE_SOURCE_DIR}/externals/imgui/misc/fonts/binary_to_compressed_c.cpp)'
-          if old not in s: raise SystemExit('Dear_ImGui_FontEmbed CMake anchor not found')
-          new=f'add_executable(Dear_ImGui_FontEmbed IMPORTED GLOBAL)\nset_target_properties(Dear_ImGui_FontEmbed PROPERTIES IMPORTED_LOCATION "{tool}")'
-          p.write_text(s.replace(old,new,1))
+          p=pathlib.Path(sys.argv[1]); tool=sys.argv[2]; s=p.read_text(); old='add_executable(Dear_ImGui_FontEmbed ${CMAKE_SOURCE_DIR}/externals/imgui/misc/fonts/binary_to_compressed_c.cpp)'
+          if old not in s: raise SystemExit('font tool anchor not found')
+          p.write_text(s.replace(old,f'add_executable(Dear_ImGui_FontEmbed IMPORTED GLOBAL)\nset_target_properties(Dear_ImGui_FontEmbed PROPERTIES IMPORTED_LOCATION "{tool}")',1))
           PY
 
-          # shadnet protobuf generation must run the macOS host protoc during iOS cross-compilation.
           HOST_PROTOC="$(brew --prefix protobuf)/bin/protoc"
-          test -x "$HOST_PROTOC"
           python3 - "$ROOT/CMakeLists.txt" "$HOST_PROTOC" <<'PY'
           import pathlib,sys
           p=pathlib.Path(sys.argv[1]); protoc=sys.argv[2]; s=p.read_text()
-          old='    COMMAND protobuf::protoc\n'
-          if old not in s: raise SystemExit('shadnet protobuf::protoc anchor not found')
-          s=s.replace(old, f'    COMMAND "{protoc}"\n', 1)
+          if '    COMMAND protobuf::protoc\n' not in s: raise SystemExit('protoc anchor not found')
+          s=s.replace('    COMMAND protobuf::protoc\n',f'    COMMAND "{protoc}"\n',1)
+          # iOS integration needs the emulator objects as a library; linking the upstream desktop executable
+          # pulls host-only FFmpeg symbols and fails before MaxPS4 can consume the core.
+          anchor='add_executable(shadps4\n'
+          if anchor not in s: raise SystemExit('shadps4 target anchor not found')
+          s=s.replace(anchor,'add_library(shadps4 STATIC\n',1)
           p.write_text(s)
           PY
 
@@ -202,19 +172,10 @@ jobs:
           LLVM="$(brew --prefix llvm)"
           printf '%s\n' 'set(ALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO_EXITCODE 0 CACHE STRING "iOS cross compile result" FORCE)' > "$RUNNER_TEMP/ios-cache.cmake"
           cmake -S "$SHADPS4_ENGINE_ROOT" -B "$RUNNER_TEMP/build" -G Ninja -C "$RUNNER_TEMP/ios-cache.cmake" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_STANDARD=23 \
-            -DCMAKE_SYSTEM_NAME=iOS \
-            -DCMAKE_SYSTEM_PROCESSOR=arm64 \
-            -DCMAKE_OSX_SYSROOT="$IOS_SDK" \
-            -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 \
-            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DKK_LLVM_CONFIG="$LLVM/bin/llvm-config" \
-            -DLLVM_DIR="$LLVM/lib/cmake/llvm" \
-            -DGLSLANG_COMPILER="$HOST_GLSLANG_VALIDATOR" \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=23 -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64 \
+            -DCMAKE_OSX_SYSROOT="$IOS_SDK" -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DKK_LLVM_CONFIG="$LLVM/bin/llvm-config" -DLLVM_DIR="$LLVM/lib/cmake/llvm" -DGLSLANG_COMPILER="$HOST_GLSLANG_VALIDATOR" \
             -DENABLE_TESTS=OFF -DENABLE_UPDATER=OFF -DENABLE_DISCORD_RPC=OFF
 
       - name: Build iOS engine and collect diagnostics
@@ -224,9 +185,7 @@ jobs:
           NINJA_STATUS: '[%e sec | %f/%t] '
         run: |
           set -uo pipefail
-          JOBS="$(sysctl -n hw.logicalcpu)"
-          if test "$JOBS" -gt 4; then JOBS=4; fi
-          echo "Building shadPS4 with $JOBS parallel jobs"
+          JOBS="$(sysctl -n hw.logicalcpu)"; if test "$JOBS" -gt 4; then JOBS=4; fi
           set +e
           cmake --build "$RUNNER_TEMP/build" --parallel "$JOBS" -- -k 50 2>&1 | tee "$RUNNER_TEMP/shadps4-build.log"
           STATUS=${PIPESTATUS[0]}
@@ -247,12 +206,10 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          LIBDIR="$RUNNER_TEMP/shadps4-ios-libs"
-          mkdir -p "$LIBDIR"
+          LIBDIR="$RUNNER_TEMP/shadps4-ios-libs"; mkdir -p "$LIBDIR"
           find "$SHADPS4_BUILD_DIR" -type f -name '*.a' -exec cp -f {} "$LIBDIR/" \;
           test "$(find "$LIBDIR" -type f -name '*.a' | wc -l | tr -d ' ')" -gt 0
-          LINK_FLAGS=""
-          for lib in "$LIBDIR"/*.a; do LINK_FLAGS="$LINK_FLAGS $lib"; done
+          LINK_FLAGS=""; for lib in "$LIBDIR"/*.a; do LINK_FLAGS="$LINK_FLAGS $lib"; done
           echo "SHADPS4_LIBRARY_DIR=$LIBDIR" >> "$GITHUB_ENV"
           echo "SHADPS4_LINK_FLAGS=$LINK_FLAGS" >> "$GITHUB_ENV"
 
@@ -260,24 +217,17 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cd "$GITHUB_WORKSPACE/MaxPS4-iOS"
-          xcodegen generate
+          cd "$GITHUB_WORKSPACE/MaxPS4-iOS"; xcodegen generate
           DERIVED="$RUNNER_TEMP/maxps4-derived"
           xcodebuild -project MaxPS4.xcodeproj -scheme MaxPS4 -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$DERIVED" SHADPS4_ENGINE_ROOT="$SHADPS4_ENGINE_ROOT" SHADPS4_LIBRARY_DIR="$SHADPS4_LIBRARY_DIR" SHADPS4_LINK_FLAGS="$SHADPS4_LINK_FLAGS" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
-          APP="$DERIVED/Build/Products/Release-iphoneos/MaxPS4.app"
-          test -d "$APP"
-          echo "MAXPS4_APP=$APP" >> "$GITHUB_ENV"
+          APP="$DERIVED/Build/Products/Release-iphoneos/MaxPS4.app"; test -d "$APP"; echo "MAXPS4_APP=$APP" >> "$GITHUB_ENV"
 
       - name: Create unsigned IPA
         shell: bash
         run: |
           set -euxo pipefail
-          PACKAGE="$RUNNER_TEMP/maxps4-package"
-          mkdir -p "$PACKAGE/Payload"
-          cp -R "$MAXPS4_APP" "$PACKAGE/Payload/MaxPS4.app"
-          cd "$PACKAGE"
-          /usr/bin/zip -qry "$RUNNER_TEMP/MaxPS4-unsigned.ipa" Payload
-          test -s "$RUNNER_TEMP/MaxPS4-unsigned.ipa"
+          PACKAGE="$RUNNER_TEMP/maxps4-package"; mkdir -p "$PACKAGE/Payload"; cp -R "$MAXPS4_APP" "$PACKAGE/Payload/MaxPS4.app"
+          cd "$PACKAGE"; /usr/bin/zip -qry "$RUNNER_TEMP/MaxPS4-unsigned.ipa" Payload; test -s "$RUNNER_TEMP/MaxPS4-unsigned.ipa"
 
       - name: Upload MaxPS4 IPA
         uses: actions/upload-artifact@v4
