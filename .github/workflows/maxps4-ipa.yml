@@ -31,7 +31,6 @@ jobs:
           test -x "$GLSLANG_PREFIX/bin/glslangValidator"
           echo "$LLVM_PREFIX/bin" >> "$GITHUB_PATH"
           echo "$SPIRV_TOOLS_PREFIX/bin" >> "$GITHUB_PATH"
-          echo "$GLSLLANG_PREFIX/bin" >> "$GITHUB_PATH" || true
           echo "$GLSLANG_PREFIX/bin" >> "$GITHUB_PATH"
           echo "LLVM_PREFIX=$LLVM_PREFIX" >> "$GITHUB_ENV"
           echo "LLVM_DIR=$LLVM_PREFIX/lib/cmake/llvm" >> "$GITHUB_ENV"
