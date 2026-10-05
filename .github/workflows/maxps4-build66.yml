@@ -1,4 +1,4 @@
-name: Build 66 MaxPS4 iOS
+name: Build 67 MaxPS4 iOS
 
 on:
   workflow_dispatch:
@@ -21,17 +21,19 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/maxps4-ccache
-          key: maxps4-ios-build66-${{ runner.os }}-${{ github.run_id }}
+          key: maxps4-ios-build67-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-
 
-      - name: Run Build64 pipeline with Build66 grouped fixes
+      - name: Run Build64 pipeline with grouped iOS fixes
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m pip install --user pyyaml
-          python3 - <<'PY'
-          import os, subprocess, tempfile, yaml
+          VENV="$RUNNER_TEMP/build67-python"
+          python3 -m venv "$VENV"
+          "$VENV/bin/python" -m pip install --upgrade pip pyyaml
+          "$VENV/bin/python" - <<'PY'
+          import os, subprocess, yaml
           base='37bd10e8758416cbefcde6bdfaa3824c8a98fcf7'
           raw=subprocess.check_output(['git','show',f'{base}:.github/workflows/maxps4-ipa.yml'],text=True)
           doc=yaml.safe_load(raw)
@@ -68,7 +70,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build66-diagnostics
+          name: build67-diagnostics
           path: ${{ runner.temp }}/shadps4-build.log
           if-no-files-found: ignore
 
