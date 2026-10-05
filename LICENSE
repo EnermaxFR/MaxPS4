@@ -1,0 +1,15 @@
+GNU GENERAL PUBLIC LICENSE
+Version 2, June 1991
+
+Copyright (C) 1989, 1991 Free Software Foundation, Inc.
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA
+
+Everyone is permitted to copy and distribute verbatim copies
+of this license document, but changing it is not allowed.
+
+This project is distributed under the GNU General Public License version 2.0 (GPL-2.0).
+
+The complete canonical GPL-2.0 license text is available from the Free Software Foundation and at:
+https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt
+
+MaxPS4 includes or integrates work derived from third-party open-source projects. Those components remain subject to their respective copyright notices and licenses. In particular, shadPS4 is licensed under GPL-2.0.
