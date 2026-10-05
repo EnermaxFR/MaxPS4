@@ -49,33 +49,47 @@ jobs:
           p = pathlib.Path(sys.argv[1])
           s = p.read_text()
 
-          # This workflow builds kk_bo.c only for iOS. The iPhoneOS SDK exposes
-          # the legacy vm_* API, not the macOS mach_vm_* declarations used here.
-          s = s.replace('#include <mach/mach_vm.h>', '#include <mach/mach.h>\n#include <mach/vm_map.h>')
+          s = s.replace('#include <mach/mach_vm.h>', '#include <mach/mach.h>\n#include <mach/vm_map.h>\n#include <sys/mman.h>')
           s = s.replace('mach_vm_address_t', 'vm_address_t')
           s = s.replace('mach_vm_size_t', 'vm_size_t')
           s = s.replace('mach_vm_remap(', 'vm_remap(')
-          s = s.replace('mach_vm_map(', 'vm_map(')
           s = s.replace('mach_vm_deallocate(', 'vm_deallocate(')
-
-          # Make the size argument explicit for the 32-bit legacy Mach typedefs.
           s = s.replace('&dst_addr, bo->size_B, 0,', '&dst_addr, (vm_size_t)bo->size_B, 0,')
-          s = s.replace('&unmap_addr, bo->size_B, 0,', '&unmap_addr, (vm_size_t)bo->size_B, 0,')
           s = s.replace('unmap_addr, bo->size_B);', 'unmap_addr, (vm_size_t)bo->size_B);')
 
-          p.write_text(s)
+          old = '''      kern_return_t ret = mach_vm_map(
+         mach_task_self(), &unmap_addr, bo->size_B, 0,
+         VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, MEMORY_OBJECT_NULL, 0, false,
+         VM_PROT_NONE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_DEFAULT);
+      if (ret != KERN_SUCCESS)
+         return VK_ERROR_MEMORY_MAP_FAILED;'''
+          if old not in s:
+              old = '''      kern_return_t ret = vm_map(
+         mach_task_self(), &unmap_addr, bo->size_B, 0,
+         VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, MEMORY_OBJECT_NULL, 0, false,
+         VM_PROT_NONE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_DEFAULT);
+      if (ret != KERN_SUCCESS)
+         return VK_ERROR_MEMORY_MAP_FAILED;'''
+          new = '''      void *reserved_addr = mmap((void *)unmap_addr, bo->size_B, PROT_NONE,
+                                  MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0);
+      if (reserved_addr == MAP_FAILED)
+         return VK_ERROR_MEMORY_MAP_FAILED;'''
+          if old not in s:
+              raise SystemExit('kk_bo reserved-unmap block not found')
+          s = s.replace(old, new, 1)
 
-          # Fail here instead of spending another full build if any unsupported
-          # mach_vm call/type survived the patch.
-          leftovers = [
-              'mach_vm_address_t', 'mach_vm_size_t', 'mach_vm_remap(',
-              'mach_vm_map(', 'mach_vm_deallocate('
-          ]
+          # Handle a previously transformed vm_map spelling too, then verify.
+          s = s.replace('mach_vm_map(', 'vm_map(')
+          if 'vm_map(' in s:
+              raise SystemExit('Unavailable iOS vm_map survived patch')
+
+          p.write_text(s)
+          leftovers = ['mach_vm_address_t', 'mach_vm_size_t', 'mach_vm_remap(', 'mach_vm_map(', 'mach_vm_deallocate(']
           bad = [x for x in leftovers if x in s]
           if bad:
               raise SystemExit('Unpatched iOS Mach VM symbols: ' + ', '.join(bad))
           PY
-          grep -nE 'vm_(remap|map|deallocate)|mach_vm_' "$KK_BO" | tail -30
+          grep -nE 'vm_(remap|map|deallocate)|mmap|mach_vm_' "$KK_BO" | tail -30
 
       - name: Configure iOS engine
         shell: bash
