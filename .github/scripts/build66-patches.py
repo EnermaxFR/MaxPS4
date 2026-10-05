@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+import pathlib, subprocess, os
+root=pathlib.Path(os.environ['RUNNER_TEMP'])/'shadps4'
+# ARM64 signal execute faults: Apple ARM64 has no x86 execute-error bit.
+p=root/'src/common/signal_context.cpp'; s=p.read_text(); a='#elif defined(__FreeBSD__) && defined(ARCH_X86_64)\n    return ((ucontext_t*)ctx)->uc_mcontext.mc_err & 0x10;'; assert a in s; p.write_text(s.replace(a,'#elif defined(__APPLE__) && defined(ARCH_ARM64)\n    return false;\n'+a,1))
+# Guest x86 ucontext conversion is not available on an ARM64 host yet; keep host context and compile the bridge.
+p=root/'src/core/libraries/kernel/threads/exception.cpp'; s=p.read_text(); a='#else\n#error "ucontext_t conversion not implemented for current architecture."\n#endif'; assert s.count(a)==2; p.write_text(s.replace(a,'#elif defined(ARCH_ARM64)\n    return;\n#else\n#error "ucontext_t conversion not implemented for current architecture."\n#endif'))
+# Xbyak is x86-64 only; do not emit x86 trampolines with an ARM64 assembler API.
+p=root/'src/core/aerolib/stubs.cpp'; s=p.read_text(); s=s.replace('#include "common/logging/log.h"','#include "common/arch.h"\n#include "common/logging/log.h"',1); start='u64 GetStub(const char* nid) {'; end='\n}\n\n} // namespace Core::AeroLib'; pre,rest=s.split(start,1); body,tail=rest.split(end,1); repl='u64 GetStub(const char* nid) {\n#if defined(ARCH_ARM64)\n    (void)nid;\n    return reinterpret_cast<u64>(&CommonStub);\n#else'+body+'\n#endif\n}\n\n} // namespace Core::AeroLib'; p.write_text(pre+repl+tail)
+# Use bundled libusb headers for compilation; the iOS target already uses an interface target.
+p=root/'externals/CMakeLists.txt'; s=p.read_text(); a='    add_library(usb-1.0 INTERFACE)\n    add_library(libusb::usb ALIAS usb-1.0)'; b='    add_library(usb-1.0 INTERFACE)\n    target_include_directories(usb-1.0 INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/libusb/libusb")\n    add_library(libusb::usb ALIAS usb-1.0)'; assert a in s; p.write_text(s.replace(a,b,1))
+# iOS has no macOS route socket header/API.
+p=root/'src/core/libraries/network/net_util.cpp'; s=p.read_text(); s=s.replace('#include <net/route.h>','#if !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n#include <net/route.h>\n#endif',1); s=s.replace('#elif defined(__APPLE__)\n    // adapted from','#elif defined(__APPLE__) && !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n    // adapted from',1); p.write_text(s)
+# iOS uses UIKit, not Cocoa; desktop icon setup becomes a no-op.
+p=root/'src/sdl_window_apple.mm'; s=p.read_text(); p.write_text('#include <TargetConditionals.h>\n#if TARGET_OS_IPHONE\n#include <SDL3/SDL_video.h>\n#include "sdl_window.h"\nnamespace Frontend { void SetWindowIcon(SDL_Window*, const std::vector<u8>&) {} }\n#else\n'+s+'\n#endif\n')
+# cpp-httplib calls a macOS-only Security API. On iOS force its existing failure/fallback paths.
+p=root/'externals/cpp-httplib/httplib.h'; s=p.read_text(); s=s.replace('OSStatus status = SecTrustCopyAnchorCertificates(&certs);','OSStatus status = errSecUnimplemented;',1); s=s.replace('if (SecTrustCopyAnchorCertificates(&certs) != errSecSuccess || !certs) {','if (true) {',1); p.write_text(s)
+# Build protoc natively from the exact protobuf submodule revision to match generated C++ with target runtime.
+host=pathlib.Path(os.environ['RUNNER_TEMP'])/'host-protobuf'; mac=subprocess.check_output(['xcrun','--sdk','macosx','--show-sdk-path'],text=True).strip(); subprocess.run(['cmake','-S',str(root/'externals/protobuf'),'-B',str(host),'-G','Ninja','-DCMAKE_BUILD_TYPE=Release',f'-DCMAKE_OSX_SYSROOT={mac}','-Dprotobuf_BUILD_TESTS=OFF','-Dprotobuf_BUILD_SHARED_LIBS=OFF'],check=True); subprocess.run(['cmake','--build',str(host),'--target','protoc','--parallel','4'],check=True); protoc=host/'protoc'; assert protoc.exists()
+# Replace Build64's Homebrew protoc with the matching host protoc.
+p=root/'CMakeLists.txt'; s=p.read_text(); import re; s=re.sub(r'COMMAND "[^"]*/protoc"',f'COMMAND "{protoc}"',s,count=1); p.write_text(s)
+print('Build66 grouped iOS patches applied')
