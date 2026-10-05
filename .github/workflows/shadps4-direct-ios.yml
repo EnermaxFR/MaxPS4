@@ -150,7 +150,7 @@ jobs:
           root,ext,protoc=(pathlib.Path(sys.argv[1]),pathlib.Path(sys.argv[2]),sys.argv[3])
           s=root.read_text(); pos=s.find('add_executable(shadps4')
           if pos<0: raise SystemExit('executable anchor missing')
-          s=s[:pos]+'\nif(CMAKE_SYSTEM_NAME STREQUAL "iOS")\n add_compile_options(-fexperimental-library)\n set(USBD_LIB "")\nendif()\n'+s[pos:]
+          s=s[:pos]+'\nif(CMAKE_SYSTEM_NAME STREQUAL "iOS")\n set(USBD_LIB "")\nendif()\n'+s[pos:]
           if 'COMMAND protobuf::protoc' not in s: raise SystemExit('protoc anchor missing')
           root.write_text(s.replace('COMMAND protobuf::protoc',f'COMMAND "{protoc}"',1))
           e=ext.read_text(); old='# libusb\nif (NOT TARGET libusb::usb)\n    if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")'
@@ -229,27 +229,8 @@ jobs:
           python3 - "$ENGINE_ROOT/src/core/aerolib/stubs.cpp" <<'PY'
           import pathlib,sys
           p=pathlib.Path(sys.argv[1]); s=p.read_text()
-          old='''    e.code = std::make_unique<Xbyak::CodeGenerator>(32, Xbyak::AutoGrow);
-    e.code->mov(e.code->rdi, index);
-    e.code->mov(e.code->rax, reinterpret_cast<u64>(&CommonStub));
-    e.code->jmp(e.code->rax);
-    e.code->ready();
-
-    g_stub_entries.push_back(std::move(e));
-    return reinterpret_cast<u64>(g_stub_entries.back().code->getCode());'''
-          new='''#if defined(__arm64__) || defined(__aarch64__)
-    static const auto Arm64MissingStub = +[]() -> u64 { return 0; };
-    g_stub_entries.push_back(std::move(e));
-    return reinterpret_cast<u64>(Arm64MissingStub);
-#else
-    e.code = std::make_unique<Xbyak::CodeGenerator>(32, Xbyak::AutoGrow);
-    e.code->mov(e.code->rdi, index);
-    e.code->mov(e.code->rax, reinterpret_cast<u64>(&CommonStub));
-    e.code->jmp(e.code->rax);
-    e.code->ready();
-    g_stub_entries.push_back(std::move(e));
-    return reinterpret_cast<u64>(g_stub_entries.back().code->getCode());
-#endif'''
+          old='''    e.code = std::make_unique<Xbyak::CodeGenerator>(32, Xbyak::AutoGrow);\n    e.code->mov(e.code->rdi, index);\n    e.code->mov(e.code->rax, reinterpret_cast<u64>(&CommonStub));\n    e.code->jmp(e.code->rax);\n    e.code->ready();\n\n    g_stub_entries.push_back(std::move(e));\n    return reinterpret_cast<u64>(g_stub_entries.back().code->getCode());'''
+          new='''#if defined(__arm64__) || defined(__aarch64__)\n    static const auto Arm64MissingStub = +[]() -> u64 { return 0; };\n    g_stub_entries.push_back(std::move(e));\n    return reinterpret_cast<u64>(Arm64MissingStub);\n#else\n    e.code = std::make_unique<Xbyak::CodeGenerator>(32, Xbyak::AutoGrow);\n    e.code->mov(e.code->rdi, index);\n    e.code->mov(e.code->rax, reinterpret_cast<u64>(&CommonStub));\n    e.code->jmp(e.code->rax);\n    e.code->ready();\n    g_stub_entries.push_back(std::move(e));\n    return reinterpret_cast<u64>(g_stub_entries.back().code->getCode());\n#endif'''
           if old not in s: raise SystemExit('AeroLib Xbyak anchor missing')
           p.write_text(s.replace(old,new,1))
           PY
