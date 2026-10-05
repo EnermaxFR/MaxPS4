@@ -1,17 +1,26 @@
 import Darwin
 import Foundation
 
-/// Central JIT memory manager for the shadPS4 iOS port.
+/// Central JIT memory manager for the MaxPS4 iOS frontend.
 ///
-/// iOS requires executable JIT pages to be created with MAP_JIT and the
-/// dynamic-codesigning entitlement. Writes are bracketed with
-/// pthread_jit_write_protect_np so the same pages are never writable and
-/// executable at the same time.
+/// MAP_JIT is available to entitled sideloaded builds, but
+/// pthread_jit_write_protect_np is marked unavailable by the public iOS SDK.
+/// Resolve it dynamically when present so the app can still compile with the
+/// official iPhoneOS SDK.
 final class JITRuntime {
     static let shared = JITRuntime()
 
+    private typealias JITWriteProtectFunction = @convention(c) (Int32) -> Void
+
     private(set) var isAvailable = false
     private(set) var lastError: String?
+
+    private lazy var jitWriteProtect: JITWriteProtectFunction? = {
+        guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "pthread_jit_write_protect_np") else {
+            return nil
+        }
+        return unsafeBitCast(symbol, to: JITWriteProtectFunction.self)
+    }()
 
     private init() {
         probe()
@@ -27,9 +36,9 @@ final class JITRuntime {
             return
         }
 
-        pthread_jit_write_protect_np(0)
+        jitWriteProtect?(0)
         memset(memory, 0, pageSize)
-        pthread_jit_write_protect_np(1)
+        jitWriteProtect?(1)
         munmap(memory, pageSize)
 
         isAvailable = true
@@ -51,12 +60,12 @@ final class JITRuntime {
 
     @inline(__always)
     func beginWrite() {
-        pthread_jit_write_protect_np(0)
+        jitWriteProtect?(0)
     }
 
     @inline(__always)
     func endWrite() {
-        pthread_jit_write_protect_np(1)
+        jitWriteProtect?(1)
     }
 
     func release(_ pointer: UnsafeMutableRawPointer, size: Int) {
