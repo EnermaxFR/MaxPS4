@@ -14,6 +14,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/maxps4-ccache
+          key: maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-v2-${{ github.run_id }}
+          restore-keys: |
+            maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-v2-
+            maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-
+
       - name: Install toolchain
         shell: bash
         run: |
@@ -25,6 +34,8 @@ jobs:
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
           echo "$RUNNER_TEMP/maxps4-python/bin" >> "$GITHUB_PATH"
           echo "CCACHE_DIR=$HOME/.cache/maxps4-ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_COMPRESS=true" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=5G" >> "$GITHUB_ENV"
 
       - name: Checkout shadPS4
         shell: bash
@@ -36,58 +47,45 @@ jobs:
           test -f "$RUNNER_TEMP/shadps4/src/emulator.h"
           echo "SHADPS4_ENGINE_ROOT=$RUNNER_TEMP/shadps4" >> "$GITHUB_ENV"
 
-      - name: Apply iOS Mach VM compatibility
+      - name: Apply grouped iOS compatibility
         shell: bash
         run: |
           set -euxo pipefail
           KK_BO="$(find "$SHADPS4_ENGINE_ROOT/externals/mesa-kosmickrisp/externals/mesa" -path '*/src/kosmickrisp/vulkan/kk_bo.c' -print -quit)"
           test -n "$KK_BO"
           python3 - "$KK_BO" <<'PY'
-          import pathlib
-          import sys
+          import pathlib, sys
           p = pathlib.Path(sys.argv[1])
           s = p.read_text()
-          s = s.replace('#include <mach/mach_vm.h>', '#include <mach/mach.h>\n#include <mach/vm_map.h>\n#include <sys/mman.h>')
-          s = s.replace('mach_vm_address_t', 'vm_address_t')
-          s = s.replace('mach_vm_size_t', 'vm_size_t')
-          s = s.replace('mach_vm_remap(', 'vm_remap(')
-          s = s.replace('mach_vm_deallocate(', 'vm_deallocate(')
-          s = s.replace('&dst_addr, bo->size_B, 0,', '&dst_addr, (vm_size_t)bo->size_B, 0,')
-          s = s.replace('unmap_addr, bo->size_B);', 'unmap_addr, (vm_size_t)bo->size_B);')
-          lines = s.splitlines()
-          out = []
-          i = 0
-          replaced = False
-          while i < len(lines):
-              if 'kern_return_t ret = mach_vm_map(' in lines[i] or 'kern_return_t ret = vm_map(' in lines[i]:
-                  indent = lines[i][:len(lines[i]) - len(lines[i].lstrip())]
-                  while i < len(lines) and 'if (ret != KERN_SUCCESS)' not in lines[i]:
-                      i += 1
-                  if i >= len(lines):
-                      raise SystemExit('kk_bo map result check not found')
-                  i += 1
-                  if i >= len(lines) or 'return VK_ERROR_MEMORY_MAP_FAILED;' not in lines[i]:
-                      raise SystemExit('kk_bo map failure return not found')
-                  out.extend([
-                      indent + 'void *reserved_addr = mmap((void *)unmap_addr, bo->size_B, PROT_NONE,',
-                      indent + '                           MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0);',
-                      indent + 'if (reserved_addr == MAP_FAILED)',
-                      indent + '   return VK_ERROR_MEMORY_MAP_FAILED;'
-                  ])
-                  replaced = True
-                  i += 1
-                  continue
-              out.append(lines[i])
-              i += 1
-          if not replaced:
-              raise SystemExit('kk_bo reserved mapping block not found')
-          s = '\n'.join(out) + '\n'
-          bad = [x for x in ['mach_vm_address_t','mach_vm_size_t','mach_vm_remap(','mach_vm_map(','mach_vm_deallocate(','vm_map('] if x in s]
+          old = '''#include <mach/mach_init.h>\n#include <mach/mach_vm.h>'''
+          new = '''#include <mach/mach.h>\n#include <mach/vm_map.h>'''
+          if old not in s:
+              raise SystemExit('Expected Mach includes not found')
+          s = s.replace(old, new, 1)
+          s = s.replace('mach_vm_address_t src_addr', 'vm_address_t src_addr')
+          s = s.replace('mach_vm_address_t dst_addr', 'vm_address_t dst_addr')
+          s = s.replace('(mach_vm_address_t)bo->cpu', '(vm_address_t)bo->cpu')
+          s = s.replace('(mach_vm_address_t)*addr', '(vm_address_t)*addr')
+          s = s.replace('mach_vm_address_t unmap_addr', 'vm_address_t unmap_addr')
+          s = s.replace('(mach_vm_address_t)addr', '(vm_address_t)addr')
+          s = s.replace('mach_vm_remap(mach_task_self(), &dst_addr, bo->size_B, 0,',
+                        'vm_remap(mach_task_self(), &dst_addr, (vm_size_t)bo->size_B, 0,')
+          s = s.replace('flags, mach_task_self(), src_addr, false,',
+                        'flags, mach_task_self(), src_addr, false,')
+          old_map = '''      /* Replace with a reserved mapping using mach_vm_map */\n      kern_return_t ret = mach_vm_map(\n         mach_task_self(), &unmap_addr, bo->size_B, 0,\n         VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, MEMORY_OBJECT_NULL, 0, false,\n         VM_PROT_NONE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_DEFAULT);\n      if (ret != KERN_SUCCESS)\n         return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED,\n                          "mach_vm_map failed: %d", ret);'''
+          new_map = '''      /* iOS does not expose mach_vm_map; reserve the same address with vm_allocate. */\n      kern_return_t ret = vm_allocate(mach_task_self(), &unmap_addr,\n                                      (vm_size_t)bo->size_B, VM_FLAGS_FIXED);\n      if (ret != KERN_SUCCESS)\n         return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED,\n                          "vm_allocate failed: %d", ret);'''
+          if old_map not in s:
+              raise SystemExit('Expected reserved mach_vm_map block not found')
+          s = s.replace(old_map, new_map, 1)
+          s = s.replace('mach_vm_deallocate(mach_task_self(), unmap_addr, bo->size_B);',
+                        'vm_deallocate(mach_task_self(), unmap_addr, (vm_size_t)bo->size_B);')
+          forbidden = ['mach_vm_address_t', 'mach_vm_remap(', 'mach_vm_map(', 'mach_vm_deallocate(']
+          bad = [x for x in forbidden if x in s]
           if bad:
               raise SystemExit('Unpatched iOS VM symbols: ' + ', '.join(bad))
           p.write_text(s)
           PY
-          grep -nE 'vm_(remap|deallocate)|mmap|mach_vm_' "$KK_BO" | tail -30
+          grep -nE 'vm_(remap|allocate|deallocate)|mach_vm_' "$KK_BO" | tail -40
 
       - name: Configure iOS engine
         shell: bash
@@ -113,12 +111,26 @@ jobs:
             -DENABLE_UPDATER=OFF \
             -DENABLE_DISCORD_RPC=OFF
 
-      - name: Build iOS engine
+      - name: Build iOS engine and collect diagnostics
         shell: bash
         run: |
-          set -euxo pipefail
-          cmake --build "$RUNNER_TEMP/build" --parallel "$(sysctl -n hw.logicalcpu)"
+          set -uo pipefail
+          JOBS="$(sysctl -n hw.logicalcpu)"
+          set +e
+          cmake --build "$RUNNER_TEMP/build" --parallel "$JOBS" -- -k 50 2>&1 | tee "$RUNNER_TEMP/shadps4-build.log"
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          ccache --show-stats || true
           echo "SHADPS4_BUILD_DIR=$RUNNER_TEMP/build" >> "$GITHUB_ENV"
+          exit "$STATUS"
+
+      - name: Upload engine diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shadps4-ios-build-log
+          path: ${{ runner.temp }}/shadps4-build.log
+          if-no-files-found: ignore
 
       - name: Collect engine libraries
         shell: bash
