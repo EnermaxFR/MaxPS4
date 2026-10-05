@@ -56,8 +56,68 @@ jobs:
           import pathlib,sys
           p=pathlib.Path(sys.argv[1]); s=p.read_text()
           s=s.replace('#include <mach/mach_vm.h>', '#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)\n#include <mach/mach.h>\n#include <mach/vm_map.h>\n#else\n#include <mach/mach_vm.h>\n#endif', 1)
-          s=s.replace('mach_vm_remap(', 'vm_remap(').replace('mach_vm_map(', 'vm_map(').replace('mach_vm_deallocate(', 'vm_deallocate(')
-          s=s.replace('mach_vm_address_t ', 'vm_address_t ').replace('mach_vm_size_t ', 'vm_size_t ').replace('mach_vm_offset_t ', 'vm_offset_t ')
+          old='''   mach_vm_address_t src_addr = (mach_vm_address_t)bo->cpu;
+   mach_vm_address_t dst_addr = (mach_vm_address_t)*addr;'''
+          new='''#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+   vm_address_t src_addr = (vm_address_t)bo->cpu;
+   vm_address_t dst_addr = (vm_address_t)*addr;
+#else
+   mach_vm_address_t src_addr = (mach_vm_address_t)bo->cpu;
+   mach_vm_address_t dst_addr = (mach_vm_address_t)*addr;
+#endif'''
+          if old not in s: raise SystemExit('kk_bo_map_placed declarations not found')
+          s=s.replace(old,new,1)
+          old='''   kern_return_t ret = mach_vm_remap(mach_task_self(), &dst_addr, bo->size_B, 0,
+                                     flags, mach_task_self(), src_addr, false,
+                                     &cur_prot, &max_prot, VM_INHERIT_DEFAULT);'''
+          new='''#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+   vm_address_t src_remap_addr = src_addr;
+   kern_return_t ret = vm_remap(mach_task_self(), &dst_addr,
+                                (vm_size_t)bo->size_B, 0, flags,
+                                mach_task_self(), src_remap_addr, false,
+                                &cur_prot, &max_prot, VM_INHERIT_DEFAULT);
+#else
+   kern_return_t ret = mach_vm_remap(mach_task_self(), &dst_addr, bo->size_B, 0,
+                                     flags, mach_task_self(), src_addr, false,
+                                     &cur_prot, &max_prot, VM_INHERIT_DEFAULT);
+#endif'''
+          if old not in s: raise SystemExit('mach_vm_remap call not found')
+          s=s.replace(old,new,1)
+          old='''   mach_vm_address_t unmap_addr = (mach_vm_address_t)addr;
+   if (reserved) {
+      /* Replace with a reserved mapping using mach_vm_map */
+      kern_return_t ret = mach_vm_map(
+         mach_task_self(), &unmap_addr, bo->size_B, 0,
+         VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, MEMORY_OBJECT_NULL, 0, false,
+         VM_PROT_NONE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_DEFAULT);'''
+          new='''#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+   vm_address_t unmap_addr = (vm_address_t)addr;
+#else
+   mach_vm_address_t unmap_addr = (mach_vm_address_t)addr;
+#endif
+   if (reserved) {
+      /* Replace with a reserved mapping using the platform VM API. */
+#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+      kern_return_t ret = vm_map(
+         mach_task_self(), &unmap_addr, (vm_size_t)bo->size_B, 0,
+         VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, MEMORY_OBJECT_NULL, 0, false,
+         VM_PROT_NONE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_DEFAULT);
+#else
+      kern_return_t ret = mach_vm_map(
+         mach_task_self(), &unmap_addr, bo->size_B, 0,
+         VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, MEMORY_OBJECT_NULL, 0, false,
+         VM_PROT_NONE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_DEFAULT);
+#endif'''
+          if old not in s: raise SystemExit('mach_vm_map block not found')
+          s=s.replace(old,new,1)
+          old='''      mach_vm_deallocate(mach_task_self(), unmap_addr, bo->size_B);'''
+          new='''#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+      vm_deallocate(mach_task_self(), unmap_addr, (vm_size_t)bo->size_B);
+#else
+      mach_vm_deallocate(mach_task_self(), unmap_addr, bo->size_B);
+#endif'''
+          if old not in s: raise SystemExit('mach_vm_deallocate call not found')
+          s=s.replace(old,new,1)
           p.write_text(s)
           PY
       - name: Configure iOS engine
