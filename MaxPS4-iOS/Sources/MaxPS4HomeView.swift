@@ -24,6 +24,7 @@ struct MaxPS4HomeView: View {
                     emptyLibrary
                     quickActions
                     statusCard
+                    legalAndContributions
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 14)
@@ -179,5 +180,84 @@ struct MaxPS4HomeView: View {
         }
         .padding(14)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var legalAndContributions: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("À propos")
+                .font(.title2.bold())
+
+            NavigationLink {
+                LicensesView()
+            } label: {
+                infoRow("Licences", icon: "doc.text.fill")
+            }
+            .buttonStyle(.plain)
+
+            NavigationLink {
+                ContributionsView()
+            } label: {
+                infoRow("Contributions", icon: "person.3.fill")
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func infoRow(_ title: String, icon: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .foregroundStyle(blue)
+                .frame(width: 28)
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(.white)
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 18))
+    }
+}
+
+struct LicensesView: View {
+    var body: some View {
+        List {
+            Section("MaxPS4") {
+                Text("MaxPS4 est distribué selon les conditions de sa licence et conserve les mentions de licence applicables à son code et à ses composants.")
+            }
+            Section("shadPS4") {
+                Text("MaxPS4 utilise et adapte des composants du projet open source shadPS4. Les droits d’auteur et conditions de licence de shadPS4 et de ses dépendances restent applicables.")
+            }
+            Section("Composants open source") {
+                Text("Les bibliothèques tierces intégrées conservent leurs licences et avis de droits d’auteur respectifs.")
+            }
+        }
+        .navigationTitle("Licences")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+struct ContributionsView: View {
+    var body: some View {
+        List {
+            Section("MaxPS4") {
+                Label("Développement et portage iOS", systemImage: "iphone")
+                Label("Interface et intégration", systemImage: "hammer.fill")
+            }
+            Section("Projets open source") {
+                Label("shadPS4 — cœur d’émulation", systemImage: "cpu")
+                Label("FFmpeg — multimédia", systemImage: "film")
+                Label("SDL — plateforme et contrôleurs", systemImage: "gamecontroller")
+                Label("Mesa / Vulkan — rendu graphique", systemImage: "sparkles")
+            }
+            Section {
+                Text("Merci aux développeurs et contributeurs des projets open source qui rendent MaxPS4 possible.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("Contributions")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
