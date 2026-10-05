@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/maxps4-ipa.yml'
       - 'MaxPS4-iOS/Sources/**'
+      - 'MaxPS4-iOS/Core/**'
       - 'MaxPS4-iOS/project.yml'
       - 'MaxPS4-iOS/MaxPS4.entitlements'
 
@@ -17,12 +18,61 @@ jobs:
       - name: Checkout MaxPS4
         uses: actions/checkout@v4
 
-      - name: Install XcodeGen
+      - name: Install build tools
         shell: bash
         run: |
           set -euxo pipefail
-          brew install xcodegen || true
+          brew install xcodegen cmake ninja || true
           xcodegen --version
+          cmake --version
+          ninja --version
+
+      - name: Checkout pinned shadPS4 engine
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ENGINE_ROOT="$RUNNER_TEMP/shadps4-official"
+          git clone https://github.com/shadps4-emu/shadPS4.git "$ENGINE_ROOT"
+          git -C "$ENGINE_ROOT" checkout b3452cf6a9bd0969771fcfbf919c359368473d1b
+          git -C "$ENGINE_ROOT" submodule update --init --recursive
+          test -f "$ENGINE_ROOT/src/emulator.h"
+          echo "SHADPS4_ENGINE_ROOT=$ENGINE_ROOT" >> "$GITHUB_ENV"
+
+      - name: Configure and build shadPS4 for iOS
+        shell: bash
+        run: |
+          set -euxo pipefail
+          IOS_SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
+          BUILD="$RUNNER_TEMP/shadps4-ios-build"
+          export IPHONEOS_DEPLOYMENT_TARGET=18.0
+          cmake -S "$SHADPS4_ENGINE_ROOT" -B "$BUILD" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_STANDARD=23 \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_SYSTEM_PROCESSOR=arm64 \
+            -DCMAKE_OSX_SYSROOT="$IOS_SDKROOT" \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 \
+            -DENABLE_TESTS=OFF \
+            -DENABLE_UPDATER=OFF \
+            -DENABLE_DISCORD_RPC=OFF
+          cmake --build "$BUILD" --parallel 2
+          echo "SHADPS4_BUILD_DIR=$BUILD" >> "$GITHUB_ENV"
+
+      - name: Collect shadPS4 static libraries
+        shell: bash
+        run: |
+          set -euxo pipefail
+          LIBDIR="$RUNNER_TEMP/shadps4-ios-libs"
+          mkdir -p "$LIBDIR"
+          find "$SHADPS4_BUILD_DIR" -type f -name '*.a' -print -exec cp -f {} "$LIBDIR/" \;
+          COUNT="$(find "$LIBDIR" -type f -name '*.a' | wc -l | tr -d ' ')"
+          test "$COUNT" -gt 0
+          printf 'Collected %s static libraries\n' "$COUNT"
+          LINK_FLAGS=""
+          for lib in "$LIBDIR"/*.a; do LINK_FLAGS="$LINK_FLAGS $lib"; done
+          echo "SHADPS4_LIBRARY_DIR=$LIBDIR" >> "$GITHUB_ENV"
+          echo "SHADPS4_LINK_FLAGS=$LINK_FLAGS" >> "$GITHUB_ENV"
 
       - name: Generate Xcode project
         shell: bash
@@ -45,6 +95,9 @@ jobs:
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath "$BUILD_DIR" \
+            SHADPS4_ENGINE_ROOT="$SHADPS4_ENGINE_ROOT" \
+            SHADPS4_LIBRARY_DIR="$SHADPS4_LIBRARY_DIR" \
+            SHADPS4_LINK_FLAGS="$SHADPS4_LINK_FLAGS" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             build
