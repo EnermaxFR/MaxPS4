@@ -1,5 +1,11 @@
 # MaxPS4
 
+## 💬 Rejoindre le Discord MaxPS4
+
+[![Discord](https://img.shields.io/badge/Discord-Rejoindre%20MaxPS4-5865F2?logo=discord&logoColor=white)](https://discord.gg/G7BaXN4fd)
+
+**👉 [Rejoindre le serveur Discord MaxPS4](https://discord.gg/G7BaXN4fd)**
+
 MaxPS4 est un projet expérimental iOS autour d'un port du moteur open source shadPS4.
 
 > Projet en développement — la compatibilité des jeux et du core iOS n'est pas garantie.
