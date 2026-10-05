@@ -22,10 +22,17 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          brew install xcodegen cmake ninja || true
+          brew install xcodegen cmake ninja llvm spirv-llvm-translator spirv-tools glslang pkgconf || true
+          LLVM_PREFIX="$(brew --prefix llvm)"
+          test -x "$LLVM_PREFIX/bin/llvm-config"
+          echo "$LLVM_PREFIX/bin" >> "$GITHUB_PATH"
+          echo "LLVM_PREFIX=$LLVM_PREFIX" >> "$GITHUB_ENV"
+          echo "LLVM_DIR=$LLVM_PREFIX/lib/cmake/llvm" >> "$GITHUB_ENV"
+          echo "LLVM_ROOT=$LLVM_PREFIX" >> "$GITHUB_ENV"
           xcodegen --version
           cmake --version
           ninja --version
+          "$LLVM_PREFIX/bin/llvm-config" --version
 
       - name: Checkout pinned shadPS4 engine
         shell: bash
@@ -44,6 +51,8 @@ jobs:
           set -euxo pipefail
           IOS_SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
           BUILD="$RUNNER_TEMP/shadps4-ios-build"
+          LLVM_CONFIG="$LLVM_PREFIX/bin/llvm-config"
+          test -x "$LLVM_CONFIG"
           export IPHONEOS_DEPLOYMENT_TARGET=18.0
           cmake -S "$SHADPS4_ENGINE_ROOT" -B "$BUILD" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
@@ -53,6 +62,9 @@ jobs:
             -DCMAKE_OSX_SYSROOT="$IOS_SDKROOT" \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+            -DKK_LLVM_CONFIG="$LLVM_CONFIG" \
+            -DLLVM_DIR="$LLVM_DIR" \
             -DENABLE_TESTS=OFF \
             -DENABLE_UPDATER=OFF \
             -DENABLE_DISCORD_RPC=OFF
