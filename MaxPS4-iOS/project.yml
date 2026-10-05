@@ -16,6 +16,7 @@ targets:
         PRODUCT_NAME: MaxPS4
         PRODUCT_BUNDLE_IDENTIFIER: com.enermaxfr.maxps4
         SWIFT_VERSION: "5.0"
+        CLANG_CXX_LANGUAGE_STANDARD: "c++23"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: MaxPS4
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
@@ -26,3 +27,17 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: Sources/MaxPS4-Bridging-Header.h
         HEADER_SEARCH_PATHS:
           - "$(SRCROOT)/Core"
+          - "$(SHADPS4_ENGINE_ROOT)/src"
+          - "$(SHADPS4_ENGINE_ROOT)"
+          - "$(SHADPS4_ENGINE_ROOT)/externals/fmt/include"
+          - "$(SHADPS4_ENGINE_ROOT)/externals/robin-map/include"
+          - "$(SHADPS4_ENGINE_ROOT)/externals/magic_enum/include"
+          - "$(SHADPS4_ENGINE_ROOT)/externals/json/include"
+          - "$(SHADPS4_ENGINE_ROOT)/externals/ext-boost"
+          - "$(SHADPS4_ENGINE_ROOT)/externals/vulkan-headers/include"
+          - "$(SHADPS4_ENGINE_ROOT)/externals/sdl3/include"
+        LIBRARY_SEARCH_PATHS:
+          - "$(SHADPS4_LIBRARY_DIR)"
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "$(SHADPS4_LINK_FLAGS)"
