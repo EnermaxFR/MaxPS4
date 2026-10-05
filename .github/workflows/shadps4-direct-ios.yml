@@ -25,7 +25,6 @@ jobs:
           SPIRV_PREFIX="$(brew --prefix spirv-llvm-translator)"
           SPIRV_TOOLS_PREFIX="$(brew --prefix spirv-tools)"
           GLSLANG_PREFIX="$(brew --prefix glslang)"
-          PROTOBUF_PREFIX="$(brew --prefix protobuf)"
           echo "$LLVM_PREFIX/bin" >> "$GITHUB_PATH"
           echo "$SPIRV_TOOLS_PREFIX/bin" >> "$GITHUB_PATH"
           echo "$GLSLANG_PREFIX/bin" >> "$GITHUB_PATH"
@@ -34,11 +33,9 @@ jobs:
           echo "SPIRV_LLVM_TRANSLATOR_ROOT=$SPIRV_PREFIX" >> "$GITHUB_ENV"
           echo "SPIRV_TOOLS_ROOT=$SPIRV_TOOLS_PREFIX" >> "$GITHUB_ENV"
           echo "HOST_GLSLANG_VALIDATOR=$GLSLANG_PREFIX/bin/glslangValidator" >> "$GITHUB_ENV"
-          echo "HOST_PROTOC=$PROTOBUF_PREFIX/bin/protoc" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$SPIRV_TOOLS_PREFIX/lib/pkgconfig:$SPIRV_PREFIX/lib/pkgconfig:$LLVM_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$GLSLANG_PREFIX:$SPIRV_TOOLS_PREFIX:$SPIRV_PREFIX:$LLVM_PREFIX:${CMAKE_PREFIX_PATH:-}" >> "$GITHUB_ENV"
           test -x "$GLSLANG_PREFIX/bin/glslangValidator"
-          test -x "$PROTOBUF_PREFIX/bin/protoc"
           python3 -m venv "$RUNNER_TEMP/maxps4-python"
           "$RUNNER_TEMP/maxps4-python/bin/python" -m pip install --upgrade pip packaging mako pyyaml meson
           echo "$RUNNER_TEMP/maxps4-python/bin" >> "$GITHUB_PATH"
@@ -52,6 +49,22 @@ jobs:
           git -C "$ENGINE_ROOT" checkout b3452cf6a9bd0969771fcfbf919c359368473d1b
           git -C "$ENGINE_ROOT" submodule update --init --recursive
           echo "ENGINE_ROOT=$ENGINE_ROOT" >> "$GITHUB_ENV"
+
+          # Build the host protoc from the exact Protobuf sources embedded by
+          # this shadPS4 revision. This guarantees generated C++ code matches
+          # the headers/runtime used later by the iOS target build.
+          PROTOBUF_HOST_BUILD="$RUNNER_TEMP/protobuf-host-build"
+          cmake -S "$ENGINE_ROOT/externals/protobuf" -B "$PROTOBUF_HOST_BUILD" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -Dprotobuf_BUILD_TESTS=OFF \
+            -Dprotobuf_BUILD_EXAMPLES=OFF \
+            -Dprotobuf_BUILD_CONFORMANCE=OFF \
+            -Dprotobuf_BUILD_PROTOC_BINARIES=ON
+          cmake --build "$PROTOBUF_HOST_BUILD" --target protoc --parallel 2
+          HOST_PROTOC="$PROTOBUF_HOST_BUILD/protoc"
+          test -x "$HOST_PROTOC"
+          "$HOST_PROTOC" --version
+          echo "HOST_PROTOC=$HOST_PROTOC" >> "$GITHUB_ENV"
 
       - name: Audit upstream for iOS-incompatible APIs
         shell: bash
