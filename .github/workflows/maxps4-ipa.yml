@@ -22,17 +22,36 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          brew install xcodegen cmake ninja llvm spirv-llvm-translator spirv-tools glslang pkgconf || true
+          brew install xcodegen cmake ninja protobuf llvm spirv-llvm-translator spirv-tools glslang pkgconf || true
           LLVM_PREFIX="$(brew --prefix llvm)"
+          SPIRV_PREFIX="$(brew --prefix spirv-llvm-translator)"
+          SPIRV_TOOLS_PREFIX="$(brew --prefix spirv-tools)"
+          GLSLANG_PREFIX="$(brew --prefix glslang)"
           test -x "$LLVM_PREFIX/bin/llvm-config"
+          test -x "$GLSLANG_PREFIX/bin/glslangValidator"
           echo "$LLVM_PREFIX/bin" >> "$GITHUB_PATH"
+          echo "$SPIRV_TOOLS_PREFIX/bin" >> "$GITHUB_PATH"
+          echo "$GLSLANG_PREFIX/bin" >> "$GITHUB_PATH"
           echo "LLVM_PREFIX=$LLVM_PREFIX" >> "$GITHUB_ENV"
           echo "LLVM_DIR=$LLVM_PREFIX/lib/cmake/llvm" >> "$GITHUB_ENV"
           echo "LLVM_ROOT=$LLVM_PREFIX" >> "$GITHUB_ENV"
+          echo "SPIRV_LLVM_TRANSLATOR_ROOT=$SPIRV_PREFIX" >> "$GITHUB_ENV"
+          echo "SPIRV_TOOLS_ROOT=$SPIRV_TOOLS_PREFIX" >> "$GITHUB_ENV"
+          echo "HOST_GLSLANG_VALIDATOR=$GLSLANG_PREFIX/bin/glslangValidator" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$SPIRV_TOOLS_PREFIX/lib/pkgconfig:$SPIRV_PREFIX/lib/pkgconfig:$LLVM_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$GLSLANG_PREFIX:$SPIRV_TOOLS_PREFIX:$SPIRV_PREFIX:$LLVM_PREFIX:${CMAKE_PREFIX_PATH:-}" >> "$GITHUB_ENV"
+
+          python3 -m venv "$RUNNER_TEMP/maxps4-python"
+          "$RUNNER_TEMP/maxps4-python/bin/python" -m pip install --upgrade pip packaging mako pyyaml meson
+          echo "$RUNNER_TEMP/maxps4-python/bin" >> "$GITHUB_PATH"
+          echo "MAXPS4_PYTHON_BIN=$RUNNER_TEMP/maxps4-python/bin" >> "$GITHUB_ENV"
+
           xcodegen --version
           cmake --version
           ninja --version
           "$LLVM_PREFIX/bin/llvm-config" --version
+          "$RUNNER_TEMP/maxps4-python/bin/meson" --version
+          "$GLSLANG_PREFIX/bin/glslangValidator" --version
 
       - name: Checkout pinned shadPS4 engine
         shell: bash
@@ -45,6 +64,68 @@ jobs:
           test -f "$ENGINE_ROOT/src/emulator.h"
           echo "SHADPS4_ENGINE_ROOT=$ENGINE_ROOT" >> "$GITHUB_ENV"
 
+          PROTOBUF_HOST_BUILD="$RUNNER_TEMP/protobuf-host-build"
+          cmake -S "$ENGINE_ROOT/externals/protobuf" -B "$PROTOBUF_HOST_BUILD" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -Dprotobuf_BUILD_TESTS=OFF \
+            -Dprotobuf_BUILD_EXAMPLES=OFF \
+            -Dprotobuf_BUILD_CONFORMANCE=OFF \
+            -Dprotobuf_BUILD_PROTOC_BINARIES=ON
+          cmake --build "$PROTOBUF_HOST_BUILD" --target protoc --parallel 2
+          HOST_PROTOC="$PROTOBUF_HOST_BUILD/protoc"
+          test -x "$HOST_PROTOC"
+          "$HOST_PROTOC" --version
+          echo "HOST_PROTOC=$HOST_PROTOC" >> "$GITHUB_ENV"
+
+      - name: Prepare shadPS4 iOS host tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          KK="$SHADPS4_ENGINE_ROOT/externals/mesa-kosmickrisp"
+          MAC_SDK="$(xcrun --sdk macosx --show-sdk-path)"
+          IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          MAC_VER="$(xcrun --sdk macosx --show-sdk-platform-version)"
+          LLVM_CONFIG="$LLVM_PREFIX/bin/llvm-config"
+
+          # Mesa/Kosmickrisp runs Meson as a host tool while the main project is cross-compiling.
+          # Keep host tools on the macOS SDK and make the iOS target cross-file explicit.
+          python3 - "$KK/CMakeLists.txt" "$MAC_SDK" "$IOS_SDK" "$LLVM_CONFIG" "$MAC_VER" <<'PY'
+          import pathlib,sys
+          p=pathlib.Path(sys.argv[1]); mac,ios,llvm,macver=sys.argv[2:]; s=p.read_text()
+          old='set(MESA_ENVIRONMENT_TOOLS\n    LLVM_CONFIG=${KK_LLVM_CONFIG})'
+          if old in s:
+              s=s.replace(old,f'''set(MESA_ENVIRONMENT_TOOLS\n    LLVM_CONFIG={llvm}\n    SDKROOT={mac}\n    MACOSX_DEPLOYMENT_TARGET={macver}\n    CFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver}\n    CXXFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver}\n    LDFLAGS=-isysroot\\ {mac}\\ -mmacosx-version-min={macver})''')
+          s=s.replace('set(MESA_CROSS_FILE_TARGET ${MESA_CROSSFILES_DIR}/mesa-${KK_TARGET_ARCHITECTURE}.ini)','set(MESA_CROSS_FILE_TARGET ${MESA_CROSSFILES_DIR}/mesa-ios-aarch64.ini)')
+          p.write_text(s)
+          PY
+
+          cat > "$KK/crossfiles/mesa-ios-aarch64.ini" <<EOF
+          [binaries]
+          c='clang'
+          cpp='clang++'
+          objc='clang'
+          objcpp='clang++'
+          ar='ar'
+          strip='strip'
+          [built-in options]
+          c_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          cpp_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          objc_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          objcpp_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          c_link_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          cpp_link_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          objc_link_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          objcpp_link_args=['-target','arm64-apple-ios18.0','-isysroot','$IOS_SDK']
+          [host_machine]
+          system='darwin'
+          cpu_family='aarch64'
+          cpu='aarch64'
+          endian='little'
+          EOF
+
+          # Cross builds cannot execute target probes. Pre-seed the libevent timer probe.
+          echo 'set(ALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO_EXITCODE 0 CACHE STRING "iOS cross compile result" FORCE)' > "$RUNNER_TEMP/maxps4-ios-cache.cmake"
+
       - name: Configure and build shadPS4 for iOS
         shell: bash
         run: |
@@ -53,8 +134,11 @@ jobs:
           BUILD="$RUNNER_TEMP/shadps4-ios-build"
           LLVM_CONFIG="$LLVM_PREFIX/bin/llvm-config"
           test -x "$LLVM_CONFIG"
+          test -x "$MAXPS4_PYTHON_BIN/meson"
+          export PATH="$MAXPS4_PYTHON_BIN:$PATH"
           export IPHONEOS_DEPLOYMENT_TARGET=18.0
           cmake -S "$SHADPS4_ENGINE_ROOT" -B "$BUILD" -G Ninja \
+            -C "$RUNNER_TEMP/maxps4-ios-cache.cmake" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_STANDARD=23 \
             -DCMAKE_SYSTEM_NAME=iOS \
