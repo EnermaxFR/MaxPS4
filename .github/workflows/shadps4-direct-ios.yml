@@ -74,6 +74,40 @@ jobs:
           MAC_VER="$(xcrun --sdk macosx --show-sdk-platform-version)"
           LLVM_CONFIG="$(brew --prefix llvm)/bin/llvm-config"
 
+          FFMPEG_SRC="$RUNNER_TEMP/ffmpeg-7.1"
+          FFMPEG_IOS_PREFIX="$RUNNER_TEMP/ffmpeg-ios-arm64"
+          git clone --depth 1 --branch n7.1 https://github.com/FFmpeg/FFmpeg.git "$FFMPEG_SRC"
+          pushd "$FFMPEG_SRC"
+          ./configure \
+            --prefix="$FFMPEG_IOS_PREFIX" \
+            --target-os=darwin --arch=arm64 --cpu=armv8-a \
+            --cc="xcrun --sdk iphoneos clang" \
+            --cxx="xcrun --sdk iphoneos clang++" \
+            --ar="xcrun --sdk iphoneos ar" \
+            --ranlib="xcrun --sdk iphoneos ranlib" \
+            --strip="xcrun --sdk iphoneos strip" \
+            --sysroot="$IOS_SDK" --enable-cross-compile \
+            --enable-static --disable-shared --enable-pic \
+            --disable-programs --disable-doc --disable-debug --disable-autodetect --disable-everything \
+            --extra-cflags="-arch arm64 -miphoneos-version-min=18.0" \
+            --extra-ldflags="-arch arm64 -miphoneos-version-min=18.0 -isysroot $IOS_SDK" \
+            --enable-decoder=aac --enable-decoder=aac_latm --enable-decoder=atrac3 --enable-decoder=atrac3p --enable-decoder=atrac9 \
+            --enable-decoder=mp3 --enable-decoder=pcm_s16le --enable-decoder=pcm_s8 \
+            --enable-decoder=h264 --enable-decoder=mpeg4 --enable-decoder=mpeg2video --enable-decoder=mjpeg --enable-decoder=mjpegb --enable-decoder=hevc \
+            --enable-encoder=pcm_s16le --enable-encoder=ffv1 --enable-encoder=mpeg4 --enable-encoder=ljpeg --enable-encoder=mjpeg \
+            --enable-muxer=avi \
+            --enable-demuxer=hevc --enable-demuxer=h264 --enable-demuxer=m4v --enable-demuxer=mp3 --enable-demuxer=mpegvideo --enable-demuxer=mpegps \
+            --enable-demuxer=mjpeg --enable-demuxer=mov --enable-demuxer=avi --enable-demuxer=aac --enable-demuxer=pmp --enable-demuxer=oma \
+            --enable-demuxer=pcm_s16le --enable-demuxer=pcm_s8 --enable-demuxer=wav \
+            --enable-parser=h264 --enable-parser=mpeg4video --enable-parser=mpegaudio --enable-parser=mpegvideo --enable-parser=mjpeg \
+            --enable-parser=aac --enable-parser=aac_latm --enable-protocol=file --enable-bsf=mjpeg2jpeg
+          make -j2
+          make install
+          popd
+          test -f "$FFMPEG_IOS_PREFIX/lib/libavformat.a"
+          xcrun vtool -show-build "$FFMPEG_IOS_PREFIX/lib/libavformat.a" || true
+          echo "FFMPEG_IOS_PREFIX=$FFMPEG_IOS_PREFIX" >> "$GITHUB_ENV"
+
           python3 - "$KK/CMakeLists.txt" "$MAC_SDK" "$IOS_SDK" "$LLVM_CONFIG" "$MAC_VER" <<'PY'
           import pathlib,sys
           p=pathlib.Path(sys.argv[1]); mac,ios,llvm,macver=sys.argv[2:]; s=p.read_text()
@@ -166,14 +200,23 @@ jobs:
           PY
 
           FFMPEG_CMAKE="$ENGINE_ROOT/externals/ffmpeg-core/CMakeLists.txt"
-          python3 - "$FFMPEG_CMAKE" <<'PY'
-          import pathlib,sys
-          p=pathlib.Path(sys.argv[1]); s=p.read_text()
-          old='''elseif (APPLE)\n\ttarget_link_libraries(${FFMPEG_CORE_NAME} INTERFACE\n\t\t"-framework CoreServices" "-framework CoreFoundation" "-framework AudioUnit"\n\t\t"-framework AudioToolbox" "-framework CoreAudio" "-framework CoreMedia"\n\t\t"-framework VideoToolbox" "-framework CoreVideo" "-framework Security")'''
-          new='''elseif (APPLE)\n\tif (CMAKE_SYSTEM_NAME STREQUAL "iOS")\n\t\ttarget_link_libraries(${FFMPEG_CORE_NAME} INTERFACE\n\t\t\t"-framework CoreFoundation" "-framework AudioToolbox" "-framework CoreAudio"\n\t\t\t"-framework CoreMedia" "-framework VideoToolbox" "-framework CoreVideo" "-framework Security")\n\telse()\n\t\ttarget_link_libraries(${FFMPEG_CORE_NAME} INTERFACE\n\t\t\t"-framework CoreServices" "-framework CoreFoundation" "-framework AudioUnit"\n\t\t\t"-framework AudioToolbox" "-framework CoreAudio" "-framework CoreMedia"\n\t\t\t"-framework VideoToolbox" "-framework CoreVideo" "-framework Security")\n\tendif()'''
-          if old not in s: raise SystemExit('FFmpeg Apple framework anchor missing')
-          p.write_text(s.replace(old,new,1))
-          PY
+          cat > "$FFMPEG_CMAKE" <<'EOF'
+          if (NOT DEFINED FFMPEG_CORE_NAME)
+              set(FFMPEG_CORE_NAME ffmpeg)
+          endif()
+          add_library(${FFMPEG_CORE_NAME} INTERFACE)
+          target_include_directories(${FFMPEG_CORE_NAME} INTERFACE "$ENV{FFMPEG_IOS_PREFIX}/include")
+          set(FFMPEG_LIB_PATH "$ENV{FFMPEG_IOS_PREFIX}/lib")
+          target_link_libraries(${FFMPEG_CORE_NAME} INTERFACE
+              "${FFMPEG_LIB_PATH}/libavformat.a"
+              "${FFMPEG_LIB_PATH}/libavcodec.a"
+              "${FFMPEG_LIB_PATH}/libswscale.a"
+              "${FFMPEG_LIB_PATH}/libavutil.a"
+              "${FFMPEG_LIB_PATH}/libavfilter.a"
+              "${FFMPEG_LIB_PATH}/libswresample.a"
+              "-framework CoreFoundation" "-framework AudioToolbox" "-framework CoreAudio"
+              "-framework CoreMedia" "-framework VideoToolbox" "-framework CoreVideo" "-framework Security")
+          EOF
 
           python3 - "$ENGINE_ROOT/src/sdl_window_apple.mm" <<'PY'
           import pathlib,sys
@@ -265,6 +308,7 @@ jobs:
           test -f "$GITHUB_WORKSPACE/MaxPS4-iOS/Core/MaxPS4CoreBridge.cpp"
           test -x "$HOST_GLSLANG_VALIDATOR"
           test -x "$HOST_PROTOC"
+          test -f "$FFMPEG_IOS_PREFIX/lib/libavcodec.a"
 
       - name: Compile MaxPS4 bridge against upstream headers
         shell: bash
