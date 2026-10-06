@@ -1017,10 +1017,37 @@ jobs:
           mkdir -p build/ps4-sdk
           make -C build/ps4-sdk-src DESTDIR="$GITHUB_WORKSPACE/build/ps4-sdk" install
           export PS4_PAYLOAD_SDK="$GITHUB_WORKSPACE/build/ps4-sdk"
-          make -C build/ps4-sdk-src/samples/hello_stdio clean
+          make -C build/ps4-sdk-src/samples/hello_stdio CFLAGS="-Wall -Werror -g -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384" clean
           make -C build/ps4-sdk-src/samples/hello_stdio
           file build/ps4-sdk-src/samples/hello_stdio/hello_stdio.elf
           readelf -h build/ps4-sdk-src/samples/hello_stdio/hello_stdio.elf
+          readelf -lW build/ps4-sdk-src/samples/hello_stdio/hello_stdio.elf
+          python3 - <<'PY'
+          from pathlib import Path
+          import struct
+          p = Path("build/ps4-sdk-src/samples/hello_stdio/hello_stdio.elf")
+          b = p.read_bytes()
+          phoff = struct.unpack_from("<Q", b, 32)[0]
+          phentsize = struct.unpack_from("<H", b, 54)[0]
+          phnum = struct.unpack_from("<H", b, 56)[0]
+          page = 0x4000
+          page_perms = {}
+          for i in range(phnum):
+              o = phoff + i * phentsize
+              p_type, p_flags = struct.unpack_from("<II", b, o)
+              if p_type != 1:
+                  continue
+              vaddr = struct.unpack_from("<Q", b, o + 16)[0]
+              memsz = struct.unpack_from("<Q", b, o + 40)[0]
+              start = vaddr & ~(page - 1)
+              end = (vaddr + memsz + page - 1) & ~(page - 1)
+              for va in range(start, end, page):
+                  page_perms[va] = page_perms.get(va, 0) | p_flags
+          bad = [va for va, flags in page_perms.items() if (flags & 1) and (flags & 2)]
+          if bad:
+              raise SystemExit(f"16K host-page W+X collision at: {[hex(x) for x in bad]}")
+          print("16K ELF page-permission audit: OK")
+          PY
 
       - name: Package source, license and provenance
         run: |
