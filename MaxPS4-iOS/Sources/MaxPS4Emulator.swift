@@ -8,7 +8,8 @@ final class MaxPS4Emulator: ObservableObject {
     init() {
         let version = String(cString: maxps4_core_version())
         let jit = maxps4_core_jit_available()
-        status = "\(version) • JIT \(jit ? "disponible" : "indisponible")"
+        let diagnostic = String(cString: maxps4_core_jit_diagnostic())
+        status = "\(version) • JIT \(jit ? "disponible" : "indisponible") • \(diagnostic)"
     }
 
     func importGame(from url: URL) {
@@ -18,13 +19,14 @@ final class MaxPS4Emulator: ObservableObject {
         }
 
         let result = url.path.withCString { maxps4_core_boot_game($0) }
+        let diagnostic = String(cString: maxps4_core_jit_diagnostic())
         switch result {
         case MAXPS4_CORE_OK:
             status = "Démarrage : \(url.lastPathComponent)"
         case MAXPS4_CORE_JIT_UNAVAILABLE:
-            status = "JIT indisponible — active StikDebug/LiveContainer JIT"
+            status = "JIT indisponible • \(diagnostic)"
         case MAXPS4_CORE_NOT_READY:
-            status = "Bridge prêt — runtime FEXCore/shadPS4 à connecter"
+            status = "JIT OK • runtime FEXCore/shadPS4 à connecter"
         case MAXPS4_CORE_INVALID_PATH:
             status = "Chemin du jeu invalide"
         default:
