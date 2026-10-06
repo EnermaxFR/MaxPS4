@@ -273,6 +273,14 @@ jobs:
               'if (!codePage.MakeGuestExecutable()) { g_maxps4_guest_last_error = "HOST_MAP code mprotect(PROT_READ) failed errno=" + std::to_string(errno); return 104; }'
           )
           s = s.replace(
+              'if (!overlapRejected) return Fail({Core::GuestExecutionStage::Mapping, EPROTO});',
+              'if (!overlapRejected) { g_maxps4_guest_last_error = "MAPPING overlap rejection check failed"; return 105; }'
+          )
+          s = s.replace(
+              'if (!mappingOk) return Fail({Core::GuestExecutionStage::Mapping, EPROTO});',
+              'if (!mappingOk) { g_maxps4_guest_last_error = "MAPPING HLE veneer cache/range check failed count=" + std::to_string(veneerRanges.size()); return 106; }'
+          )
+          s = s.replace(
               '  return 0;\n}',
               '  g_maxps4_guest_last_error = "OK";\n  return 0;\n}',
               1
