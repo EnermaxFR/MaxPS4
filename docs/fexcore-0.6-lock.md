@@ -39,3 +39,20 @@ FEXCore 0.6 acceptance status:
 7. NOT YET — `MAXPS4_HAS_SHADPS4_FEX` stays disabled until the actual shadPS4 runtime is linked to this validated FEXCore layer and passes an on-device integration test.
 
 This is a project compliance checklist, not legal advice.
+
+
+## 0.7 shadPS4/FEX guest bridge gate
+
+The next integration stage uses only the exact AetherPS4 guest-CPU bridge sources from commit `3347fc13f19860855ce91b66356940989ea6b6a6`:
+
+- `src/core/fex/fex_guest_engine.cpp`
+- `src/core/guest_cpu/fex_guest_cpu.cpp`
+- `src/core/guest_cpu/hle_call_adapter.cpp`
+- `src/core/guest_cpu/fex_hle_bridge.cpp`
+- `runtime/probes/fexcore-guest-harness.cpp`
+
+These files are compiled and linked against the already pinned FEXCore snapshot as a dedicated iOS gate before any full shadPS4 runtime is enabled in MaxPS4.
+
+The FEX-only iOS deployment target is now 17.4 because the inspected FEXCore snapshot uses Apple synchronization APIs introduced in iOS 17.4. The MaxPS4 frontend may keep a lower deployment target independently, but any binary that links this FEXCore path must not claim iOS 16 runtime compatibility without an explicit fallback implementation.
+
+A successful guest-harness link proves that the shadPS4/Aether guest CPU abstraction can be built against FEXCore for arm64 iOS. It does not yet prove PS4 HLE, loader, GPU, audio, filesystem, or full game execution. The backend therefore remains STAGING.
