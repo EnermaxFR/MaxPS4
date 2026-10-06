@@ -50,9 +50,11 @@ final class MaxPS4Emulator: ObservableObject {
         case MAXPS4_CORE_JIT_UNAVAILABLE:
             status = "JIT indisponible • \(diagnostic)"
         case MAXPS4_CORE_NOT_READY:
-            status = "JIT OK • runtime FEXCore/shadPS4 à connecter"
+            let backendDiagnostic = String(cString: maxps4_backend_diagnostic())
+            status = "JIT OK • \(backendDiagnostic)"
         case MAXPS4_CORE_INVALID_PATH:
-            status = "Chemin du jeu invalide"
+            let backendDiagnostic = String(cString: maxps4_backend_diagnostic())
+            status = "Exécutable PS4 invalide • \(backendDiagnostic)"
         default:
             status = "Échec du cœur MaxPS4 (\(result.rawValue))"
         }
