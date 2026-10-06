@@ -5,6 +5,7 @@
 #include <FEXCore/Core/X86Enums.h>
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -51,8 +52,10 @@ public:
     AetherPS4::Fex::EngineResult<bool> Invoke(Core::GuestCpu::HleCallFrame& frame) override {
         const uint64_t op = frame.operation;
         auto& gpr = frame.gpr;
-        // Minimal, non-proprietary test-only I/O shim for the GPL hello_stdio sample.
-        // FreeBSD/Orbis-style syscall numbers: read=3, write=4.
+        RecordSyscall(op);
+
+        // Small, non-proprietary compatibility shim used only by legal homebrew tests.
+        // FreeBSD/Orbis-style syscall numbers used here: read=3, write=4.
         if (op == 4) {
             const int fd = static_cast<int>(gpr[FEXCore::X86State::REG_RDI]);
             const auto addr = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RSI]);
@@ -61,41 +64,104 @@ public:
                 FILE* out = fd == 1 ? stdout : stderr;
                 const size_t done = fwrite(reinterpret_cast<const void*>(addr), 1, len, out);
                 fflush(out);
-                const size_t remaining = output.size() < 1024 ? 1024 - output.size() : 0;
-                if (remaining != 0) {
-                    const size_t capture = std::min(done, remaining);
-                    output.append(reinterpret_cast<const char*>(addr), capture);
-                }
+                Capture(reinterpret_cast<const char*>(addr), done);
                 gpr[FEXCore::X86State::REG_RAX] = done;
                 return true;
             }
             return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, EFAULT};
         }
+
         if (op == 3) {
-            // EOF for stdin: enough for the legal hello sample to continue without interactive input.
+            const int fd = static_cast<int>(gpr[FEXCore::X86State::REG_RDI]);
+            const auto addr = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RSI]);
+            const size_t len = static_cast<size_t>(gpr[FEXCore::X86State::REG_RDX]);
+            if (fd != 0 || !IsWritable(addr, len)) {
+                return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+            // Deterministic stdin for legal stdio homebrew: one short line, then EOF.
+            static constexpr char kInput[] = "MaxPS4\n";
+            const size_t available = stdin_sent ? 0 : sizeof(kInput) - 1;
+            const size_t done = std::min(len, available);
+            if (done != 0) {
+                memcpy(reinterpret_cast<void*>(addr), kInput, done);
+                stdin_sent = true;
+            }
+            gpr[FEXCore::X86State::REG_RAX] = done;
+            return true;
+        }
+
+        // Harmless identity/query calls commonly reached by tiny libc startup paths.
+        if (op == 20) { // getpid
+            gpr[FEXCore::X86State::REG_RAX] = 1;
+            return true;
+        }
+        if (op == 24 || op == 25 || op == 43 || op == 47) { // getuid/geteuid/getegid/getgid
             gpr[FEXCore::X86State::REG_RAX] = 0;
             return true;
         }
+
         last_syscall = op;
         return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, ENOSYS};
     }
 
     void SetImage(uintptr_t begin, size_t size) { image_begin = begin; image_size = size; }
+    void SetStack(uintptr_t begin, size_t size) { stack_begin = begin; stack_size = size; }
     uint64_t LastSyscall() const { return last_syscall; }
     const std::string& Output() const { return output; }
 
-private:
-    bool IsReadable(uintptr_t addr, size_t size) const {
-        if (size == 0) return true;
-        if (addr < image_begin || addr > UINTPTR_MAX - size) return false;
-        return addr + size <= image_begin + image_size;
+    std::string Trace() const {
+        std::string result;
+        const size_t count = std::min(trace_count, trace.size());
+        const size_t first = trace_count > trace.size() ? trace_count % trace.size() : 0;
+        for (size_t i = 0; i < count; ++i) {
+            const size_t index = (first + i) % trace.size();
+            if (!result.empty()) result += ",";
+            result += std::to_string(trace[index]);
+        }
+        return result;
     }
+
+private:
+    bool Contains(uintptr_t begin, size_t span, uintptr_t addr, size_t size) const {
+        if (size == 0) return true;
+        if (begin == 0 || addr < begin || addr > UINTPTR_MAX - size) return false;
+        const uintptr_t end = begin + span;
+        return end >= begin && addr + size <= end;
+    }
+
+    bool IsReadable(uintptr_t addr, size_t size) const {
+        return Contains(image_begin, image_size, addr, size) ||
+               Contains(stack_begin, stack_size, addr, size);
+    }
+
+    bool IsWritable(uintptr_t addr, size_t size) const {
+        // The complete stack is writable. For the ELF image this test harness intentionally
+        // permits writes only after the loader has already enforced W^X page protections;
+        // mprotect remains the final authority if a malformed guest points at RX data.
+        return Contains(stack_begin, stack_size, addr, size) ||
+               Contains(image_begin, image_size, addr, size);
+    }
+
+    void Capture(const char* data, size_t size) {
+        const size_t remaining = output.size() < 1024 ? 1024 - output.size() : 0;
+        if (remaining != 0 && data != nullptr) output.append(data, std::min(size, remaining));
+    }
+
+    void RecordSyscall(uint64_t op) {
+        trace[trace_count % trace.size()] = op;
+        ++trace_count;
+    }
+
     uintptr_t image_begin{};
     size_t image_size{};
+    uintptr_t stack_begin{};
+    size_t stack_size{};
     uint64_t last_syscall{};
+    bool stdin_sent{};
     std::string output;
-};
-} // namespace
+    std::array<uint64_t, 12> trace{};
+    size_t trace_count{};
+};} // namespace
 
 extern "C" const char* maxps4_fex_guest_run_last_error(void) {
     return g_run_diag.c_str();
@@ -250,6 +316,7 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
 
     HomebrewBridge bridge;
     bridge.SetImage(image_begin, image.size);
+    bridge.SetStack(stack_begin, stack.size);
     auto backendResult = Core::FexGuestCpuBackend::Create(bridge);
     if (const auto* failure = std::get_if<Core::GuestExecutionFailure>(&backendResult)) {
         char buf[160]; snprintf(buf, sizeof(buf), "FEX create failed stage=%d errno=%d",
@@ -267,28 +334,34 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
 
     auto result = backend->Run(request);
     if (const auto* failure = std::get_if<Core::GuestExecutionFailure>(&result)) {
-        char buf[220];
+        char buf[420];
         const auto& captured = bridge.Output();
+        const auto trace = bridge.Trace();
         snprintf(buf, sizeof(buf),
-                 "FEX handoff reached guest • stopped stage=%d errno=%d syscall=%llu%s%s",
+                 "FEX handoff reached guest • stopped stage=%d errno=%d syscall=%llu%s%s%s%s",
                  static_cast<int>(failure->Stage), failure->Error,
                  static_cast<unsigned long long>(bridge.LastSyscall()),
                  captured.empty() ? "" : " • output=",
-                 captured.empty() ? "" : captured.c_str());
+                 captured.empty() ? "" : captured.c_str(),
+                 trace.empty() ? "" : " • trace=",
+                 trace.empty() ? "" : trace.c_str());
         g_run_diag = buf;
         return 33;
     }
 
     const auto& state = std::get<Core::GuestExecutionState>(result);
-    char buf[220];
+    char buf[420];
     const auto& captured = bridge.Output();
+    const auto trace = bridge.Trace();
     snprintf(buf, sizeof(buf),
-             "FEX guest executed • stop=%d first=0x%llx last=0x%llx%s%s",
+             "FEX guest executed • stop=%d first=0x%llx last=0x%llx%s%s%s%s",
              static_cast<int>(state.StopReason),
              static_cast<unsigned long long>(state.FirstRip),
              static_cast<unsigned long long>(state.LastRip),
              captured.empty() ? "" : " • output=",
-             captured.empty() ? "" : captured.c_str());
+             captured.empty() ? "" : captured.c_str(),
+             trace.empty() ? "" : " • trace=",
+             trace.empty() ? "" : trace.c_str());
     g_run_diag = buf;
     return 0;
 }
