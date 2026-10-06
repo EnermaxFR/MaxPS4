@@ -53,6 +53,8 @@ jobs:
           grep -Fq "SPDX-License-Identifier: MIT" "$REF/src/core/guest_cpu/fex_hle_bridge.h"
           grep -Fq "SPDX-License-Identifier: GPL-2.0-or-later" "$REF/src/common/types.h"
           grep -Fq "SPDX-License-Identifier: GPL-2.0-or-later" "$REF/src/core/libraries/kernel/threads/exception.h"
+          grep -Fq "SPDX-License-Identifier: GPL-2.0-or-later" "$REF/src/core/ios/ios_jit_allocator.cpp"
+          grep -Fq "SPDX-License-Identifier: GPL-2.0-or-later" "$REF/src/core/ios/ios_jit_allocator.h"
           echo "shadPS4/FEX license boundary verified"
 
       - name: Patch guest harness FEX internal include path
@@ -333,6 +335,32 @@ jobs:
           s = s.replace(needle, needle + host_block, 1)
           cmake.write_text(s)
 
+          ios_alloc = Path("build/aether-reference/src/core/ios/ios_jit_allocator.cpp")
+          ia = ios_alloc.read_text()
+          ia = ia.replace(
+              'namespace {\n\nusing BreakGetJITMappingFn = void* (*)(void*, size_t);',
+              'extern "C" void* MaxPS4BreakGetJITMapping(void*, size_t);\n'
+              'extern "C" void MaxPS4BreakJITDetach(void);\n\n'
+              'namespace {\n\nusing BreakGetJITMappingFn = void* (*)(void*, size_t);'
+          )
+          pattern_ios = re.compile(
+              r'const BreakpointJITSymbols& GetBreakpointJITSymbols\(\) noexcept \{.*?\n\}',
+              re.S
+          )
+          replacement_ios = '''const BreakpointJITSymbols& GetBreakpointJITSymbols() noexcept {
+            static const BreakpointJITSymbols symbols = [] {
+              BreakpointJITSymbols s;
+              s.get_jit_mapping = &MaxPS4BreakGetJITMapping;
+              s.jit_detach = &MaxPS4BreakJITDetach;
+              return s;
+            }();
+            return symbols;
+          }'''
+          ia, ios_count = pattern_ios.subn(replacement_ios, ia, count=1)
+          if ios_count != 1:
+              raise SystemExit("failed to patch shadPS4 iOS allocator JIT symbols")
+          ios_alloc.write_text(ia)
+
           alloc = Path("build/aether-reference/runtime/sources/fexcore-darwin/FEXCore/Source/Utils/Allocator.cpp")
           a = alloc.read_text()
           anchor = 'namespace {\nusing BreakGetJITMappingFn = void* (*)(void*, size_t);'
@@ -395,7 +423,7 @@ jobs:
             -DTUNE_ARCH=generic \
             -DFEXCORE_SMOKE_SOURCE="$GITHUB_WORKSPACE/build/aether-reference/runtime/probes/fexcore-smoke.cpp" \
             -DFEXCORE_PROJECT_SOURCE_DIR="$GITHUB_WORKSPACE/build/aether-reference/src" \
-            -DFEXCORE_GUEST_HARNESS_SOURCES="$GITHUB_WORKSPACE/build/aether-reference/src/core/fex/fex_guest_engine.cpp;$GITHUB_WORKSPACE/build/aether-reference/src/core/guest_cpu/fex_guest_cpu.cpp;$GITHUB_WORKSPACE/build/aether-reference/src/core/guest_cpu/hle_call_adapter.cpp;$GITHUB_WORKSPACE/build/aether-reference/src/core/guest_cpu/fex_hle_bridge.cpp;$GITHUB_WORKSPACE/build/aether-reference/runtime/probes/fexcore-guest-harness.cpp" \
+            -DFEXCORE_GUEST_HARNESS_SOURCES="$GITHUB_WORKSPACE/build/aether-reference/src/core/fex/fex_guest_engine.cpp;$GITHUB_WORKSPACE/build/aether-reference/src/core/guest_cpu/fex_guest_cpu.cpp;$GITHUB_WORKSPACE/build/aether-reference/src/core/guest_cpu/hle_call_adapter.cpp;$GITHUB_WORKSPACE/build/aether-reference/src/core/guest_cpu/fex_hle_bridge.cpp;$GITHUB_WORKSPACE/build/aether-reference/src/core/ios/ios_jit_allocator.cpp;$GITHUB_WORKSPACE/build/aether-reference/runtime/sources/fexcore-darwin/MaxPS4JITShim.cpp;$GITHUB_WORKSPACE/build/aether-reference/runtime/probes/fexcore-guest-harness.cpp" \
             -DBUILD_FEXCORE_SMOKE=ON \
             -DBUILD_TESTING=OFF \
             -DBUILD_FEX_LINUX_TESTS=OFF \
