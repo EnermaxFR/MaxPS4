@@ -1,0 +1,4 @@
+module MaxPS4Core {
+    header "maxps4_core.h"
+    export *
+}
