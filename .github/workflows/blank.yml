@@ -64,13 +64,22 @@ jobs:
           from pathlib import Path
           p = Path("build/aether-reference/runtime/sources/fexcore-darwin/CMakeLists.txt")
           s = p.read_text()
-          needle = '"${CMAKE_SOURCE_DIR}/Source/Tools/CommonTools")'
-          replacement = '"${CMAKE_SOURCE_DIR}/Source/Tools/CommonTools"\n        "${CMAKE_SOURCE_DIR}/FEXCore/Source")'
-          if needle not in s:
-              raise SystemExit("guest harness include anchor not found")
-          p.write_text(s.replace(needle, replacement, 1))
+          marker = 'target_include_directories(fexcore-guest-harness PRIVATE'
+          pos = s.find(marker)
+          if pos < 0:
+              raise SystemExit("guest harness include block not found")
+          close = s.find(')', pos)
+          if close < 0:
+              raise SystemExit("guest harness include block terminator not found")
+          block = s[pos:close+1]
+          include = '"${CMAKE_SOURCE_DIR}/FEXCore/Source"'
+          if include not in block:
+              block = block[:-1] + '\n        ' + include + ')'
+              s = s[:pos] + block + s[close+1:]
+          p.write_text(s)
           PY
-          grep -A6 -n "target_include_directories(fexcore-guest-harness" "$CMAKE_FILE"
+          grep -A8 -n "target_include_directories(fexcore-guest-harness" "$CMAKE_FILE"
+          grep -A8 -n "target_include_directories(fexcore-guest-harness" "$CMAKE_FILE" | grep -F 'FEXCore/Source'
 
       - name: Patch locked guest harness namespace for current bridge API
         shell: bash
