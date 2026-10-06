@@ -1,4 +1,4 @@
-name: Build 72 MaxPS4 iOS
+name: Build 73 MaxPS4 iOS
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ on:
 jobs:
   build:
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,16 +25,16 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/maxps4-ccache
-          key: maxps4-ios-build72-${{ runner.os }}-${{ github.run_id }}
+          key: maxps4-ios-build73-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-
 
-      - name: Run Build64 pipeline with persistent diagnostics
+      - name: Run Build64 pipeline with live progress and persistent diagnostics
         shell: bash
         run: |
           set -euo pipefail
-          VENV="$RUNNER_TEMP/build72-python"
-          LOGDIR="$RUNNER_TEMP/build72-logs"
+          VENV="$RUNNER_TEMP/build73-python"
+          LOGDIR="$RUNNER_TEMP/build73-logs"
           mkdir -p "$LOGDIR"
           python3 -m venv "$VENV"
           "$VENV/bin/python" -m pip install --upgrade pip pyyaml
@@ -46,7 +46,7 @@ jobs:
           doc=yaml.safe_load(raw)
           steps=doc['jobs']['build-maxps4-ipa']['steps']
           env=os.environ.copy(); envfile=env['GITHUB_ENV']; pathfile=env['GITHUB_PATH']
-          logdir=Path(env['RUNNER_TEMP'])/'build72-logs'
+          logdir=Path(env['RUNNER_TEMP'])/'build73-logs'
           open(envfile,'w').close(); open(pathfile,'w').close(); env_pos=0; path_pos=0
           for index, step in enumerate(steps, 1):
               name=step.get('name','') or f'unnamed step {index}'; script=step.get('run')
@@ -58,16 +58,20 @@ jobs:
                   if name == 'Configure iOS engine':
                       subprocess.run(['python3','.github/scripts/build66-patches.py'],env=env,check=True)
                   with logfile.open('w') as out:
-                      result=subprocess.run(['bash','-x','-e','-o','pipefail','-c',script],env=env,stdout=out,stderr=subprocess.STDOUT)
-                  print(logfile.read_text(errors='replace'),flush=True)
-                  if result.returncode:
-                      core=Path(env['RUNNER_TEMP'])/'build'/'libshadps4.a'
-                      if name == 'Build iOS engine and collect diagnostics' and core.is_file():
-                          print(f'Build72: engine returned {result.returncode}, but {core} exists; continuing.',flush=True)
+                      proc=subprocess.Popen(['bash','-x','-e','-o','pipefail','-c',script],env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1)
+                      assert proc.stdout is not None
+                      for line in proc.stdout:
+                          out.write(line); out.flush()
+                          print(line,end='',flush=True)
+                      result=proc.wait()
+                  if result:
+                      candidates=list(Path(env['RUNNER_TEMP']).rglob('libshadps4.a'))
+                      if name == 'Build iOS engine and collect diagnostics' and candidates:
+                          print(f'Build73: engine returned {result}, but core library exists at {candidates[0]}; continuing.',flush=True)
                       else:
-                          (logdir/'FAILURE.txt').write_text(f'Build64 step {index}: {name}\nexit code: {result.returncode}\nlog: {logfile.name}\n')
-                          print(f'::error title=Build72 failure::Build64 step {index} "{name}" failed with exit code {result.returncode}',flush=True)
-                          raise subprocess.CalledProcessError(result.returncode, script)
+                          (logdir/'FAILURE.txt').write_text(f'Build64 step {index}: {name}\nexit code: {result}\nlog: {logfile.name}\n')
+                          print(f'::error title=Build73 failure::Build64 step {index} "{name}" failed with exit code {result}',flush=True)
+                          raise subprocess.CalledProcessError(result, script)
                   with open(envfile) as f:
                       f.seek(env_pos)
                       for line in f:
@@ -104,13 +108,13 @@ jobs:
           printf 'MaxPS4 commit: %s\nGitHub run: %s\nRun attempt: %s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$OUT/BUILD-SOURCE-IDENTITY.txt"
           ditto -c -k --sequesterRsrc --keepParent "$OUT" "$RUNNER_TEMP/MaxPS4-GPL-Corresponding-Source.zip"
 
-      - name: Upload Build72 diagnostics
+      - name: Upload Build73 diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build72-diagnostics
+          name: build73-diagnostics
           path: |
-            ${{ runner.temp }}/build72-logs/
+            ${{ runner.temp }}/build73-logs/
             ${{ runner.temp }}/shadps4-build.log
             ${{ runner.temp }}/shadps4-cmake-configure.log
             ${{ runner.temp }}/shadps4-libs.txt
