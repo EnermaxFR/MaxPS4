@@ -1,26 +1,37 @@
 # MaxPS4 third-party notices
 
-MaxPS4 is an independent experimental iOS frontend. The 0.5 porting work is being developed on the `shadps4-ios-core` branch.
+MaxPS4 is an independent experimental iOS frontend. FEXCore/shadPS4 integration work is developed on the `shadps4-ios-core` branch.
 
-## shadPS4
+## shadPS4 / GPL-covered integration
 
 Project: shadPS4
 Source: https://github.com/shadps4-emu/shadPS4
-License: GNU General Public License v2.0 or later (GPL-2.0-or-later), as declared by upstream.
 
-Any shadPS4-derived source incorporated into MaxPS4 must retain the applicable copyright and license notices and remain available under the applicable GPL terms.
+Any shadPS4 or other GPL-covered source incorporated into MaxPS4 must retain the applicable copyright and license notices. Binary distributions containing such code must satisfy the corresponding GPL source-distribution requirements.
 
-## FEX
+The AetherPS4 integration reference inspected for the 0.6 port carries GNU GPL version 2.
+
+## FEXCore
 
 Project: FEX
 Source: https://github.com/FEX-Emu/FEX
+Pinned upstream revision for the inspected Darwin port: `f2b679f6028ce1c38875233aecfcf5d3f8ebecec`
+License: MIT
 
-FEX-derived files must retain their upstream copyright and license notices. Before vendoring or distributing FEX-derived code or binaries, MaxPS4's build must record the exact upstream revision and include the corresponding license text(s) for the files/components actually used.
+Copyright (c) 2019 Ryan Houdek <Sonicadvance1@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Reference snapshot inspected for Apple/Darwin adaptation: `Leviidev/AetherPS4` commit `3347fc13f19860855ce91b66356940989ea6b6a6`, `runtime/sources/fexcore-darwin`.
 
 ## Distribution boundaries
 
 MaxPS4 does not include PlayStation 4 games, copyrighted game content, console firmware, cryptographic keys, user credentials, or other proprietary Sony content. Users must provide any legally required external content themselves.
 
-Third-party code must not be copied into this repository without preserving its provenance and applicable license notices. Build artifacts that contain GPL-covered code must be accompanied by the corresponding source and notices as required by the applicable license.
+Third-party code must not be copied into this repository without preserving its provenance and applicable notices. The 0.6 FEXCore integration must also preserve the iOS JIT26 W^X boundary validated with StikDebug; the macOS MAP_JIT allocator is not assumed to be valid on iOS.
 
-This notice is a compliance inventory for the project, not legal advice.
+See `docs/fexcore-0.6-lock.md` for the 0.6 acceptance gate. This notice is a compliance inventory, not legal advice.
