@@ -79,6 +79,35 @@ jobs:
           PY
           grep -n "pthread_jit_write_protect_np\|TARGET_OS_IPHONE" "$PROBE"
 
+      - name: Add iOS clear-cache compatibility shim
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/build/aether-reference/runtime/sources/fexcore-darwin"
+          cat > "$SRC/MaxPS4ClearCacheShim.cpp" <<'CPP'
+          #include <libkern/OSCacheControl.h>
+          #include <cstddef>
+
+          extern "C" void __clear_cache(void* begin, void* end) {
+              auto* first = static_cast<unsigned char*>(begin);
+              auto* last = static_cast<unsigned char*>(end);
+              if (last > first) {
+                  sys_icache_invalidate(first, static_cast<std::size_t>(last - first));
+              }
+          }
+          CPP
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build/aether-reference/runtime/sources/fexcore-darwin/CMakeLists.txt")
+          s = p.read_text()
+          s = s.replace(
+              'add_executable(fexcore-smoke "${FEXCORE_SMOKE_SOURCE}")',
+              'add_executable(fexcore-smoke "${FEXCORE_SMOKE_SOURCE}" "${CMAKE_SOURCE_DIR}/MaxPS4ClearCacheShim.cpp")'
+          )
+          p.write_text(s)
+          PY
+          grep -n "add_executable(fexcore-smoke" "$SRC/CMakeLists.txt"
+
       - name: Install FEXCore Python configure dependencies
         shell: bash
         run: |
