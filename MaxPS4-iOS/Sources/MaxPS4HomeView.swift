@@ -28,6 +28,14 @@ struct MaxPS4HomeView: View {
                 }
                 .buttonStyle(.borderedProminent)
 
+                Button {
+                    emulator.testBackend()
+                } label: {
+                    Label("Tester le backend shadPS4/FEX", systemImage: "cpu")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+
                 Text(emulator.status)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
