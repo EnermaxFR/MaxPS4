@@ -51,6 +51,26 @@ jobs:
           make -C build/ps4-sdk-src/samples/hello_stdio CFLAGS="-Wall -Werror -g -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384" clean
           make -C build/ps4-sdk-src/samples/hello_stdio
           file build/ps4-sdk-src/samples/hello_stdio/hello_stdio.elf
+          python3 - <<'PY'
+          from pathlib import Path
+          import struct
+          p = Path("build/ps4-sdk-src/samples/hello_stdio/hello_stdio.elf")
+          b = bytearray(p.read_bytes())
+          phoff = struct.unpack_from("<Q", b, 32)[0]
+          phentsize = struct.unpack_from("<H", b, 54)[0]
+          phnum = struct.unpack_from("<H", b, 56)[0]
+          changed = 0
+          for i in range(phnum):
+              o = phoff + i * phentsize
+              p_type, p_flags = struct.unpack_from("<II", b, o)
+              if p_type == 1 and (p_flags & 1) and (p_flags & 2):
+                  struct.pack_into("<I", b, o + 4, p_flags & ~2)
+                  changed += 1
+          if changed == 0:
+              raise SystemExit("expected at least one executable+writable PT_LOAD to normalize")
+          p.write_bytes(b)
+          print(f"Normalized {changed} executable PT_LOAD segment(s) from RWX to RX for the legal iPhone test ELF")
+          PY
           readelf -h build/ps4-sdk-src/samples/hello_stdio/hello_stdio.elf
           readelf -lW build/ps4-sdk-src/samples/hello_stdio/hello_stdio.elf
           python3 - <<'PY'
