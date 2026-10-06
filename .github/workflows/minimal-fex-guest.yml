@@ -1,0 +1,102 @@
+name: Build minimal FEX guest ELF
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["shadps4-ios-core"]
+    paths:
+      - "MaxPS4-iOS/Tests/minimal_fex_guest.S"
+      - ".github/workflows/minimal-fex-guest.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout MaxPS4
+        uses: actions/checkout@v4
+
+      - name: Install LLVM tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang-18 lld-18 binutils file
+
+      - name: Build tiny x86-64 ET_DYN guest
+        run: |
+          set -euo pipefail
+          mkdir -p build/minimal-fex
+          clang-18 -c -fPIC -nostdlib -o build/minimal-fex/minimal_fex_guest.o MaxPS4-iOS/Tests/minimal_fex_guest.S
+          ld.lld-18 -pie -e _start \
+            -z max-page-size=16384 \
+            -z common-page-size=16384 \
+            --no-dynamic-linker \
+            -o build/minimal-fex/minimal_fex_guest.elf \
+            build/minimal-fex/minimal_fex_guest.o
+          file build/minimal-fex/minimal_fex_guest.elf
+          readelf -h build/minimal-fex/minimal_fex_guest.elf
+          readelf -lW build/minimal-fex/minimal_fex_guest.elf
+
+      - name: Verify loader profile and 16K W^X
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import struct
+          p = Path("build/minimal-fex/minimal_fex_guest.elf")
+          b = p.read_bytes()
+          assert b[:4] == b"\x7fELF"
+          assert b[4] == 2 and b[5] == 1
+          assert b[7] == 0, f"OSABI={b[7]}"
+          assert struct.unpack_from("<H", b, 16)[0] == 3, "expected ET_DYN"
+          assert struct.unpack_from("<H", b, 18)[0] == 62, "expected x86-64"
+          phoff = struct.unpack_from("<Q", b, 32)[0]
+          phentsize = struct.unpack_from("<H", b, 54)[0]
+          phnum = struct.unpack_from("<H", b, 56)[0]
+          page = 0x4000
+          perms = {}
+          exec_seen = False
+          for i in range(phnum):
+              o = phoff + i * phentsize
+              p_type, p_flags = struct.unpack_from("<II", b, o)
+              if p_type != 1:
+                  continue
+              vaddr = struct.unpack_from("<Q", b, o + 16)[0]
+              memsz = struct.unpack_from("<Q", b, o + 40)[0]
+              if p_flags & 1:
+                  exec_seen = True
+              start = vaddr & ~(page - 1)
+              end = (vaddr + memsz + page - 1) & ~(page - 1)
+              for va in range(start, end, page):
+                  perms[va] = perms.get(va, 0) | p_flags
+          assert exec_seen, "no executable PT_LOAD"
+          bad = [hex(va) for va, flags in perms.items() if (flags & 1) and (flags & 2)]
+          assert not bad, f"16K host-page W+X collision: {bad}"
+          print("Minimal guest audit: OK")
+          PY
+
+      - name: Package legal smoke test
+        run: |
+          set -euo pipefail
+          OUT=build/MaxPS4-Minimal-FEX-Guest
+          mkdir -p "$OUT"
+          cp build/minimal-fex/minimal_fex_guest.elf "$OUT/"
+          cp MaxPS4-iOS/Tests/minimal_fex_guest.S "$OUT/source.S"
+          cat > "$OUT/README.txt" <<'EOF'
+          MaxPS4 minimal FEX guest smoke test.
+          Contains only a few original x86-64 instructions:
+          write(1, "MaxPS4 FEX minimal guest OK\n", 27), then HLT.
+          No Sony game, firmware, keys, SDK, copyrighted executable, or proprietary PlayStation content is included.
+          Purpose: isolate FEX/JIT/bridge execution from PS4 libc/HLE dependencies.
+          EOF
+          sha256sum "$OUT/minimal_fex_guest.elf" > "$OUT/SHA256SUMS.txt"
+
+      - name: Upload minimal guest
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-Minimal-FEX-Guest
+          path: build/MaxPS4-Minimal-FEX-Guest
+          if-no-files-found: error
+          retention-days: 14
