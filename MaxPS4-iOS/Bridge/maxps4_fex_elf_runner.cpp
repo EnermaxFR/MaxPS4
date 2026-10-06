@@ -152,6 +152,9 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     HostMapping stack(static_cast<size_t>(std::max<uint64_t>(page * 16, 256 * 1024)));
     if (!image.ok() || !stack.ok()) { g_run_diag = "guest image/stack mmap failed"; return 29; }
 
+    const size_t image_page_count = image.size / static_cast<size_t>(page);
+    std::vector<uint32_t> page_flags(image_page_count, 0);
+
     for (uint16_t i = 0; i < phnum; ++i) {
         const uint8_t* ph = eh + phoff + static_cast<uint64_t>(i) * phentsize;
         if (U32(ph) != 1) continue;
@@ -165,11 +168,75 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
         }
         memcpy(static_cast<uint8_t*>(image.ptr) + (vaddr - min_page),
                file.data() + off, static_cast<size_t>(filesz));
+
+        const uint32_t flags = U32(ph + 4);
+        const uint64_t seg_page_begin = AlignDown(vaddr, page);
+        const uint64_t seg_page_end = AlignUp(vaddr + memsz, page);
+        for (uint64_t va = seg_page_begin; va < seg_page_end; va += page) {
+            const size_t page_index = static_cast<size_t>((va - min_page) / page);
+            if (page_index >= page_flags.size()) {
+                g_run_diag = "PT_LOAD page index invalid";
+                return 31;
+            }
+            page_flags[page_index] |= flags;
+        }
     }
 
-    if (entry < min_page || entry >= max_page) { g_run_diag = "entry outside image"; return 31; }
+    if (entry < min_page || entry >= max_page) { g_run_diag = "entry outside image"; return 32; }
 
     const uintptr_t image_begin = reinterpret_cast<uintptr_t>(image.ptr);
+    std::vector<Core::GuestExecutionRange> image_ranges;
+    bool entry_is_executable = false;
+
+    for (size_t first = 0; first < page_flags.size();) {
+        const uint32_t flags = page_flags[first];
+        size_t last = first + 1;
+        while (last < page_flags.size() && page_flags[last] == flags) ++last;
+
+        const uintptr_t begin = image_begin + first * static_cast<size_t>(page);
+        const size_t length = (last - first) * static_cast<size_t>(page);
+
+        if (flags == 0) {
+            if (mprotect(reinterpret_cast<void*>(begin), length, PROT_NONE) != 0) {
+                g_run_diag = "mprotect(PROT_NONE) failed";
+                return 33;
+            }
+            first = last;
+            continue;
+        }
+
+        const bool executable = (flags & 0x1u) != 0; // PF_X
+        const bool writable = (flags & 0x2u) != 0;   // PF_W
+        if (executable && writable) {
+            g_run_diag = "ELF host page merges writable+executable PT_LOAD segments";
+            return 34;
+        }
+
+        // FEX translates guest x86-64 code into its own JIT cache. Guest code must
+        // therefore be host-readable but sealed against host writes; guest data stays RW.
+        int host_prot = PROT_READ | (writable ? PROT_WRITE : 0);
+        if (mprotect(reinterpret_cast<void*>(begin), length, host_prot) != 0) {
+            char buf[128];
+            snprintf(buf, sizeof(buf), "mprotect ELF segment failed errno=%d", errno);
+            g_run_diag = buf;
+            return 35;
+        }
+
+        image_ranges.push_back({begin, length, executable, writable});
+
+        const uintptr_t translated_entry =
+            image_begin + static_cast<uintptr_t>(entry - min_page);
+        if (executable && translated_entry >= begin && translated_entry < begin + length) {
+            entry_is_executable = true;
+        }
+        first = last;
+    }
+
+    if (!entry_is_executable) {
+        g_run_diag = "ELF entry is not inside an executable PT_LOAD range";
+        return 36;
+    }
+
     const uintptr_t guest_entry = image_begin + static_cast<uintptr_t>(entry - min_page);
     const uintptr_t stack_begin = reinterpret_cast<uintptr_t>(stack.ptr);
     const uintptr_t stack_top = (stack_begin + stack.size - 32) & ~static_cast<uintptr_t>(0xF);
@@ -188,10 +255,8 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     request.Rip = guest_entry;
     request.Rsp = stack_top;
     request.Rflags = 1U << 1;
-    request.MappedRanges = {
-        {image_begin, image.size, true, true},
-        {stack_begin, stack.size, false, true},
-    };
+    request.MappedRanges = image_ranges;
+    request.MappedRanges.push_back({stack_begin, stack.size, false, true});
 
     auto result = backend->Run(request);
     if (const auto* failure = std::get_if<Core::GuestExecutionFailure>(&result)) {
