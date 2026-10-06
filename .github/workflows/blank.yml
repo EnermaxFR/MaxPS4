@@ -308,8 +308,7 @@ jobs:
           cat > "$SRC/MaxPS4FEXGuestHost.mm" <<'OBJC'
           #import <UIKit/UIKit.h>
 
-          extern "C" int maxps4_fex_guest_harness_run(void);
-          extern "C" const char* maxps4_fex_guest_last_error(void);
+          #include "maxps4_backend.h"
 
           @interface MaxPS4FEXGuestViewController : UIViewController
           @property(nonatomic, strong) UILabel *statusLabel;
@@ -354,14 +353,14 @@ jobs:
               self.runButton.enabled = NO;
               self.statusLabel.text = @"Bridge shadPS4/FEX en cours…";
               dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-                  int result = maxps4_fex_guest_harness_run();
-                  const char *detail = maxps4_fex_guest_last_error();
+                  BOOL ok = maxps4_backend_self_test();
+                  const char *detail = maxps4_backend_diagnostic();
                   NSString *detailText = detail ? [NSString stringWithUTF8String:detail] : @"no detail";
                   dispatch_async(dispatch_get_main_queue(), ^{
-                      if (result == 0) {
-                          self.statusLabel.text = @"SHADPS4_FEX_GUEST_OK\nGuestEngine • FexGuestCpuBackend • HLE veneers • callbacks : OK";
+                      if (ok) {
+                          self.statusLabel.text = [NSString stringWithFormat:@"MAXPS4_BACKEND_OK\n%@", detailText];
                       } else {
-                          self.statusLabel.text = [NSString stringWithFormat:@"SHADPS4_FEX_GUEST_FAIL code=%d\n%@", result, detailText];
+                          self.statusLabel.text = [NSString stringWithFormat:@"MAXPS4_BACKEND_FAIL\n%@", detailText];
                       }
                       self.runButton.enabled = YES;
                   });
@@ -499,6 +498,7 @@ jobs:
             add_executable(maxps4-fex-guest-probe
               "${CMAKE_SOURCE_DIR}/MaxPS4FEXGuestHost.mm"
               "${CMAKE_SOURCE_DIR}/MaxPS4FEXGuestHost.cpp"
+              "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_backend.cpp"
               "${FEXCORE_PROJECT_SOURCE_DIR}/core/fex/fex_guest_engine.cpp"
               "${FEXCORE_PROJECT_SOURCE_DIR}/core/guest_cpu/fex_guest_cpu.cpp"
               "${FEXCORE_PROJECT_SOURCE_DIR}/core/guest_cpu/hle_call_adapter.cpp"
@@ -507,10 +507,12 @@ jobs:
               "${CMAKE_SOURCE_DIR}/MaxPS4JITShim.cpp")
             target_compile_features(maxps4-fex-guest-probe PRIVATE cxx_std_20)
             target_include_directories(maxps4-fex-guest-probe PRIVATE
+              "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge"
               "${FEXCORE_PROJECT_SOURCE_DIR}"
               "${CMAKE_BINARY_DIR}/generated"
               "${CMAKE_SOURCE_DIR}/Source/Tools/CommonTools"
               "${CMAKE_SOURCE_DIR}/FEXCore/Source")
+            target_compile_definitions(maxps4-fex-guest-probe PRIVATE MAXPS4_HAS_SHADPS4_FEX=1)
             target_link_libraries(maxps4-fex-guest-probe PRIVATE
               FEXCore Common CommonTools JemallocLibs ${PTHREAD_LIB}
               "-framework UIKit" "-framework Foundation")
@@ -621,6 +623,7 @@ jobs:
             -DTUNE_ARCH=generic \
             -DFEXCORE_SMOKE_SOURCE="$GITHUB_WORKSPACE/build/aether-reference/runtime/probes/fexcore-smoke.cpp" \
             -DFEXCORE_PROJECT_SOURCE_DIR="$GITHUB_WORKSPACE/build/aether-reference/src" \
+            -DMAXPS4_PROJECT_ROOT="$GITHUB_WORKSPACE" \
             -DFEXCORE_GUEST_HARNESS_SOURCES="$GITHUB_WORKSPACE/build/aether-reference/src/core/fex/fex_guest_engine.cpp;$GITHUB_WORKSPACE/build/aether-reference/src/core/guest_cpu/fex_guest_cpu.cpp;$GITHUB_WORKSPACE/build/aether-reference/src/core/guest_cpu/hle_call_adapter.cpp;$GITHUB_WORKSPACE/build/aether-reference/src/core/guest_cpu/fex_hle_bridge.cpp;$GITHUB_WORKSPACE/build/aether-reference/src/core/ios/ios_jit_allocator.cpp;$GITHUB_WORKSPACE/build/aether-reference/runtime/sources/fexcore-darwin/MaxPS4JITShim.cpp;$GITHUB_WORKSPACE/build/aether-reference/runtime/probes/fexcore-guest-harness.cpp" \
             -DBUILD_FEXCORE_SMOKE=ON \
             -DBUILD_TESTING=OFF \
