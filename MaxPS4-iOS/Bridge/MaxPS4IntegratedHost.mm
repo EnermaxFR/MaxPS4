@@ -7,6 +7,8 @@
 @property(nonatomic, strong) UIButton *testButton;
 @property(nonatomic, strong) UIButton *importButton;
 @property(nonatomic, strong) NSURL *selectedURL;
+@property(nonatomic, assign) BOOL bootInProgress;
+@property(nonatomic, assign) NSUInteger bootGeneration;
 @end
 
 @implementation MaxPS4IntegratedViewController
@@ -103,20 +105,47 @@
 
     if (!valid) {
         self.statusLabel.text = [NSString stringWithFormat:@"Fichier refusé\n%@", detailText];
-    } else {
+        if (scoped) [url stopAccessingSecurityScopedResource];
+        return;
+    }
+
+    self.bootInProgress = YES;
+    self.bootGeneration += 1;
+    const NSUInteger generation = self.bootGeneration;
+    self.importButton.enabled = NO;
+    self.statusLabel.text = [NSString stringWithFormat:
+        @"%@ validé.\nExécution FEX lancée en arrière-plan…",
+        url.lastPathComponent];
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         BOOL booted = maxps4_backend_boot(url.fileSystemRepresentation);
         const char *bootDetail = maxps4_backend_diagnostic();
         NSString *bootText = bootDetail ? [NSString stringWithUTF8String:bootDetail] : @"aucun détail";
-        if (booted) {
-            self.statusLabel.text = [NSString stringWithFormat:@"Démarrage demandé : %@\n%@", url.lastPathComponent, bootText];
-        } else {
-            self.statusLabel.text = [NSString stringWithFormat:
-                @"%@ validé.\n%@\n\nLe handoff loader → FEX a été tenté. Cette build de test n’implémente pas encore tous les services/HLE PS4 nécessaires.",
-                url.lastPathComponent, bootText];
-        }
-    }
+        if (scoped) [url stopAccessingSecurityScopedResource];
 
-    if (scoped) [url stopAccessingSecurityScopedResource];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (generation != self.bootGeneration) return;
+            self.bootInProgress = NO;
+            self.importButton.enabled = YES;
+            if (booted) {
+                self.statusLabel.text = [NSString stringWithFormat:@"Démarrage demandé : %@\n%@", url.lastPathComponent, bootText];
+            } else {
+                self.statusLabel.text = [NSString stringWithFormat:
+                    @"%@ validé.\n%@\n\nLe handoff loader → FEX a été tenté. Cette build de test n’implémente pas encore tous les services/HLE PS4 nécessaires.",
+                    url.lastPathComponent, bootText];
+            }
+        });
+    });
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        if (self.bootInProgress && generation == self.bootGeneration) {
+            self.statusLabel.text = [NSString stringWithFormat:
+                @"%@ validé.\nFEX est toujours en cours après 5 s.\n\nL’interface reste active : le guest semble bloqué dans l’exécution. Aucun arrêt forcé n’est tenté pour éviter de corrompre l’état du runtime.",
+                url.lastPathComponent];
+            self.importButton.enabled = YES;
+        }
+    });
 }
 @end
 
