@@ -389,6 +389,15 @@ jobs:
           xcrun vtool -show-build build/fexcore-ios/Bin/fexcore-guest-harness.app/fexcore-guest-harness || true
           nm -gU build/fexcore-ios/Bin/fexcore-guest-harness.app/fexcore-guest-harness | grep -E "FexGuestCpuBackend|GuestEngine|main" | head -60 || true
 
+      - name: Compile and link shadPS4 FEX guest bridge harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build/fexcore-ios --target fexcore-guest-harness --parallel 3
+          file build/fexcore-ios/Bin/fexcore-guest-harness.app/fexcore-guest-harness
+          xcrun vtool -show-build build/fexcore-ios/Bin/fexcore-guest-harness.app/fexcore-guest-harness || true
+          nm -gU build/fexcore-ios/Bin/fexcore-guest-harness.app/fexcore-guest-harness | grep -E "FexGuestCpuBackend|GuestEngine|main" | head -80 || true
+
       - name: Build app-hosted FEXCore probe
         shell: bash
         run: |
@@ -546,7 +555,7 @@ jobs:
           done
           grep -q 'SPDX-License-Identifier: GPL-2.0-or-later' "$REF/src/core/ios/ios_jit_allocator.cpp"
           grep -q 'SPDX-License-Identifier: GPL-2.0-or-later' "$REF/src/core/guest_cpu/guest_memory_validation_cache.h"
-          echo "GPL exclusions verified; not part of MIT bridge import."
+          echo "GPL dependency boundary verified; guest bridge will be treated as GPL-covered integration."
 
       - name: Apply MaxPS4 iOS smoke packaging patch
         shell: bash
@@ -842,6 +851,8 @@ jobs:
             -DTUNE_CPU=generic \
             -DTUNE_ARCH=generic \
             -DFEXCORE_SMOKE_SOURCE="$GITHUB_WORKSPACE/build/aether-reference/runtime/probes/fexcore-smoke.cpp" \
+            -DFEXCORE_PROJECT_SOURCE_DIR="$GITHUB_WORKSPACE/build/aether-reference/src" \
+            -DFEXCORE_GUEST_HARNESS_SOURCES="$GITHUB_WORKSPACE/build/aether-reference/src/core/fex/fex_guest_engine.cpp;$GITHUB_WORKSPACE/build/aether-reference/src/core/guest_cpu/fex_guest_cpu.cpp;$GITHUB_WORKSPACE/build/aether-reference/src/core/guest_cpu/hle_call_adapter.cpp;$GITHUB_WORKSPACE/build/aether-reference/src/core/guest_cpu/fex_hle_bridge.cpp;$GITHUB_WORKSPACE/build/aether-reference/runtime/probes/fexcore-guest-harness.cpp" \
             -DBUILD_FEXCORE_SMOKE=ON \
             -DBUILD_TESTING=OFF \
             -DBUILD_FEX_LINUX_TESTS=OFF \
