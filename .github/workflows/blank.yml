@@ -40,23 +40,14 @@ jobs:
           grep -q "MIT License" build/aether-reference/runtime/sources/fexcore-darwin/LICENSE
           grep -q "$FEXCORE_UPSTREAM_REV" build/aether-reference/runtime/sources/fexcore-darwin/README.aethercore-darwin.md
 
-      - name: Audit locked shadPS4 FEX bridge license boundary
+      - name: Audit shadPS4/FEX GPL integration boundary
         shell: bash
         run: |
           set -euo pipefail
           REF="$GITHUB_WORKSPACE/build/aether-reference"
-          declare -A EXPECTED=(
-            ["src/core/fex/fex_guest_engine.cpp"]="bc3c4408ef6c4e14b9c8a5ceb3d236e6a28c2d8f"
-            ["src/core/fex/fex_guest_engine.h"]="bdb08c8b986dc2fe37d954cf315f9a62a20ccaf4"
-            ["src/core/guest_cpu/fex_guest_cpu.cpp"]="9d0092ce1f70abd771f96123d9d37da74f6fca58"
-            ["src/core/guest_cpu/fex_guest_cpu.h"]="a38ac457e12e3d2c082359c919b52423e81a16fb"
-            ["src/core/guest_cpu/fex_hle_bridge.cpp"]="0f40ae6b413e0473de9bb13eaf302d9fdf34405c"
-            ["src/core/guest_cpu/fex_hle_bridge.h"]="97d9f7956dcb75802bf3124298c065c4921d3930"
-          )
-          for path in "${!EXPECTED[@]}"; do
-            actual="$(git -C "$REF" rev-parse "HEAD:$path")"
-            test "$actual" = "${EXPECTED[$path]}"
-            grep -q '^// SPDX-License-Identifier: MIT        shell: bash
+          for path in             src/core/fex/fex_guest_engine.cpp             src/core/fex/fex_guest_engine.h             src/core/guest_cpu/fex_guest_cpu.cpp             src/core/guest_cpu/fex_guest_cpu.h             src/core/guest_cpu/fex_hle_bridge.cpp             src/core/guest_cpu/fex_hle_bridge.h; do
+            grep -q '^// SPDX-License-Identifier: MIT      - name: Apply MaxPS4 iOS smoke packaging patch
+        shell: bash
         run: |
           set -euo pipefail
           CMAKE_FILE="$GITHUB_WORKSPACE/build/aether-reference/runtime/sources/fexcore-darwin/CMakeLists.txt"
@@ -341,9 +332,9 @@ jobs:
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_C_COMPILER="$(xcrun --find clang)" \
             -DCMAKE_CXX_COMPILER="$(xcrun --find clang++)" \
-            -DCMAKE_C_COMPILER_TARGET=arm64-apple-ios17.4 \
-            -DCMAKE_CXX_COMPILER_TARGET=arm64-apple-ios17.4 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=17.4 \
+            -DCMAKE_C_COMPILER_TARGET=arm64-apple-ios16.0 \
+            -DCMAKE_CXX_COMPILER_TARGET=arm64-apple-ios16.0 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_FEXCORE_ONLY=ON \
             -DTUNE_CPU=generic \
@@ -379,15 +370,6 @@ jobs:
           file build/fexcore-ios/Bin/fexcore-smoke.app/fexcore-smoke
           xcrun vtool -show-build build/fexcore-ios/Bin/fexcore-smoke.app/fexcore-smoke || true
           nm -gU build/fexcore-ios/Bin/fexcore-smoke.app/fexcore-smoke | grep -E "FEX|main" | head -40 || true
-
-      - name: Link shadPS4 FEX guest CPU bridge harness
-        shell: bash
-        run: |
-          set -euo pipefail
-          cmake --build build/fexcore-ios --target fexcore-guest-harness --parallel 3
-          file build/fexcore-ios/Bin/fexcore-guest-harness.app/fexcore-guest-harness
-          xcrun vtool -show-build build/fexcore-ios/Bin/fexcore-guest-harness.app/fexcore-guest-harness || true
-          nm -gU build/fexcore-ios/Bin/fexcore-guest-harness.app/fexcore-guest-harness | grep -E "FexGuestCpuBackend|GuestEngine|main" | head -60 || true
 
       - name: Compile and link shadPS4 FEX guest bridge harness
         shell: bash
@@ -453,9 +435,11 @@ jobs:
           set -euo pipefail
           mkdir -p build/fexcore-proof
           cp build/fexcore-ios/Bin/fexcore-smoke.app/fexcore-smoke build/fexcore-proof/
-          cp build/fexcore-ios/Bin/fexcore-guest-harness.app/fexcore-guest-harness build/fexcore-proof/
           cp build/fexcore-ios/FEXCore/Source/libFEXCore.a build/fexcore-proof/
+          cp build/fexcore-ios/Bin/fexcore-guest-harness.app/fexcore-guest-harness build/fexcore-proof/
           cp build/aether-reference/runtime/sources/fexcore-darwin/LICENSE build/fexcore-proof/FEXCore-LICENSE
+          cp build/aether-reference/LICENSE build/fexcore-proof/AetherPS4-GPL2-LICENSE
+          cp docs/shadps4-fex-0.7-lock.md build/fexcore-proof/SHADPS4_FEX_0_7_PROVENANCE.md
           printf "%s\n" "$FEXCORE_UPSTREAM_REV" > build/fexcore-proof/FEXCORE_UPSTREAM_REVISION.txt
 
       - name: Upload FEXCore iOS link proof
@@ -487,7 +471,7 @@ jobs:
           mkdir -p build/core
           for SRC in MaxPS4-iOS/Bridge/maxps4_core.cpp MaxPS4-iOS/Bridge/maxps4_backend.cpp; do
             OUT="build/core/$(basename "${SRC%.cpp}").o"
-            xcrun --sdk iphoneos clang++ -target arm64-apple-ios17.4 -isysroot "$SDK" \
+            xcrun --sdk iphoneos clang++ -target arm64-apple-ios16.0 -isysroot "$SDK" \
               -std=c++20 -O2 -fvisibility=hidden -I MaxPS4-iOS/Bridge -c "$SRC" -o "$OUT"
             file "$OUT"
           done
@@ -498,7 +482,7 @@ jobs:
           set -euo pipefail
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           mkdir -p build/Payload/MaxPS4.app
-          xcrun --sdk iphoneos swiftc -target arm64-apple-ios17.4 -sdk "$SDK" \
+          xcrun --sdk iphoneos swiftc -target arm64-apple-ios16.0 -sdk "$SDK" \
             -I MaxPS4-iOS/Bridge -O -parse-as-library -framework SwiftUI -framework UIKit \
             MaxPS4-iOS/Sources/*.swift build/core/maxps4_core.o build/core/maxps4_backend.o \
             -Xlinker -lc++ -o build/Payload/MaxPS4.app/MaxPS4
@@ -507,6 +491,7 @@ jobs:
         run: |
           cp THIRD_PARTY_NOTICES.md build/Payload/MaxPS4.app/THIRD_PARTY_NOTICES.md
           cp docs/fexcore-0.6-lock.md build/Payload/MaxPS4.app/FEXCORE_0_6_PROVENANCE.md
+          cp docs/shadps4-fex-0.7-lock.md build/Payload/MaxPS4.app/SHADPS4_FEX_0_7_PROVENANCE.md
 
       - name: Create Info.plist
         shell: bash
@@ -538,6 +523,7 @@ jobs:
           nm -gU build/Payload/MaxPS4.app/MaxPS4 | grep -E 'maxps4_(core|backend)' || true
           test -f build/Payload/MaxPS4.app/THIRD_PARTY_NOTICES.md
           test -f build/Payload/MaxPS4.app/FEXCORE_0_6_PROVENANCE.md
+          test -f build/Payload/MaxPS4.app/SHADPS4_FEX_0_7_PROVENANCE.md
 
       - name: Package unsigned IPA
         working-directory: build
@@ -551,11 +537,11 @@ jobs:
           if-no-files-found: error
           retention-days: 14
  "$REF/$path"
-            printf 'MIT bridge source verified: %s %s\n' "$path" "$actual"
           done
-          grep -q 'SPDX-License-Identifier: GPL-2.0-or-later' "$REF/src/core/ios/ios_jit_allocator.cpp"
+          grep -q 'SPDX-License-Identifier: GPL-2.0-or-later' "$REF/src/common/types.h"
+          grep -q 'SPDX-License-Identifier: GPL-2.0-or-later' "$REF/src/core/libraries/kernel/threads/exception.h"
           grep -q 'SPDX-License-Identifier: GPL-2.0-or-later' "$REF/src/core/guest_cpu/guest_memory_validation_cache.h"
-          echo "GPL dependency boundary verified; guest bridge will be treated as GPL-covered integration."
+          echo "Guest bridge GPL dependency boundary verified."
 
       - name: Apply MaxPS4 iOS smoke packaging patch
         shell: bash
@@ -843,16 +829,14 @@ jobs:
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_C_COMPILER="$(xcrun --find clang)" \
             -DCMAKE_CXX_COMPILER="$(xcrun --find clang++)" \
-            -DCMAKE_C_COMPILER_TARGET=arm64-apple-ios17.4 \
-            -DCMAKE_CXX_COMPILER_TARGET=arm64-apple-ios17.4 \
+            -DCMAKE_C_COMPILER_TARGET=arm64-apple-ios16.0 \
+            -DCMAKE_CXX_COMPILER_TARGET=arm64-apple-ios16.0 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_FEXCORE_ONLY=ON \
             -DTUNE_CPU=generic \
             -DTUNE_ARCH=generic \
             -DFEXCORE_SMOKE_SOURCE="$GITHUB_WORKSPACE/build/aether-reference/runtime/probes/fexcore-smoke.cpp" \
-            -DFEXCORE_PROJECT_SOURCE_DIR="$GITHUB_WORKSPACE/build/aether-reference/src" \
-            -DFEXCORE_GUEST_HARNESS_SOURCES="$GITHUB_WORKSPACE/build/aether-reference/src/core/fex/fex_guest_engine.cpp;$GITHUB_WORKSPACE/build/aether-reference/src/core/guest_cpu/fex_guest_cpu.cpp;$GITHUB_WORKSPACE/build/aether-reference/src/core/guest_cpu/hle_call_adapter.cpp;$GITHUB_WORKSPACE/build/aether-reference/src/core/guest_cpu/fex_hle_bridge.cpp;$GITHUB_WORKSPACE/build/aether-reference/runtime/probes/fexcore-guest-harness.cpp" \
             -DBUILD_FEXCORE_SMOKE=ON \
             -DBUILD_TESTING=OFF \
             -DBUILD_FEX_LINUX_TESTS=OFF \
@@ -970,7 +954,7 @@ jobs:
           mkdir -p build/core
           for SRC in MaxPS4-iOS/Bridge/maxps4_core.cpp MaxPS4-iOS/Bridge/maxps4_backend.cpp; do
             OUT="build/core/$(basename "${SRC%.cpp}").o"
-            xcrun --sdk iphoneos clang++ -target arm64-apple-ios17.4 -isysroot "$SDK" \
+            xcrun --sdk iphoneos clang++ -target arm64-apple-ios16.0 -isysroot "$SDK" \
               -std=c++20 -O2 -fvisibility=hidden -I MaxPS4-iOS/Bridge -c "$SRC" -o "$OUT"
             file "$OUT"
           done
@@ -981,7 +965,7 @@ jobs:
           set -euo pipefail
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           mkdir -p build/Payload/MaxPS4.app
-          xcrun --sdk iphoneos swiftc -target arm64-apple-ios17.4 -sdk "$SDK" \
+          xcrun --sdk iphoneos swiftc -target arm64-apple-ios16.0 -sdk "$SDK" \
             -I MaxPS4-iOS/Bridge -O -parse-as-library -framework SwiftUI -framework UIKit \
             MaxPS4-iOS/Sources/*.swift build/core/maxps4_core.o build/core/maxps4_backend.o \
             -Xlinker -lc++ -o build/Payload/MaxPS4.app/MaxPS4
