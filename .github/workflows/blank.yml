@@ -60,6 +60,25 @@ jobs:
           PY
           grep -n "install(TARGETS fexcore-smoke" "$CMAKE_FILE"
 
+      - name: Patch smoke probe for iOS JIT API availability
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROBE="$GITHUB_WORKSPACE/build/aether-reference/runtime/probes/fexcore-smoke.cpp"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build/aether-reference/runtime/probes/fexcore-smoke.cpp")
+          s = p.read_text()
+          s = s.replace('#ifdef __APPLE__\n#include <pthread.h>\n#endif',
+                        '#ifdef __APPLE__\n#include <pthread.h>\n#include <TargetConditionals.h>\n#endif')
+          s = s.replace('#ifdef __APPLE__\n    // Darwin refuses any RWX/exec-capable anonymous mapping',
+                        '#if defined(__APPLE__) && !TARGET_OS_IPHONE\n    // Darwin refuses any RWX/exec-capable anonymous mapping')
+          s = s.replace('#ifdef __APPLE__\n  // pthread_jit_write_protect_np is a *global per-thread* toggle',
+                        '#if defined(__APPLE__) && !TARGET_OS_IPHONE\n  // pthread_jit_write_protect_np is a *global per-thread* toggle')
+          p.write_text(s)
+          PY
+          grep -n "pthread_jit_write_protect_np\|TARGET_OS_IPHONE" "$PROBE"
+
       - name: Install FEXCore Python configure dependencies
         shell: bash
         run: |
