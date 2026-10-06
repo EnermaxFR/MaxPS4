@@ -16,7 +16,7 @@ const char *maxps4_backend_name(void) {
 #if defined(MAXPS4_HAS_SHADPS4_FEX)
     return "shadPS4 + FEXCore ARM64";
 #else
-    return "shadPS4 + FEXCore ARM64 (staging)";
+    return "FEXCore ARM64 validated • shadPS4 staging";
 #endif
 }
 
@@ -24,7 +24,7 @@ const char *maxps4_backend_diagnostic(void) {
 #if defined(MAXPS4_HAS_SHADPS4_FEX)
     return "Backend linked; runtime initialization available";
 #else
-    return "0.5 boundary ready; shadPS4/FEXCore libraries not linked yet";
+    return "0.6 FEXCore guest execution validated on-device; shadPS4 runtime not linked yet";
 #endif
 }
 
