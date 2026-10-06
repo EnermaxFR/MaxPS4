@@ -39,6 +39,13 @@ jobs:
           grep -q "MIT License" build/aether-reference/runtime/sources/fexcore-darwin/LICENSE
           grep -q "$FEXCORE_UPSTREAM_REV" build/aether-reference/runtime/sources/fexcore-darwin/README.aethercore-darwin.md
 
+      - name: Install FEXCore Python configure dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user packaging setuptools
+          python3 -c 'import packaging, pkg_resources; print("FEXCore Python dependencies OK")'
+
       - name: Configure FEXCore for arm64 iOS
         shell: bash
         run: |
