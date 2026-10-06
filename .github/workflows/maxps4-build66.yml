@@ -1,4 +1,4 @@
-name: Build 69 MaxPS4 iOS
+name: Build 70 MaxPS4 iOS
 
 on:
   workflow_dispatch:
@@ -21,20 +21,21 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/maxps4-ccache
-          key: maxps4-ios-build69-${{ runner.os }}-${{ github.run_id }}
+          key: maxps4-ios-build70-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-
 
-      - name: Run Build64 pipeline with grouped iOS fixes
+      - name: Run Build64 pipeline with detailed diagnostics
         shell: bash
         run: |
           set -euo pipefail
-          VENV="$RUNNER_TEMP/build69-python"
+          VENV="$RUNNER_TEMP/build70-python"
           python3 -m venv "$VENV"
           "$VENV/bin/python" -m pip install --upgrade pip pyyaml
           "$VENV/bin/python" - <<'PY'
-          import os, subprocess, yaml
+          import os, subprocess, yaml, traceback
           from pathlib import Path
+
           base='37bd10e8758416cbefcde6bdfaa3824c8a98fcf7'
           raw=subprocess.check_output(['git','show',f'{base}:.github/workflows/maxps4-ipa.yml'],text=True)
           doc=yaml.safe_load(raw)
@@ -43,41 +44,77 @@ jobs:
           envfile=env['GITHUB_ENV']; pathfile=env['GITHUB_PATH']
           open(envfile,'w').close(); open(pathfile,'w').close()
           env_pos=0; path_pos=0
-          for step in steps:
-              name=step.get('name','')
+          failed=[]
+
+          for index, step in enumerate(steps, 1):
+              name=step.get('name','') or f'unnamed step {index}'
               script=step.get('run')
               if not script:
                   continue
-              if name == 'Configure iOS engine':
-                  subprocess.run(['python3','.github/scripts/build66-patches.py'],env=env,check=True)
-              print(f'\n===== {name} =====',flush=True)
-              result=subprocess.run(['bash','-e','-o','pipefail','-c',script],env=env)
-              if result.returncode:
-                  core=Path(env['RUNNER_TEMP'])/'build'/'libshadps4.a'
-                  if name == 'Build iOS engine and collect diagnostics' and core.is_file():
-                      print(f'Build69: engine command returned {result.returncode}, but {core} exists; continuing to library collection and Xcode link stage.',flush=True)
-                  else:
-                      raise subprocess.CalledProcessError(result.returncode, ['bash','-e','-o','pipefail','-c',script])
-              with open(envfile) as f:
-                  f.seek(env_pos)
-                  for line in f:
-                      line=line.rstrip('\n')
-                      if '=' in line:
-                          k,v=line.split('=',1); env[k]=v
-                  env_pos=f.tell()
-              with open(pathfile) as f:
-                  f.seek(path_pos)
-                  new=[x.rstrip('\n') for x in f if x.rstrip('\n')]
-                  path_pos=f.tell()
-              if new:
-                  env['PATH']=':'.join(new)+':'+env.get('PATH','')
+
+              print(f'\n::group::Build64 step {index}: {name}', flush=True)
+              print('----- command -----', flush=True)
+              print(script, flush=True)
+              print('-------------------', flush=True)
+
+              try:
+                  if name == 'Configure iOS engine':
+                      print('Build70: applying grouped iOS patches...', flush=True)
+                      subprocess.run(['python3','.github/scripts/build66-patches.py'],env=env,check=True)
+
+                  result=subprocess.run(
+                      ['bash','-x','-e','-o','pipefail','-c',script],
+                      env=env
+                  )
+                  print(f'Build70: step exit code = {result.returncode}', flush=True)
+
+                  if result.returncode:
+                      core=Path(env['RUNNER_TEMP'])/'build'/'libshadps4.a'
+                      if name == 'Build iOS engine and collect diagnostics' and core.is_file():
+                          print(f'Build70: engine command returned {result.returncode}, but {core} exists ({core.stat().st_size} bytes); continuing.',flush=True)
+                      else:
+                          failed.append((index,name,result.returncode))
+                          print(f'::error title=Build70 failure::Build64 step {index} "{name}" failed with exit code {result.returncode}',flush=True)
+                          raise subprocess.CalledProcessError(result.returncode, ['bash','-x','-e','-o','pipefail','-c',script])
+
+                  with open(envfile) as f:
+                      f.seek(env_pos)
+                      for line in f:
+                          line=line.rstrip('\n')
+                          if '=' in line:
+                              k,v=line.split('=',1); env[k]=v
+                      env_pos=f.tell()
+
+                  with open(pathfile) as f:
+                      f.seek(path_pos)
+                      new=[x.rstrip('\n') for x in f if x.rstrip('\n')]
+                      path_pos=f.tell()
+                  if new:
+                      env['PATH']=':'.join(new)+':'+env.get('PATH','')
+
+              except Exception:
+                  print('Build70: exception traceback:', flush=True)
+                  traceback.print_exc()
+                  raise
+              finally:
+                  print('::endgroup::', flush=True)
+
+          print('\nBuild70: all runnable Build64 steps completed.', flush=True)
           PY
+
+      - name: Build70 failure summary
+        if: failure()
+        shell: bash
+        run: |
+          echo "Build 70 failed. The previous step now prints each Build64 sub-step, its command trace, exit code, and a GitHub ::error marker."
+          echo "Diagnostic files currently present:"
+          find "$RUNNER_TEMP" -maxdepth 3 -type f \( -name '*.log' -o -name '*.txt' \) -print 2>/dev/null | sort || true
 
       - name: Upload engine diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build69-diagnostics
+          name: build70-diagnostics
           path: |
             ${{ runner.temp }}/shadps4-cmake-configure.log
             ${{ runner.temp }}/shadps4-build.log
