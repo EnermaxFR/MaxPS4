@@ -61,6 +61,11 @@ public:
                 FILE* out = fd == 1 ? stdout : stderr;
                 const size_t done = fwrite(reinterpret_cast<const void*>(addr), 1, len, out);
                 fflush(out);
+                const size_t remaining = output.size() < 1024 ? 1024 - output.size() : 0;
+                if (remaining != 0) {
+                    const size_t capture = std::min(done, remaining);
+                    output.append(reinterpret_cast<const char*>(addr), capture);
+                }
                 gpr[FEXCore::X86State::REG_RAX] = done;
                 return true;
             }
@@ -77,6 +82,7 @@ public:
 
     void SetImage(uintptr_t begin, size_t size) { image_begin = begin; image_size = size; }
     uint64_t LastSyscall() const { return last_syscall; }
+    const std::string& Output() const { return output; }
 
 private:
     bool IsReadable(uintptr_t addr, size_t size) const {
@@ -87,6 +93,7 @@ private:
     uintptr_t image_begin{};
     size_t image_size{};
     uint64_t last_syscall{};
+    std::string output;
 };
 } // namespace
 
@@ -261,21 +268,27 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     auto result = backend->Run(request);
     if (const auto* failure = std::get_if<Core::GuestExecutionFailure>(&result)) {
         char buf[220];
+        const auto& captured = bridge.Output();
         snprintf(buf, sizeof(buf),
-                 "FEX handoff reached guest • stopped stage=%d errno=%d syscall=%llu",
+                 "FEX handoff reached guest • stopped stage=%d errno=%d syscall=%llu%s%s",
                  static_cast<int>(failure->Stage), failure->Error,
-                 static_cast<unsigned long long>(bridge.LastSyscall()));
+                 static_cast<unsigned long long>(bridge.LastSyscall()),
+                 captured.empty() ? "" : " • output=",
+                 captured.empty() ? "" : captured.c_str());
         g_run_diag = buf;
         return 33;
     }
 
     const auto& state = std::get<Core::GuestExecutionState>(result);
     char buf[220];
+    const auto& captured = bridge.Output();
     snprintf(buf, sizeof(buf),
-             "FEX guest executed • stop=%d first=0x%llx last=0x%llx",
+             "FEX guest executed • stop=%d first=0x%llx last=0x%llx%s%s",
              static_cast<int>(state.StopReason),
              static_cast<unsigned long long>(state.FirstRip),
-             static_cast<unsigned long long>(state.LastRip));
+             static_cast<unsigned long long>(state.LastRip),
+             captured.empty() ? "" : " • output=",
+             captured.empty() ? "" : captured.c_str());
     g_run_diag = buf;
     return 0;
 }
