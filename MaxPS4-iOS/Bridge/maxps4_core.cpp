@@ -1,4 +1,5 @@
-#include "maxps4_core.h"\n#include "maxps4_backend.h"
+#include "maxps4_core.h"
+#include "maxps4_backend.h"
 
 #include <sys/mman.h>
 #include <unistd.h>
