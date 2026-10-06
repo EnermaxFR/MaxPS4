@@ -8,7 +8,7 @@ on:
       - ".github/workflows/ps4-homebrew-test.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   PS4_SDK_REPO: https://github.com/ps4-payload-dev/sdk.git
@@ -48,10 +48,37 @@ jobs:
         run: |
           set -euo pipefail
           export PS4_PAYLOAD_SDK="$GITHUB_WORKSPACE/build/ps4-sdk"
-          make -C build/ps4-sdk-src/samples/hello_stdio clean
+          make -C build/ps4-sdk-src/samples/hello_stdio CFLAGS="-Wall -Werror -g -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384" clean
           make -C build/ps4-sdk-src/samples/hello_stdio
           file build/ps4-sdk-src/samples/hello_stdio/hello_stdio.elf
           readelf -h build/ps4-sdk-src/samples/hello_stdio/hello_stdio.elf
+          readelf -lW build/ps4-sdk-src/samples/hello_stdio/hello_stdio.elf
+          python3 - <<'PY'
+          from pathlib import Path
+          import struct
+          p = Path("build/ps4-sdk-src/samples/hello_stdio/hello_stdio.elf")
+          b = p.read_bytes()
+          phoff = struct.unpack_from("<Q", b, 32)[0]
+          phentsize = struct.unpack_from("<H", b, 54)[0]
+          phnum = struct.unpack_from("<H", b, 56)[0]
+          page = 0x4000
+          perms = {}
+          for i in range(phnum):
+              o = phoff + i * phentsize
+              p_type, p_flags = struct.unpack_from("<II", b, o)
+              if p_type != 1:
+                  continue
+              vaddr = struct.unpack_from("<Q", b, o + 16)[0]
+              memsz = struct.unpack_from("<Q", b, o + 40)[0]
+              start = vaddr & ~(page - 1)
+              end = (vaddr + memsz + page - 1) & ~(page - 1)
+              for va in range(start, end, page):
+                  perms[va] = perms.get(va, 0) | p_flags
+          bad = [va for va, flags in perms.items() if (flags & 1) and (flags & 2)]
+          if bad:
+              raise SystemExit(f"16K host-page W+X collision at: {[hex(x) for x in bad]}")
+          print("16K ELF page-permission audit: OK")
+          PY
 
       - name: Package ELF with license and provenance
         run: |
@@ -81,11 +108,3 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-
-      - name: Publish direct ELF download
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          TAG="maxps4-legal-elf-${{ github.run_number }}"
-          gh release create "$TAG"             "$GITHUB_WORKSPACE/build/MaxPS4-Legal-Hello-ELF/hello_stdio.elf#hello_stdio.elf"             --repo "$GITHUB_REPOSITORY"             --title "MaxPS4 Legal Hello ELF ${{ github.run_number }}"             --notes "Open-source GPLv3+ PS4 Hello World ELF for MaxPS4 loader testing. No proprietary Sony content is included."
