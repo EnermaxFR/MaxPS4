@@ -338,6 +338,15 @@ jobs:
           ios_alloc = Path("build/aether-reference/src/core/ios/ios_jit_allocator.cpp")
           ia = ios_alloc.read_text()
           ia = ia.replace(
+              '#include "common/logging/log.h"',
+              '''// MaxPS4 0.7 minimal harness: avoid pulling the full shadPS4/spdlog logging graph.
+#define LOG_CRITICAL(...) do {} while (0)
+#define LOG_ERROR(...) do {} while (0)
+#define LOG_WARNING(...) do {} while (0)
+#define LOG_INFO(...) do {} while (0)
+#define LOG_DEBUG(...) do {} while (0)'''
+          )
+          ia = ia.replace(
               'namespace {\n\nusing BreakGetJITMappingFn = void* (*)(void*, size_t);',
               'extern "C" void* MaxPS4BreakGetJITMapping(void*, size_t);\n'
               'extern "C" void MaxPS4BreakJITDetach(void);\n\n'
