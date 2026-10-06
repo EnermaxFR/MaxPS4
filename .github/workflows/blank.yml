@@ -68,7 +68,8 @@ jobs:
             -DBUILD_FEXCORE_ONLY=ON \
             -DTUNE_CPU=generic \
             -DTUNE_ARCH=generic \
-            -DBUILD_FEXCORE_SMOKE=OFF \
+            -DFEXCORE_SMOKE_SOURCE="$GITHUB_WORKSPACE/build/aether-reference/runtime/probes/fexcore-smoke.cpp" \
+            -DBUILD_FEXCORE_SMOKE=ON \
             -DBUILD_TESTING=OFF \
             -DBUILD_FEX_LINUX_TESTS=OFF \
             -DBUILD_THUNKS=OFF \
@@ -87,6 +88,33 @@ jobs:
         run: |
           set -euo pipefail
           cmake --build build/fexcore-ios --target FEXCore --parallel 3
+
+      - name: Link FEXCore iOS smoke probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build/fexcore-ios --target fexcore-smoke --parallel 3
+          file build/fexcore-ios/fexcore-smoke
+          xcrun vtool -show-build build/fexcore-ios/fexcore-smoke || true
+          nm -gU build/fexcore-ios/fexcore-smoke | grep -E "FEX|main" | head -40 || true
+
+      - name: Package FEXCore iOS link proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/fexcore-proof
+          cp build/fexcore-ios/fexcore-smoke build/fexcore-proof/
+          cp build/fexcore-ios/FEXCore/Source/libFEXCore.a build/fexcore-proof/
+          cp build/aether-reference/runtime/sources/fexcore-darwin/LICENSE build/fexcore-proof/FEXCore-LICENSE
+          printf "%s\n" "$FEXCORE_UPSTREAM_REV" > build/fexcore-proof/FEXCORE_UPSTREAM_REVISION.txt
+
+      - name: Upload FEXCore iOS link proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: FEXCore-iOS-link-proof
+          path: build/fexcore-proof
+          if-no-files-found: error
+          retention-days: 14
 
   build-ios:
     runs-on: macos-latest
