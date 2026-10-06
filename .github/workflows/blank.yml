@@ -330,12 +330,13 @@ jobs:
               self.statusLabel.text = @"Bridge shadPS4/FEX en cours…";
               dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
                   int result = maxps4_fex_guest_harness_run();
+                  const char *detail = maxps4_fex_guest_last_error();
+                  NSString *detailText = detail ? [NSString stringWithUTF8String:detail] : @"no detail";
                   dispatch_async(dispatch_get_main_queue(), ^{
                       if (result == 0) {
                           self.statusLabel.text = @"SHADPS4_FEX_GUEST_OK\nGuestEngine • FexGuestCpuBackend • HLE veneers • callbacks : OK";
                       } else {
-                          const char *detail = maxps4_fex_guest_last_error();
-                          self.statusLabel.text = [NSString stringWithFormat:@"SHADPS4_FEX_GUEST_FAIL code=%d\n%s", result, detail ? detail : "no detail"];
+                          self.statusLabel.text = [NSString stringWithFormat:@"SHADPS4_FEX_GUEST_FAIL code=%d\n%@", result, detailText];
                       }
                       self.runButton.enabled = YES;
                   });
