@@ -556,6 +556,7 @@ jobs:
               "${CMAKE_SOURCE_DIR}/MaxPS4FEXGuestHost.cpp"
               "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_backend.cpp"
               "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_ps4_loader.cpp"
+              "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_fex_elf_runner.cpp"
               "${FEXCORE_PROJECT_SOURCE_DIR}/core/fex/fex_guest_engine.cpp"
               "${FEXCORE_PROJECT_SOURCE_DIR}/core/guest_cpu/fex_guest_cpu.cpp"
               "${FEXCORE_PROJECT_SOURCE_DIR}/core/guest_cpu/hle_call_adapter.cpp"
