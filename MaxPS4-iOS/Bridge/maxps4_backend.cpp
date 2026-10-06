@@ -6,6 +6,8 @@
 #if defined(MAXPS4_HAS_SHADPS4_FEX)
 extern "C" int maxps4_fex_guest_harness_run(void);
 extern "C" const char* maxps4_fex_guest_last_error(void);
+extern "C" int maxps4_fex_guest_run_elf(const char* path);
+extern "C" const char* maxps4_fex_guest_run_last_error(void);
 #endif
 
 static char g_backend_diagnostic[256] =
@@ -70,11 +72,11 @@ bool maxps4_backend_boot(const char *path) {
         return false;
     }
 #if defined(MAXPS4_HAS_SHADPS4_FEX)
-    char validated[sizeof(g_backend_diagnostic)]{};
-    std::snprintf(validated, sizeof(validated), "%s", g_backend_diagnostic);
+    const int rc = maxps4_fex_guest_run_elf(path);
+    const char* detail = maxps4_fex_guest_run_last_error();
     std::snprintf(g_backend_diagnostic, sizeof(g_backend_diagnostic),
-                  "%s • shadPS4 runtime handoff pending", validated);
-    return false;
+                  "%s", detail ? detail : "FEX guest runner: no detail");
+    return rc == 0;
 #else
     return false;
 #endif
