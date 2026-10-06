@@ -111,7 +111,7 @@
             self.statusLabel.text = [NSString stringWithFormat:@"Démarrage demandé : %@\n%@", url.lastPathComponent, bootText];
         } else {
             self.statusLabel.text = [NSString stringWithFormat:
-                @"%@ validé.\n%@\n\nLe chargeur PS4 complet n’est pas encore relié à l’exécution du jeu dans cette build.",
+                @"%@ validé.\n%@\n\nLe handoff loader → FEX a été tenté. Cette build de test n’implémente pas encore tous les services/HLE PS4 nécessaires.",
                 url.lastPathComponent, bootText];
         }
     }
