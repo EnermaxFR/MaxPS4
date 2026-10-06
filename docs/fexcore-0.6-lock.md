@@ -16,7 +16,7 @@ The MIT copyright and permission notice must be retained with every copy or subs
 
 The inspected AetherPS4 repository is distributed under GNU GPL v2. Any source copied or adapted from that GPL-covered integration must retain its copyright/license notices and MaxPS4 distributions containing that code must meet the corresponding GPL source-distribution requirements.
 
-Do not mark the MaxPS4 backend READY merely because FEXCore source exists in the tree. READY is reserved for a build where the real runtime is compiled, linked, initialized and validated on-device.
+FEXCore 0.6 has now been compiled, linked, initialized and validated on-device with a real x86-64 guest smoke probe. This validates the FEXCore execution layer only. The MaxPS4 PS4 backend remains STAGING until the real shadPS4 runtime is linked and validated on-device.
 
 ## iOS JIT boundary
 
@@ -28,14 +28,14 @@ MaxPS4 must not ship PS4 games, copyrighted game assets, Sony firmware, cryptogr
 
 ## 0.6 acceptance gate
 
-0.6 may advance from STAGING only after all of the following are true:
+FEXCore 0.6 acceptance status:
 
-1. Exact FEXCore-derived source revision is recorded.
-2. MIT notice is included in source and binary distribution notices.
-3. Any GPL-covered shadPS4/AetherPS4-derived integration retains its notices and corresponding source is available.
-4. FEXCore builds for `arm64-apple-ios` in GitHub Actions.
-5. The FEXCore code-cache path uses the validated iOS JIT26 RX/RW mechanism rather than assuming macOS MAP_JIT behavior.
-6. A minimal x86-64 guest probe executes through FEXCore on the iPhone.
-7. Only then may `MAXPS4_HAS_SHADPS4_FEX` be enabled.
+1. COMPLETE — Exact FEXCore-derived source revision is recorded.
+2. COMPLETE — MIT notice is included in source and binary distribution notices.
+3. COMPLETE FOR CURRENT FEXCORE STAGE — GPL-covered shadPS4/AetherPS4 provenance is recorded; any future copied GPL integration must retain notices and corresponding source.
+4. COMPLETE — FEXCore builds for `arm64-apple-ios` in GitHub Actions.
+5. COMPLETE — The FEXCore code-cache path uses the validated iOS JIT26 RX/RW mechanism rather than assuming macOS MAP_JIT behavior.
+6. COMPLETE — A minimal x86-64 guest probe executed successfully through FEXCore on-device and reported `FEXCORE_SMOKE_OK`.
+7. NOT YET — `MAXPS4_HAS_SHADPS4_FEX` stays disabled until the actual shadPS4 runtime is linked to this validated FEXCore layer and passes an on-device integration test.
 
 This is a project compliance checklist, not legal advice.
