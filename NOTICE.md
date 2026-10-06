@@ -16,11 +16,19 @@ shadPS4 is distributed under the GNU General Public License, version 2 or later 
 
 MaxPS4 does not claim ownership of shadPS4 or of third-party components used by shadPS4.
 
+## FFmpeg
+
+The MaxPS4 iOS build uses FFmpeg 7.1, compiled from source as static iOS arm64 libraries. FFmpeg is a separate third-party project and remains copyright its respective contributors.
+
+The MaxPS4 build configuration does not enable FFmpeg's `--enable-gpl` or `--enable-nonfree` options. FFmpeg's applicable license and copyright notices are retained in the FFmpeg source tree included with the corresponding-source package.
+
+The exact FFmpeg 7.1 source used by a release build is included under `third-party/ffmpeg-7.1/` in the corresponding-source artifact. See `SOURCE.md` for build and source-availability details.
+
 ## Third-party software
 
-shadPS4 and its dependencies include software under several free/open-source licenses, including GPL-2.0-or-later, BSD-3-Clause, BSL-1.0, MIT, CC0-1.0 and OFL-1.1. Their original copyright and license notices remain applicable.
+shadPS4, FFmpeg and their dependencies include software under multiple free/open-source licenses. Their original copyright and license notices remain applicable.
 
-See the upstream shadPS4 `LICENSES` directory for the corresponding license texts and notices.
+See the upstream shadPS4 `LICENSES` directory and the license files contained in the included FFmpeg source tree for the applicable texts and notices.
 
 ## Source availability
 
