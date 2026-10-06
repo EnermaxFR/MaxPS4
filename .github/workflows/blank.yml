@@ -44,7 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m venv "$GITHUB_WORKSPACE/build/fex-python"
-          "$GITHUB_WORKSPACE/build/fex-python/bin/python" -m pip install --upgrade pip setuptools packaging
+          "$GITHUB_WORKSPACE/build/fex-python/bin/python" -m pip install --upgrade pip packaging 'setuptools<81'
           "$GITHUB_WORKSPACE/build/fex-python/bin/python" -c 'import packaging, pkg_resources; print("FEXCore Python dependencies OK")'
           echo "$GITHUB_WORKSPACE/build/fex-python/bin" >> "$GITHUB_PATH"
 
