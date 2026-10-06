@@ -28,7 +28,7 @@ These implementation files are not treated as an isolated MIT-only deliverable b
 
 The bridge build may include GPL-2.0-or-later shadPS4 headers required by the guest CPU interface. Those GPL notices must be preserved and the resulting combined integration is handled under compatible GPL terms.
 
-The shadPS4 iOS JIT allocator (`src/core/ios/ios_jit_allocator.{h,cpp}`) is still intentionally excluded from MaxPS4 because MaxPS4 already has an independently implemented StikDebug/JIT26 RX/RW allocator boundary validated on-device. It must not be copied merely to duplicate functionality.
+The shadPS4 iOS JIT allocator (`src/core/ios/ios_jit_allocator.{h,cpp}`) is required by the 0.7 guest bridge because `GuestEngine` and the HLE veneer allocator depend on `Core::DualMappedRegion`. It is therefore included in the 0.7 harness build and treated as GPL-2.0-or-later source from the locked AetherPS4 reference. Its BreakpointJIT `dlopen`/`dlsym` boundary is patched at build time so allocation calls MaxPS4's already validated direct JIT26/StikDebug interoperability shim instead. No StikDebug, StikJIT, or BreakpointJIT binary is bundled.
 
 ## Runtime truthfulness gate
 
