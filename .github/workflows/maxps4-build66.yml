@@ -1,4 +1,4 @@
-name: Build 70 MaxPS4 iOS
+name: Build 71 MaxPS4 iOS
 
 on:
   workflow_dispatch:
@@ -7,6 +7,10 @@ on:
     paths:
       - '.github/workflows/maxps4-build66.yml'
       - '.github/scripts/build66-patches.py'
+      - 'MaxPS4-iOS/**'
+      - 'LICENSE'
+      - 'NOTICE.md'
+      - 'SOURCE.md'
 
 jobs:
   build:
@@ -21,7 +25,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/maxps4-ccache
-          key: maxps4-ios-build70-${{ runner.os }}-${{ github.run_id }}
+          key: maxps4-ios-build71-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-
 
@@ -29,54 +33,33 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VENV="$RUNNER_TEMP/build70-python"
+          VENV="$RUNNER_TEMP/build71-python"
           python3 -m venv "$VENV"
           "$VENV/bin/python" -m pip install --upgrade pip pyyaml
           "$VENV/bin/python" - <<'PY'
           import os, subprocess, yaml, traceback
           from pathlib import Path
-
           base='37bd10e8758416cbefcde6bdfaa3824c8a98fcf7'
           raw=subprocess.check_output(['git','show',f'{base}:.github/workflows/maxps4-ipa.yml'],text=True)
           doc=yaml.safe_load(raw)
           steps=doc['jobs']['build-maxps4-ipa']['steps']
-          env=os.environ.copy()
-          envfile=env['GITHUB_ENV']; pathfile=env['GITHUB_PATH']
-          open(envfile,'w').close(); open(pathfile,'w').close()
-          env_pos=0; path_pos=0
-          failed=[]
-
+          env=os.environ.copy(); envfile=env['GITHUB_ENV']; pathfile=env['GITHUB_PATH']
+          open(envfile,'w').close(); open(pathfile,'w').close(); env_pos=0; path_pos=0
           for index, step in enumerate(steps, 1):
-              name=step.get('name','') or f'unnamed step {index}'
-              script=step.get('run')
-              if not script:
-                  continue
-
-              print(f'\n::group::Build64 step {index}: {name}', flush=True)
-              print('----- command -----', flush=True)
-              print(script, flush=True)
-              print('-------------------', flush=True)
-
+              name=step.get('name','') or f'unnamed step {index}'; script=step.get('run')
+              if not script: continue
+              print(f'\n::group::Build64 step {index}: {name}',flush=True); print(script,flush=True)
               try:
                   if name == 'Configure iOS engine':
-                      print('Build70: applying grouped iOS patches...', flush=True)
                       subprocess.run(['python3','.github/scripts/build66-patches.py'],env=env,check=True)
-
-                  result=subprocess.run(
-                      ['bash','-x','-e','-o','pipefail','-c',script],
-                      env=env
-                  )
-                  print(f'Build70: step exit code = {result.returncode}', flush=True)
-
+                  result=subprocess.run(['bash','-x','-e','-o','pipefail','-c',script],env=env)
                   if result.returncode:
                       core=Path(env['RUNNER_TEMP'])/'build'/'libshadps4.a'
                       if name == 'Build iOS engine and collect diagnostics' and core.is_file():
-                          print(f'Build70: engine command returned {result.returncode}, but {core} exists ({core.stat().st_size} bytes); continuing.',flush=True)
+                          print(f'Build71: engine returned {result.returncode}, but core exists; continuing.',flush=True)
                       else:
-                          failed.append((index,name,result.returncode))
-                          print(f'::error title=Build70 failure::Build64 step {index} "{name}" failed with exit code {result.returncode}',flush=True)
-                          raise subprocess.CalledProcessError(result.returncode, ['bash','-x','-e','-o','pipefail','-c',script])
-
+                          print(f'::error title=Build71 failure::Build64 step {index} "{name}" failed with exit code {result.returncode}',flush=True)
+                          raise subprocess.CalledProcessError(result.returncode, script)
                   with open(envfile) as f:
                       f.seek(env_pos)
                       for line in f:
@@ -84,42 +67,66 @@ jobs:
                           if '=' in line:
                               k,v=line.split('=',1); env[k]=v
                       env_pos=f.tell()
-
                   with open(pathfile) as f:
-                      f.seek(path_pos)
-                      new=[x.rstrip('\n') for x in f if x.rstrip('\n')]
-                      path_pos=f.tell()
-                  if new:
-                      env['PATH']=':'.join(new)+':'+env.get('PATH','')
-
+                      f.seek(path_pos); new=[x.rstrip('\n') for x in f if x.rstrip('\n')]; path_pos=f.tell()
+                  if new: env['PATH']=':'.join(new)+':'+env.get('PATH','')
               except Exception:
-                  print('Build70: exception traceback:', flush=True)
-                  traceback.print_exc()
-                  raise
+                  traceback.print_exc(); raise
               finally:
-                  print('::endgroup::', flush=True)
-
-          print('\nBuild70: all runnable Build64 steps completed.', flush=True)
+                  print('::endgroup::',flush=True)
           PY
 
-      - name: Build70 failure summary
+      - name: Package GPL corresponding source
+        if: success()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          OUT="$RUNNER_TEMP/MaxPS4-GPL-Source"
+          rm -rf "$OUT"
+          mkdir -p "$OUT/maxps4" "$OUT/shadps4"
+
+          # Exact MaxPS4 source and build scripts used for this run.
+          git archive --format=tar HEAD | tar -xf - -C "$OUT/maxps4"
+
+          # The build pipeline checks out this exact shadPS4 revision and patches it for iOS.
+          SHAD="$RUNNER_TEMP/shadps4"
+          test -d "$SHAD/.git"
+          git -C "$SHAD" rev-parse HEAD > "$OUT/SHADPS4_COMMIT.txt"
+          cp -R "$SHAD"/. "$OUT/shadps4/"
+          rm -rf "$OUT/shadps4/.git"
+
+          cp LICENSE "$OUT/LICENSE-MaxPS4-GPL-2.0.txt"
+          cp NOTICE.md "$OUT/NOTICE.md"
+          cp SOURCE.md "$OUT/SOURCE.md"
+          printf 'MaxPS4 commit: %s\nGitHub run: %s\nRun attempt: %s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$OUT/BUILD-SOURCE-IDENTITY.txt"
+
+          ditto -c -k --sequesterRsrc --keepParent "$OUT" "$RUNNER_TEMP/MaxPS4-GPL-Corresponding-Source.zip"
+
+      - name: Build71 failure summary
         if: failure()
         shell: bash
         run: |
-          echo "Build 70 failed. The previous step now prints each Build64 sub-step, its command trace, exit code, and a GitHub ::error marker."
-          echo "Diagnostic files currently present:"
+          echo "Build 71 failed. Check the detailed Build64 sub-step trace above."
           find "$RUNNER_TEMP" -maxdepth 3 -type f \( -name '*.log' -o -name '*.txt' \) -print 2>/dev/null | sort || true
 
       - name: Upload engine diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build70-diagnostics
+          name: build71-diagnostics
           path: |
             ${{ runner.temp }}/shadps4-cmake-configure.log
             ${{ runner.temp }}/shadps4-build.log
             ${{ runner.temp }}/shadps4-libs.txt
           if-no-files-found: ignore
+
+      - name: Upload GPL corresponding source
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-GPL-Corresponding-Source
+          path: ${{ runner.temp }}/MaxPS4-GPL-Corresponding-Source.zip
+          if-no-files-found: error
 
       - name: Upload MaxPS4 IPA
         if: success()
