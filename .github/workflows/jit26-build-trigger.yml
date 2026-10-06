@@ -16,10 +16,10 @@ jobs:
   dispatch:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch MaxPS4 IPA workflow on JIT26 branch
+      - name: Dispatch stable MaxPS4 Build 77 pipeline on JIT26 branch
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh workflow run maxps4-ipa.yml \
+          gh workflow run maxps4-build66.yml \
             --repo "${{ github.repository }}" \
             --ref maxps4-ios26-jit-compliance
