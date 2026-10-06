@@ -85,6 +85,10 @@
 }
 
 - (void)pickExecutable {
+    if (self.bootInProgress) {
+        self.statusLabel.text = @"Un guest FEX est déjà en cours. Ferme puis relance MaxPS4 avant d’en lancer un autre.";
+        return;
+    }
     UIDocumentPickerViewController *picker =
         [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.data"]
                                                                inMode:UIDocumentPickerModeOpen];
@@ -143,7 +147,7 @@
             self.statusLabel.text = [NSString stringWithFormat:
                 @"%@ validé.\nFEX est toujours en cours après 5 s.\n\nL’interface reste active : le guest semble bloqué dans l’exécution. Aucun arrêt forcé n’est tenté pour éviter de corrompre l’état du runtime.",
                 url.lastPathComponent];
-            self.importButton.enabled = YES;
+            self.importButton.enabled = NO;
         }
     });
 }
