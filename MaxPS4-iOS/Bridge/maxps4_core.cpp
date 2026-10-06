@@ -1,4 +1,4 @@
-#include "maxps4_core.h"
+#include "maxps4_core.h"\n#include "maxps4_backend.h"
 
 #include <sys/mman.h>
 #include <unistd.h>
@@ -117,7 +117,9 @@ bool maxps4_core_jit_available(void) {
 MaxPS4CoreResult maxps4_core_boot_game(const char *path) {
     if (path == nullptr || path[0] == '\0') return MAXPS4_CORE_INVALID_PATH;
     if (!maxps4_core_jit_available()) return MAXPS4_CORE_JIT_UNAVAILABLE;
-    return MAXPS4_CORE_NOT_READY;
+    if (!maxps4_backend_validate_executable(path)) return MAXPS4_CORE_INVALID_PATH;
+    if (!maxps4_backend_boot(path)) return MAXPS4_CORE_NOT_READY;
+    return MAXPS4_CORE_OK;
 }
 
 void maxps4_core_stop(void) {
