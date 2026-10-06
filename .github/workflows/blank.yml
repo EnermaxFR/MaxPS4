@@ -220,6 +220,101 @@ jobs:
           p.write_text(s)
           PY
 
+          cp "$GITHUB_WORKSPACE/build/aether-reference/runtime/probes/fexcore-guest-harness.cpp" "$SRC/MaxPS4FEXGuestHost.cpp"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build/aether-reference/runtime/sources/fexcore-darwin/MaxPS4FEXGuestHost.cpp")
+          s = p.read_text()
+          if s.count("int main() {") != 1:
+              raise SystemExit("expected exactly one guest harness main()")
+          s = s.replace("int main() {", 'extern "C" int maxps4_fex_guest_harness_run() {', 1)
+          s = s.replace('#include "../../src/core/fex/fex_guest_engine.h"', '#include "core/fex/fex_guest_engine.h"')
+          s = s.replace('#include "../../src/core/guest_cpu/fex_guest_cpu.h"', '#include "core/guest_cpu/fex_guest_cpu.h"')
+          s = s.replace('#include "../../src/core/guest_cpu/fex_hle_bridge.h"', '#include "core/guest_cpu/fex_hle_bridge.h"')
+          p.write_text(s)
+          PY
+
+          cat > "$SRC/MaxPS4FEXGuestHost.mm" <<'OBJC'
+          #import <UIKit/UIKit.h>
+
+          extern "C" int maxps4_fex_guest_harness_run(void);
+
+          @interface MaxPS4FEXGuestViewController : UIViewController
+          @property(nonatomic, strong) UILabel *statusLabel;
+          @property(nonatomic, strong) UIButton *runButton;
+          @end
+
+          @implementation MaxPS4FEXGuestViewController
+          - (void)viewDidLoad {
+              [super viewDidLoad];
+              self.view.backgroundColor = UIColor.systemBackgroundColor;
+
+              UILabel *title = [[UILabel alloc] init];
+              title.translatesAutoresizingMaskIntoConstraints = NO;
+              title.text = @"MaxPS4 shadPS4/FEX 0.7";
+              title.font = [UIFont boldSystemFontOfSize:26.0];
+
+              self.statusLabel = [[UILabel alloc] init];
+              self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
+              self.statusLabel.numberOfLines = 0;
+              self.statusLabel.text = @"1. Lance StikDebug avec universal.js\n2. Reviens ici\n3. Appuie sur Tester le bridge";
+
+              self.runButton = [UIButton buttonWithType:UIButtonTypeSystem];
+              self.runButton.translatesAutoresizingMaskIntoConstraints = NO;
+              [self.runButton setTitle:@"Tester le bridge shadPS4/FEX" forState:UIControlStateNormal];
+              self.runButton.titleLabel.font = [UIFont boldSystemFontOfSize:18.0];
+              [self.runButton addTarget:self action:@selector(runProbe) forControlEvents:UIControlEventTouchUpInside];
+
+              UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[title, self.statusLabel, self.runButton]];
+              stack.translatesAutoresizingMaskIntoConstraints = NO;
+              stack.axis = UILayoutConstraintAxisVertical;
+              stack.spacing = 24.0;
+              [self.view addSubview:stack];
+
+              [NSLayoutConstraint activateConstraints:@[
+                  [stack.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:24.0],
+                  [stack.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-24.0],
+                  [stack.centerYAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.centerYAnchor]
+              ]];
+          }
+
+          - (void)runProbe {
+              self.runButton.enabled = NO;
+              self.statusLabel.text = @"Bridge shadPS4/FEX en cours…";
+              dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                  int result = maxps4_fex_guest_harness_run();
+                  dispatch_async(dispatch_get_main_queue(), ^{
+                      if (result == 0) {
+                          self.statusLabel.text = @"SHADPS4_FEX_GUEST_OK\nGuestEngine • FexGuestCpuBackend • HLE veneers • callbacks : OK";
+                      } else {
+                          self.statusLabel.text = [NSString stringWithFormat:@"SHADPS4_FEX_GUEST_FAIL code=%d\nEnvoie-moi ce code ou le crash LiveContainer.", result];
+                      }
+                      self.runButton.enabled = YES;
+                  });
+              });
+          }
+          @end
+
+          @interface MaxPS4FEXGuestAppDelegate : UIResponder <UIApplicationDelegate>
+          @property(nonatomic, strong) UIWindow *window;
+          @end
+
+          @implementation MaxPS4FEXGuestAppDelegate
+          - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+              self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+              self.window.rootViewController = [[MaxPS4FEXGuestViewController alloc] init];
+              [self.window makeKeyAndVisible];
+              return YES;
+          }
+          @end
+
+          int main(int argc, char *argv[]) {
+              @autoreleasepool {
+                  return UIApplicationMain(argc, argv, nil, NSStringFromClass([MaxPS4FEXGuestAppDelegate class]));
+              }
+          }
+          OBJC
+
           cat > "$SRC/MaxPS4FEXHost.mm" <<'OBJC'
           #import <UIKit/UIKit.h>
 
@@ -326,6 +421,25 @@ jobs:
             target_link_libraries(maxps4-fex-probe PRIVATE
               FEXCore Common CommonTools JemallocLibs ${PTHREAD_LIB}
               "-framework UIKit" "-framework Foundation")
+
+            add_executable(maxps4-fex-guest-probe
+              "${CMAKE_SOURCE_DIR}/MaxPS4FEXGuestHost.mm"
+              "${CMAKE_SOURCE_DIR}/MaxPS4FEXGuestHost.cpp"
+              "${FEXCORE_PROJECT_SOURCE_DIR}/core/fex/fex_guest_engine.cpp"
+              "${FEXCORE_PROJECT_SOURCE_DIR}/core/guest_cpu/fex_guest_cpu.cpp"
+              "${FEXCORE_PROJECT_SOURCE_DIR}/core/guest_cpu/hle_call_adapter.cpp"
+              "${FEXCORE_PROJECT_SOURCE_DIR}/core/guest_cpu/fex_hle_bridge.cpp"
+              "${FEXCORE_PROJECT_SOURCE_DIR}/core/ios/ios_jit_allocator.cpp"
+              "${CMAKE_SOURCE_DIR}/MaxPS4JITShim.cpp")
+            target_compile_features(maxps4-fex-guest-probe PRIVATE cxx_std_20)
+            target_include_directories(maxps4-fex-guest-probe PRIVATE
+              "${FEXCORE_PROJECT_SOURCE_DIR}"
+              "${CMAKE_BINARY_DIR}/generated"
+              "${CMAKE_SOURCE_DIR}/Source/Tools/CommonTools"
+              "${CMAKE_SOURCE_DIR}/FEXCore/Source")
+            target_link_libraries(maxps4-fex-guest-probe PRIVATE
+              FEXCore Common CommonTools JemallocLibs ${PTHREAD_LIB}
+              "-framework UIKit" "-framework Foundation")
           '''
           needle = '''    target_link_libraries(fexcore-smoke PRIVATE
                 FEXCore Common CommonTools JemallocLibs ${PTHREAD_LIB})
@@ -399,6 +513,7 @@ jobs:
           PY
 
           grep -n "maxps4-fex-probe" "$SRC/CMakeLists.txt"
+          grep -n "maxps4-fex-guest-probe" "$SRC/CMakeLists.txt"
           grep -n "MaxPS4BreakGetJITMapping" "$SRC/FEXCore/Source/Utils/Allocator.cpp"
 
       - name: Install FEXCore Python configure dependencies
@@ -516,6 +631,57 @@ jobs:
         with:
           name: MaxPS4-FEXCore-Probe-unsigned
           path: build/MaxPS4-FEXCore-Probe-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build app-hosted shadPS4 FEX guest bridge probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build/fexcore-ios --target maxps4-fex-guest-probe --parallel 3
+          file build/fexcore-ios/Bin/maxps4-fex-guest-probe.app/maxps4-fex-guest-probe
+
+      - name: Package on-device shadPS4 FEX 0.7 guest probe IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="build/fexcore-ios/Bin/maxps4-fex-guest-probe.app"
+          PAYLOAD="build/fex-guest-probe-ipa/Payload"
+          mkdir -p "$PAYLOAD"
+          rm -rf "$PAYLOAD/MaxPS4FEXGuestProbe.app"
+          cp -R "$APP" "$PAYLOAD/MaxPS4FEXGuestProbe.app"
+          mv "$PAYLOAD/MaxPS4FEXGuestProbe.app/maxps4-fex-guest-probe" "$PAYLOAD/MaxPS4FEXGuestProbe.app/MaxPS4FEXGuestProbe"
+          cat > "$PAYLOAD/MaxPS4FEXGuestProbe.app/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleDevelopmentRegion</key><string>fr</string>
+            <key>CFBundleDisplayName</key><string>MaxPS4 FEX Guest 0.7</string>
+            <key>CFBundleExecutable</key><string>MaxPS4FEXGuestProbe</string>
+            <key>CFBundleIdentifier</key><string>com.enermaxfr.maxps4.fexguest07</string>
+            <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+            <key>CFBundleName</key><string>MaxPS4FEXGuestProbe</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>0.7</string>
+            <key>CFBundleVersion</key><string>${{ github.run_number }}</string>
+            <key>LSRequiresIPhoneOS</key><true/>
+            <key>MinimumOSVersion</key><string>17.4</string>
+            <key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
+          </dict></plist>
+          PLIST
+          cp build/aether-reference/runtime/sources/fexcore-darwin/LICENSE "$PAYLOAD/MaxPS4FEXGuestProbe.app/FEXCore-LICENSE"
+          cp build/aether-reference/LICENSE "$PAYLOAD/MaxPS4FEXGuestProbe.app/AetherPS4-GPL2-LICENSE"
+          cp THIRD_PARTY_NOTICES.md "$PAYLOAD/MaxPS4FEXGuestProbe.app/THIRD_PARTY_NOTICES.md"
+          cp docs/fexcore-0.6-lock.md "$PAYLOAD/MaxPS4FEXGuestProbe.app/FEXCORE_0_6_PROVENANCE.md"
+          cp docs/shadps4-fex-0.7-lock.md "$PAYLOAD/MaxPS4FEXGuestProbe.app/SHADPS4_FEX_0_7_PROVENANCE.md"
+          plutil -lint "$PAYLOAD/MaxPS4FEXGuestProbe.app/Info.plist"
+          (cd build/fex-guest-probe-ipa && zip -qry ../MaxPS4-shadPS4-FEX-Guest-Probe-unsigned.ipa Payload)
+
+      - name: Upload on-device shadPS4 FEX 0.7 guest probe IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-shadPS4-FEX-Guest-Probe-unsigned
+          path: build/MaxPS4-shadPS4-FEX-Guest-Probe-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
 
