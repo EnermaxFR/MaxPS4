@@ -231,6 +231,52 @@ jobs:
           s = s.replace('#include "../../src/core/fex/fex_guest_engine.h"', '#include "core/fex/fex_guest_engine.h"')
           s = s.replace('#include "../../src/core/guest_cpu/fex_guest_cpu.h"', '#include "core/guest_cpu/fex_guest_cpu.h"')
           s = s.replace('#include "../../src/core/guest_cpu/fex_hle_bridge.h"', '#include "core/guest_cpu/fex_hle_bridge.h"')
+          s = s.replace(
+              'namespace {\n',
+              '#include <string>\n\nstatic thread_local std::string g_maxps4_guest_last_error = "none";\n'
+              'extern "C" const char* maxps4_fex_guest_last_error() { return g_maxps4_guest_last_error.c_str(); }\n\n'
+              'namespace {\n',
+              1
+          )
+          s = s.replace(
+              'int Fail(const AetherPS4::Fex::EngineFailure& failure) {\n'
+              '  std::fprintf(stderr, "FEXCORE_GUEST_ENGINE_FAIL stage=%d error=%d\\n", static_cast<int>(failure.Stage), failure.Error);\n'
+              '  return 1;\n'
+              '}',
+              'int Fail(const AetherPS4::Fex::EngineFailure& failure) {\n'
+              '  char buf[160];\n'
+              '  std::snprintf(buf, sizeof(buf), "ENGINE stage=%d error=%d", static_cast<int>(failure.Stage), failure.Error);\n'
+              '  g_maxps4_guest_last_error = buf;\n'
+              '  std::fprintf(stderr, "FEXCORE_GUEST_ENGINE_FAIL %s\\n", buf);\n'
+              '  return 101;\n'
+              '}'
+          )
+          s = s.replace(
+              'int Fail(const Core::GuestExecutionFailure& failure) {\n'
+              '  std::fprintf(stderr, "FEXCORE_GUEST_CPU_FAIL stage=%d error=%d\\n", static_cast<int>(failure.Stage), failure.Error);\n'
+              '  return 1;\n'
+              '}',
+              'int Fail(const Core::GuestExecutionFailure& failure) {\n'
+              '  char buf[160];\n'
+              '  std::snprintf(buf, sizeof(buf), "GUEST_CPU stage=%d error=%d", static_cast<int>(failure.Stage), failure.Error);\n'
+              '  g_maxps4_guest_last_error = buf;\n'
+              '  std::fprintf(stderr, "FEXCORE_GUEST_CPU_FAIL %s\\n", buf);\n'
+              '  return 102;\n'
+              '}'
+          )
+          s = s.replace(
+              'if (!codePage.IsValid() || !stackPage.IsValid()) return 1;',
+              'if (!codePage.IsValid() || !stackPage.IsValid()) { g_maxps4_guest_last_error = "HOST_MAP code/stack mmap failed"; return 103; }'
+          )
+          s = s.replace(
+              'if (!codePage.MakeGuestExecutable()) return 1;',
+              'if (!codePage.MakeGuestExecutable()) { g_maxps4_guest_last_error = "HOST_MAP code mprotect(PROT_READ) failed errno=" + std::to_string(errno); return 104; }'
+          )
+          s = s.replace(
+              '  return 0;\n}',
+              '  g_maxps4_guest_last_error = "OK";\n  return 0;\n}',
+              1
+          )
           p.write_text(s)
           PY
 
@@ -238,6 +284,7 @@ jobs:
           #import <UIKit/UIKit.h>
 
           extern "C" int maxps4_fex_guest_harness_run(void);
+          extern "C" const char* maxps4_fex_guest_last_error(void);
 
           @interface MaxPS4FEXGuestViewController : UIViewController
           @property(nonatomic, strong) UILabel *statusLabel;
@@ -287,7 +334,8 @@ jobs:
                       if (result == 0) {
                           self.statusLabel.text = @"SHADPS4_FEX_GUEST_OK\nGuestEngine • FexGuestCpuBackend • HLE veneers • callbacks : OK";
                       } else {
-                          self.statusLabel.text = [NSString stringWithFormat:@"SHADPS4_FEX_GUEST_FAIL code=%d\nEnvoie-moi ce code ou le crash LiveContainer.", result];
+                          const char *detail = maxps4_fex_guest_last_error();
+                          self.statusLabel.text = [NSString stringWithFormat:@"SHADPS4_FEX_GUEST_FAIL code=%d\n%s", result, detail ? detail : "no detail"];
                       }
                       self.runButton.enabled = YES;
                   });
