@@ -9,9 +9,9 @@ This document freezes the source and license boundary for the next MaxPS4 integr
 - FEX upstream revision used by the locked Darwin snapshot: `f2b679f6028ce1c38875233aecfcf5d3f8ebecec`
 - Existing FEXCore provenance: see `docs/fexcore-0.6-lock.md`
 
-## MIT-only guest bridge candidate set
+## Guest bridge candidate set and effective GPL boundary
 
-The following files in the locked reference each carry `SPDX-License-Identifier: MIT` and are the only shadPS4/AetherPS4 guest bridge files approved for the first 0.7 import:
+The following implementation files in the locked reference each carry `SPDX-License-Identifier: MIT` and are the initial guest bridge implementation set:
 
 - `src/core/fex/fex_guest_engine.cpp` — blob `bc3c4408ef6c4e14b9c8a5ceb3d236e6a28c2d8f`
 - `src/core/fex/fex_guest_engine.h` — blob `bdb08c8b986dc2fe37d954cf315f9a62a20ccaf4`
@@ -22,17 +22,13 @@ The following files in the locked reference each carry `SPDX-License-Identifier:
 
 Any imported copy must retain its SPDX header and preserve provenance back to the locked reference.
 
-## Explicitly excluded GPL surface
+These implementation files are not treated as an isolated MIT-only deliverable because their include graph reaches GPL-2.0-or-later shadPS4 headers, including `src/common/types.h` and `src/core/libraries/kernel/threads/exception.h`. The compiled guest bridge is therefore treated as GPL-covered integration in MaxPS4. MaxPS4's repository is public and the corresponding source/provenance must remain available with binary distributions.
 
-The locked AetherPS4 tree also contains GPL-covered shadPS4 files. They are not covered by the MIT-only bridge allowance above and must not be copied into the 0.7 MIT bridge layer without a separate license decision and corresponding distribution obligations.
+## GPL surface and exclusions
 
-Examples include:
+The bridge build may include GPL-2.0-or-later shadPS4 headers required by the guest CPU interface. Those GPL notices must be preserved and the resulting combined integration is handled under compatible GPL terms.
 
-- `src/core/ios/ios_jit_allocator.cpp`
-- `src/core/ios/ios_jit_allocator.h`
-- `src/core/guest_cpu/guest_memory_validation_cache.h`
-
-MaxPS4 will continue using its independently implemented StikDebug/JIT26 RX/RW allocator boundary validated on-device instead of importing the GPL iOS JIT allocator.
+The shadPS4 iOS JIT allocator (`src/core/ios/ios_jit_allocator.{h,cpp}`) is still intentionally excluded from MaxPS4 because MaxPS4 already has an independently implemented StikDebug/JIT26 RX/RW allocator boundary validated on-device. It must not be copied merely to duplicate functionality.
 
 ## Runtime truthfulness gate
 
