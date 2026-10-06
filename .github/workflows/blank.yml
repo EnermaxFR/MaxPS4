@@ -6,6 +6,7 @@ on:
     branches: ["shadps4-ios-core"]
     paths:
       - "MaxPS4-iOS/**"
+      - "THIRD_PARTY_NOTICES.md"
       - ".github/workflows/blank.yml"
 
 permissions:
@@ -26,23 +27,22 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-path
           swiftc --version
 
-      - name: Compile native core bridge
+      - name: Compile native core and 0.5 backend
         shell: bash
         run: |
           set -euo pipefail
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           mkdir -p build/core
-          CORE_CPP="$(find MaxPS4-iOS -name 'maxps4_core.cpp' -print -quit)"
-          test -n "$CORE_CPP"
-          CORE_DIR="$(dirname "$CORE_CPP")"
-          xcrun --sdk iphoneos clang++ \
-            -target arm64-apple-ios16.0 \
-            -isysroot "$SDK" \
-            -std=c++20 -O2 -fvisibility=hidden \
-            -I"$CORE_DIR" \
-            -c "$CORE_CPP" \
-            -o build/core/maxps4_core.o
-          file build/core/maxps4_core.o
+          for SRC in MaxPS4-iOS/Bridge/maxps4_core.cpp MaxPS4-iOS/Bridge/maxps4_backend.cpp; do
+            OUT="build/core/$(basename "${SRC%.cpp}").o"
+            xcrun --sdk iphoneos clang++ \
+              -target arm64-apple-ios16.0 \
+              -isysroot "$SDK" \
+              -std=c++20 -O2 -fvisibility=hidden \
+              -I MaxPS4-iOS/Bridge \
+              -c "$SRC" -o "$OUT"
+            file "$OUT"
+          done
 
       - name: Build arm64 iOS executable
         shell: bash
@@ -57,9 +57,12 @@ jobs:
             -O -parse-as-library \
             -framework SwiftUI -framework UIKit \
             MaxPS4-iOS/Sources/*.swift \
-            build/core/maxps4_core.o \
+            build/core/maxps4_core.o build/core/maxps4_backend.o \
             -Xlinker -lc++ \
             -o build/Payload/MaxPS4.app/MaxPS4
+
+      - name: Bundle compliance notices
+        run: cp THIRD_PARTY_NOTICES.md build/Payload/MaxPS4.app/THIRD_PARTY_NOTICES.md
 
       - name: Create Info.plist
         shell: bash
@@ -69,13 +72,13 @@ jobs:
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0"><dict>
             <key>CFBundleDevelopmentRegion</key><string>fr</string>
-            <key>CFBundleDisplayName</key><string>MaxPS4 Core 0.4</string>
+            <key>CFBundleDisplayName</key><string>MaxPS4 Core 0.5</string>
             <key>CFBundleExecutable</key><string>MaxPS4</string>
-            <key>CFBundleIdentifier</key><string>com.enermaxfr.maxps4.core04</string>
+            <key>CFBundleIdentifier</key><string>com.enermaxfr.maxps4.core05</string>
             <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
             <key>CFBundleName</key><string>MaxPS4</string>
             <key>CFBundlePackageType</key><string>APPL</string>
-            <key>CFBundleShortVersionString</key><string>0.4</string>
+            <key>CFBundleShortVersionString</key><string>0.5</string>
             <key>CFBundleVersion</key><string>${{ github.run_number }}</string>
             <key>LSRequiresIPhoneOS</key><true/>
             <key>MinimumOSVersion</key><string>16.0</string>
@@ -85,10 +88,11 @@ jobs:
           PLIST
           plutil -lint build/Payload/MaxPS4.app/Info.plist
 
-      - name: Verify executable
+      - name: Verify executable and backend symbols
         run: |
           file build/Payload/MaxPS4.app/MaxPS4
-          nm -gU build/Payload/MaxPS4.app/MaxPS4 | grep maxps4_core || true
+          nm -gU build/Payload/MaxPS4.app/MaxPS4 | grep -E 'maxps4_(core|backend)' || true
+          test -f build/Payload/MaxPS4.app/THIRD_PARTY_NOTICES.md
 
       - name: Package unsigned IPA
         working-directory: build
