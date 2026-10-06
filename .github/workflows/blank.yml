@@ -39,6 +39,27 @@ jobs:
           grep -q "MIT License" build/aether-reference/runtime/sources/fexcore-darwin/LICENSE
           grep -q "$FEXCORE_UPSTREAM_REV" build/aether-reference/runtime/sources/fexcore-darwin/README.aethercore-darwin.md
 
+      - name: Apply MaxPS4 iOS smoke packaging patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          CMAKE_FILE="$GITHUB_WORKSPACE/build/aether-reference/runtime/sources/fexcore-darwin/CMakeLists.txt"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build/aether-reference/runtime/sources/fexcore-darwin/CMakeLists.txt")
+          s = p.read_text()
+          s = s.replace(
+              'install(TARGETS fexcore-smoke fexcore-guest-harness RUNTIME DESTINATION bin)',
+              'install(TARGETS fexcore-smoke fexcore-guest-harness RUNTIME DESTINATION bin BUNDLE DESTINATION bin)'
+          )
+          s = s.replace(
+              'install(TARGETS fexcore-smoke RUNTIME DESTINATION bin)',
+              'install(TARGETS fexcore-smoke RUNTIME DESTINATION bin BUNDLE DESTINATION bin)'
+          )
+          p.write_text(s)
+          PY
+          grep -n "install(TARGETS fexcore-smoke" "$CMAKE_FILE"
+
       - name: Install FEXCore Python configure dependencies
         shell: bash
         run: |
