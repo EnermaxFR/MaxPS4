@@ -97,8 +97,21 @@ jobs:
           if count == 0:
               raise SystemExit("expected AetherPS4::GuestCpu namespace references were not found")
           s = s.replace(old, "Core::GuestCpu::")
+          old_mapping = '''  const bool mappingOk = std::holds_alternative<uint64_t>(cachedScalar) &&
+                         std::get<uint64_t>(cachedScalar) == scalarVeneer && veneerRanges.size() == 5;'''
+          new_mapping = '''  const bool mappingOk =
+      std::holds_alternative<uint64_t>(cachedScalar) &&
+      std::get<uint64_t>(cachedScalar) == scalarVeneer &&
+      veneerAllocator.QueryExecutableRange(scalarVeneer).has_value() &&
+      veneerAllocator.QueryExecutableRange(pointerVeneer).has_value() &&
+      veneerAllocator.QueryExecutableRange(functionPointerVeneer).has_value() &&
+      veneerAllocator.QueryExecutableRange(vectorVeneer).has_value() &&
+      veneerAllocator.QueryExecutableRange(stackVeneer).has_value();'''
+          if old_mapping not in s:
+              raise SystemExit("expected HLE veneer mapping assertion was not found")
+          s = s.replace(old_mapping, new_mapping, 1)
           p.write_text(s)
-          print(f"patched {count} guest CPU namespace references")
+          print(f"patched {count} guest CPU namespace references and iOS-safe HLE veneer mapping validation")
           PY
           grep -n "Core::GuestCpu::" "$HARNESS" | head -20
 
