@@ -99,11 +99,12 @@ bool maxps4_ps4_loader_validate(const char *path, MaxPS4ExecutableInfo *out_info
         return false;
     }
 
-    if (eh[4] != 2 || eh[5] != 1 || eh[6] != 1 || eh[7] != 9 || eh[8] != 0) {
+    if (eh[4] != 2 || eh[5] != 1 || eh[6] != 1 || eh[8] != 0) {
         diag(diagnostic, diagnostic_size, "PS4 loader: ABI ELF incompatible");
         return false;
     }
 
+    const unsigned char osabi = eh[7];
     const uint16_t type = u16le(eh + 16);
     const uint16_t machine = u16le(eh + 18);
     const uint32_t version = u32le(eh + 20);
@@ -113,13 +114,18 @@ bool maxps4_ps4_loader_validate(const char *path, MaxPS4ExecutableInfo *out_info
     const uint16_t shentsize = u16le(eh + 58);
 
     const bool sce_type = type == 0xFE00 || type == 0xFE10 || type == 0xFE18;
+    const bool sce_elf = osabi == 9 && sce_type;
+    // Open-source PS4 payload SDKs emit x86-64 System V ET_DYN ELF files.
+    // Keep this as a separate, explicit homebrew profile instead of weakening
+    // the SCE ELF checks used for commercial-style SELF/ELF validation.
+    const bool homebrew_payload_elf = !is_self && osabi == 0 && type == 3;
 
-    if (!sce_type || machine != 62 || version != 1 || phentsize != 56 ||
-        (shentsize != 0 && shentsize != 64)) {
+    if ((!sce_elf && !homebrew_payload_elf) || machine != 62 || version != 1 ||
+        phentsize != 56 || phnum == 0 || (shentsize != 0 && shentsize != 64)) {
         diag(diagnostic, diagnostic_size,
-             "PS4 loader: ELF non PS4 type=0x%llx machine=%llu",
-             static_cast<unsigned long long>(type),
-             static_cast<unsigned long long>(machine));
+             "PS4 loader: ELF non pris en charge osabi=%llu type=0x%llx",
+             static_cast<unsigned long long>(osabi),
+             static_cast<unsigned long long>(type));
         return false;
     }
 
@@ -130,10 +136,17 @@ bool maxps4_ps4_loader_validate(const char *path, MaxPS4ExecutableInfo *out_info
         out_info->program_header_count = phnum;
     }
 
-    diag(diagnostic, diagnostic_size,
-         is_self ? "PS4 SELF valide • entry=0x%llx • ph=%llu"
-                 : "PS4 ELF valide • entry=0x%llx • ph=%llu",
-         static_cast<unsigned long long>(entry),
-         static_cast<unsigned long long>(phnum));
+    if (homebrew_payload_elf) {
+        diag(diagnostic, diagnostic_size,
+             "PS4 homebrew ELF valide • entry=0x%llx • ph=%llu",
+             static_cast<unsigned long long>(entry),
+             static_cast<unsigned long long>(phnum));
+    } else {
+        diag(diagnostic, diagnostic_size,
+             is_self ? "PS4 SELF valide • entry=0x%llx • ph=%llu"
+                     : "PS4 SCE ELF valide • entry=0x%llx • ph=%llu",
+             static_cast<unsigned long long>(entry),
+             static_cast<unsigned long long>(phnum));
+    }
     return true;
 }
