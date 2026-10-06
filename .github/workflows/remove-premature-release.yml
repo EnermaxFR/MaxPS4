@@ -1,0 +1,21 @@
+name: Remove premature MaxPS4 release
+
+on:
+  push:
+    branches: ["shadps4-ios-core"]
+    paths:
+      - ".github/workflows/remove-premature-release.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  remove-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete public release and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release delete maxps4-run-150 --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
