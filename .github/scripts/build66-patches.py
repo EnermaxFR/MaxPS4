@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import pathlib, subprocess, os
+import pathlib, subprocess, os, shutil, urllib.request, tarfile
 root=pathlib.Path(os.environ['RUNNER_TEMP'])/'shadps4'
 # ARM64 signal execute faults: Apple ARM64 has no x86 execute-error bit.
 p=root/'src/common/signal_context.cpp'; s=p.read_text(); a='#elif defined(__FreeBSD__) && defined(ARCH_X86_64)\n    return ((ucontext_t*)ctx)->uc_mcontext.mc_err & 0x10;'; assert a in s; p.write_text(s.replace(a,'#elif defined(__APPLE__) && defined(ARCH_ARM64)\n    return false;\n'+a,1))
@@ -19,4 +19,35 @@ p=root/'externals/cpp-httplib/httplib.h'; s=p.read_text(); s=s.replace('OSStatus
 host=pathlib.Path(os.environ['RUNNER_TEMP'])/'host-protobuf'; mac=subprocess.check_output(['xcrun','--sdk','macosx','--show-sdk-path'],text=True).strip(); subprocess.run(['cmake','-S',str(root/'externals/protobuf'),'-B',str(host),'-G','Ninja','-DCMAKE_BUILD_TYPE=Release',f'-DCMAKE_OSX_SYSROOT={mac}','-Dprotobuf_BUILD_TESTS=OFF','-Dprotobuf_BUILD_SHARED_LIBS=OFF'],check=True); subprocess.run(['cmake','--build',str(host),'--target','protoc','--parallel','4'],check=True); protoc=host/'protoc'; assert protoc.exists()
 # Replace Build64's Homebrew protoc with the matching host protoc.
 p=root/'CMakeLists.txt'; s=p.read_text(); import re; s=re.sub(r'COMMAND "[^"]*/protoc"',f'COMMAND "{protoc}"',s,count=1); p.write_text(s)
-print('Build68 grouped iOS patches applied')
+
+# Build FFmpeg 7.1 as real iOS/arm64 static libraries. ext-ffmpeg-core otherwise downloads macOS archives,
+# which compile shadPS4 but cannot be linked into an iPhone application.
+tmp=pathlib.Path(os.environ['RUNNER_TEMP']); ff_src=tmp/'ffmpeg-ios-src'; ff_prefix=tmp/'ffmpeg-ios'
+if not (ff_prefix/'lib/libavcodec.a').exists():
+    archive=tmp/'ffmpeg-7.1.tar.xz'
+    if not archive.exists():
+        urllib.request.urlretrieve('https://ffmpeg.org/releases/ffmpeg-7.1.tar.xz', archive)
+    if ff_src.exists(): shutil.rmtree(ff_src)
+    unpack=tmp/'ffmpeg-7.1'
+    if unpack.exists(): shutil.rmtree(unpack)
+    with tarfile.open(archive) as t: t.extractall(tmp)
+    unpack.rename(ff_src)
+    sdk=subprocess.check_output(['xcrun','--sdk','iphoneos','--show-sdk-path'],text=True).strip()
+    clang=subprocess.check_output(['xcrun','--sdk','iphoneos','-f','clang'],text=True).strip()
+    cfg=[str(ff_src/'configure'),f'--prefix={ff_prefix}','--arch=arm64','--target-os=darwin','--enable-cross-compile',f'--cc={clang}',f'--sysroot={sdk}','--extra-cflags=-arch arm64 -miphoneos-version-min=18.0','--extra-ldflags=-arch arm64 -miphoneos-version-min=18.0','--disable-programs','--disable-doc','--disable-debug','--disable-shared','--enable-static','--disable-autodetect','--disable-iconv','--disable-xlib','--disable-sdl2']
+    subprocess.run(cfg,cwd=ff_src,check=True)
+    subprocess.run(['make','-j4'],cwd=ff_src,check=True)
+    subprocess.run(['make','install'],cwd=ff_src,check=True)
+assert (ff_prefix/'lib/libavcodec.a').exists()
+
+# Point shadPS4's FFmpeg interface target at the iOS build instead of ext-ffmpeg-core's macOS prebuilt.
+p=root/'externals/ffmpeg-core/CMakeLists.txt'
+libs=['avformat','avcodec','swscale','avutil','avfilter','swresample']
+cm=['if (NOT DEFINED FFMPEG_CORE_NAME)','  set(FFMPEG_CORE_NAME ffmpeg)','endif()','add_library(${FFMPEG_CORE_NAME} INTERFACE)',f'target_include_directories(${{FFMPEG_CORE_NAME}} INTERFACE "{ff_prefix}/include")']
+cm.append('target_link_libraries(${FFMPEG_CORE_NAME} INTERFACE')
+for lib in libs: cm.append(f'  "{ff_prefix}/lib/lib{lib}.a"')
+for fw in ['CoreFoundation','AudioToolbox','AudioUnit','CoreMedia','VideoToolbox','CoreVideo','Security']:
+    cm.append(f'  "-framework {fw}"')
+cm.append(')')
+p.write_text('\n'.join(cm)+'\n')
+print('Build74 grouped iOS patches applied; FFmpeg is iOS/arm64')
