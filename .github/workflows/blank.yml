@@ -163,16 +163,16 @@ jobs:
         run: |
           set -euo pipefail
           cmake --build build/fexcore-ios --target fexcore-smoke --parallel 3
-          file build/fexcore-ios/fexcore-smoke
-          xcrun vtool -show-build build/fexcore-ios/fexcore-smoke || true
-          nm -gU build/fexcore-ios/fexcore-smoke | grep -E "FEX|main" | head -40 || true
+          file build/fexcore-ios/Bin/fexcore-smoke.app/fexcore-smoke
+          xcrun vtool -show-build build/fexcore-ios/Bin/fexcore-smoke.app/fexcore-smoke || true
+          nm -gU build/fexcore-ios/Bin/fexcore-smoke.app/fexcore-smoke | grep -E "FEX|main" | head -40 || true
 
       - name: Package FEXCore iOS link proof
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p build/fexcore-proof
-          cp build/fexcore-ios/fexcore-smoke build/fexcore-proof/
+          cp build/fexcore-ios/Bin/fexcore-smoke.app/fexcore-smoke build/fexcore-proof/
           cp build/fexcore-ios/FEXCore/Source/libFEXCore.a build/fexcore-proof/
           cp build/aether-reference/runtime/sources/fexcore-darwin/LICENSE build/fexcore-proof/FEXCore-LICENSE
           printf "%s\n" "$FEXCORE_UPSTREAM_REV" > build/fexcore-proof/FEXCORE_UPSTREAM_REVISION.txt
