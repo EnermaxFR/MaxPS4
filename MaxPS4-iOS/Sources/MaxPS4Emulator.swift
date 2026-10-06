@@ -4,6 +4,8 @@ import MaxPS4Core
 @MainActor
 final class MaxPS4Emulator: ObservableObject {
     @Published var status = "Prêt"
+    private var bootGeneration: UInt = 0
+    private var bootInProgress = false
 
     init() {
         refreshStatus()
@@ -42,21 +44,39 @@ final class MaxPS4Emulator: ObservableObject {
             return
         }
 
-        let result = url.path.withCString { maxps4_core_boot_game($0) }
-        let diagnostic = String(cString: maxps4_core_jit_diagnostic())
-        switch result {
-        case MAXPS4_CORE_OK:
-            status = "Démarrage : \(url.lastPathComponent)"
-        case MAXPS4_CORE_JIT_UNAVAILABLE:
-            status = "JIT indisponible • \(diagnostic)"
-        case MAXPS4_CORE_NOT_READY:
+        bootGeneration &+= 1
+        let generation = bootGeneration
+        bootInProgress = true
+        status = "\(url.lastPathComponent) • exécution FEX lancée en arrière-plan…"
+        let path = url.path
+        let name = url.lastPathComponent
+
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let result = path.withCString { maxps4_core_boot_game($0) }
+            let diagnostic = String(cString: maxps4_core_jit_diagnostic())
             let backendDiagnostic = String(cString: maxps4_backend_diagnostic())
-            status = "JIT OK • \(backendDiagnostic)"
-        case MAXPS4_CORE_INVALID_PATH:
-            let backendDiagnostic = String(cString: maxps4_backend_diagnostic())
-            status = "Exécutable PS4 invalide • \(backendDiagnostic)"
-        default:
-            status = "Échec du cœur MaxPS4 (\(result.rawValue))"
+            await MainActor.run {
+                guard let self, generation == self.bootGeneration else { return }
+                self.bootInProgress = false
+                switch result {
+                case MAXPS4_CORE_OK:
+                    self.status = "Démarrage : \(name)"
+                case MAXPS4_CORE_JIT_UNAVAILABLE:
+                    self.status = "JIT indisponible • \(diagnostic)"
+                case MAXPS4_CORE_NOT_READY:
+                    self.status = "JIT OK • \(backendDiagnostic)"
+                case MAXPS4_CORE_INVALID_PATH:
+                    self.status = "Exécutable PS4 invalide • \(backendDiagnostic)"
+                default:
+                    self.status = "Échec du cœur MaxPS4 (\(result.rawValue))"
+                }
+            }
+        }
+
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard let self, self.bootInProgress, generation == self.bootGeneration else { return }
+            self.status = "\(name) • FEX est toujours en cours après 5 s. L’interface reste active; aucun arrêt forcé du guest n’est tenté."
         }
     }
 
