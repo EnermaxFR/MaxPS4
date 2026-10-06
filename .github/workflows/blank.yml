@@ -45,8 +45,23 @@ jobs:
         run: |
           set -euo pipefail
           REF="$GITHUB_WORKSPACE/build/aether-reference"
-          for path in             src/core/fex/fex_guest_engine.cpp             src/core/fex/fex_guest_engine.h             src/core/guest_cpu/fex_guest_cpu.cpp             src/core/guest_cpu/fex_guest_cpu.h             src/core/guest_cpu/fex_hle_bridge.cpp             src/core/guest_cpu/fex_hle_bridge.h; do
-            grep -q '^// SPDX-License-Identifier: MIT      - name: Apply MaxPS4 iOS smoke packaging patch
+          BRIDGE_FILES=(
+            "src/core/fex/fex_guest_engine.cpp"
+            "src/core/fex/fex_guest_engine.h"
+            "src/core/guest_cpu/fex_guest_cpu.cpp"
+            "src/core/guest_cpu/fex_guest_cpu.h"
+            "src/core/guest_cpu/fex_hle_bridge.cpp"
+            "src/core/guest_cpu/fex_hle_bridge.h"
+          )
+          for path in "${BRIDGE_FILES[@]}"; do
+            grep -q '^// SPDX-License-Identifier: MIT$' "$REF/$path"
+          done
+          grep -q 'SPDX-License-Identifier: GPL-2.0-or-later' "$REF/src/common/types.h"
+          grep -q 'SPDX-License-Identifier: GPL-2.0-or-later' "$REF/src/core/libraries/kernel/threads/exception.h"
+          grep -q 'SPDX-License-Identifier: GPL-2.0-or-later' "$REF/src/core/guest_cpu/guest_memory_validation_cache.h"
+          echo "Guest bridge GPL dependency boundary verified."
+
+      - name: Apply MaxPS4 iOS smoke packaging patch
         shell: bash
         run: |
           set -euo pipefail
