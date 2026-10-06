@@ -1,4 +1,4 @@
-name: Build 73 MaxPS4 iOS
+name: Build 76 MaxPS4 iOS
 
 on:
   workflow_dispatch:
@@ -25,7 +25,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/maxps4-ccache
-          key: maxps4-ios-build73-${{ runner.os }}-${{ github.run_id }}
+          key: maxps4-ios-build76-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-
 
@@ -33,8 +33,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VENV="$RUNNER_TEMP/build73-python"
-          LOGDIR="$RUNNER_TEMP/build73-logs"
+          VENV="$RUNNER_TEMP/build76-python"
+          LOGDIR="$RUNNER_TEMP/build76-logs"
           mkdir -p "$LOGDIR"
           python3 -m venv "$VENV"
           "$VENV/bin/python" -m pip install --upgrade pip pyyaml
@@ -46,7 +46,7 @@ jobs:
           doc=yaml.safe_load(raw)
           steps=doc['jobs']['build-maxps4-ipa']['steps']
           env=os.environ.copy(); envfile=env['GITHUB_ENV']; pathfile=env['GITHUB_PATH']
-          logdir=Path(env['RUNNER_TEMP'])/'build73-logs'
+          logdir=Path(env['RUNNER_TEMP'])/'build76-logs'
           open(envfile,'w').close(); open(pathfile,'w').close(); env_pos=0; path_pos=0
           for index, step in enumerate(steps, 1):
               name=step.get('name','') or f'unnamed step {index}'; script=step.get('run')
@@ -67,10 +67,10 @@ jobs:
                   if result:
                       candidates=list(Path(env['RUNNER_TEMP']).rglob('libshadps4.a'))
                       if name == 'Build iOS engine and collect diagnostics' and candidates:
-                          print(f'Build73: engine returned {result}, but core library exists at {candidates[0]}; continuing.',flush=True)
+                          print(f'Build76: engine returned {result}, but core library exists at {candidates[0]}; continuing.',flush=True)
                       else:
                           (logdir/'FAILURE.txt').write_text(f'Build64 step {index}: {name}\nexit code: {result}\nlog: {logfile.name}\n')
-                          print(f'::error title=Build73 failure::Build64 step {index} "{name}" failed with exit code {result}',flush=True)
+                          print(f'::error title=Build76 failure::Build64 step {index} "{name}" failed with exit code {result}',flush=True)
                           raise subprocess.CalledProcessError(result, script)
                   with open(envfile) as f:
                       f.seek(env_pos)
@@ -95,26 +95,35 @@ jobs:
           set -euxo pipefail
           OUT="$RUNNER_TEMP/MaxPS4-GPL-Source"
           rm -rf "$OUT"
-          mkdir -p "$OUT/maxps4" "$OUT/shadps4"
+          mkdir -p "$OUT/maxps4" "$OUT/shadps4" "$OUT/third-party"
           git archive --format=tar HEAD | tar -xf - -C "$OUT/maxps4"
           SHAD="$RUNNER_TEMP/shadps4"
           test -d "$SHAD/.git"
           git -C "$SHAD" rev-parse HEAD > "$OUT/SHADPS4_COMMIT.txt"
           cp -R "$SHAD"/. "$OUT/shadps4/"
           rm -rf "$OUT/shadps4/.git"
+
+          # FFmpeg is built from source by build66-patches.py for the iOS binary.
+          # Include that exact source tree in the corresponding-source artifact.
+          FFMPEG_SRC="$RUNNER_TEMP/ffmpeg-7.1"
+          test -d "$FFMPEG_SRC"
+          cp -R "$FFMPEG_SRC" "$OUT/third-party/ffmpeg-7.1"
+          rm -rf "$OUT/third-party/ffmpeg-7.1/.git" || true
+          printf 'FFmpeg version: 7.1\nSource tree used by this GitHub Actions build: %s\n' "$FFMPEG_SRC" > "$OUT/third-party/FFMPEG-SOURCE-IDENTITY.txt"
+
           cp LICENSE "$OUT/LICENSE-MaxPS4-GPL-2.0.txt"
           cp NOTICE.md "$OUT/NOTICE.md"
           cp SOURCE.md "$OUT/SOURCE.md"
-          printf 'MaxPS4 commit: %s\nGitHub run: %s\nRun attempt: %s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$OUT/BUILD-SOURCE-IDENTITY.txt"
+          printf 'MaxPS4 commit: %s\nGitHub run: %s\nRun attempt: %s\nshadPS4 commit: b3452cf6a9bd0969771fcfbf919c359368473d1b\nFFmpeg: 7.1 source included under third-party/ffmpeg-7.1\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$OUT/BUILD-SOURCE-IDENTITY.txt"
           ditto -c -k --sequesterRsrc --keepParent "$OUT" "$RUNNER_TEMP/MaxPS4-GPL-Corresponding-Source.zip"
 
-      - name: Upload Build73 diagnostics
+      - name: Upload Build76 diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build73-diagnostics
+          name: build76-diagnostics
           path: |
-            ${{ runner.temp }}/build73-logs/
+            ${{ runner.temp }}/build76-logs/
             ${{ runner.temp }}/shadps4-build.log
             ${{ runner.temp }}/shadps4-cmake-configure.log
             ${{ runner.temp }}/shadps4-libs.txt
