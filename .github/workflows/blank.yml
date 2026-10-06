@@ -310,9 +310,10 @@ jobs:
 
           #include "maxps4_backend.h"
 
-          @interface MaxPS4FEXGuestViewController : UIViewController
+          @interface MaxPS4FEXGuestViewController : UIViewController <UIDocumentPickerDelegate>
           @property(nonatomic, strong) UILabel *statusLabel;
           @property(nonatomic, strong) UIButton *runButton;
+          @property(nonatomic, strong) UIButton *loadButton;
           @end
 
           @implementation MaxPS4FEXGuestViewController
@@ -322,7 +323,7 @@ jobs:
 
               UILabel *title = [[UILabel alloc] init];
               title.translatesAutoresizingMaskIntoConstraints = NO;
-              title.text = @"MaxPS4 shadPS4/FEX 0.7";
+              title.text = @"MaxPS4 shadPS4/FEX 0.8";
               title.font = [UIFont boldSystemFontOfSize:26.0];
 
               self.statusLabel = [[UILabel alloc] init];
@@ -336,7 +337,13 @@ jobs:
               self.runButton.titleLabel.font = [UIFont boldSystemFontOfSize:18.0];
               [self.runButton addTarget:self action:@selector(runProbe) forControlEvents:UIControlEventTouchUpInside];
 
-              UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[title, self.statusLabel, self.runButton]];
+              self.loadButton = [UIButton buttonWithType:UIButtonTypeSystem];
+              self.loadButton.translatesAutoresizingMaskIntoConstraints = NO;
+              [self.loadButton setTitle:@"Choisir un eboot.bin / SELF" forState:UIControlStateNormal];
+              self.loadButton.titleLabel.font = [UIFont boldSystemFontOfSize:18.0];
+              [self.loadButton addTarget:self action:@selector(pickExecutable) forControlEvents:UIControlEventTouchUpInside];
+
+              UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[title, self.statusLabel, self.runButton, self.loadButton]];
               stack.translatesAutoresizingMaskIntoConstraints = NO;
               stack.axis = UILayoutConstraintAxisVertical;
               stack.spacing = 24.0;
@@ -365,6 +372,30 @@ jobs:
                       self.runButton.enabled = YES;
                   });
               });
+          }
+
+          - (void)pickExecutable {
+              UIDocumentPickerViewController *picker =
+                  [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.data"]
+                                                                         inMode:UIDocumentPickerModeOpen];
+              picker.delegate = self;
+              picker.allowsMultipleSelection = NO;
+              [self presentViewController:picker animated:YES completion:nil];
+          }
+
+          - (void)documentPicker:(UIDocumentPickerViewController *)controller
+            didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+              NSURL *url = urls.firstObject;
+              if (!url) return;
+              BOOL scoped = [url startAccessingSecurityScopedResource];
+              BOOL ok = maxps4_backend_validate_executable(url.fileSystemRepresentation);
+              const char *detail = maxps4_backend_diagnostic();
+              NSString *detailText = detail ? [NSString stringWithUTF8String:detail] : @"no detail";
+              self.statusLabel.text =
+                  [NSString stringWithFormat:ok ? @"MAXPS4_LOADER_OK\n%@"
+                                                : @"MAXPS4_LOADER_FAIL\n%@",
+                                             detailText];
+              if (scoped) [url stopAccessingSecurityScopedResource];
           }
           @end
 
