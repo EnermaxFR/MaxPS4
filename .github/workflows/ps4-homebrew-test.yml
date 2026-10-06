@@ -1,0 +1,82 @@
+name: Build legal PS4 homebrew ELF test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["shadps4-ios-core"]
+    paths:
+      - ".github/workflows/ps4-homebrew-test.yml"
+
+permissions:
+  contents: read
+
+env:
+  PS4_SDK_REPO: https://github.com/ps4-payload-dev/sdk.git
+  PS4_SDK_REV: 573b4a0d0d5fa8695cfeee5f5e2f0447c550035d
+
+jobs:
+  build-homebrew-elf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout MaxPS4
+        uses: actions/checkout@v4
+
+      - name: Install open-source toolchain prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y bash clang-18 lld-18 make git file
+
+      - name: Fetch pinned GPLv3+ PS4 payload SDK
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout "$PS4_SDK_REPO" build/ps4-sdk-src
+          git -C build/ps4-sdk-src fetch --depth 1 origin "$PS4_SDK_REV"
+          git -C build/ps4-sdk-src checkout --detach FETCH_HEAD
+          test "$(git -C build/ps4-sdk-src rev-parse HEAD)" = "$PS4_SDK_REV"
+          grep -q "GPLv3+" build/ps4-sdk-src/README.md
+
+      - name: Build SDK locally
+        run: |
+          set -euo pipefail
+          mkdir -p build/ps4-sdk
+          make -C build/ps4-sdk-src DESTDIR="$GITHUB_WORKSPACE/build/ps4-sdk" install
+          test -f build/ps4-sdk/toolchain/orbis.mk
+
+      - name: Build upstream Hello World ELF
+        run: |
+          set -euo pipefail
+          export PS4_PAYLOAD_SDK="$GITHUB_WORKSPACE/build/ps4-sdk"
+          make -C build/ps4-sdk-src/samples/hello_stdio clean
+          make -C build/ps4-sdk-src/samples/hello_stdio
+          file build/ps4-sdk-src/samples/hello_stdio/hello_stdio.elf
+          readelf -h build/ps4-sdk-src/samples/hello_stdio/hello_stdio.elf
+
+      - name: Package ELF with license and provenance
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/build/MaxPS4-Legal-Hello-ELF"
+          mkdir -p "$OUT"
+          cp build/ps4-sdk-src/samples/hello_stdio/hello_stdio.elf "$OUT/hello_stdio.elf"
+          cp build/ps4-sdk-src/samples/hello_stdio/main.c "$OUT/source-main.c"
+          cp build/ps4-sdk-src/samples/hello_stdio/Makefile "$OUT/source-Makefile"
+          cp build/ps4-sdk-src/README.md "$OUT/PS4-PAYLOAD-SDK-README.md"
+          cp /usr/share/common-licenses/GPL-3 "$OUT/GPL-3.0.txt"
+          cat > "$OUT/PROVENANCE.txt" <<EOF
+          Purpose: legal/open-source ELF for testing MaxPS4's ELF loader.
+          Upstream: $PS4_SDK_REPO
+          Locked revision: $PS4_SDK_REV
+          Sample: samples/hello_stdio
+          License: GPLv3+ (sample and SDK, except separately noted upstream components)
+          Contains no Sony game, firmware, keys, SDK, or proprietary PlayStation content.
+          EOF
+          sha256sum "$OUT/hello_stdio.elf" > "$OUT/SHA256SUMS.txt"
+
+      - name: Upload legal PS4 ELF test
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-Legal-Hello-ELF
+          path: build/MaxPS4-Legal-Hello-ELF
+          if-no-files-found: error
+          retention-days: 14
