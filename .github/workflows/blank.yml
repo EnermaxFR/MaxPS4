@@ -6,17 +6,75 @@ on:
     branches: ["shadps4-ios-core"]
     paths:
       - "MaxPS4-iOS/**"
+      - "docs/fexcore-0.6-lock.md"
       - "THIRD_PARTY_NOTICES.md"
       - ".github/workflows/blank.yml"
 
 permissions:
   contents: read
 
+env:
+  FEXCORE_REFERENCE_REPO: https://github.com/Leviidev/AetherPS4.git
+  FEXCORE_REFERENCE_REV: 3347fc13f19860855ce91b66356940989ea6b6a6
+  FEXCORE_UPSTREAM_REV: f2b679f6028ce1c38875233aecfcf5d3f8ebecec
+
 jobs:
+  fexcore-ios-gate:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - name: Checkout MaxPS4
+        uses: actions/checkout@v4
+
+      - name: Fetch locked FEXCore Darwin reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout "$FEXCORE_REFERENCE_REPO" build/aether-reference
+          git -C build/aether-reference fetch --depth 1 origin "$FEXCORE_REFERENCE_REV"
+          git -C build/aether-reference checkout --detach FETCH_HEAD
+          test "$(git -C build/aether-reference rev-parse HEAD)" = "$FEXCORE_REFERENCE_REV"
+          test -f build/aether-reference/runtime/sources/fexcore-darwin/LICENSE
+          grep -q "MIT License" build/aether-reference/runtime/sources/fexcore-darwin/LICENSE
+          grep -q "$FEXCORE_UPSTREAM_REV" build/aether-reference/runtime/sources/fexcore-darwin/README.aethercore-darwin.md
+
+      - name: Configure FEXCore for arm64 iOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/build/aether-reference/runtime/sources/fexcore-darwin"
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          cmake -S "$SRC" -B build/fexcore-ios -G Ninja \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_SYSROOT="$SDK" \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_FEXCORE_ONLY=ON \
+            -DBUILD_FEXCORE_SMOKE=OFF \
+            -DBUILD_TESTING=OFF \
+            -DBUILD_FEX_LINUX_TESTS=OFF \
+            -DBUILD_THUNKS=OFF \
+            -DBUILD_FEXCONFIG=OFF \
+            -DENABLE_GDB_SYMBOLS=OFF \
+            -DENABLE_LTO=OFF \
+            -DENABLE_JEMALLOC_GLIBC_ALLOC=OFF \
+            -DENABLE_OFFLINE_TELEMETRY=OFF \
+            -DENABLE_VIXL_DISASSEMBLER=OFF \
+            -DENABLE_VIXL_SIMULATOR=OFF \
+            -DENABLE_ZYDIS=OFF \
+            -DENABLE_FEXCORE_PROFILER=OFF
+
+      - name: Compile FEXCore iOS probe target
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build/fexcore-ios --target FEXCore --parallel 3
+
   build-ios:
     runs-on: macos-latest
     timeout-minutes: 20
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,7 +85,7 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-path
           swiftc --version
 
-      - name: Compile native core and 0.5 backend
+      - name: Compile native core and backend
         shell: bash
         run: |
           set -euo pipefail
@@ -35,12 +93,8 @@ jobs:
           mkdir -p build/core
           for SRC in MaxPS4-iOS/Bridge/maxps4_core.cpp MaxPS4-iOS/Bridge/maxps4_backend.cpp; do
             OUT="build/core/$(basename "${SRC%.cpp}").o"
-            xcrun --sdk iphoneos clang++ \
-              -target arm64-apple-ios16.0 \
-              -isysroot "$SDK" \
-              -std=c++20 -O2 -fvisibility=hidden \
-              -I MaxPS4-iOS/Bridge \
-              -c "$SRC" -o "$OUT"
+            xcrun --sdk iphoneos clang++ -target arm64-apple-ios16.0 -isysroot "$SDK" \
+              -std=c++20 -O2 -fvisibility=hidden -I MaxPS4-iOS/Bridge -c "$SRC" -o "$OUT"
             file "$OUT"
           done
 
@@ -50,19 +104,15 @@ jobs:
           set -euo pipefail
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           mkdir -p build/Payload/MaxPS4.app
-          xcrun --sdk iphoneos swiftc \
-            -target arm64-apple-ios16.0 \
-            -sdk "$SDK" \
-            -I MaxPS4-iOS/Bridge \
-            -O -parse-as-library \
-            -framework SwiftUI -framework UIKit \
-            MaxPS4-iOS/Sources/*.swift \
-            build/core/maxps4_core.o build/core/maxps4_backend.o \
-            -Xlinker -lc++ \
-            -o build/Payload/MaxPS4.app/MaxPS4
+          xcrun --sdk iphoneos swiftc -target arm64-apple-ios16.0 -sdk "$SDK" \
+            -I MaxPS4-iOS/Bridge -O -parse-as-library -framework SwiftUI -framework UIKit \
+            MaxPS4-iOS/Sources/*.swift build/core/maxps4_core.o build/core/maxps4_backend.o \
+            -Xlinker -lc++ -o build/Payload/MaxPS4.app/MaxPS4
 
       - name: Bundle compliance notices
-        run: cp THIRD_PARTY_NOTICES.md build/Payload/MaxPS4.app/THIRD_PARTY_NOTICES.md
+        run: |
+          cp THIRD_PARTY_NOTICES.md build/Payload/MaxPS4.app/THIRD_PARTY_NOTICES.md
+          cp docs/fexcore-0.6-lock.md build/Payload/MaxPS4.app/FEXCORE_0_6_PROVENANCE.md
 
       - name: Create Info.plist
         shell: bash
@@ -72,13 +122,13 @@ jobs:
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0"><dict>
             <key>CFBundleDevelopmentRegion</key><string>fr</string>
-            <key>CFBundleDisplayName</key><string>MaxPS4 Core 0.5</string>
+            <key>CFBundleDisplayName</key><string>MaxPS4 Core 0.6</string>
             <key>CFBundleExecutable</key><string>MaxPS4</string>
-            <key>CFBundleIdentifier</key><string>com.enermaxfr.maxps4.core05</string>
+            <key>CFBundleIdentifier</key><string>com.enermaxfr.maxps4.core06</string>
             <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
             <key>CFBundleName</key><string>MaxPS4</string>
             <key>CFBundlePackageType</key><string>APPL</string>
-            <key>CFBundleShortVersionString</key><string>0.5</string>
+            <key>CFBundleShortVersionString</key><string>0.6</string>
             <key>CFBundleVersion</key><string>${{ github.run_number }}</string>
             <key>LSRequiresIPhoneOS</key><true/>
             <key>MinimumOSVersion</key><string>16.0</string>
@@ -88,11 +138,12 @@ jobs:
           PLIST
           plutil -lint build/Payload/MaxPS4.app/Info.plist
 
-      - name: Verify executable and backend symbols
+      - name: Verify executable and compliance payload
         run: |
           file build/Payload/MaxPS4.app/MaxPS4
           nm -gU build/Payload/MaxPS4.app/MaxPS4 | grep -E 'maxps4_(core|backend)' || true
           test -f build/Payload/MaxPS4.app/THIRD_PARTY_NOTICES.md
+          test -f build/Payload/MaxPS4.app/FEXCORE_0_6_PROVENANCE.md
 
       - name: Package unsigned IPA
         working-directory: build
