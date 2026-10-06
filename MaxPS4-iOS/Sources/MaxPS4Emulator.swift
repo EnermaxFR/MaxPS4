@@ -58,6 +58,22 @@ final class MaxPS4Emulator: ObservableObject {
         }
     }
 
+
+    func testBackend() {
+        guard maxps4_backend_state() == MAXPS4_BACKEND_READY else {
+            status = "Backend shadPS4/FEX non lié dans ce build"
+            return
+        }
+        status = "Test du backend shadPS4/FEX en cours…"
+        Task.detached(priority: .userInitiated) {
+            let ok = maxps4_backend_self_test()
+            let diagnostic = String(cString: maxps4_backend_diagnostic())
+            await MainActor.run {
+                self.status = ok ? "Backend shadPS4/FEX • OK • \(diagnostic)" : "Backend shadPS4/FEX • ÉCHEC • \(diagnostic)"
+            }
+        }
+    }
+
     func stop() {
         maxps4_backend_stop()
         maxps4_core_stop()
