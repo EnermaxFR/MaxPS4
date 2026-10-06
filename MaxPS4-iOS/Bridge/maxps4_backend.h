@@ -7,8 +7,8 @@ extern "C" {
 #endif
 
 // Stable boundary between the MaxPS4 iOS frontend and the PS4 emulation runtime.
-// The first 0.5 milestone deliberately keeps shadPS4/FEX behind this interface so
-// upstream code can be integrated with its provenance and license notices intact.
+// READY means the validated shadPS4/FEX guest backend is actually linked into
+// the current binary. It does not claim that the PS4 executable loader is wired yet.
 
 typedef enum MaxPS4BackendState {
     MAXPS4_BACKEND_NOT_LINKED = 0,
@@ -19,6 +19,7 @@ typedef enum MaxPS4BackendState {
 MaxPS4BackendState maxps4_backend_state(void);
 const char *maxps4_backend_name(void);
 const char *maxps4_backend_diagnostic(void);
+bool maxps4_backend_self_test(void);
 bool maxps4_backend_boot(const char *path);
 void maxps4_backend_stop(void);
 
