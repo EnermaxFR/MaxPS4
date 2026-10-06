@@ -499,6 +499,7 @@ jobs:
               "${CMAKE_SOURCE_DIR}/MaxPS4FEXGuestHost.mm"
               "${CMAKE_SOURCE_DIR}/MaxPS4FEXGuestHost.cpp"
               "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_backend.cpp"
+              "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_ps4_loader.cpp"
               "${FEXCORE_PROJECT_SOURCE_DIR}/core/fex/fex_guest_engine.cpp"
               "${FEXCORE_PROJECT_SOURCE_DIR}/core/guest_cpu/fex_guest_cpu.cpp"
               "${FEXCORE_PROJECT_SOURCE_DIR}/core/guest_cpu/hle_call_adapter.cpp"
@@ -802,7 +803,7 @@ jobs:
           set -euo pipefail
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           mkdir -p build/core
-          for SRC in MaxPS4-iOS/Bridge/maxps4_core.cpp MaxPS4-iOS/Bridge/maxps4_backend.cpp; do
+          for SRC in MaxPS4-iOS/Bridge/maxps4_core.cpp MaxPS4-iOS/Bridge/maxps4_backend.cpp MaxPS4-iOS/Bridge/maxps4_ps4_loader.cpp; do
             OUT="build/core/$(basename "${SRC%.cpp}").o"
             xcrun --sdk iphoneos clang++ -target arm64-apple-ios16.0 -isysroot "$SDK" \
               -std=c++20 -O2 -fvisibility=hidden -I MaxPS4-iOS/Bridge -c "$SRC" -o "$OUT"
@@ -817,7 +818,7 @@ jobs:
           mkdir -p build/Payload/MaxPS4.app
           xcrun --sdk iphoneos swiftc -target arm64-apple-ios16.0 -sdk "$SDK" \
             -I MaxPS4-iOS/Bridge -O -parse-as-library -framework SwiftUI -framework UIKit \
-            MaxPS4-iOS/Sources/*.swift build/core/maxps4_core.o build/core/maxps4_backend.o \
+            MaxPS4-iOS/Sources/*.swift build/core/maxps4_core.o build/core/maxps4_backend.o build/core/maxps4_ps4_loader.o \
             -Xlinker -lc++ -o build/Payload/MaxPS4.app/MaxPS4
 
       - name: Bundle compliance notices
