@@ -1,9 +1,9 @@
-name: Build MaxPS4 iOS IPA
+name: Build MaxPS4 iOS Core IPA
 
 on:
   workflow_dispatch:
   push:
-    branches: ["main"]
+    branches: ["shadps4-ios-core"]
     paths:
       - "MaxPS4-iOS/**"
       - ".github/workflows/blank.yml"
@@ -26,21 +26,38 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-path
           swiftc --version
 
+      - name: Compile native core bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          mkdir -p build/core
+          CORE_CPP="$(find MaxPS4-iOS -name 'maxps4_core.cpp' -print -quit)"
+          test -n "$CORE_CPP"
+          CORE_DIR="$(dirname "$CORE_CPP")"
+          xcrun --sdk iphoneos clang++ \
+            -target arm64-apple-ios16.0 \
+            -isysroot "$SDK" \
+            -std=c++20 -O2 -fvisibility=hidden \
+            -I"$CORE_DIR" \
+            -c "$CORE_CPP" \
+            -o build/core/maxps4_core.o
+          file build/core/maxps4_core.o
+
       - name: Build arm64 iOS executable
         shell: bash
         run: |
           set -euo pipefail
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           mkdir -p build/Payload/MaxPS4.app
-
           xcrun --sdk iphoneos swiftc \
             -target arm64-apple-ios16.0 \
             -sdk "$SDK" \
-            -O \
-            -parse-as-library \
-            -framework SwiftUI \
-            -framework UIKit \
+            -O -parse-as-library \
+            -framework SwiftUI -framework UIKit \
             MaxPS4-iOS/Sources/*.swift \
+            build/core/maxps4_core.o \
+            -Xlinker -lc++ \
             -o build/Payload/MaxPS4.app/MaxPS4
 
       - name: Create Info.plist
@@ -49,45 +66,37 @@ jobs:
           cat > build/Payload/MaxPS4.app/Info.plist <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
+          <plist version="1.0"><dict>
             <key>CFBundleDevelopmentRegion</key><string>fr</string>
-            <key>CFBundleDisplayName</key><string>MaxPS4</string>
+            <key>CFBundleDisplayName</key><string>MaxPS4 Core</string>
             <key>CFBundleExecutable</key><string>MaxPS4</string>
-            <key>CFBundleIdentifier</key><string>com.enermaxfr.maxps4</string>
+            <key>CFBundleIdentifier</key><string>com.enermaxfr.maxps4.core</string>
             <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
             <key>CFBundleName</key><string>MaxPS4</string>
             <key>CFBundlePackageType</key><string>APPL</string>
-            <key>CFBundleShortVersionString</key><string>0.1</string>
+            <key>CFBundleShortVersionString</key><string>0.2</string>
             <key>CFBundleVersion</key><string>${{ github.run_number }}</string>
             <key>LSRequiresIPhoneOS</key><true/>
             <key>MinimumOSVersion</key><string>16.0</string>
             <key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
             <key>UILaunchScreen</key><dict/>
-            <key>UISupportedInterfaceOrientations</key>
-            <array>
-              <string>UIInterfaceOrientationPortrait</string>
-              <string>UIInterfaceOrientationLandscapeLeft</string>
-              <string>UIInterfaceOrientationLandscapeRight</string>
-            </array>
-          </dict>
-          </plist>
+          </dict></plist>
           PLIST
           plutil -lint build/Payload/MaxPS4.app/Info.plist
 
       - name: Verify executable
         run: |
           file build/Payload/MaxPS4.app/MaxPS4
-          codesign -dvvv build/Payload/MaxPS4.app/MaxPS4 2>&1 || true
+          nm -gU build/Payload/MaxPS4.app/MaxPS4 | grep maxps4_core || true
 
       - name: Package unsigned IPA
         working-directory: build
-        run: zip -qry MaxPS4-unsigned.ipa Payload
+        run: zip -qry MaxPS4-core-unsigned.ipa Payload
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MaxPS4-unsigned
-          path: build/MaxPS4-unsigned.ipa
+          name: MaxPS4-core-unsigned
+          path: build/MaxPS4-core-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
