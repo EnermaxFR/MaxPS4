@@ -8,7 +8,7 @@ on:
       - ".github/workflows/ps4-homebrew-test.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   PS4_SDK_REPO: https://github.com/ps4-payload-dev/sdk.git
@@ -80,3 +80,12 @@ jobs:
           path: build/MaxPS4-Legal-Hello-ELF
           if-no-files-found: error
           retention-days: 14
+
+
+      - name: Publish direct ELF download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="maxps4-legal-elf-${{ github.run_number }}"
+          gh release create "$TAG"             "$GITHUB_WORKSPACE/build/MaxPS4-Legal-Hello-ELF/hello_stdio.elf#hello_stdio.elf"             --repo "$GITHUB_REPOSITORY"             --title "MaxPS4 Legal Hello ELF ${{ github.run_number }}"             --notes "Open-source GPLv3+ PS4 Hello World ELF for MaxPS4 loader testing. No proprietary Sony content is included."
