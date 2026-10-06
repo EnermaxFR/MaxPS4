@@ -14,6 +14,8 @@ The AetherPS4 integration reference inspected for the 0.6 port carries GNU GPL v
 
 For the next guest-CPU bridge stage, the locked AetherPS4 reference contains individual bridge implementation files with MIT SPDX headers, but those files include and depend on shadPS4 headers carrying GPL-2.0-or-later notices (for example `src/common/types.h` and `src/core/libraries/kernel/threads/exception.h`). Therefore MaxPS4 treats the integrated guest-CPU bridge as a GPL-covered combined integration rather than claiming an MIT-only boundary.
 
+MaxPS4 0.8 also contains a small GPL-2.0-or-later PS4 SELF/ELF format gate in `MaxPS4-iOS/Bridge/maxps4_ps4_loader.{h,cpp}`. Its acceptance rules intentionally follow the locked shadPS4/AetherPS4 loader contract (PS4 FreeBSD ABI, x86-64, SCE executable types) so imported files can be rejected before runtime handoff. It does not contain Sony firmware, keys, decryption material, or game content.
+
 The public MaxPS4 repository remains the corresponding source location for MaxPS4 changes. Imported or compiled shadPS4/AetherPS4 code must retain its original SPDX/copyright notices and the upstream source/revision must remain recorded. For the 0.7 guest-bridge harness, `src/core/ios/ios_jit_allocator.{h,cpp}` from the locked AetherPS4 reference is now compiled because the shadPS4 guest engine and HLE veneer allocator depend on `Core::DualMappedRegion`. Those files are GPL-2.0-or-later and are treated as part of the GPL-covered integration. The allocator's BreakpointJIT dynamic-loading boundary is patched at build time to call MaxPS4's independently implemented JIT26/StikDebug interoperability shim directly; MaxPS4 still does not bundle or redistribute StikDebug, StikJIT, or BreakpointJIT.
 
 ## FEXCore
