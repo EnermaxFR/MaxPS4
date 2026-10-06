@@ -53,6 +53,7 @@ jobs:
           xcrun --sdk iphoneos swiftc \
             -target arm64-apple-ios16.0 \
             -sdk "$SDK" \
+            -I MaxPS4-iOS/Bridge \
             -O -parse-as-library \
             -framework SwiftUI -framework UIKit \
             MaxPS4-iOS/Sources/*.swift \
