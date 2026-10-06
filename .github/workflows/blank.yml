@@ -339,12 +339,12 @@ jobs:
           ia = ios_alloc.read_text()
           ia = ia.replace(
               '#include "common/logging/log.h"',
-              '''// MaxPS4 0.7 minimal harness: avoid pulling the full shadPS4/spdlog logging graph.
-#define LOG_CRITICAL(...) do {} while (0)
-#define LOG_ERROR(...) do {} while (0)
-#define LOG_WARNING(...) do {} while (0)
-#define LOG_INFO(...) do {} while (0)
-#define LOG_DEBUG(...) do {} while (0)'''
+              '// MaxPS4 0.7 minimal harness: avoid pulling the full shadPS4/spdlog logging graph.\n'
+              '#define LOG_CRITICAL(...) do {} while (0)\n'
+              '#define LOG_ERROR(...) do {} while (0)\n'
+              '#define LOG_WARNING(...) do {} while (0)\n'
+              '#define LOG_INFO(...) do {} while (0)\n'
+              '#define LOG_DEBUG(...) do {} while (0)'
           )
           ia = ia.replace(
               'namespace {\n\nusing BreakGetJITMappingFn = void* (*)(void*, size_t);',
