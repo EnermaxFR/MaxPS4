@@ -12,10 +12,9 @@ Any shadPS4 or other GPL-covered source incorporated into MaxPS4 must retain the
 The AetherPS4 integration reference inspected for the 0.6 port carries GNU GPL version 2.
 
 
-For the next guest-CPU bridge stage, MaxPS4 is intentionally limiting the candidate imported surface to files that carry an explicit `SPDX-License-Identifier: MIT` header in the locked AetherPS4 reference commit `3347fc13f19860855ce91b66356940989ea6b6a6`:
-`src/core/fex/fex_guest_engine.{h,cpp}`, `src/core/guest_cpu/fex_guest_cpu.{h,cpp}`, and `src/core/guest_cpu/fex_hle_bridge.{h,cpp}`.
+For the next guest-CPU bridge stage, the locked AetherPS4 reference contains individual bridge implementation files with MIT SPDX headers, but those files include and depend on shadPS4 headers carrying GPL-2.0-or-later notices (for example `src/common/types.h` and `src/core/libraries/kernel/threads/exception.h`). Therefore MaxPS4 treats the integrated guest-CPU bridge as a GPL-covered combined integration rather than claiming an MIT-only boundary.
 
-GPL-covered shadPS4 files are not silently reclassified by this boundary. In particular, files such as `src/core/ios/ios_jit_allocator.{h,cpp}` and `src/core/guest_cpu/guest_memory_validation_cache.h` remain under their stated GPL terms and are not part of the MIT-only bridge import plan. MaxPS4 uses its independently implemented JIT26/StikDebug interoperability shim for the validated iOS executable-memory path.
+The public MaxPS4 repository remains the corresponding source location for MaxPS4 changes. Imported or compiled shadPS4/AetherPS4 code must retain its original SPDX/copyright notices and the upstream source/revision must remain recorded. MaxPS4 continues using its independently implemented JIT26/StikDebug interoperability shim for the validated iOS executable-memory path; GPL shadPS4 JIT allocator files are not copied unless a later integration explicitly requires them and records that decision.
 
 ## FEXCore
 
