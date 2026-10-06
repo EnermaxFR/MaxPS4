@@ -1,8 +1,18 @@
 #include "maxps4_backend.h"
 
-// 0.5 staging implementation. This is intentionally not a fake emulator core:
-// READY is only returned once the real shadPS4/FEX runtime is linked into the
-// iOS build. Keeping NOT_LINKED here makes the UI/build diagnostics truthful.
+#include <cstdio>
+
+#if defined(MAXPS4_HAS_SHADPS4_FEX)
+extern "C" int maxps4_fex_guest_harness_run(void);
+extern "C" const char* maxps4_fex_guest_last_error(void);
+#endif
+
+static char g_backend_diagnostic[256] =
+#if defined(MAXPS4_HAS_SHADPS4_FEX)
+    "shadPS4/FEX guest backend linked • on-device self-test not run";
+#else
+    "FEXCore ARM64 validated • shadPS4 guest backend staging";
+#endif
 
 MaxPS4BackendState maxps4_backend_state(void) {
 #if defined(MAXPS4_HAS_SHADPS4_FEX)
@@ -14,25 +24,43 @@ MaxPS4BackendState maxps4_backend_state(void) {
 
 const char *maxps4_backend_name(void) {
 #if defined(MAXPS4_HAS_SHADPS4_FEX)
-    return "shadPS4 + FEXCore ARM64";
+    return "shadPS4/FEXCore ARM64 guest backend";
 #else
     return "FEXCore ARM64 validated • shadPS4 staging";
 #endif
 }
 
 const char *maxps4_backend_diagnostic(void) {
+    return g_backend_diagnostic;
+}
+
+bool maxps4_backend_self_test(void) {
 #if defined(MAXPS4_HAS_SHADPS4_FEX)
-    return "Backend linked; runtime initialization available";
+    const int result = maxps4_fex_guest_harness_run();
+    const char *detail = maxps4_fex_guest_last_error();
+    if (result == 0) {
+        std::snprintf(g_backend_diagnostic, sizeof(g_backend_diagnostic),
+                      "shadPS4/FEX guest backend self-test OK");
+        return true;
+    }
+    std::snprintf(g_backend_diagnostic, sizeof(g_backend_diagnostic),
+                  "shadPS4/FEX self-test FAIL code=%d • %s",
+                  result, detail ? detail : "no detail");
+    return false;
 #else
-    return "0.6 FEXCore guest execution validated on-device; shadPS4 runtime not linked yet";
+    std::snprintf(g_backend_diagnostic, sizeof(g_backend_diagnostic),
+                  "shadPS4/FEX guest backend not linked");
+    return false;
 #endif
 }
 
 bool maxps4_backend_boot(const char *path) {
     if (path == nullptr || path[0] == '\0') return false;
 #if defined(MAXPS4_HAS_SHADPS4_FEX)
-    // Real runtime entry point is wired here when the licensed upstream objects
-    // are part of the build. Do not report success before that integration.
+    // The guest CPU/HLE runtime is linked and validated. The next milestone is
+    // wiring the PS4 executable/module loader into this stable frontend boundary.
+    std::snprintf(g_backend_diagnostic, sizeof(g_backend_diagnostic),
+                  "Backend linked • PS4 executable loader not wired yet");
     return false;
 #else
     return false;
