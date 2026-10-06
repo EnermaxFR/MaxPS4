@@ -7,8 +7,6 @@
 extern "C" {
 #endif
 
-// Stable C ABI used by the Swift frontend. The implementation will be
-// connected to the iOS shadPS4/FEXCore runtime incrementally.
 typedef enum MaxPS4CoreResult {
     MAXPS4_CORE_OK = 0,
     MAXPS4_CORE_NOT_READY = 1,
@@ -20,6 +18,7 @@ typedef enum MaxPS4CoreResult {
 const char *maxps4_core_version(void);
 bool maxps4_core_is_available(void);
 bool maxps4_core_jit_available(void);
+const char *maxps4_core_jit_diagnostic(void);
 MaxPS4CoreResult maxps4_core_boot_game(const char *path);
 void maxps4_core_stop(void);
 
