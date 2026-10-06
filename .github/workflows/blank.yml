@@ -108,6 +108,81 @@ jobs:
           PY
           grep -n "add_executable(fexcore-smoke" "$SRC/CMakeLists.txt"
 
+      - name: Wire FEXCore to MaxPS4 StikDebug protocol shim
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/build/aether-reference/runtime/sources/fexcore-darwin"
+          cat > "$SRC/MaxPS4JITShim.cpp" <<'CPP'
+          #include <cstddef>
+
+          #if defined(__APPLE__) && defined(__aarch64__)
+          extern "C" __attribute__((noinline, optnone, naked))
+          void* MaxPS4BreakGetJITMapping(void* address, std::size_t length) {
+              __asm__ volatile(
+                  "mov x16, #1\n"
+                  "brk #0xf00d\n"
+                  "ret\n"
+              );
+          }
+
+          extern "C" __attribute__((noinline, optnone, naked))
+          void MaxPS4BreakJITDetach(void) {
+              __asm__ volatile(
+                  "mov x16, #0\n"
+                  "brk #0xf00d\n"
+                  "ret\n"
+              );
+          }
+          #else
+          extern "C" void* MaxPS4BreakGetJITMapping(void*, std::size_t) { return nullptr; }
+          extern "C" void MaxPS4BreakJITDetach(void) {}
+          #endif
+          CPP
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          cmake = Path("build/aether-reference/runtime/sources/fexcore-darwin/CMakeLists.txt")
+          s = cmake.read_text()
+          s = s.replace(
+              'add_executable(fexcore-smoke "${FEXCORE_SMOKE_SOURCE}" "${CMAKE_SOURCE_DIR}/MaxPS4ClearCacheShim.cpp")',
+              'add_executable(fexcore-smoke "${FEXCORE_SMOKE_SOURCE}" "${CMAKE_SOURCE_DIR}/MaxPS4ClearCacheShim.cpp" "${CMAKE_SOURCE_DIR}/MaxPS4JITShim.cpp")'
+          )
+          cmake.write_text(s)
+
+          alloc = Path("build/aether-reference/runtime/sources/fexcore-darwin/FEXCore/Source/Utils/Allocator.cpp")
+          a = alloc.read_text()
+          anchor = 'namespace {\nusing BreakGetJITMappingFn = void* (*)(void*, size_t);'
+          a = a.replace(
+              anchor,
+              'extern "C" void* MaxPS4BreakGetJITMapping(void*, size_t);\n'
+              'extern "C" void MaxPS4BreakJITDetach(void);\n\n'
+              + anchor
+          )
+          pattern = re.compile(
+              r'const BreakpointJITSymbols& GetBreakpointJITSymbols\(\) noexcept \{.*?\n\}',
+              re.S
+          )
+          replacement = '''const BreakpointJITSymbols& GetBreakpointJITSymbols() noexcept {
+            static const BreakpointJITSymbols symbols = [] {
+              BreakpointJITSymbols s;
+              s.get_jit_mapping = &MaxPS4BreakGetJITMapping;
+              s.jit_detach = &MaxPS4BreakJITDetach;
+              return s;
+            }();
+            return symbols;
+          }'''
+          a, count = pattern.subn(replacement, a, count=1)
+          if count != 1:
+              raise SystemExit("failed to patch GetBreakpointJITSymbols")
+          alloc.write_text(a)
+          PY
+
+          grep -n "MaxPS4JITShim" "$SRC/CMakeLists.txt"
+          grep -n "MaxPS4BreakGetJITMapping" "$SRC/FEXCore/Source/Utils/Allocator.cpp"
+
       - name: Install FEXCore Python configure dependencies
         shell: bash
         run: |
@@ -166,6 +241,47 @@ jobs:
           file build/fexcore-ios/Bin/fexcore-smoke.app/fexcore-smoke
           xcrun vtool -show-build build/fexcore-ios/Bin/fexcore-smoke.app/fexcore-smoke || true
           nm -gU build/fexcore-ios/Bin/fexcore-smoke.app/fexcore-smoke | grep -E "FEX|main" | head -40 || true
+
+      - name: Package on-device FEXCore 0.6 probe IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="build/fexcore-ios/Bin/fexcore-smoke.app"
+          PAYLOAD="build/fexcore-probe-ipa/Payload"
+          mkdir -p "$PAYLOAD"
+          rm -rf "$PAYLOAD/MaxPS4FEXProbe.app"
+          cp -R "$APP" "$PAYLOAD/MaxPS4FEXProbe.app"
+          cat > "$PAYLOAD/MaxPS4FEXProbe.app/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleDevelopmentRegion</key><string>fr</string>
+            <key>CFBundleDisplayName</key><string>MaxPS4 FEX Probe 0.6</string>
+            <key>CFBundleExecutable</key><string>fexcore-smoke</string>
+            <key>CFBundleIdentifier</key><string>com.enermaxfr.maxps4.fexprobe06</string>
+            <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+            <key>CFBundleName</key><string>MaxPS4FEXProbe</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>0.6</string>
+            <key>CFBundleVersion</key><string>${{ github.run_number }}</string>
+            <key>LSRequiresIPhoneOS</key><true/>
+            <key>MinimumOSVersion</key><string>17.4</string>
+            <key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
+          </dict></plist>
+          PLIST
+          cp build/aether-reference/runtime/sources/fexcore-darwin/LICENSE "$PAYLOAD/MaxPS4FEXProbe.app/FEXCore-LICENSE"
+          cp THIRD_PARTY_NOTICES.md "$PAYLOAD/MaxPS4FEXProbe.app/THIRD_PARTY_NOTICES.md"
+          cp docs/fexcore-0.6-lock.md "$PAYLOAD/MaxPS4FEXProbe.app/FEXCORE_0_6_PROVENANCE.md"
+          plutil -lint "$PAYLOAD/MaxPS4FEXProbe.app/Info.plist"
+          (cd build/fexcore-probe-ipa && zip -qry ../MaxPS4-FEXCore-Probe-unsigned.ipa Payload)
+
+      - name: Upload on-device FEXCore probe IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-FEXCore-Probe-unsigned
+          path: build/MaxPS4-FEXCore-Probe-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Package FEXCore iOS link proof
         shell: bash
