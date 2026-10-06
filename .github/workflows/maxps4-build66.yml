@@ -1,4 +1,4 @@
-name: Build 71 MaxPS4 iOS
+name: Build 72 MaxPS4 iOS
 
 on:
   workflow_dispatch:
@@ -25,15 +25,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/maxps4-ccache
-          key: maxps4-ios-build71-${{ runner.os }}-${{ github.run_id }}
+          key: maxps4-ios-build72-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             maxps4-ios-ccache-${{ runner.os }}-shadps4-b3452cf6-
 
-      - name: Run Build64 pipeline with detailed diagnostics
+      - name: Run Build64 pipeline with persistent diagnostics
         shell: bash
         run: |
           set -euo pipefail
-          VENV="$RUNNER_TEMP/build71-python"
+          VENV="$RUNNER_TEMP/build72-python"
+          LOGDIR="$RUNNER_TEMP/build72-logs"
+          mkdir -p "$LOGDIR"
           python3 -m venv "$VENV"
           "$VENV/bin/python" -m pip install --upgrade pip pyyaml
           "$VENV/bin/python" - <<'PY'
@@ -44,21 +46,27 @@ jobs:
           doc=yaml.safe_load(raw)
           steps=doc['jobs']['build-maxps4-ipa']['steps']
           env=os.environ.copy(); envfile=env['GITHUB_ENV']; pathfile=env['GITHUB_PATH']
+          logdir=Path(env['RUNNER_TEMP'])/'build72-logs'
           open(envfile,'w').close(); open(pathfile,'w').close(); env_pos=0; path_pos=0
           for index, step in enumerate(steps, 1):
               name=step.get('name','') or f'unnamed step {index}'; script=step.get('run')
               if not script: continue
-              print(f'\n::group::Build64 step {index}: {name}',flush=True); print(script,flush=True)
+              safe=''.join(c if c.isalnum() else '-' for c in name).strip('-')[:60]
+              logfile=logdir/f'{index:02d}-{safe}.log'
+              print(f'\n::group::Build64 step {index}: {name}',flush=True)
               try:
                   if name == 'Configure iOS engine':
                       subprocess.run(['python3','.github/scripts/build66-patches.py'],env=env,check=True)
-                  result=subprocess.run(['bash','-x','-e','-o','pipefail','-c',script],env=env)
+                  with logfile.open('w') as out:
+                      result=subprocess.run(['bash','-x','-e','-o','pipefail','-c',script],env=env,stdout=out,stderr=subprocess.STDOUT)
+                  print(logfile.read_text(errors='replace'),flush=True)
                   if result.returncode:
                       core=Path(env['RUNNER_TEMP'])/'build'/'libshadps4.a'
                       if name == 'Build iOS engine and collect diagnostics' and core.is_file():
-                          print(f'Build71: engine returned {result.returncode}, but core exists; continuing.',flush=True)
+                          print(f'Build72: engine returned {result.returncode}, but {core} exists; continuing.',flush=True)
                       else:
-                          print(f'::error title=Build71 failure::Build64 step {index} "{name}" failed with exit code {result.returncode}',flush=True)
+                          (logdir/'FAILURE.txt').write_text(f'Build64 step {index}: {name}\nexit code: {result.returncode}\nlog: {logfile.name}\n')
+                          print(f'::error title=Build72 failure::Build64 step {index} "{name}" failed with exit code {result.returncode}',flush=True)
                           raise subprocess.CalledProcessError(result.returncode, script)
                   with open(envfile) as f:
                       f.seek(env_pos)
@@ -84,39 +92,27 @@ jobs:
           OUT="$RUNNER_TEMP/MaxPS4-GPL-Source"
           rm -rf "$OUT"
           mkdir -p "$OUT/maxps4" "$OUT/shadps4"
-
-          # Exact MaxPS4 source and build scripts used for this run.
           git archive --format=tar HEAD | tar -xf - -C "$OUT/maxps4"
-
-          # The build pipeline checks out this exact shadPS4 revision and patches it for iOS.
           SHAD="$RUNNER_TEMP/shadps4"
           test -d "$SHAD/.git"
           git -C "$SHAD" rev-parse HEAD > "$OUT/SHADPS4_COMMIT.txt"
           cp -R "$SHAD"/. "$OUT/shadps4/"
           rm -rf "$OUT/shadps4/.git"
-
           cp LICENSE "$OUT/LICENSE-MaxPS4-GPL-2.0.txt"
           cp NOTICE.md "$OUT/NOTICE.md"
           cp SOURCE.md "$OUT/SOURCE.md"
           printf 'MaxPS4 commit: %s\nGitHub run: %s\nRun attempt: %s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$OUT/BUILD-SOURCE-IDENTITY.txt"
-
           ditto -c -k --sequesterRsrc --keepParent "$OUT" "$RUNNER_TEMP/MaxPS4-GPL-Corresponding-Source.zip"
 
-      - name: Build71 failure summary
-        if: failure()
-        shell: bash
-        run: |
-          echo "Build 71 failed. Check the detailed Build64 sub-step trace above."
-          find "$RUNNER_TEMP" -maxdepth 3 -type f \( -name '*.log' -o -name '*.txt' \) -print 2>/dev/null | sort || true
-
-      - name: Upload engine diagnostics
+      - name: Upload Build72 diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build71-diagnostics
+          name: build72-diagnostics
           path: |
-            ${{ runner.temp }}/shadps4-cmake-configure.log
+            ${{ runner.temp }}/build72-logs/
             ${{ runner.temp }}/shadps4-build.log
+            ${{ runner.temp }}/shadps4-cmake-configure.log
             ${{ runner.temp }}/shadps4-libs.txt
           if-no-files-found: ignore
 
