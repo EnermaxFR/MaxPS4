@@ -548,6 +548,29 @@ jobs:
             target_link_libraries(maxps4-fex-guest-probe PRIVATE
               FEXCore Common CommonTools JemallocLibs ${PTHREAD_LIB}
               "-framework UIKit" "-framework Foundation")
+
+            add_executable(maxps4-integrated
+              "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/MaxPS4IntegratedHost.mm"
+              "${CMAKE_SOURCE_DIR}/MaxPS4FEXGuestHost.cpp"
+              "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_backend.cpp"
+              "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_ps4_loader.cpp"
+              "${FEXCORE_PROJECT_SOURCE_DIR}/core/fex/fex_guest_engine.cpp"
+              "${FEXCORE_PROJECT_SOURCE_DIR}/core/guest_cpu/fex_guest_cpu.cpp"
+              "${FEXCORE_PROJECT_SOURCE_DIR}/core/guest_cpu/hle_call_adapter.cpp"
+              "${FEXCORE_PROJECT_SOURCE_DIR}/core/guest_cpu/fex_hle_bridge.cpp"
+              "${FEXCORE_PROJECT_SOURCE_DIR}/core/ios/ios_jit_allocator.cpp"
+              "${CMAKE_SOURCE_DIR}/MaxPS4JITShim.cpp")
+            target_compile_features(maxps4-integrated PRIVATE cxx_std_20)
+            target_include_directories(maxps4-integrated PRIVATE
+              "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge"
+              "${FEXCORE_PROJECT_SOURCE_DIR}"
+              "${CMAKE_BINARY_DIR}/generated"
+              "${CMAKE_SOURCE_DIR}/Source/Tools/CommonTools"
+              "${CMAKE_SOURCE_DIR}/FEXCore/Source")
+            target_compile_definitions(maxps4-integrated PRIVATE MAXPS4_HAS_SHADPS4_FEX=1)
+            target_link_libraries(maxps4-integrated PRIVATE
+              FEXCore Common CommonTools JemallocLibs ${PTHREAD_LIB}
+              "-framework UIKit" "-framework Foundation")
           '''
           needle = '''    target_link_libraries(fexcore-smoke PRIVATE
                 FEXCore Common CommonTools JemallocLibs ${PTHREAD_LIB})
@@ -791,6 +814,64 @@ jobs:
         with:
           name: MaxPS4-shadPS4-FEX-Guest-Probe-unsigned
           path: build/MaxPS4-shadPS4-FEX-Guest-Probe-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build integrated MaxPS4 app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build/fexcore-ios --target maxps4-integrated --parallel 3
+          file build/fexcore-ios/Bin/maxps4-integrated.app/maxps4-integrated
+
+      - name: Package compliant integrated MaxPS4 IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="build/fexcore-ios/Bin/maxps4-integrated.app"
+          PAYLOAD="build/maxps4-integrated-ipa/Payload"
+          mkdir -p "$PAYLOAD"
+          rm -rf "$PAYLOAD/MaxPS4.app"
+          cp -R "$APP" "$PAYLOAD/MaxPS4.app"
+          mv "$PAYLOAD/MaxPS4.app/maxps4-integrated" "$PAYLOAD/MaxPS4.app/MaxPS4"
+          cat > "$PAYLOAD/MaxPS4.app/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleDevelopmentRegion</key><string>fr</string>
+            <key>CFBundleDisplayName</key><string>MaxPS4 0.8 Integration</string>
+            <key>CFBundleExecutable</key><string>MaxPS4</string>
+            <key>CFBundleIdentifier</key><string>com.enermaxfr.maxps4.integration08</string>
+            <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+            <key>CFBundleName</key><string>MaxPS4</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>0.8</string>
+            <key>CFBundleVersion</key><string>${{ github.run_number }}</string>
+            <key>LSRequiresIPhoneOS</key><true/>
+            <key>MinimumOSVersion</key><string>17.4</string>
+            <key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
+            <key>UILaunchScreen</key><dict/>
+          </dict></plist>
+          PLIST
+          cp build/aether-reference/runtime/sources/fexcore-darwin/LICENSE "$PAYLOAD/MaxPS4.app/FEXCore-LICENSE"
+          cp build/aether-reference/LICENSE "$PAYLOAD/MaxPS4.app/AetherPS4-GPL2-LICENSE"
+          cp THIRD_PARTY_NOTICES.md "$PAYLOAD/MaxPS4.app/THIRD_PARTY_NOTICES.md"
+          cp docs/fexcore-0.6-lock.md "$PAYLOAD/MaxPS4.app/FEXCORE_0_6_PROVENANCE.md"
+          cp docs/shadps4-fex-0.7-lock.md "$PAYLOAD/MaxPS4.app/SHADPS4_FEX_0_7_PROVENANCE.md"
+          cat > "$PAYLOAD/MaxPS4.app/LEGAL_USE.txt" <<'TXT'
+          MaxPS4 does not include games, firmware, keys, or PlayStation system files.
+          Users must supply only files they are legally authorized to use.
+          This integration build validates imported PS4 SELF/ELF files but does not yet
+          claim complete game execution support.
+          TXT
+          plutil -lint "$PAYLOAD/MaxPS4.app/Info.plist"
+          (cd build/maxps4-integrated-ipa && zip -qry ../MaxPS4-Integrated-unsigned.ipa Payload)
+
+      - name: Upload integrated MaxPS4 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-Integrated-unsigned
+          path: build/MaxPS4-Integrated-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
 
