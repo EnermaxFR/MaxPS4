@@ -55,6 +55,25 @@ jobs:
           grep -Fq "SPDX-License-Identifier: GPL-2.0-or-later" "$REF/src/core/libraries/kernel/threads/exception.h"
           echo "shadPS4/FEX license boundary verified"
 
+      - name: Patch locked guest harness namespace for current bridge API
+        shell: bash
+        run: |
+          set -euo pipefail
+          HARNESS="$GITHUB_WORKSPACE/build/aether-reference/runtime/probes/fexcore-guest-harness.cpp"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build/aether-reference/runtime/probes/fexcore-guest-harness.cpp")
+          s = p.read_text()
+          old = "AetherPS4::GuestCpu::"
+          count = s.count(old)
+          if count == 0:
+              raise SystemExit("expected AetherPS4::GuestCpu namespace references were not found")
+          s = s.replace(old, "Core::GuestCpu::")
+          p.write_text(s)
+          print(f"patched {count} guest CPU namespace references")
+          PY
+          grep -n "Core::GuestCpu::" "$HARNESS" | head -20
+
       - name: Apply MaxPS4 iOS smoke packaging patch
         shell: bash
         run: |
@@ -341,9 +360,9 @@ jobs:
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_C_COMPILER="$(xcrun --find clang)" \
             -DCMAKE_CXX_COMPILER="$(xcrun --find clang++)" \
-            -DCMAKE_C_COMPILER_TARGET=arm64-apple-ios16.0 \
-            -DCMAKE_CXX_COMPILER_TARGET=arm64-apple-ios16.0 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
+            -DCMAKE_C_COMPILER_TARGET=arm64-apple-ios17.4 \
+            -DCMAKE_CXX_COMPILER_TARGET=arm64-apple-ios17.4 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=17.4 \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_FEXCORE_ONLY=ON \
             -DTUNE_CPU=generic \
