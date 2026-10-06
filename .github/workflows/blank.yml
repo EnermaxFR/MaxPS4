@@ -55,6 +55,30 @@ jobs:
           grep -Fq "SPDX-License-Identifier: GPL-2.0-or-later" "$REF/src/core/libraries/kernel/threads/exception.h"
           echo "shadPS4/FEX license boundary verified"
 
+      - name: Patch guest harness FEX internal include path
+        shell: bash
+        run: |
+          set -euo pipefail
+          CMAKE_FILE="$GITHUB_WORKSPACE/build/aether-reference/runtime/sources/fexcore-darwin/CMakeLists.txt"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build/aether-reference/runtime/sources/fexcore-darwin/CMakeLists.txt")
+          s = p.read_text()
+          old = '''      target_include_directories(fexcore-guest-harness PRIVATE
+        "${FEXCORE_PROJECT_SOURCE_DIR}"
+        "${CMAKE_BINARY_DIR}/generated"
+        "${CMAKE_SOURCE_DIR}/Source/Tools/CommonTools")'''
+          new = '''      target_include_directories(fexcore-guest-harness PRIVATE
+        "${FEXCORE_PROJECT_SOURCE_DIR}"
+        "${CMAKE_BINARY_DIR}/generated"
+        "${CMAKE_SOURCE_DIR}/Source/Tools/CommonTools"
+        "${CMAKE_SOURCE_DIR}/FEXCore/Source")'''
+          if old not in s:
+              raise SystemExit("guest harness include block not found")
+          p.write_text(s.replace(old, new, 1))
+          PY
+          grep -A6 -n "target_include_directories(fexcore-guest-harness" "$CMAKE_FILE"
+
       - name: Patch locked guest harness namespace for current bridge API
         shell: bash
         run: |
