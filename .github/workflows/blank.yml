@@ -66,6 +66,8 @@ jobs:
             -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_FEXCORE_ONLY=ON \
+            -DTUNE_CPU=generic \
+            -DTUNE_ARCH=generic \
             -DBUILD_FEXCORE_SMOKE=OFF \
             -DBUILD_TESTING=OFF \
             -DBUILD_FEX_LINUX_TESTS=OFF \
