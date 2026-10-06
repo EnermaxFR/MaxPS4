@@ -113,6 +113,7 @@ jobs:
         run: |
           set -euo pipefail
           SRC="$GITHUB_WORKSPACE/build/aether-reference/runtime/sources/fexcore-darwin"
+
           cat > "$SRC/MaxPS4JITShim.cpp" <<'CPP'
           #include <cstddef>
 
@@ -140,6 +141,103 @@ jobs:
           #endif
           CPP
 
+          # Build an app-hosted copy of the smoke probe. The original command-line
+          # executable remains the CI link proof; this copy is callable from UIKit.
+          cp "$GITHUB_WORKSPACE/build/aether-reference/runtime/probes/fexcore-smoke.cpp" "$SRC/MaxPS4FEXSmokeHost.cpp"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build/aether-reference/runtime/sources/fexcore-darwin/MaxPS4FEXSmokeHost.cpp")
+          s = p.read_text()
+          s = s.replace("int main() {", 'extern "C" int maxps4_fex_smoke_run() {', 1)
+          s = s.replace(
+              "Mapping codePage {static_cast<size_t>(pageSize), PROT_READ | PROT_WRITE | PROT_EXEC};",
+              "Mapping codePage {static_cast<size_t>(pageSize), PROT_READ | PROT_WRITE};",
+              1
+          )
+          p.write_text(s)
+          PY
+
+          cat > "$SRC/MaxPS4FEXHost.mm" <<'OBJC'
+          #import <UIKit/UIKit.h>
+
+          extern "C" int maxps4_fex_smoke_run(void);
+
+          @interface MaxPS4FEXViewController : UIViewController
+          @property(nonatomic, strong) UILabel *statusLabel;
+          @property(nonatomic, strong) UIButton *runButton;
+          @end
+
+          @implementation MaxPS4FEXViewController
+          - (void)viewDidLoad {
+              [super viewDidLoad];
+              self.view.backgroundColor = UIColor.systemBackgroundColor;
+
+              UILabel *title = [[UILabel alloc] init];
+              title.translatesAutoresizingMaskIntoConstraints = NO;
+              title.text = @"MaxPS4 FEXCore 0.6";
+              title.font = [UIFont boldSystemFontOfSize:28.0];
+
+              self.statusLabel = [[UILabel alloc] init];
+              self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
+              self.statusLabel.numberOfLines = 0;
+              self.statusLabel.text = @"1. Lance StikDebug avec universal.js\n2. Reviens ici\n3. Appuie sur Tester FEXCore";
+
+              self.runButton = [UIButton buttonWithType:UIButtonTypeSystem];
+              self.runButton.translatesAutoresizingMaskIntoConstraints = NO;
+              [self.runButton setTitle:@"Tester FEXCore" forState:UIControlStateNormal];
+              self.runButton.titleLabel.font = [UIFont boldSystemFontOfSize:20.0];
+              [self.runButton addTarget:self action:@selector(runProbe) forControlEvents:UIControlEventTouchUpInside];
+
+              UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[title, self.statusLabel, self.runButton]];
+              stack.translatesAutoresizingMaskIntoConstraints = NO;
+              stack.axis = UILayoutConstraintAxisVertical;
+              stack.spacing = 24.0;
+              [self.view addSubview:stack];
+
+              [NSLayoutConstraint activateConstraints:@[
+                  [stack.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:24.0],
+                  [stack.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-24.0],
+                  [stack.centerYAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.centerYAnchor]
+              ]];
+          }
+
+          - (void)runProbe {
+              self.runButton.enabled = NO;
+              self.statusLabel.text = @"FEXCore en cours…";
+              dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                  int result = maxps4_fex_smoke_run();
+                  dispatch_async(dispatch_get_main_queue(), ^{
+                      if (result == 0) {
+                          self.statusLabel.text = @"FEXCORE_SMOKE_OK\nGPR • stack • FP • threads • TLS • callback • invalidation : OK";
+                      } else {
+                          self.statusLabel.text = [NSString stringWithFormat:@"FEXCORE_SMOKE_FAIL code=%d\nEnvoie-moi ce code ou le crash LiveContainer.", result];
+                      }
+                      self.runButton.enabled = YES;
+                  });
+              });
+          }
+          @end
+
+          @interface MaxPS4FEXAppDelegate : UIResponder <UIApplicationDelegate>
+          @property(nonatomic, strong) UIWindow *window;
+          @end
+
+          @implementation MaxPS4FEXAppDelegate
+          - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+              self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+              self.window.rootViewController = [[MaxPS4FEXViewController alloc] init];
+              [self.window makeKeyAndVisible];
+              return YES;
+          }
+          @end
+
+          int main(int argc, char *argv[]) {
+              @autoreleasepool {
+                  return UIApplicationMain(argc, argv, nil, NSStringFromClass([MaxPS4FEXAppDelegate class]));
+              }
+          }
+          OBJC
+
           python3 - <<'PY'
           from pathlib import Path
           import re
@@ -150,6 +248,28 @@ jobs:
               'add_executable(fexcore-smoke "${FEXCORE_SMOKE_SOURCE}" "${CMAKE_SOURCE_DIR}/MaxPS4ClearCacheShim.cpp")',
               'add_executable(fexcore-smoke "${FEXCORE_SMOKE_SOURCE}" "${CMAKE_SOURCE_DIR}/MaxPS4ClearCacheShim.cpp" "${CMAKE_SOURCE_DIR}/MaxPS4JITShim.cpp")'
           )
+
+          host_block = r'''
+            enable_language(OBJCXX)
+            add_executable(maxps4-fex-probe
+              "${CMAKE_SOURCE_DIR}/MaxPS4FEXHost.mm"
+              "${CMAKE_SOURCE_DIR}/MaxPS4FEXSmokeHost.cpp"
+              "${CMAKE_SOURCE_DIR}/MaxPS4ClearCacheShim.cpp"
+              "${CMAKE_SOURCE_DIR}/MaxPS4JITShim.cpp")
+            target_compile_features(maxps4-fex-probe PRIVATE cxx_std_20)
+            target_include_directories(maxps4-fex-probe PRIVATE
+              "${CMAKE_BINARY_DIR}/generated"
+              "${CMAKE_SOURCE_DIR}/Source/Tools/CommonTools")
+            target_link_libraries(maxps4-fex-probe PRIVATE
+              FEXCore Common CommonTools JemallocLibs ${PTHREAD_LIB}
+              "-framework UIKit" "-framework Foundation")
+          '''
+          needle = '''    target_link_libraries(fexcore-smoke PRIVATE
+                FEXCore Common CommonTools JemallocLibs ${PTHREAD_LIB})
+          '''
+          if needle not in s:
+              raise SystemExit("failed to locate smoke target link block")
+          s = s.replace(needle, needle + host_block, 1)
           cmake.write_text(s)
 
           alloc = Path("build/aether-reference/runtime/sources/fexcore-darwin/FEXCore/Source/Utils/Allocator.cpp")
@@ -180,7 +300,7 @@ jobs:
           alloc.write_text(a)
           PY
 
-          grep -n "MaxPS4JITShim" "$SRC/CMakeLists.txt"
+          grep -n "maxps4-fex-probe" "$SRC/CMakeLists.txt"
           grep -n "MaxPS4BreakGetJITMapping" "$SRC/FEXCore/Source/Utils/Allocator.cpp"
 
       - name: Install FEXCore Python configure dependencies
@@ -242,22 +362,30 @@ jobs:
           xcrun vtool -show-build build/fexcore-ios/Bin/fexcore-smoke.app/fexcore-smoke || true
           nm -gU build/fexcore-ios/Bin/fexcore-smoke.app/fexcore-smoke | grep -E "FEX|main" | head -40 || true
 
+      - name: Build app-hosted FEXCore probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build/fexcore-ios --target maxps4-fex-probe --parallel 3
+          file build/fexcore-ios/Bin/maxps4-fex-probe.app/maxps4-fex-probe
+
       - name: Package on-device FEXCore 0.6 probe IPA
         shell: bash
         run: |
           set -euo pipefail
-          APP="build/fexcore-ios/Bin/fexcore-smoke.app"
+          APP="build/fexcore-ios/Bin/maxps4-fex-probe.app"
           PAYLOAD="build/fexcore-probe-ipa/Payload"
           mkdir -p "$PAYLOAD"
           rm -rf "$PAYLOAD/MaxPS4FEXProbe.app"
           cp -R "$APP" "$PAYLOAD/MaxPS4FEXProbe.app"
+          mv "$PAYLOAD/MaxPS4FEXProbe.app/maxps4-fex-probe" "$PAYLOAD/MaxPS4FEXProbe.app/MaxPS4FEXProbe"
           cat > "$PAYLOAD/MaxPS4FEXProbe.app/Info.plist" <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0"><dict>
             <key>CFBundleDevelopmentRegion</key><string>fr</string>
             <key>CFBundleDisplayName</key><string>MaxPS4 FEX Probe 0.6</string>
-            <key>CFBundleExecutable</key><string>fexcore-smoke</string>
+            <key>CFBundleExecutable</key><string>MaxPS4FEXProbe</string>
             <key>CFBundleIdentifier</key><string>com.enermaxfr.maxps4.fexprobe06</string>
             <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
             <key>CFBundleName</key><string>MaxPS4FEXProbe</string>
