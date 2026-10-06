@@ -47,8 +47,13 @@ jobs:
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           cmake -S "$SRC" -B build/fexcore-ios -G Ninja \
             -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_SYSTEM_PROCESSOR=arm64 \
             -DCMAKE_OSX_SYSROOT="$SDK" \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_C_COMPILER="$(xcrun --find clang)" \
+            -DCMAKE_CXX_COMPILER="$(xcrun --find clang++)" \
+            -DCMAKE_C_COMPILER_TARGET=arm64-apple-ios16.0 \
+            -DCMAKE_CXX_COMPILER_TARGET=arm64-apple-ios16.0 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_FEXCORE_ONLY=ON \
