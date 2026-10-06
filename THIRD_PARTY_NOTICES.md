@@ -28,6 +28,14 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 Reference snapshot inspected for Apple/Darwin adaptation: `Leviidev/AetherPS4` commit `3347fc13f19860855ce91b66356940989ea6b6a6`, `runtime/sources/fexcore-darwin`.
 
+## StikDebug interoperability
+
+Project: StikDebug
+Source: https://github.com/StikDebug/StikDebug
+License of the StikDebug project: GNU AGPL version 3.
+
+MaxPS4 does not bundle or redistribute StikDebug, StikJIT, or the third-party BreakpointJIT framework in the 0.6 FEXCore probe. MaxPS4 only implements the small public debugger breakpoint calling convention needed to interoperate with an independently installed StikDebug session. This keeps the MaxPS4 probe source and binary separate from StikDebug's AGPL-covered implementation while preserving attribution to the interoperability source.
+
 ## Distribution boundaries
 
 MaxPS4 does not include PlayStation 4 games, copyrighted game content, console firmware, cryptographic keys, user credentials, or other proprietary Sony content. Users must provide any legally required external content themselves.
