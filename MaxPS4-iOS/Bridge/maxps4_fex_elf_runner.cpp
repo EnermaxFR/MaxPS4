@@ -135,11 +135,9 @@ private:
     }
 
     bool IsWritable(uintptr_t addr, size_t size) const {
-        // The complete stack is writable. For the ELF image this test harness intentionally
-        // permits writes only after the loader has already enforced W^X page protections;
-        // mprotect remains the final authority if a malformed guest points at RX data.
-        return Contains(stack_begin, stack_size, addr, size) ||
-               Contains(image_begin, image_size, addr, size);
+        // The legal stdio probe reads into a stack buffer. Keep this conservative rather than
+        // guessing which ELF image pages are writable after W^X sealing.
+        return Contains(stack_begin, stack_size, addr, size);
     }
 
     void Capture(const char* data, size_t size) {
