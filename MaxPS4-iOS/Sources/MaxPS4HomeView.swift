@@ -18,6 +18,7 @@ struct MaxPS4HomeView: View {
     @State private var gameToRename: MaxPS4Game?
     @State private var renamedGameTitle = ""
     @State private var inspectionReport: String?
+    @State private var selectedGameDetails: MaxPS4Game?
 
     @AppStorage("showFPS") private var showFPS = false
     @AppStorage("networkEnabled") private var networkEnabled = false
@@ -71,6 +72,39 @@ struct MaxPS4HomeView: View {
             Button("Fermer") { inspectionReport = nil }
         } message: {
             Text(inspectionReport ?? "")
+        }
+        .sheet(item: $selectedGameDetails) { game in
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text(game.fileName.uppercased().contains("SONICMANIA") ? "Sonic Mania" : game.name)
+                            .font(.largeTitle.bold())
+                        Text(game.fileName)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        Text(game.fileName.lowercased().hasSuffix(".pkg") ? "Format : PKG PS4" : "Format : ELF / SELF")
+                        Text("Date d’import : " + game.importedAt.formatted(date: .abbreviated, time: .shortened))
+                        Text("Exécution PS4 indisponible")
+                            .foregroundStyle(.orange)
+                        Button("Analyser les métadonnées") {
+                            emulator.inspect(game)
+                            inspectionReport = emulator.status
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+                }
+                .navigationTitle("Fiche du jeu")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Fermer") { selectedGameDetails = nil }
+                    }
+                }
+            }
+            .preferredColorScheme(.dark)
         }
         .fileImporter(
             isPresented: $importingGame,
@@ -512,7 +546,11 @@ struct MaxPS4HomeView: View {
 
         return VStack(alignment: .leading, spacing: 10) {
             Button {
-                emulator.launch(game)
+                if isPKG {
+                    selectedGameDetails = game
+                } else {
+                    emulator.launch(game)
+                }
             } label: {
                 ZStack(alignment: .bottomLeading) {
                     LinearGradient(
@@ -558,8 +596,7 @@ struct MaxPS4HomeView: View {
             HStack {
                 Button {
                     if isPKG {
-                        emulator.inspect(game)
-                        inspectionReport = emulator.status
+                        selectedGameDetails = game
                     } else {
                         emulator.launch(game)
                     }
