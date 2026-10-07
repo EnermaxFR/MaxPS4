@@ -84,7 +84,25 @@ enum MaxPS4ELFLoader {
             }
             var cpu = MaxPS4CPUPrototype()
             try cpu.runLoadedTest(memory: result.memory, entry: result.entry, length: 2)
-            return cpu.rip == 2
+            guard cpu.rip == 2 else { return false }
+
+            // An executable entry point outside PT_LOAD must be rejected.
+            put(0x2000, at: 24, width: 8)
+            try Data(bytes).write(to: url, options: .atomic)
+            do {
+                _ = try load(url: url)
+                return false
+            } catch LoaderError.invalid {}
+
+            // A PT_LOAD segment whose memory size is smaller than file size is invalid.
+            put(0x1000, at: 24, width: 8)
+            put(2, at: 104, width: 8)
+            try Data(bytes).write(to: url, options: .atomic)
+            do {
+                _ = try load(url: url)
+                return false
+            } catch LoaderError.invalid {}
+            return true
         } catch { return false }
     }
 }
