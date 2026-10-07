@@ -1,7 +1,7 @@
 import Foundation
 
-/// Tiny educational x86-64 interpreter. Runs only caller-provided byte arrays.
-/// Not connected to imported games, native memory, or executable pages.
+/// Educational, bounded x86-64 instruction interpreter.
+/// Operates exclusively on supplied test bytes; does not launch PS4 software.
 struct MaxPS4CPUPrototype {
     enum CPUError: Error {
         case unsupportedOpcode
@@ -9,8 +9,11 @@ struct MaxPS4CPUPrototype {
         case instructionLimit
     }
 
-    private(set) var rax: UInt64 = 0
+    // x86-64 register order: RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI.
+    private(set) var registers = [UInt64](repeating: 0, count: 8)
     private(set) var rip = 0
+    private(set) var zeroFlag = false
+    var rax: UInt64 { registers[0] }
 
     mutating func run(_ program: [UInt8], limit: Int = 256) throws {
         var steps = 0
@@ -20,25 +23,37 @@ struct MaxPS4CPUPrototype {
             let opcode = program[rip]
             if opcode == 0x90 { // NOP
                 rip += 1
-            } else if opcode == 0xC3 { // RET (terminates this standalone test)
+            } else if opcode == 0xC3 { // RET ends the isolated test
                 rip += 1
                 return
-            } else if rip + 2 <= program.count && opcode == 0x48 && program[rip + 1] == 0xB8 {
-                // MOV RAX, imm64
-                guard rip + 10 <= program.count else { throw CPUError.truncatedInstruction }
-                var value: UInt64 = 0
-                for index in 0..<8 {
-                    value |= UInt64(program[rip + 2 + index]) << (index * 8)
+            } else if opcode == 0x48 {
+                guard rip + 2 <= program.count else { throw CPUError.truncatedInstruction }
+                let next = program[rip + 1]
+                if next >= 0xB8 && next <= 0xBF { // MOV r64, imm64
+                    guard rip + 10 <= program.count else { throw CPUError.truncatedInstruction }
+                    var value: UInt64 = 0
+                    for index in 0..<8 {
+                        value |= UInt64(program[rip + 2 + index]) << (index * 8)
+                    }
+                    registers[Int(next - 0xB8)] = value
+                    rip += 10
+                } else if next == 0x83 { // ADD/SUB/CMP r64, sign-extended imm8
+                    guard rip + 4 <= program.count else { throw CPUError.truncatedInstruction }
+                    let modrm = program[rip + 2]
+                    guard modrm & 0xC0 == 0xC0 else { throw CPUError.unsupportedOpcode }
+                    let operation = (modrm >> 3) & 7
+                    guard operation == 0 || operation == 5 || operation == 7 else {
+                        throw CPUError.unsupportedOpcode
+                    }
+                    let index = Int(modrm & 7)
+                    let immediate = UInt64(bitPattern: Int64(Int8(bitPattern: program[rip + 3])))
+                    let result = registers[index] &- (operation == 0 ? (~immediate &+ 1) : immediate)
+                    if operation != 7 { registers[index] = result }
+                    zeroFlag = result == 0
+                    rip += 4
+                } else {
+                    throw CPUError.unsupportedOpcode
                 }
-                rax = value
-                rip += 10
-            } else if rip + 3 <= program.count && opcode == 0x48 &&
-                      program[rip + 1] == 0x83 && program[rip + 2] == 0xC0 {
-                // ADD RAX, sign-extended imm8
-                guard rip + 4 <= program.count else { throw CPUError.truncatedInstruction }
-                let signed = Int64(Int8(bitPattern: program[rip + 3]))
-                rax = rax &+ UInt64(bitPattern: signed)
-                rip += 4
             } else {
                 throw CPUError.unsupportedOpcode
             }
@@ -49,18 +64,20 @@ struct MaxPS4CPUPrototype {
         do {
             var cpu = Self()
             try cpu.run([0x48, 0xB8, 0x05, 0, 0, 0, 0, 0, 0, 0,
-                         0x48, 0x83, 0xC0, 0x03, 0x90, 0xC3])
-            guard cpu.rax == 8 && cpu.rip == 16 else { return false }
+                         0x48, 0x83, 0xC0, 0x03,
+                         0x48, 0xBB, 0x08, 0, 0, 0, 0, 0, 0, 0,
+                         0x48, 0x83, 0xFB, 0x08,
+                         0x48, 0x83, 0xEB, 0x02, 0xC3])
+            guard cpu.rax == 8, cpu.registers[3] == 6, !cpu.zeroFlag else { return false }
             var unsupported = Self()
-            do {
-                try unsupported.run([0x0F])
-                return false
-            } catch CPUError.unsupportedOpcode {}
+            do { try unsupported.run([0x0F]); return false }
+            catch CPUError.unsupportedOpcode {}
             var truncated = Self()
-            do {
-                try truncated.run([0x48, 0xB8, 0x01])
-                return false
-            } catch CPUError.truncatedInstruction {}
+            do { try truncated.run([0x48, 0xB8, 0x01]); return false }
+            catch CPUError.truncatedInstruction {}
+            var limit = Self()
+            do { try limit.run([0x90, 0x90], limit: 1); return false }
+            catch CPUError.instructionLimit {}
             return true
         } catch { return false }
     }
