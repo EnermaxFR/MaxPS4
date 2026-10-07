@@ -143,8 +143,10 @@ struct MaxPS4GuestTextureSnapshot {
 };
 
 std::mutex g_guest_texture_mutex;
-MaxPS4GuestTextureSnapshot g_guest_texture;
-bool g_guest_texture_active = false;
+std::array<MaxPS4GuestTextureSnapshot, MAXPS4_GUEST_TEXTURE_MAX_RESOURCES> g_guest_textures{};
+std::array<bool, MAXPS4_GUEST_TEXTURE_MAX_RESOURCES> g_guest_texture_active{};
+MaxPS4GuestTextureSnapshot g_guest_texture_latest{};
+bool g_guest_texture_latest_active = false;
 uint32_t g_guest_texture_sequence = 0;
 
 void SetLiveDiag(const std::string& value) {
@@ -306,16 +308,49 @@ bool UploadGuestTexture(uint32_t texture_id,
     std::memcpy(next.rgba.data(), reinterpret_cast<const void*>(src), byte_count);
 
     std::lock_guard<std::mutex> lock(g_guest_texture_mutex);
+
+    size_t target = MAXPS4_GUEST_TEXTURE_MAX_RESOURCES;
+    for (size_t i = 0; i < MAXPS4_GUEST_TEXTURE_MAX_RESOURCES; ++i) {
+        if (g_guest_texture_active[i] &&
+            g_guest_textures[i].texture_id == texture_id) {
+            target = i;
+            break;
+        }
+    }
+    if (target == MAXPS4_GUEST_TEXTURE_MAX_RESOURCES) {
+        for (size_t i = 0; i < MAXPS4_GUEST_TEXTURE_MAX_RESOURCES; ++i) {
+            if (!g_guest_texture_active[i]) {
+                target = i;
+                break;
+            }
+        }
+    }
+    if (target == MAXPS4_GUEST_TEXTURE_MAX_RESOURCES) {
+        return false;
+    }
+
     next.sequence = ++g_guest_texture_sequence;
-    g_guest_texture = next;
-    g_guest_texture_active = true;
+    g_guest_textures[target] = next;
+    g_guest_texture_active[target] = true;
+    g_guest_texture_latest = next;
+    g_guest_texture_latest_active = true;
     return true;
 }
 
 bool GetGuestTexture(MaxPS4GuestTextureSnapshot& out) {
     std::lock_guard<std::mutex> lock(g_guest_texture_mutex);
-    if (!g_guest_texture_active) return false;
-    out = g_guest_texture;
+    if (!g_guest_texture_latest_active) return false;
+    out = g_guest_texture_latest;
+    return true;
+}
+
+bool GetGuestTextureAt(uint32_t slot, MaxPS4GuestTextureSnapshot& out) {
+    std::lock_guard<std::mutex> lock(g_guest_texture_mutex);
+    if (slot >= MAXPS4_GUEST_TEXTURE_MAX_RESOURCES ||
+        !g_guest_texture_active[slot]) {
+        return false;
+    }
+    out = g_guest_textures[slot];
     return true;
 }
 
@@ -341,8 +376,10 @@ void ResetGuestGraphicsState() {
     }
     {
         std::lock_guard<std::mutex> lock(g_guest_texture_mutex);
-        g_guest_texture = {};
-        g_guest_texture_active = false;
+        g_guest_textures = {};
+        g_guest_texture_active.fill(false);
+        g_guest_texture_latest = {};
+        g_guest_texture_latest_active = false;
         g_guest_texture_sequence = 0;
     }
 }
@@ -1390,6 +1427,22 @@ extern "C" bool maxps4_fex_get_guest_texture(MaxPS4GuestTexture* out) {
     if (!out) return false;
     MaxPS4GuestTextureSnapshot snapshot{};
     if (!GetGuestTexture(snapshot)) return false;
+    out->sequence = snapshot.sequence;
+    out->texture_id = snapshot.texture_id;
+    out->width = snapshot.width;
+    out->height = snapshot.height;
+    out->byte_count = snapshot.byte_count;
+    if (snapshot.byte_count != 0) {
+        std::memcpy(out->rgba, snapshot.rgba.data(), snapshot.byte_count);
+    }
+    return true;
+}
+
+extern "C" bool maxps4_fex_get_guest_texture_at(unsigned int slot,
+                                                 MaxPS4GuestTexture* out) {
+    if (!out) return false;
+    MaxPS4GuestTextureSnapshot snapshot{};
+    if (!GetGuestTextureAt(slot, snapshot)) return false;
     out->sequence = snapshot.sequence;
     out->texture_id = snapshot.texture_id;
     out->width = snapshot.width;
