@@ -83,10 +83,10 @@ final class MaxPS4Emulator: ObservableObject {
         )
         do {
             try saveLibrary()
-            status = "Jeu renommé : \\(name)"
+            status = "Jeu renommé : \(name)"
         } catch {
             games[index] = previous
-            status = "Renommage impossible : \\(error.localizedDescription)"
+            status = "Renommage impossible : \(error.localizedDescription)"
         }
     }
 
@@ -112,10 +112,16 @@ final class MaxPS4Emulator: ObservableObject {
         status = "Bibliothèque vidée"
     }
 
+    var deviceDiagnostic: String {
+        let process = ProcessInfo.processInfo
+        let memoryGB = Double(process.physicalMemory) / 1_073_741_824
+        return "iOS \\(process.operatingSystemVersionString) • \\(process.processorCount) cœurs logiques • \\(String(format: "%.1f", memoryGB)) Go RAM"
+    }
+
     func testBackend() {
         status = backendReady
             ? "Backend shadPS4/FEX prêt"
-            : "Interface prête • backend natif à connecter"
+            : "Diagnostic : iPhone détecté • moteur shadPS4 non connecté"
     }
 
     func launch(_ game: MaxPS4Game) {
