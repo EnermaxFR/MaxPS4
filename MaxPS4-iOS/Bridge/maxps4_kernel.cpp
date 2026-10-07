@@ -9,6 +9,10 @@
 #include <thread>
 
 namespace MaxPS4::Kernel {
+
+thread_local const KernelState* KernelState::bound_kernel_ = nullptr;
+thread_local uint32_t KernelState::bound_tid_ = 0;
+
 namespace {
 
 constexpr size_t kGuestPageSize = 16 * 1024;
@@ -39,6 +43,7 @@ KernelState::KernelState() {
 }
 
 void KernelState::Reset() {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     process_ = {};
     managed_arena_base_ = 0;
     managed_arena_size_ = 0;
@@ -75,6 +80,7 @@ void KernelState::Reset() {
 
 bool KernelState::RegisterMemoryRegion(uintptr_t base, size_t size,
                                        uint32_t protection) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     if (!SpanValid(base, size) ||
         process_.memory_region_count >= process_.memory_regions.size()) {
         return false;
@@ -90,6 +96,7 @@ bool KernelState::RegisterMemoryRegion(uintptr_t base, size_t size,
 }
 
 bool KernelState::ConfigureManagedArena(uintptr_t base, size_t size) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     if (!SpanValid(base, size)) return false;
     managed_arena_base_ = base;
     managed_arena_size_ = size;
@@ -98,6 +105,7 @@ bool KernelState::ConfigureManagedArena(uintptr_t base, size_t size) {
 
 bool KernelState::ContainsMemory(uintptr_t address, size_t size,
                                  uint32_t required) const {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     if (size == 0) return true;
     if (!SpanValid(address, size)) return false;
 
@@ -117,6 +125,7 @@ bool KernelState::ContainsMemory(uintptr_t address, size_t size,
 
 uintptr_t KernelState::AllocateVirtualMemory(size_t size, uint32_t protection,
                                              int& error) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     error = 0;
     const size_t aligned = AlignPage(size);
     if (aligned == 0 || managed_arena_base_ == 0 || managed_arena_size_ == 0) {
@@ -165,6 +174,7 @@ uintptr_t KernelState::AllocateVirtualMemory(size_t size, uint32_t protection,
 }
 
 MemoryRegion* KernelState::FindManagedAllocation(uintptr_t address, size_t size) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     if (!SpanValid(address, size)) return nullptr;
     const uintptr_t end = address + size;
     for (size_t i = 0; i < process_.memory_region_count; ++i) {
@@ -179,6 +189,7 @@ MemoryRegion* KernelState::FindManagedAllocation(uintptr_t address, size_t size)
 
 bool KernelState::ProtectVirtualMemory(uintptr_t address, size_t size,
                                        uint32_t protection, int& error) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     error = 0;
     if ((protection & ~(MemoryRead | MemoryWrite | MemoryExecute)) != 0) {
         error = EINVAL;
@@ -198,6 +209,7 @@ bool KernelState::ProtectVirtualMemory(uintptr_t address, size_t size,
 }
 
 bool KernelState::UnmapVirtualMemory(uintptr_t address, size_t size, int& error) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     error = 0;
     auto* region = FindManagedAllocation(address, size);
     if (!region || address != region->base || AlignPage(size) != region->size) {
@@ -209,6 +221,7 @@ bool KernelState::UnmapVirtualMemory(uintptr_t address, size_t size, int& error)
 }
 
 int KernelState::FindVirtualFile(std::string_view path) const {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     for (size_t i = 0; i < process_.virtual_files.size(); ++i) {
         const auto& node = process_.virtual_files[i];
         if (!node.active) continue;
@@ -222,6 +235,7 @@ int KernelState::FindVirtualFile(std::string_view path) const {
 bool KernelState::SeedVirtualFile(std::string_view path,
                                   std::string_view contents,
                                   bool writable) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     if (!PathAllowed(path) || path.empty() || path.size() >= 128 ||
         contents.size() > kMaxVirtualFileBytes) {
         return false;
@@ -254,6 +268,7 @@ bool KernelState::SeedVirtualFile(std::string_view path,
 }
 
 int KernelState::AllocateDescriptorSlot() {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     for (size_t i = 3; i < process_.descriptors.size(); ++i) {
         if (process_.descriptors[i].fd < 0) return static_cast<int>(i);
     }
@@ -261,6 +276,7 @@ int KernelState::AllocateDescriptorSlot() {
 }
 
 int KernelState::OpenVirtualFile(std::string_view path, int flags, int& error) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     error = 0;
     if (!PathAllowed(path) || path.empty() || path.size() >= 128) {
         error = EACCES;
@@ -304,6 +320,7 @@ int KernelState::OpenVirtualFile(std::string_view path, int flags, int& error) {
 }
 
 bool KernelState::CloseFile(int fd, int& error) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     error = 0;
     if (fd < 3 || static_cast<size_t>(fd) >= process_.descriptors.size() ||
         process_.descriptors[static_cast<size_t>(fd)].fd != fd) {
@@ -317,6 +334,7 @@ bool KernelState::CloseFile(int fd, int& error) {
 
 bool KernelState::ReadFile(int fd, void* destination, size_t length,
                            size_t& transferred, int& error) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     transferred = 0;
     error = 0;
     if (!destination && length != 0) {
@@ -352,6 +370,7 @@ bool KernelState::ReadFile(int fd, void* destination, size_t length,
 
 bool KernelState::WriteFile(int fd, const void* source, size_t length,
                             size_t& transferred, int& error) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     transferred = 0;
     error = 0;
     if (!source && length != 0) {
@@ -394,6 +413,7 @@ bool KernelState::WriteFile(int fd, const void* source, size_t length,
 
 bool KernelState::HasFileDescriptor(int fd, bool require_read,
                                     bool require_write) const {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     if (fd < 0 || static_cast<size_t>(fd) >= process_.descriptors.size()) {
         return false;
     }
@@ -405,6 +425,7 @@ bool KernelState::HasFileDescriptor(int fd, bool require_read,
 }
 
 uint32_t KernelState::CreateLogicalThread(std::string_view name, int& error) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     error = 0;
     if (name.size() >= 32) {
         error = EINVAL;
@@ -428,8 +449,9 @@ uint32_t KernelState::CreateLogicalThread(std::string_view name, int& error) {
 }
 
 bool KernelState::CompleteLogicalThread(uint32_t tid, int exit_code, int& error) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     error = 0;
-    if (tid == process_.current_tid) {
+    if (tid == process_.pid) {
         error = EBUSY;
         return false;
     }
@@ -445,6 +467,7 @@ bool KernelState::CompleteLogicalThread(uint32_t tid, int exit_code, int& error)
 }
 
 bool KernelState::JoinLogicalThread(uint32_t tid, int& exit_code, int& error) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     error = 0;
     for (auto& thread : process_.threads) {
         if (!thread.active || thread.tid != tid) continue;
@@ -461,7 +484,35 @@ bool KernelState::JoinLogicalThread(uint32_t tid, int& exit_code, int& error) {
     return false;
 }
 
+bool KernelState::BindCurrentThread(uint32_t tid, int& error) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
+    error = 0;
+    for (const auto& thread : process_.threads) {
+        if (!thread.active || thread.tid != tid) continue;
+        bound_kernel_ = this;
+        bound_tid_ = tid;
+        return true;
+    }
+    error = ESRCH;
+    return false;
+}
+
+void KernelState::UnbindCurrentThread() {
+    if (bound_kernel_ == this) {
+        bound_kernel_ = nullptr;
+        bound_tid_ = 0;
+    }
+}
+
+uint32_t KernelState::CurrentTid() const {
+    if (bound_kernel_ == this && bound_tid_ != 0) {
+        return bound_tid_;
+    }
+    return process_.current_tid;
+}
+
 uint32_t KernelState::CreateMutex(int& error) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     error = 0;
     for (auto& mutex : process_.mutexes) {
         if (mutex.active) continue;
@@ -475,6 +526,7 @@ uint32_t KernelState::CreateMutex(int& error) {
 }
 
 bool KernelState::LockMutex(uint32_t id, uint32_t tid, int& error) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     error = 0;
     for (auto& mutex : process_.mutexes) {
         if (!mutex.active || mutex.id != id) continue;
@@ -491,6 +543,7 @@ bool KernelState::LockMutex(uint32_t id, uint32_t tid, int& error) {
 }
 
 bool KernelState::UnlockMutex(uint32_t id, uint32_t tid, int& error) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     error = 0;
     for (auto& mutex : process_.mutexes) {
         if (!mutex.active || mutex.id != id) continue;
@@ -506,6 +559,7 @@ bool KernelState::UnlockMutex(uint32_t id, uint32_t tid, int& error) {
 }
 
 bool KernelState::DestroyMutex(uint32_t id, int& error) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     error = 0;
     for (auto& mutex : process_.mutexes) {
         if (!mutex.active || mutex.id != id) continue;
@@ -605,6 +659,7 @@ void KernelState::YieldCurrentThread() const {
 }
 
 bool KernelState::LegacyUmtxLock(uintptr_t address, int& error) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     error = 0;
     if (!ContainsMemory(address, sizeof(uint64_t), MemoryRead | MemoryWrite)) {
         error = EFAULT;
@@ -629,6 +684,7 @@ bool KernelState::LegacyUmtxLock(uintptr_t address, int& error) {
 }
 
 bool KernelState::LegacyUmtxUnlock(uintptr_t address, int& error) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     error = 0;
     if (!ContainsMemory(address, sizeof(uint64_t), MemoryRead | MemoryWrite)) {
         error = EFAULT;
@@ -651,6 +707,7 @@ bool KernelState::LegacyUmtxUnlock(uintptr_t address, int& error) {
 bool KernelState::UmtxOperation(uintptr_t object, int operation, uint64_t value,
                                 uintptr_t uaddr, uintptr_t uaddr2,
                                 uint64_t& result_value, int& error) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     result_value = 0;
     error = 0;
 
@@ -794,6 +851,7 @@ bool KernelState::UmtxOperation(uintptr_t object, int operation, uint64_t value,
 SyscallResult KernelState::Dispatch(
     uint64_t syscall_number,
     const std::array<uint64_t, 6>& args) {
+    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     SyscallResult result{};
 
     switch (syscall_number) {
