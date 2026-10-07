@@ -12,13 +12,14 @@
  *   logical recursive mutex create/lock/unlock/destroy
  *   realtime/monotonic clocks, nanosleep, scheduler yield
  *   FreeBSD legacy umtx + _umtx_op uncontended mutex/wake paths
+ *   real FreeBSD thr_new guest execution on a second FEX context
  */
 
 .section .text
 .globl _start
 .type _start,@function
 _start:
-    sub $256, %rsp
+    sub $512, %rsp
 
     /* open/read/close a seeded read-only /app0 file */
     mov $5, %rax
@@ -269,6 +270,80 @@ _start:
     test %rax, %rax
     jne failed
 
+    /*
+     * Real FreeBSD thr_new: reserve a guest stack in the managed arena,
+     * create a second FEX context, and let it publish its own thr_self TID.
+     */
+    mov $477, %rax
+    xor %rdi, %rdi
+    mov $16384, %rsi
+    mov $3, %rdx
+    xor %r10, %r10
+    mov $-1, %r8
+    xor %r9, %r9
+    syscall
+    test %rax, %rax
+    jz failed
+    mov %rax, %r13
+
+    /* shared result: marker, child_tid, parent_tid, worker_self */
+    movq $0, 368(%rsp)
+    movq $0, 376(%rsp)
+    movq $0, 384(%rsp)
+    movq $0, 392(%rsp)
+
+    /* struct thr_param at rsp+256 (104 bytes on x86-64 FreeBSD). */
+    lea worker_start(%rip), %rax
+    mov %rax, 256(%rsp)
+    lea 368(%rsp), %rax
+    mov %rax, 264(%rsp)
+    mov %r13, 272(%rsp)
+    movq $16384, 280(%rsp)
+    movq $0, 288(%rsp)
+    movq $0, 296(%rsp)
+    lea 376(%rsp), %rax
+    mov %rax, 304(%rsp)
+    lea 384(%rsp), %rax
+    mov %rax, 312(%rsp)
+    movl $0, 320(%rsp)
+    movl $0, 324(%rsp)
+    movq $0, 328(%rsp)
+    movq $0, 336(%rsp)
+    movq $0, 344(%rsp)
+    movq $0, 352(%rsp)
+
+    mov $455, %rax
+    lea 256(%rsp), %rdi
+    mov $104, %rsi
+    syscall
+    test %rax, %rax
+    jne failed
+
+    cmpq $2, 384(%rsp)
+    jb failed
+    mov 384(%rsp), %rax
+    cmp %rax, 376(%rsp)
+    jne failed
+
+    /* Give the second FEX context time to execute without blocking it. */
+    mov $200000, %r10
+.Lwait_worker:
+    movabs $0x4f4b444145524854, %rax /* "THREADOK" little-endian */
+    cmp %rax, 368(%rsp)
+    je .Lworker_done
+    mov $331, %rax
+    syscall
+    test %rax, %rax
+    jne failed
+    dec %r10
+    jnz .Lwait_worker
+    jmp failed
+
+.Lworker_done:
+    mov 384(%rsp), %rax
+    cmp %rax, 392(%rsp)
+    jne failed
+
     /* create -> complete -> join a logical thread */
     mov $0x4d60, %rax
     lea worker_name(%rip), %rdi
@@ -337,7 +412,7 @@ _start:
     mov $(ok_message_end-ok_message), %rdx
     syscall
 
-    add $256, %rsp
+    add $512, %rsp
     mov $1, %rax
     xor %rdi, %rdi
     syscall
@@ -349,9 +424,37 @@ failed:
     lea fail_message(%rip), %rsi
     mov $(fail_message_end-fail_message), %rdx
     syscall
-    add $256, %rsp
+    add $512, %rsp
     mov $1, %rax
     mov $1, %rdi
+    syscall
+    ud2
+
+.type worker_start,@function
+worker_start:
+    mov %rdi, %rbx
+
+    /* Publish the actual TID observed inside this FEX worker context. */
+    mov $432, %rax
+    lea 24(%rbx), %rdi
+    syscall
+    test %rax, %rax
+    jne .Lworker_fail
+
+    movabs $0x4f4b444145524854, %rax /* "THREADOK" */
+    mov %rax, 0(%rbx)
+
+    /* End only this FreeBSD guest thread, not the whole process. */
+    mov $431, %rax
+    xor %rdi, %rdi
+    syscall
+    ud2
+
+.Lworker_fail:
+    movabs $0x4c494146524854, %rax /* "THRFAIL" */
+    mov %rax, 0(%rbx)
+    mov $431, %rax
+    xor %rdi, %rdi
     syscall
     ud2
 
