@@ -707,7 +707,7 @@ bool KernelState::LegacyUmtxUnlock(uintptr_t address, int& error) {
 bool KernelState::UmtxOperation(uintptr_t object, int operation, uint64_t value,
                                 uintptr_t uaddr, uintptr_t uaddr2,
                                 uint64_t& result_value, int& error) {
-    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
+    std::unique_lock<std::recursive_mutex> state_lock(state_mutex_);
     result_value = 0;
     error = 0;
 
@@ -730,38 +730,83 @@ bool KernelState::UmtxOperation(uintptr_t object, int operation, uint64_t value,
         return LegacyUmtxUnlock(object, error);
 
     case kUmtxOpWake:
-    case kUmtxOpWakePrivate:
-        // There is no parallel guest waiter yet. Treat wake as a successful
-        // no-op so userland can complete uncontended synchronization paths.
+    case kUmtxOpWakePrivate: {
+        auto it = umtx_wait_queues_.find(object);
+        if (it == umtx_wait_queues_.end() || it->second->waiters == 0) {
+            result_value = 0;
+            return true;
+        }
+
+        UmtxWaitQueue& queue = *it->second;
+        ++queue.generation;
+        const uint64_t requested = value == 0 ? 1 : value;
+        result_value = std::min<uint64_t>(queue.waiters, requested);
+
+        // Each address has its own condition variable. notify_all is deliberate:
+        // waiters re-check the guest word and generation after wake, so no wake
+        // is lost even when several FEX threads race on the same address.
+        queue.condition.notify_all();
         return true;
+    }
 
     case kUmtxOpWait: {
         if (!ContainsMemory(object, sizeof(uint64_t), MemoryRead)) {
             error = EFAULT;
             return false;
         }
+
         uint64_t current = 0;
         std::memcpy(&current, reinterpret_cast<const void*>(object), sizeof(current));
         if (current != value) {
-            error = EWOULDBLOCK;
-            return false;
+            // The condition changed before we reached the sleep point. Treat it
+            // as already satisfied so the bridge does not turn EWOULDBLOCK into
+            // a fatal guest stop.
+            return true;
         }
 
-        // Until parallel FEX guest scheduling exists, never sleep forever.
-        // A supplied timeout is honored; otherwise report would-block.
-        if (uaddr2 == 0) {
-            error = EWOULDBLOCK;
+        auto& slot = umtx_wait_queues_[object];
+        if (!slot) slot = std::make_unique<UmtxWaitQueue>();
+        UmtxWaitQueue& queue = *slot;
+        const uint64_t generation = queue.generation;
+        ++queue.waiters;
+
+        auto predicate = [&]() {
+            uint64_t observed = 0;
+            std::memcpy(&observed, reinterpret_cast<const void*>(object),
+                        sizeof(observed));
+            return queue.generation != generation || observed != value;
+        };
+
+        bool woke = true;
+        if (uaddr2 != 0) {
+            if (!ContainsMemory(uaddr2, sizeof(int64_t) * 2, MemoryRead)) {
+                --queue.waiters;
+                error = EFAULT;
+                return false;
+            }
+            int64_t timeout[2]{};
+            std::memcpy(timeout, reinterpret_cast<const void*>(uaddr2),
+                        sizeof(timeout));
+            if (timeout[0] < 0 || timeout[1] < 0 ||
+                timeout[1] >= 1000000000LL) {
+                --queue.waiters;
+                error = EINVAL;
+                return false;
+            }
+            const auto duration =
+                std::chrono::seconds(timeout[0]) +
+                std::chrono::nanoseconds(timeout[1]);
+            woke = queue.condition.wait_for(state_lock, duration, predicate);
+        } else {
+            queue.condition.wait(state_lock, predicate);
+        }
+
+        --queue.waiters;
+        if (!woke) {
+            error = ETIMEDOUT;
             return false;
         }
-        if (!ContainsMemory(uaddr2, sizeof(int64_t) * 2, MemoryRead)) {
-            error = EFAULT;
-            return false;
-        }
-        int64_t timeout[2]{};
-        std::memcpy(timeout, reinterpret_cast<const void*>(uaddr2), sizeof(timeout));
-        if (!SleepFor(timeout[0], timeout[1], error)) return false;
-        error = ETIMEDOUT;
-        return false;
+        return true;
     }
 
     case kUmtxOpWaitUInt:
@@ -770,25 +815,57 @@ bool KernelState::UmtxOperation(uintptr_t object, int operation, uint64_t value,
             error = EFAULT;
             return false;
         }
+
+        const uint32_t expected = static_cast<uint32_t>(value);
         uint32_t current = 0;
         std::memcpy(&current, reinterpret_cast<const void*>(object), sizeof(current));
-        if (current != static_cast<uint32_t>(value)) {
-            error = EWOULDBLOCK;
+        if (current != expected) {
+            return true;
+        }
+
+        auto& slot = umtx_wait_queues_[object];
+        if (!slot) slot = std::make_unique<UmtxWaitQueue>();
+        UmtxWaitQueue& queue = *slot;
+        const uint64_t generation = queue.generation;
+        ++queue.waiters;
+
+        auto predicate = [&]() {
+            uint32_t observed = 0;
+            std::memcpy(&observed, reinterpret_cast<const void*>(object),
+                        sizeof(observed));
+            return queue.generation != generation || observed != expected;
+        };
+
+        bool woke = true;
+        if (uaddr2 != 0) {
+            if (!ContainsMemory(uaddr2, sizeof(int64_t) * 2, MemoryRead)) {
+                --queue.waiters;
+                error = EFAULT;
+                return false;
+            }
+            int64_t timeout[2]{};
+            std::memcpy(timeout, reinterpret_cast<const void*>(uaddr2),
+                        sizeof(timeout));
+            if (timeout[0] < 0 || timeout[1] < 0 ||
+                timeout[1] >= 1000000000LL) {
+                --queue.waiters;
+                error = EINVAL;
+                return false;
+            }
+            const auto duration =
+                std::chrono::seconds(timeout[0]) +
+                std::chrono::nanoseconds(timeout[1]);
+            woke = queue.condition.wait_for(state_lock, duration, predicate);
+        } else {
+            queue.condition.wait(state_lock, predicate);
+        }
+
+        --queue.waiters;
+        if (!woke) {
+            error = ETIMEDOUT;
             return false;
         }
-        if (uaddr2 == 0) {
-            error = EWOULDBLOCK;
-            return false;
-        }
-        if (!ContainsMemory(uaddr2, sizeof(int64_t) * 2, MemoryRead)) {
-            error = EFAULT;
-            return false;
-        }
-        int64_t timeout[2]{};
-        std::memcpy(timeout, reinterpret_cast<const void*>(uaddr2), sizeof(timeout));
-        if (!SleepFor(timeout[0], timeout[1], error)) return false;
-        error = ETIMEDOUT;
-        return false;
+        return true;
     }
 
     case kUmtxOpMutexTryLock:
@@ -851,7 +928,7 @@ bool KernelState::UmtxOperation(uintptr_t object, int operation, uint64_t value,
 SyscallResult KernelState::Dispatch(
     uint64_t syscall_number,
     const std::array<uint64_t, 6>& args) {
-    std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
+    std::unique_lock<std::recursive_mutex> state_lock(state_mutex_);
     SyscallResult result{};
 
     switch (syscall_number) {
@@ -938,6 +1015,9 @@ SyscallResult KernelState::Dispatch(
 
     case 454: { // _umtx_op
         result.handled = true;
+        // UmtxOperation may block and must be able to release state_mutex_ so
+        // another guest thread can enter WAKE on the same KernelState.
+        state_lock.unlock();
         int error = 0;
         uint64_t value = 0;
         if (!UmtxOperation(static_cast<uintptr_t>(args[0]),
