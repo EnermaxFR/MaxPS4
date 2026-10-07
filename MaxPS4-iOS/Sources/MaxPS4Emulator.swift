@@ -57,12 +57,12 @@ final class MaxPS4Emulator: ObservableObject {
         do {
             let validation = validateExecutable(at: url)
             guard validation.isValid else {
-                status = "Import refusé • \\(validation.diagnostic)"
+                status = "Import refusé • \(validation.diagnostic)"
                 return
             }
 
             if isDuplicateImport(url) {
-                status = "\\(url.lastPathComponent) • déjà présent dans la bibliothèque"
+                status = "\(url.lastPathComponent) • déjà présent dans la bibliothèque"
                 return
             }
 

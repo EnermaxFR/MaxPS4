@@ -53,6 +53,7 @@ struct MaxPS4HomeView: View {
     @State private var importingGame = false
     @State private var selectedSection: MaxPS4Section = .home
     @State private var selectedLibraryCategory: MaxPS4LibraryCategory = .all
+    @State private var librarySearchText = ""
 
     var body: some View {
         ZStack {
@@ -168,6 +169,32 @@ struct MaxPS4HomeView: View {
 
                 libraryCategoryPicker
 
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.white.opacity(0.50))
+
+                    TextField("Rechercher un jeu", text: $librarySearchText)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    if !librarySearchText.isEmpty {
+                        Button {
+                            librarySearchText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.white.opacity(0.45))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(.white.opacity(0.08), lineWidth: 1)
+                )
+
                 if filteredLibraryGames.isEmpty {
                     libraryEmptyState
                 } else {
@@ -187,17 +214,19 @@ struct MaxPS4HomeView: View {
     }
 
     private var filteredLibraryGames: [MaxPS4LibraryGame] {
+        let categorized: [MaxPS4LibraryGame]
+
         switch selectedLibraryCategory {
         case .all:
-            return emulator.libraryGames.sorted { $0.importedAt > $1.importedAt }
+            categorized = emulator.libraryGames.sorted { $0.importedAt > $1.importedAt }
 
         case .favorites:
-            return emulator.libraryGames
+            categorized = emulator.libraryGames
                 .filter(\.isFavorite)
                 .sorted { $0.importedAt > $1.importedAt }
 
         case .recent:
-            return emulator.libraryGames
+            categorized = emulator.libraryGames
                 .filter { $0.lastPlayedAt != nil }
                 .sorted {
                     ($0.lastPlayedAt ?? .distantPast) >
@@ -205,9 +234,17 @@ struct MaxPS4HomeView: View {
                 }
 
         case .homebrew:
-            return emulator.libraryGames
+            categorized = emulator.libraryGames
                 .filter(\.isHomebrew)
                 .sorted { $0.importedAt > $1.importedAt }
+        }
+
+        let query = librarySearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return categorized }
+
+        return categorized.filter {
+            $0.name.localizedCaseInsensitiveContains(query) ||
+            $0.executableRelativePath.localizedCaseInsensitiveContains(query)
         }
     }
 
