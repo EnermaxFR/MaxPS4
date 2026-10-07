@@ -2343,8 +2343,41 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
                       static_cast<unsigned long long>(stack_top));
         SetLiveDiag(live);
     }
-    auto result = backend->Run(request);
+    auto main_thread_result = backend->CreateThread(request);
+    if (const auto* failure =
+            std::get_if<Core::GuestExecutionFailure>(&main_thread_result)) {
+        char buf[240];
+        std::snprintf(buf, sizeof(buf),
+                      "FEX main thread create failed stage=%d errno=%d",
+                      static_cast<int>(failure->Stage), failure->Error);
+        g_run_diag = buf;
+        SetLiveDiag(g_run_diag);
+        return 32;
+    }
+
+    auto main_thread = std::move(
+        std::get<std::unique_ptr<Core::FexGuestCpuBackend::Thread>>(
+            main_thread_result));
+
+    auto result = backend->Run(*main_thread);
+
+    // FEX requires each guest Thread to be destroyed by the same host pthread
+    // that created it. More importantly on iOS, do not tear down the main FEX
+    // thread while a thr_new worker is still completing DestroyThread(): doing
+    // both teardowns concurrently can stall the context for tens of seconds.
+    SetLiveDiag("MaxPS4Kernel guest finished • joining worker FEX threads");
     join_worker_threads();
+
+    SetLiveDiag("MaxPS4Kernel workers joined • destroying main FEX thread");
+    const auto main_destroy_result = backend->DestroyThread(main_thread);
+    if (!std::holds_alternative<Core::GuestExecutionFailure>(result)) {
+        if (const auto* destroy_failure =
+                std::get_if<Core::GuestExecutionFailure>(
+                    &main_destroy_result)) {
+            result = *destroy_failure;
+        }
+    }
+
     if (const auto* failure = std::get_if<Core::GuestExecutionFailure>(&result)) {
         if (bridge.ExitRequested()) {
             char exitbuf[420];
