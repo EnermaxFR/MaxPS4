@@ -10,6 +10,7 @@
  *   thr_self logical identity
  *   logical thread create/complete/join
  *   logical recursive mutex create/lock/unlock/destroy
+ *   realtime/monotonic clocks, nanosleep, scheduler yield
  */
 
 .section .text
@@ -143,6 +144,72 @@ _start:
     test %rax, %rax
     jne failed
     cmpq $1, 128(%rsp)
+    jne failed
+
+    /* wall clock: gettimeofday */
+    movq $0, 144(%rsp)
+    movq $0, 152(%rsp)
+    mov $116, %rax
+    lea 144(%rsp), %rdi
+    xor %rsi, %rsi
+    syscall
+    test %rax, %rax
+    jne failed
+    cmpq $0, 144(%rsp)
+    jle failed
+    cmpq $0, 152(%rsp)
+    jl failed
+    cmpq $1000000, 152(%rsp)
+    jae failed
+
+    /* monotonic clock + resolution */
+    movq $0, 160(%rsp)
+    movq $0, 168(%rsp)
+    mov $232, %rax
+    mov $4, %rdi
+    lea 160(%rsp), %rsi
+    syscall
+    test %rax, %rax
+    jne failed
+    cmpq $0, 160(%rsp)
+    jl failed
+    cmpq $0, 168(%rsp)
+    jl failed
+    cmpq $1000000000, 168(%rsp)
+    jae failed
+
+    movq $-1, 176(%rsp)
+    movq $-1, 184(%rsp)
+    mov $234, %rax
+    mov $4, %rdi
+    lea 176(%rsp), %rsi
+    syscall
+    test %rax, %rax
+    jne failed
+    cmpq $0, 176(%rsp)
+    jne failed
+    cmpq $1, 184(%rsp)
+    jne failed
+
+    /* one millisecond kernel sleep + scheduler yield */
+    movq $0, 192(%rsp)
+    movq $1000000, 200(%rsp)
+    movq $-1, 208(%rsp)
+    movq $-1, 216(%rsp)
+    mov $240, %rax
+    lea 192(%rsp), %rdi
+    lea 208(%rsp), %rsi
+    syscall
+    test %rax, %rax
+    jne failed
+    cmpq $0, 208(%rsp)
+    jne failed
+    cmpq $0, 216(%rsp)
+    jne failed
+
+    mov $331, %rax
+    syscall
+    test %rax, %rax
     jne failed
 
     /* create -> complete -> join a logical thread */
