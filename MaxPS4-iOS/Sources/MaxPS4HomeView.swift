@@ -111,7 +111,8 @@ struct MaxPS4HomeView: View {
                                             let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: game.localPath))
                                             defer { try? handle.close() }
                                             let header = try handle.read(upToCount: 128) ?? Data()
-                                            let length = (try? FileManager.default.attributesOfItem(atPath: game.localPath)[.size] as? NSNumber)?.int64Value ?? 0
+                                            let attributes = try FileManager.default.attributesOfItem(atPath: game.localPath)
+                                            let length = (attributes[.size] as? NSNumber)?.int64Value ?? 0
                                             var contentID = "indisponible"
                                             if header.count >= 0x64 && Array(header.prefix(4)) == [0x7F, 0x43, 0x4E, 0x54] {
                                                 let field = header.subdata(in: 0x40..<0x64)
