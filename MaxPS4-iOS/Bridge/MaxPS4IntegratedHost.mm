@@ -1,4 +1,6 @@
 #import <UIKit/UIKit.h>
+#import <GameController/GameController.h>
+#import <Metal/Metal.h>
 
 #include "maxps4_backend.h"
 #include "maxps4_core.h"
@@ -8,6 +10,8 @@
 @property(nonatomic, strong) UILabel *guestOutputLabel;
 @property(nonatomic, strong) UILabel *stateValueLabel;
 @property(nonatomic, strong) UILabel *fileValueLabel;
+@property(nonatomic, strong) UILabel *controllerValueLabel;
+@property(nonatomic, strong) UILabel *metalValueLabel;
 @property(nonatomic, strong) UIButton *testButton;
 @property(nonatomic, strong) UIButton *importButton;
 @property(nonatomic, strong) UIButton *diagnosticCopyButton;
@@ -112,6 +116,36 @@
                                          primary:NO];
     [self.testButton addTarget:self action:@selector(runBackendTest) forControlEvents:UIControlEventTouchUpInside];
 
+    UIView *ioCard = [self cardView];
+    UILabel *ioTitle = [[UILabel alloc] init];
+    ioTitle.translatesAutoresizingMaskIntoConstraints = NO;
+    ioTitle.text = @"Entrée & rendu";
+    ioTitle.textColor = UIColor.whiteColor;
+    ioTitle.font = [UIFont systemFontOfSize:18.0 weight:UIFontWeightBold];
+
+    UILabel *controllerLabel = [self mutedLabel:@"Manette"];
+    self.controllerValueLabel = [self valueLabel:@"Recherche…"];
+    UILabel *metalLabel = [self mutedLabel:@"Metal"];
+    self.metalValueLabel = [self valueLabel:@"Détection…"];
+
+    UIStackView *controllerRow = [self infoRowWithLeft:controllerLabel right:self.controllerValueLabel];
+    UIStackView *metalRow = [self infoRowWithLeft:metalLabel right:self.metalValueLabel];
+
+    UIStackView *ioStack = [[UIStackView alloc] initWithArrangedSubviews:@[
+        ioTitle, controllerRow, metalRow
+    ]];
+    ioStack.translatesAutoresizingMaskIntoConstraints = NO;
+    ioStack.axis = UILayoutConstraintAxisVertical;
+    ioStack.spacing = 13.0;
+    [ioCard addSubview:ioStack];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [ioStack.leadingAnchor constraintEqualToAnchor:ioCard.leadingAnchor constant:16.0],
+        [ioStack.trailingAnchor constraintEqualToAnchor:ioCard.trailingAnchor constant:-16.0],
+        [ioStack.topAnchor constraintEqualToAnchor:ioCard.topAnchor constant:16.0],
+        [ioStack.bottomAnchor constraintEqualToAnchor:ioCard.bottomAnchor constant:-16.0],
+    ]];
+
     UIView *detailsCard = [self cardView];
     UILabel *detailsTitle = [[UILabel alloc] init];
     detailsTitle.translatesAutoresizingMaskIntoConstraints = NO;
@@ -207,6 +241,7 @@
         backendCard,
         self.importButton,
         self.testButton,
+        ioCard,
         detailsCard,
         outputTitle,
         outputCard,
@@ -219,6 +254,16 @@
     stack.spacing = 16.0;
 
     [content addSubview:stack];
+
+    [self refreshHardwareStatus];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(controllerDidChange:)
+                                                 name:GCControllerDidConnectNotification
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(controllerDidChange:)
+                                                 name:GCControllerDidDisconnectNotification
+                                               object:nil];
 
     [NSLayoutConstraint activateConstraints:@[
         [scroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
@@ -237,6 +282,26 @@
         [stack.topAnchor constraintEqualToAnchor:content.safeAreaLayoutGuide.topAnchor constant:18.0],
         [stack.bottomAnchor constraintEqualToAnchor:content.bottomAnchor constant:-28.0],
     ]];
+}
+
+- (void)controllerDidChange:(NSNotification *)note {
+    (void)note;
+    [self refreshHardwareStatus];
+}
+
+- (void)refreshHardwareStatus {
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    self.metalValueLabel.text = device ? [NSString stringWithFormat:@"Disponible • %@", device.name ?: @"GPU Apple"] : @"Indisponible";
+
+    NSArray<GCController *> *controllers = GCController.controllers;
+    if (controllers.count == 0) {
+        self.controllerValueLabel.text = @"Aucune";
+        return;
+    }
+
+    GCController *controller = controllers.firstObject;
+    NSString *name = controller.vendorName.length ? controller.vendorName : @"Manette connectée";
+    self.controllerValueLabel.text = name;
 }
 
 - (NSAttributedString *)brandText {
@@ -530,6 +595,7 @@
 }
 
 - (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self stopDiagnosticPolling];
 }
 @end
