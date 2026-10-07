@@ -120,9 +120,22 @@ typedef struct MaxPS4GuestTexture {
 // Latest guest-uploaded legal RGBA8 texture resource, if one exists.
 bool maxps4_backend_guest_texture(MaxPS4GuestTexture *out);
 bool maxps4_backend_self_test(void);
-// Validates an imported PS4 SELF/ELF executable using the same structural
-// requirements as the locked shadPS4 loader before any runtime handoff.
+
+typedef enum MaxPS4ImportKind {
+    MAXPS4_IMPORT_INVALID = 0,
+    MAXPS4_IMPORT_EXECUTABLE = 1,
+    MAXPS4_IMPORT_PKG = 2,
+} MaxPS4ImportKind;
+
+// Validates an imported PS4 SELF/ELF or recognizes a PS4 PKG container.
 bool maxps4_backend_validate_executable(const char *path);
+MaxPS4ImportKind maxps4_backend_import_kind(const char *path);
+
+// Conservative PKG support: extract only a directly stored readable ELF/SELF
+// entry. No PFS decryption, license keys, or protected-content bypass.
+bool maxps4_backend_extract_plain_pkg_executable(const char *pkg_path,
+                                                 const char *output_path);
+
 bool maxps4_backend_boot(const char *path);
 void maxps4_backend_stop(void);
 
