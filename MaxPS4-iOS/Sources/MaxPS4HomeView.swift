@@ -675,6 +675,9 @@ struct MaxPS4HomeView: View {
                 primaryAction(icon: "square.and.arrow.down.fill", title: "Importer un jeu", subtitle: "Sélectionner un fichier local") {
                     importingGame = true
                 }
+                secondaryAction(icon: "memorychip", title: "Tester la mémoire invitée", subtitle: "Prototype isolé • sans exécution PS4") {
+                    emulator.testGuestMemory()
+                }
                 secondaryAction(icon: "internaldrive", title: "Gestion du stockage", subtitle: "\(emulator.games.count) fichiers enregistrés localement") {
                     selectedTab = .games
                 }
