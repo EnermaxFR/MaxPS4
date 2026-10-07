@@ -189,6 +189,7 @@ struct MaxPS4HomeView: View {
                     }
                 }
 
+                statusCard
                 Spacer(minLength: 90)
             }
             .padding(.horizontal, 20)
@@ -563,7 +564,7 @@ struct MaxPS4HomeView: View {
                     Button {
                         emulator.inspect(game)
                     } label: {
-                        Label("Analyser l’exécutable", systemImage: "doc.text.magnifyingglass")
+                        Label(game.fileName.lowercased().hasSuffix(".pkg") ? "Analyser le PKG" : "Analyser l’exécutable", systemImage: "doc.text.magnifyingglass")
                     }
                     Button(role: .destructive) {
                         emulator.remove(game)
