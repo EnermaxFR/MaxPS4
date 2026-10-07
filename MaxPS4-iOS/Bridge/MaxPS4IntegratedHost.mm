@@ -5,6 +5,7 @@
 
 #include "maxps4_backend.h"
 #include "maxps4_core.h"
+#include <cmath>
 
 @interface MaxPS4IntegratedViewController : UIViewController <UIDocumentPickerDelegate, MTKViewDelegate>
 @property(nonatomic, strong) UILabel *statusLabel;
@@ -430,9 +431,17 @@
     id<CAMetalDrawable> drawable = view.currentDrawable;
     if (!pass || !drawable || !self.metalCommandQueue) return;
 
+    MaxPS4GuestSceneFrame scene{};
+    const BOOL hasScene = maxps4_backend_guest_scene_frame(&scene);
+
     MaxPS4GuestFrame frame{};
-    const BOOL hasGuestFrame = maxps4_backend_guest_frame(&frame);
-    if (hasGuestFrame) {
+    const BOOL hasGuestFrame = !hasScene && maxps4_backend_guest_frame(&frame);
+
+    if (hasScene) {
+        pass.colorAttachments[0].clearColor =
+            MTLClearColorMake(scene.clear_red, scene.clear_green,
+                              scene.clear_blue, scene.clear_alpha);
+    } else if (hasGuestFrame) {
         pass.colorAttachments[0].clearColor =
             MTLClearColorMake(frame.clear_red, frame.clear_green,
                               frame.clear_blue, frame.clear_alpha);
@@ -444,8 +453,60 @@
     if (self.metalProbePipeline) {
         [encoder setRenderPipelineState:self.metalProbePipeline];
 
-        if (hasGuestFrame) {
-            const unsigned int count = MIN(frame.rect_count, (unsigned int)MAXPS4_GUEST_FRAME_MAX_RECTS);
+        if (hasScene) {
+            const unsigned int count =
+                MIN(scene.primitive_count, (unsigned int)MAXPS4_GUEST_SCENE_MAX_PRIMITIVES);
+            for (unsigned int i = 0; i < count; ++i) {
+                const MaxPS4GuestPrimitive primitive = scene.primitives[i];
+                const float cs = (float)std::cos((double)primitive.rotation);
+                const float sn = (float)std::sin((double)primitive.rotation);
+                const float hx = primitive.width * 0.5f;
+                const float hy = primitive.height * 0.5f;
+                const float color[4] = {
+                    primitive.red, primitive.green, primitive.blue, primitive.alpha
+                };
+                [encoder setFragmentBytes:color length:sizeof(color) atIndex:0];
+
+                if (primitive.type == MAXPS4_GUEST_PRIMITIVE_TRIANGLE) {
+                    const float local[6] = {
+                         0.0f,  hy,
+                        -hx,   -hy,
+                         hx,   -hy,
+                    };
+                    float vertices[6];
+                    for (int v = 0; v < 3; ++v) {
+                        const float lx = local[v * 2];
+                        const float ly = local[v * 2 + 1];
+                        vertices[v * 2] =
+                            primitive.x + lx * cs - ly * sn;
+                        vertices[v * 2 + 1] =
+                            primitive.y + lx * sn + ly * cs;
+                    }
+                    [encoder setVertexBytes:vertices length:sizeof(vertices) atIndex:0];
+                    [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+                } else {
+                    const float local[8] = {
+                        -hx, -hy,
+                         hx, -hy,
+                        -hx,  hy,
+                         hx,  hy,
+                    };
+                    float vertices[8];
+                    for (int v = 0; v < 4; ++v) {
+                        const float lx = local[v * 2];
+                        const float ly = local[v * 2 + 1];
+                        vertices[v * 2] =
+                            primitive.x + lx * cs - ly * sn;
+                        vertices[v * 2 + 1] =
+                            primitive.y + lx * sn + ly * cs;
+                    }
+                    [encoder setVertexBytes:vertices length:sizeof(vertices) atIndex:0];
+                    [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+                }
+            }
+        } else if (hasGuestFrame) {
+            const unsigned int count =
+                MIN(frame.rect_count, (unsigned int)MAXPS4_GUEST_FRAME_MAX_RECTS);
             for (unsigned int i = 0; i < count; ++i) {
                 const MaxPS4GuestRect rect = frame.rects[i];
                 const float halfW = 0.15f * rect.scale;
