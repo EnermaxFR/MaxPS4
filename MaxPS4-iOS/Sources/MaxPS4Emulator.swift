@@ -108,6 +108,27 @@ final class MaxPS4Emulator: ObservableObject {
         }
     }
 
+    /// Report possible duplicate imports without deleting any user files.
+    func inspectDuplicates() {
+        let groups = Dictionary(grouping: games) { game -> String in
+            let filename = game.fileName.lowercased()
+            // Strip the numeric suffix assigned by uniqueDestination during import.
+            let stem = (filename as NSString).deletingPathExtension
+            let ext = (filename as NSString).pathExtension
+            let normalized = stem.replacingOccurrences(
+                of: "-[0-9]+$", with: "", options: .regularExpression
+            )
+            return normalized + "." + ext
+        }
+        let duplicates = groups.values.filter { $0.count > 1 }
+        guard !duplicates.isEmpty else {
+            status = "Bibliothèque : aucun doublon probable détecté"
+            return
+        }
+        let fileCount = duplicates.reduce(0) { $0 + $1.count }
+        status = "Doublons possibles : \(fileCount) fichiers dans \(duplicates.count) groupes • suppression manuelle uniquement"
+    }
+
     func inspect(_ game: MaxPS4Game) {
         do {
             if game.fileName.lowercased().hasSuffix(".pkg") {
