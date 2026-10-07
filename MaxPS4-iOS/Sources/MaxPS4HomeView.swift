@@ -18,6 +18,8 @@ struct MaxPS4HomeView: View {
     @State private var gameToRename: MaxPS4Game?
     @State private var gameToDelete: MaxPS4Game?
     @State private var showingDuplicates = false
+    @State private var comparisonReport: String?
+    @State private var comparingPKGs = false
     @State private var renamedGameTitle = ""
     @State private var inspectionReport: String?
     @State private var selectedGameDetails: MaxPS4Game?
@@ -91,6 +93,35 @@ struct MaxPS4HomeView: View {
         .sheet(isPresented: $showingDuplicates) {
             NavigationStack {
                 List {
+                    Section {
+                        Button(comparingPKGs ? "Comparaison en cours…" : "Comparer les PKG par SHA-256") {
+                            guard !comparingPKGs else { return }
+                            comparingPKGs = true
+                            comparisonReport = "Lecture des PKG en cours…" 
+                            let files = emulator.games.filter { $0.fileName.lowercased().hasSuffix(".pkg") }
+                            Task {
+                                let message = await Task.detached(priority: .utility) { () -> String in
+                                    var groups: [String: [String]] = [:]
+                                    var errors: [String] = []
+                                    for game in files {
+                                        do {
+                                            let fingerprint = try MaxPS4PKGHash.digest(url: URL(fileURLWithPath: game.localPath))
+                                            groups[fingerprint, default: []].append(game.fileName)
+                                        } catch { errors.append(game.fileName + " : " + error.localizedDescription) }
+                                    }
+                                    let duplicates = groups.values.filter { $0.count > 1 }
+                                    var message = duplicates.isEmpty ? "Aucun PKG strictement identique détecté." :
+                                        duplicates.map { "Copies identiques : " + $0.sorted().joined(separator: " / ") }.joined(separator: "\n")
+                                    if !errors.isEmpty { message += "\nFichiers non comparés : " + errors.joined(separator: " / ") }
+                                    return message + "\nAucune suppression automatique."
+                                }.value
+                                comparisonReport = message
+                                comparingPKGs = false
+                            }
+                        }
+                        .disabled(comparingPKGs)
+                        if let comparisonReport { Text(comparisonReport).font(.footnote).textSelection(.enabled) }
+                    }
                     if emulator.duplicateGroups.isEmpty {
                         Text("Aucun doublon probable dans la bibliothèque.")
                             .foregroundStyle(.secondary)
