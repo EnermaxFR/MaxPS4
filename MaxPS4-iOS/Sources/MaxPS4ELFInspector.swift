@@ -57,11 +57,15 @@ enum MaxPS4ELFInspector {
         }
         var loadable = 0
         var executable = 0
+        var plannedMemory: UInt64 = 0
+        var entryCovered = false
+        let entry = u64(header, 24)
         for index in 0..<count {
             let item = try read(tableOffset + UInt64(index * entrySize), entrySize)
             let type = u32(item, 0)
             let flags = u32(item, 4)
             let offset = u64(item, 8)
+            let virtualAddress = u64(item, 16)
             let fileBytes = u64(item, 32)
             let memoryBytes = u64(item, 40)
             guard offset <= fileSize, fileBytes <= fileSize - offset else {
@@ -71,11 +75,24 @@ enum MaxPS4ELFInspector {
                 guard memoryBytes >= fileBytes else {
                     throw InspectionError.invalid("Segment PT_LOAD incohérent")
                 }
+                guard virtualAddress <= UInt64.max - memoryBytes else {
+                    throw InspectionError.invalid("Adresse virtuelle hors limites")
+                }
+                guard memoryBytes <= 1_073_741_824,
+                      plannedMemory <= 1_073_741_824 - memoryBytes else {
+                    throw InspectionError.invalid("Plan mémoire trop volumineux (limite diagnostic : 1 Gio)")
+                }
+                plannedMemory += memoryBytes
                 loadable += 1
-                if flags & 1 != 0 { executable += 1 }
+                if flags & 1 != 0 {
+                    executable += 1
+                    if entry >= virtualAddress && entry < virtualAddress + memoryBytes {
+                        entryCovered = true
+                    }
+                }
             }
         }
-        let entry = u64(header, 24)
-        return "ELF64 x86-64 • entrée 0x\(String(entry, radix: 16)) • \(count) segments • \(loadable) PT_LOAD dont \(executable) exécutables • lecture seule"
+        let memoryDescription = ByteCountFormatter.string(fromByteCount: Int64(plannedMemory), countStyle: .memory)
+        return "Plan ELF64 • \(loadable) PT_LOAD, \(executable) exécutables • mémoire demandée : \(memoryDescription) • entrée \(entryCovered ? "couverte" : "non couverte") • aucune allocation/exécution"
     }
 }
