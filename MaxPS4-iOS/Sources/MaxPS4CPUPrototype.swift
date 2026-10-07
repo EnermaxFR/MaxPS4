@@ -236,6 +236,17 @@ struct MaxPS4CPUPrototype {
                                       0x0F, 0x05, 0xC3])
             guard memoryServiceCPU.rax == 4096,
                   memoryServiceCPU.executedInstructions == 3 else { return false }
+            var allocationCPU = Self()
+            try allocationCPU.run([
+                0x48, 0xB9, 0x00, 0xA0, 0, 0, 0, 0, 0, 0,
+                0x48, 0xBA, 0x00, 0x10, 0, 0, 0, 0, 0, 0,
+                0x48, 0xB8, 0x02, 0, 0, 0, 0, 0, 0, 0,
+                0x0F, 0x05,
+                0x48, 0xB8, 0x03, 0, 0, 0, 0, 0, 0, 0,
+                0x0F, 0x05, 0xC3
+            ])
+            guard allocationCPU.rax == 0, allocationCPU.guestMemory.allocatedBytes == 0,
+                  allocationCPU.executedInstructions == 7 else { return false }
             var invalidService = Self()
             do { try invalidService.run([0x48, 0xB8, 0x63, 0, 0, 0, 0, 0, 0, 0, 0x0F, 0x05]); return false }
             catch CPUError.unsupportedOpcode {}
