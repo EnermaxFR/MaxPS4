@@ -13,6 +13,7 @@
  *   realtime/monotonic clocks, nanosleep, scheduler yield
  *   FreeBSD legacy umtx + _umtx_op uncontended mutex/wake paths
  *   real FreeBSD thr_new guest execution on a second FEX context
+ *   blocking UMTX_OP_WAIT_UINT_PRIVATE / WAKE_PRIVATE between FEX threads
  */
 
 .section .text
@@ -286,11 +287,14 @@ _start:
     jz failed
     mov %rax, %r13
 
-    /* shared result: marker, child_tid, parent_tid, worker_self */
+    /* shared result: marker, child_tid, parent_tid, worker_self, futex */
     movq $0, 368(%rsp)
     movq $0, 376(%rsp)
     movq $0, 384(%rsp)
     movq $0, 392(%rsp)
+    movl $0, 400(%rsp)
+    movq $5, 408(%rsp)       /* timeout seconds */
+    movq $0, 416(%rsp)       /* timeout nanoseconds */
 
     /* struct thr_param at rsp+256 (104 bytes on x86-64 FreeBSD). */
     lea worker_start(%rip), %rax
@@ -325,21 +329,26 @@ _start:
     cmp %rax, 376(%rsp)
     jne failed
 
-    /* Give the second FEX context time to execute without blocking it. */
-    mov $200000, %r10
-.Lwait_worker:
-    movabs $0x4f4b444145524854, %rax /* "THREADOK" little-endian */
-    cmp %rax, 368(%rsp)
-    je .Lworker_done
-    mov $331, %rax
+    /*
+     * Block the main guest thread until the worker changes futex 0 -> 1 and
+     * performs UMTX_OP_WAKE_PRIVATE. A five-second timeout makes regressions
+     * fail deterministically instead of hanging the iPhone.
+     */
+    mov $454, %rax
+    lea 400(%rsp), %rdi
+    mov $15, %rsi
+    xor %rdx, %rdx
+    xor %r10, %r10
+    lea 408(%rsp), %r8
     syscall
     test %rax, %rax
     jne failed
-    dec %r10
-    jnz .Lwait_worker
-    jmp failed
 
-.Lworker_done:
+    cmpl $1, 400(%rsp)
+    jne failed
+    movabs $0x4f4b444145524854, %rax /* "THREADOK" little-endian */
+    cmp %rax, 368(%rsp)
+    jne failed
     mov 384(%rsp), %rax
     cmp %rax, 392(%rsp)
     jne failed
@@ -443,6 +452,18 @@ worker_start:
 
     movabs $0x4f4b444145524854, %rax /* "THREADOK" */
     mov %rax, 0(%rbx)
+
+    /* Publish completion and wake the main FEX guest thread. */
+    movl $1, 32(%rbx)
+    mov $454, %rax
+    lea 32(%rbx), %rdi
+    mov $16, %rsi
+    mov $1, %rdx
+    xor %r10, %r10
+    xor %r8, %r8
+    syscall
+    test %rax, %rax
+    js .Lworker_fail
 
     /* End only this FreeBSD guest thread, not the whole process. */
     mov $431, %rax
