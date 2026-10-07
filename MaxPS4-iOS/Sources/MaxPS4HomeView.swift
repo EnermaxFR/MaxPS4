@@ -148,7 +148,7 @@ struct MaxPS4HomeView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Jeux")
                             .font(.system(size: 36, weight: .black, design: .rounded))
-                        Text("Importe un exécutable pour le lancer")
+                        Text("\(emulator.libraryGames.count) élément\(emulator.libraryGames.count > 1 ? "s" : "") dans la bibliothèque")
                             .foregroundStyle(.white.opacity(0.58))
                     }
 
@@ -168,38 +168,15 @@ struct MaxPS4HomeView: View {
 
                 libraryCategoryPicker
 
-                VStack(spacing: 14) {
-                    Image(systemName: selectedLibraryCategory.icon)
-                        .font(.system(size: 42))
-                        .foregroundStyle(.white.opacity(0.55))
-
-                    Text(selectedLibraryCategory.emptyTitle)
-                        .font(.headline)
-
-                    Text(selectedLibraryCategory.emptySubtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.58))
-                        .multilineTextAlignment(.center)
-
-                    Button {
-                        importingGame = true
-                    } label: {
-                        Label("Importer un jeu", systemImage: "plus.circle.fill")
+                if filteredLibraryGames.isEmpty {
+                    libraryEmptyState
+                } else {
+                    LazyVStack(spacing: 12) {
+                        ForEach(filteredLibraryGames) { game in
+                            libraryGameCard(game)
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.blue)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 34)
-                .padding(.horizontal, 18)
-                .background(.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 24))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 24)
-                        .stroke(
-                            .blue.opacity(0.30),
-                            style: StrokeStyle(lineWidth: 1, dash: [7, 6])
-                        )
-                )
 
                 statusMiniCard
                 Spacer(minLength: 100)
@@ -207,6 +184,184 @@ struct MaxPS4HomeView: View {
             .padding(.horizontal, 20)
             .padding(.top, 12)
         }
+    }
+
+    private var filteredLibraryGames: [MaxPS4LibraryGame] {
+        switch selectedLibraryCategory {
+        case .all:
+            return emulator.libraryGames.sorted { $0.importedAt > $1.importedAt }
+
+        case .favorites:
+            return emulator.libraryGames
+                .filter(\.isFavorite)
+                .sorted { $0.importedAt > $1.importedAt }
+
+        case .recent:
+            return emulator.libraryGames
+                .filter { $0.lastPlayedAt != nil }
+                .sorted {
+                    ($0.lastPlayedAt ?? .distantPast) >
+                    ($1.lastPlayedAt ?? .distantPast)
+                }
+
+        case .homebrew:
+            return emulator.libraryGames
+                .filter(\.isHomebrew)
+                .sorted { $0.importedAt > $1.importedAt }
+        }
+    }
+
+    private var libraryEmptyState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: selectedLibraryCategory.icon)
+                .font(.system(size: 42))
+                .foregroundStyle(.white.opacity(0.55))
+
+            Text(selectedLibraryCategory.emptyTitle)
+                .font(.headline)
+
+            Text(selectedLibraryCategory.emptySubtitle)
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.58))
+                .multilineTextAlignment(.center)
+
+            Button {
+                importingGame = true
+            } label: {
+                Label("Importer un jeu", systemImage: "plus.circle.fill")
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.blue)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 34)
+        .padding(.horizontal, 18)
+        .background(.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 24))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24)
+                .stroke(
+                    .blue.opacity(0.30),
+                    style: StrokeStyle(lineWidth: 1, dash: [7, 6])
+                )
+        )
+    }
+
+    private func libraryGameCard(_ game: MaxPS4LibraryGame) -> some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(
+                            LinearGradient(
+                                colors: [.blue.opacity(0.85), .cyan.opacity(0.55)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 58, height: 58)
+
+                    Image(systemName: game.isHomebrew ? "hammer.fill" : "gamecontroller.fill")
+                        .font(.title2)
+                        .foregroundStyle(.white)
+                }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(game.name)
+                        .font(.headline)
+                        .lineLimit(1)
+
+                    HStack(spacing: 8) {
+                        if game.isFavorite {
+                            Label("Favori", systemImage: "heart.fill")
+                                .foregroundStyle(.pink)
+                        }
+
+                        if game.isHomebrew {
+                            Label("Homebrew", systemImage: "hammer.fill")
+                                .foregroundStyle(.cyan)
+                        }
+
+                        if !game.isFavorite && !game.isHomebrew {
+                            Text("PS4")
+                                .foregroundStyle(.white.opacity(0.48))
+                        }
+                    }
+                    .font(.caption.weight(.semibold))
+
+                    if let lastPlayedAt = game.lastPlayedAt {
+                        HStack(spacing: 4) {
+                            Text("Lancé")
+                            Text(lastPlayedAt, style: .relative)
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.45))
+                    }
+                }
+
+                Spacer()
+
+                Menu {
+                    Button {
+                        emulator.toggleFavorite(game.id)
+                    } label: {
+                        Label(
+                            game.isFavorite ? "Retirer des favoris" : "Ajouter aux favoris",
+                            systemImage: game.isFavorite ? "heart.slash" : "heart"
+                        )
+                    }
+
+                    Button {
+                        emulator.toggleHomebrew(game.id)
+                    } label: {
+                        Label(
+                            game.isHomebrew ? "Retirer de Homebrew" : "Marquer Homebrew",
+                            systemImage: "hammer"
+                        )
+                    }
+
+                    Button(role: .destructive) {
+                        emulator.removeGame(game.id)
+                    } label: {
+                        Label("Retirer de la bibliothèque", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.headline)
+                        .foregroundStyle(.white.opacity(0.72))
+                        .frame(width: 40, height: 40)
+                        .background(.white.opacity(0.06), in: Circle())
+                }
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    emulator.launchGame(game.id)
+                } label: {
+                    Label("Lancer", systemImage: "play.fill")
+                        .font(.subheadline.bold())
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.blue)
+
+                Button {
+                    emulator.toggleFavorite(game.id)
+                } label: {
+                    Image(systemName: game.isFavorite ? "heart.fill" : "heart")
+                        .font(.headline)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.bordered)
+                .tint(game.isFavorite ? .pink : .white)
+            }
+        }
+        .padding(16)
+        .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 22))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22)
+                .stroke(.white.opacity(0.08), lineWidth: 1)
+        )
     }
 
     private var libraryCategoryPicker: some View {
