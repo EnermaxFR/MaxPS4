@@ -229,7 +229,7 @@ struct MaxPS4CPUPrototype {
             guard memoryServiceCPU.rax == 4096,
                   memoryServiceCPU.executedInstructions == 3 else { return false }
             var invalidService = Self()
-            do { try invalidService.run([0x48, 0xB8, 0x01, 0, 0, 0, 0, 0, 0, 0, 0x0F, 0x05]); return false }
+            do { try invalidService.run([0x48, 0xB8, 0x63, 0, 0, 0, 0, 0, 0, 0, 0x0F, 0x05]); return false }
             catch CPUError.unsupportedOpcode {}
             var unsupported = Self()
             do { try unsupported.run([0x0F, 0x0B]); return false }
