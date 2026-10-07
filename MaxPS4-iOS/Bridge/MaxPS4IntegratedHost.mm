@@ -20,9 +20,8 @@
 @property(nonatomic, strong) id<MTLRenderPipelineState> metalProbePipeline;
 @property(nonatomic, strong) id<MTLRenderPipelineState> metalTexturePipeline;
 @property(nonatomic, strong) id<MTLTexture> metalProbeTexture;
-@property(nonatomic, strong) id<MTLTexture> guestUploadedTexture;
-@property(nonatomic, assign) unsigned int guestUploadedTextureSequence;
-@property(nonatomic, assign) unsigned int guestUploadedTextureID;
+@property(nonatomic, strong) NSMutableDictionary *guestUploadedTextures;
+@property(nonatomic, strong) NSMutableDictionary *guestUploadedTextureSequences;
 @property(nonatomic, assign) float probeX;
 @property(nonatomic, assign) float probeY;
 @property(nonatomic, assign) float probeScale;
@@ -167,8 +166,8 @@
     self.probeY = 0.0f;
     self.probeScale = 1.0f;
     self.probeButtons = 0;
-    self.guestUploadedTextureSequence = 0;
-    self.guestUploadedTextureID = 0;
+    self.guestUploadedTextures = [NSMutableDictionary dictionary];
+    self.guestUploadedTextureSequences = [NSMutableDictionary dictionary];
 
     if (probeDevice) {
         NSString *shaderSource =
@@ -484,13 +483,24 @@
     id<CAMetalDrawable> drawable = view.currentDrawable;
     if (!pass || !drawable || !self.metalCommandQueue) return;
 
-    // Pull the latest small guest-owned RGBA8 texture only when its sequence
-    // changes. This avoids copying/recreating the resource every Metal frame.
-    MaxPS4GuestTexture guestTexture{};
-    if (maxps4_backend_guest_texture(&guestTexture) &&
-        guestTexture.sequence != self.guestUploadedTextureSequence &&
-        guestTexture.width > 0 && guestTexture.height > 0 &&
-        guestTexture.byte_count == guestTexture.width * guestTexture.height * 4u) {
+    // Synchronize the bounded guest RGBA8 texture table. Each texture_id is
+    // cached independently so one scene can reference several guest resources.
+    for (unsigned int slot = 0; slot < MAXPS4_GUEST_TEXTURE_MAX_RESOURCES; ++slot) {
+        MaxPS4GuestTexture guestTexture{};
+        if (!maxps4_backend_guest_texture_at(slot, &guestTexture) ||
+            guestTexture.texture_id == 0 ||
+            guestTexture.width == 0 || guestTexture.height == 0 ||
+            guestTexture.byte_count != guestTexture.width * guestTexture.height * 4u) {
+            continue;
+        }
+
+        NSNumber *textureKey = @(guestTexture.texture_id);
+        NSNumber *knownSequence = self.guestUploadedTextureSequences[textureKey];
+        if (knownSequence &&
+            knownSequence.unsignedIntValue == guestTexture.sequence) {
+            continue;
+        }
+
         MTLTextureDescriptor *desc =
             [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
                                                                width:guestTexture.width
@@ -503,9 +513,8 @@
                        mipmapLevel:0
                          withBytes:guestTexture.rgba
                        bytesPerRow:guestTexture.width * 4u];
-            self.guestUploadedTexture = texture;
-            self.guestUploadedTextureSequence = guestTexture.sequence;
-            self.guestUploadedTextureID = guestTexture.texture_id;
+            self.guestUploadedTextures[textureKey] = texture;
+            self.guestUploadedTextureSequences[textureKey] = @(guestTexture.sequence);
         }
     }
 
@@ -545,9 +554,8 @@
                 if (primitive.type == MAXPS4_GUEST_PRIMITIVE_TEXTURED_QUAD) {
                     sceneTexture = self.metalProbeTexture;
                 } else if (primitive.type == MAXPS4_GUEST_PRIMITIVE_GUEST_TEXTURED_QUAD &&
-                           primitive.texture_id != 0 &&
-                           primitive.texture_id == self.guestUploadedTextureID) {
-                    sceneTexture = self.guestUploadedTexture;
+                           primitive.texture_id != 0) {
+                    sceneTexture = self.guestUploadedTextures[@(primitive.texture_id)];
                 }
 
                 if (sceneTexture && self.metalTexturePipeline) {
@@ -990,6 +998,9 @@
         if (scopedForBoot) [url stopAccessingSecurityScopedResource];
         return;
     }
+
+    [self.guestUploadedTextures removeAllObjects];
+    [self.guestUploadedTextureSequences removeAllObjects];
 
     self.bootInProgress = YES;
     self.bootGeneration += 1;
