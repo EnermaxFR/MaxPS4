@@ -416,6 +416,17 @@ struct MaxPS4CPUPrototype {
                   guests.process(pid: guestB)?.cpu.rax == 7,
                   guests.process(pid: guestA)?.cpu.guestMemory.allocatedBytes == 0,
                   guests.process(pid: guestB)?.cpu.guestMemory.allocatedBytes == 0 else { return false }
+            var stepGuests = MaxPS4VirtualProcessManager()
+            let stepPID = try stepGuests.create()
+            guard stepGuests.scheduleNext() == stepPID else { return false }
+            try stepGuests.stepCurrent(steppedProgram)
+            guard stepGuests.process(pid: stepPID)?.cpu.rax == 5,
+                  stepGuests.process(pid: stepPID)?.cpu.rip == 10 else { return false }
+            guard stepGuests.suspend(pid: stepPID), stepGuests.resume(pid: stepPID),
+                  stepGuests.scheduleNext() == stepPID else { return false }
+            try stepGuests.stepCurrent(steppedProgram)
+            guard stepGuests.process(pid: stepPID)?.cpu.rax == 8,
+                  stepGuests.process(pid: stepPID)?.cpu.rip == 14 else { return false }
             var memoryGuests = MaxPS4VirtualProcessManager()
             let memoryA = try memoryGuests.create()
             let memoryB = try memoryGuests.create()
@@ -572,6 +583,15 @@ struct MaxPS4VirtualProcessManager {
             throw ProcessError.noRunningProcess
         }
         try process.cpu.run(program, limit: 256)
+        processes[pid] = process
+    }
+
+    /// Step through one test instruction in the currently scheduled process.
+    mutating func stepCurrent(_ program: [UInt8]) throws {
+        guard let pid = runningPID, var process = processes[pid] else {
+            throw ProcessError.noRunningProcess
+        }
+        try process.cpu.step(program)
         processes[pid] = process
     }
 
