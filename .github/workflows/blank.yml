@@ -764,7 +764,7 @@ jobs:
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0"><dict>
             <key>CFBundleDevelopmentRegion</key><string>fr</string>
-            <key>CFBundleDisplayName</key><string>MaxPS4 FEX Probe 0.6</string>
+            <key>CFBundleDisplayName</key><string>MaxPS4</string>
             <key>CFBundleExecutable</key><string>MaxPS4FEXProbe</string>
             <key>CFBundleIdentifier</key><string>com.enermaxfr.maxps4.fexprobe06</string>
             <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
@@ -813,7 +813,7 @@ jobs:
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0"><dict>
             <key>CFBundleDevelopmentRegion</key><string>fr</string>
-            <key>CFBundleDisplayName</key><string>MaxPS4 FEX Guest 0.7</string>
+            <key>CFBundleDisplayName</key><string>MaxPS4</string>
             <key>CFBundleExecutable</key><string>MaxPS4FEXGuestProbe</string>
             <key>CFBundleIdentifier</key><string>com.enermaxfr.maxps4.fexguest07</string>
             <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
@@ -864,7 +864,7 @@ jobs:
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0"><dict>
             <key>CFBundleDevelopmentRegion</key><string>fr</string>
-            <key>CFBundleDisplayName</key><string>MaxPS4 0.8 Integration</string>
+            <key>CFBundleDisplayName</key><string>MaxPS4</string>
             <key>CFBundleExecutable</key><string>MaxPS4</string>
             <key>CFBundleIdentifier</key><string>com.enermaxfr.maxps4.integration08</string>
             <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
@@ -972,7 +972,7 @@ jobs:
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0"><dict>
             <key>CFBundleDevelopmentRegion</key><string>fr</string>
-            <key>CFBundleDisplayName</key><string>MaxPS4 Core 0.6</string>
+            <key>CFBundleDisplayName</key><string>MaxPS4</string>
             <key>CFBundleExecutable</key><string>MaxPS4</string>
             <key>CFBundleIdentifier</key><string>com.enermaxfr.maxps4.core06</string>
             <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
