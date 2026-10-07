@@ -13,9 +13,17 @@ struct MaxPS4HomeView: View {
 
     @State private var selectedTab: MaxPS4Tab = .home
     @State private var importingGame = false
+    @State private var gameSearch = ""
+    @State private var gameFilter = 0
 
     @AppStorage("showFPS") private var showFPS = false
     @AppStorage("networkEnabled") private var networkEnabled = false
+
+    private var filteredGames: [MaxPS4Game] {
+        let query = gameSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let matching = emulator.games.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }
+        return gameFilter == 1 ? matching.sorted { $0.importedAt > $1.importedAt } : matching
+    }
 
     var body: some View {
         ZStack {
@@ -62,6 +70,7 @@ struct MaxPS4HomeView: View {
                 heroPanel
 
                 backendCard
+                systemOverview
 
                 primaryAction(
                     icon: "square.and.arrow.down.fill",
@@ -129,9 +138,26 @@ struct MaxPS4HomeView: View {
                     }
                 }
 
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                    TextField("Rechercher un jeu", text: $gameSearch)
+                        .autocorrectionDisabled()
+                }
+                .padding(14)
+                .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 16))
+                Picker("Tri", selection: $gameFilter) {
+                    Text("Tous").tag(0)
+                    Text("Récents").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .tint(.cyan)
+
                 if emulator.games.isEmpty {
-                    emptyLibrary
-                        .padding(.top, 24)
+                    emptyLibrary.padding(.top, 24)
+                } else if filteredGames.isEmpty {
+                    Text("Aucun jeu correspondant")
+                        .foregroundStyle(.white.opacity(0.65))
+                        .padding(.vertical, 24)
                 } else {
                     LazyVGrid(
                         columns: [
@@ -140,7 +166,7 @@ struct MaxPS4HomeView: View {
                         ],
                         spacing: 18
                     ) {
-                        ForEach(emulator.games) { game in
+                        ForEach(filteredGames) { game in
                             gameCard(game, fixedWidth: nil)
                         }
                     }
@@ -171,7 +197,7 @@ struct MaxPS4HomeView: View {
                     Divider().overlay(.white.opacity(0.08))
 
                     Toggle(isOn: $showFPS) {
-                        settingLabel(icon: "speedometer", title: "Afficher les FPS")
+                        settingLabel(icon: "speedometer", title: "Préférence FPS (préparation)")
                     }
                     .tint(.blue)
                     .padding(.vertical, 14)
@@ -179,7 +205,7 @@ struct MaxPS4HomeView: View {
                     Divider().overlay(.white.opacity(0.08))
 
                     Toggle(isOn: $networkEnabled) {
-                        settingLabel(icon: "network", title: "Réseau")
+                        settingLabel(icon: "network", title: "Préférence réseau (préparation)")
                     }
                     .tint(.blue)
                     .padding(.vertical, 14)
@@ -229,11 +255,37 @@ struct MaxPS4HomeView: View {
             }
             .font(.system(size: 42, weight: .black, design: .rounded))
 
-            Text("NEXT-GEN CONTROL CENTER  /  iOS")
+            Text("N O V A  •  iOS")
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.white.opacity(0.60))
         }
         .padding(.top, 8)
+    }
+
+    private var systemOverview: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+            overviewTile(icon: "gamecontroller.fill", title: "Jeux", value: "\(emulator.games.count) importés")
+            overviewTile(icon: "internaldrive", title: "Stockage", value: "Local")
+            overviewTile(icon: "cpu", title: "CPU", value: emulator.backendReady ? "Connecté" : "Inactif")
+            overviewTile(icon: "desktopcomputer", title: "GPU", value: emulator.backendReady ? "Moteur connecté" : "Inactif")
+        }
+    }
+
+    private func overviewTile(icon: String, title: String, value: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .foregroundStyle(.cyan)
+                .font(.title3)
+                .frame(width: 30)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title).font(.subheadline.weight(.semibold))
+                Text(value).font(.caption).foregroundStyle(.white.opacity(0.63))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(Color(red: 0.055, green: 0.06, blue: 0.19), in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(.blue.opacity(0.28), lineWidth: 1))
     }
 
     private var backendCard: some View {
@@ -537,10 +589,10 @@ struct MaxPS4HomeView: View {
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.55))
             }
-            Text("Votre univers.\nVos jeux.")
+            Text("Bienvenue sur MaxPS4")
                 .font(.system(size: 34, weight: .black, design: .rounded))
                 .foregroundStyle(.white)
-            Text("Bibliothèque et commandes dans une interface nouvelle génération.")
+            Text("Votre bibliothèque PS4 sur iPhone • interface NOVA")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.66))
             HStack(spacing: 10) {
@@ -579,6 +631,12 @@ struct MaxPS4HomeView: View {
                 }
                 primaryAction(icon: "square.and.arrow.down.fill", title: "Importer un jeu", subtitle: "Sélectionner un fichier local") {
                     importingGame = true
+                }
+                secondaryAction(icon: "internaldrive", title: "Gestion du stockage", subtitle: "\(emulator.games.count) fichiers enregistrés localement") {
+                    selectedTab = .games
+                }
+                secondaryAction(icon: "doc.text", title: "État du système", subtitle: "Afficher les informations de diagnostic") {
+                    emulator.testBackend()
                 }
                 statusCard
             }
