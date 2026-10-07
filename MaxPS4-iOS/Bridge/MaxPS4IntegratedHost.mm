@@ -57,7 +57,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
 
-    self.view.backgroundColor = [UIColor colorWithRed:0.018 green:0.022 blue:0.032 alpha:1.0];
+    self.view.backgroundColor = [UIColor colorWithRed:0.025 green:0.043 blue:0.10 alpha:1.0];
     self.lastDiagnostic = @"Backend intégré. Active le JIT avec StikDebug, puis teste le backend ou importe ton propre eboot.bin / SELF.";
     [self loadLibrary];
 
@@ -74,15 +74,41 @@
 
     UILabel *brand = [[UILabel alloc] init];
     brand.translatesAutoresizingMaskIntoConstraints = NO;
-    brand.attributedText = [self brandText];
+    brand.text = @"MAXPS4  1.1";
+    brand.textColor = [UIColor colorWithRed:0.28 green:0.80 blue:1.0 alpha:1.0];
     brand.font = [UIFont systemFontOfSize:34.0 weight:UIFontWeightBlack];
     brand.accessibilityLabel = @"MaxPS4";
 
     UILabel *subtitle = [[UILabel alloc] init];
     subtitle.translatesAutoresizingMaskIntoConstraints = NO;
-    subtitle.text = @"Ta bibliothèque PS4 sur iPhone";
+    subtitle.text = @"Ton espace PS4 • Nouvelle interface";
     subtitle.textColor = [UIColor colorWithWhite:1.0 alpha:0.58];
     subtitle.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightMedium];
+
+    UILabel *welcomeTitle = [[UILabel alloc] init];
+    welcomeTitle.text = @"Centre de lancement";
+    welcomeTitle.font = [UIFont systemFontOfSize:26.0 weight:UIFontWeightHeavy];
+    welcomeTitle.textColor = UIColor.whiteColor;
+
+    UILabel *welcomeDescription = [[UILabel alloc] init];
+    welcomeDescription.text = @"Importe tes fichiers autorisés, explore ta bibliothèque et vérifie le moteur expérimental.";
+    welcomeDescription.numberOfLines = 0;
+    welcomeDescription.font = [UIFont systemFontOfSize:14.0];
+    welcomeDescription.textColor = [UIColor colorWithWhite:0.77 alpha:1.0];
+
+    UIView *welcomeCard = [self cardView];
+    welcomeCard.backgroundColor = [UIColor colorWithRed:0.07 green:0.15 blue:0.32 alpha:1.0];
+    UIStackView *welcomeStack = [[UIStackView alloc] initWithArrangedSubviews:@[welcomeTitle, welcomeDescription]];
+    welcomeStack.axis = UILayoutConstraintAxisVertical;
+    welcomeStack.spacing = 12;
+    welcomeStack.translatesAutoresizingMaskIntoConstraints = NO;
+    [welcomeCard addSubview:welcomeStack];
+    [NSLayoutConstraint activateConstraints:@[
+        [welcomeStack.leadingAnchor constraintEqualToAnchor:welcomeCard.leadingAnchor constant:20],
+        [welcomeStack.trailingAnchor constraintEqualToAnchor:welcomeCard.trailingAnchor constant:-20],
+        [welcomeStack.topAnchor constraintEqualToAnchor:welcomeCard.topAnchor constant:24],
+        [welcomeStack.bottomAnchor constraintEqualToAnchor:welcomeCard.bottomAnchor constant:-24]
+    ]];
 
     UIView *backendCard = [self cardView];
     UIStackView *backendStack = [[UIStackView alloc] init];
@@ -138,8 +164,8 @@
         [backendStack.bottomAnchor constraintEqualToAnchor:backendCard.bottomAnchor constant:-16.0],
     ]];
 
-    self.importButton = [self actionButtonWithTitle:@"+  Ajouter un jeu"
-                                          subtitle:@"Importer eboot.bin, SELF ou PKG autorisé"
+    self.importButton = [self actionButtonWithTitle:@"＋  Importer un exécutable PS4"
+                                          subtitle:@"ELF / SELF / PKG • Fichiers autorisés"
                                            primary:YES];
     [self.importButton addTarget:self action:@selector(pickExecutable) forControlEvents:UIControlEventTouchUpInside];
 
@@ -157,7 +183,7 @@
                           forControlEvents:UIControlEventTouchUpInside];
 
     UILabel *libraryTitle = [[UILabel alloc] init];
-    libraryTitle.text = @"Mes jeux";
+    libraryTitle.text = @"Bibliothèque";
     libraryTitle.textColor = UIColor.whiteColor;
     libraryTitle.font = [UIFont systemFontOfSize:20.0 weight:UIFontWeightBold];
 
@@ -408,7 +434,7 @@
     ]];
 
     UILabel *developerTitle = [[UILabel alloc] init];
-    developerTitle.text = @"Développeur";
+    developerTitle.text = @"Outils développeur";
     developerTitle.textColor = [UIColor colorWithWhite:1.0 alpha:0.80];
     developerTitle.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightBold];
 
@@ -451,11 +477,12 @@
     UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[
         brand,
         subtitle,
+        welcomeCard,
+        self.importButton,
         backendCard,
         libraryTitle,
         self.libraryCategoryControl,
         libraryCard,
-        self.importButton,
         developerTitle,
         developerCard,
         legal
