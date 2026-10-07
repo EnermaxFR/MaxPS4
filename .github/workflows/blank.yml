@@ -890,13 +890,13 @@ jobs:
           claim complete game execution support.
           TXT
           plutil -lint "$PAYLOAD/MaxPS4.app/Info.plist"
-          (cd build/maxps4-integrated-ipa && zip -qry ../MaxPS4-Integrated-unsigned.ipa Payload)
+          (cd build/maxps4-integrated-ipa && zip -qry ../MaxPS4.ipa Payload)
 
       - name: Upload integrated MaxPS4 IPA
         uses: actions/upload-artifact@v4
         with:
-          name: MaxPS4-Integrated-unsigned
-          path: build/MaxPS4-Integrated-unsigned.ipa
+          name: MaxPS4
+          path: build/MaxPS4.ipa
           if-no-files-found: error
           retention-days: 14
 
