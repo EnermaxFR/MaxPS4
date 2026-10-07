@@ -138,8 +138,8 @@ jobs:
           {
             echo '## MaxPS4 NOVA — IPA générée'
             echo ''
-            echo "- Commit : \`\${GITHUB_SHA}\`"
-            echo "- Build : \`\${GITHUB_RUN_NUMBER}\`"
+            echo "- Commit : ${GITHUB_SHA}"
+            echo "- Build : ${GITHUB_RUN_NUMBER}"
             echo '- Archive : **MaxPS4-unsigned** (section Artifacts)'
             echo '- Attention : IPA non signée ; aucune exécution de jeu PS4.'
           } >> "$GITHUB_STEP_SUMMARY"
