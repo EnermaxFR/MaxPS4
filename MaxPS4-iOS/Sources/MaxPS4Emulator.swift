@@ -37,20 +37,30 @@ final class MaxPS4Emulator: ObservableObject {
         }
 
         let name = url.lastPathComponent.lowercased()
-        guard name == "eboot.bin" || name.hasSuffix(".self") || name.hasSuffix(".elf") else {
-            status = "Format non pris en charge : sélectionnez eboot.bin, SELF ou ELF"
+        guard name == "eboot.bin" || name.hasSuffix(".self") || name.hasSuffix(".elf") || name.hasSuffix(".pkg") else {
+            status = "Format non pris en charge : sélectionnez PKG, eboot.bin, SELF ou ELF"
             return
         }
 
+        let isPKG = name.hasSuffix(".pkg")
+        // Identification only: PKG packages are not decrypted, extracted or launched.
         // ELF magic is a useful preliminary check, not proof of PS4 compatibility.
         guard let header = try? FileHandle(forReadingFrom: url) else {
             status = "Impossible de lire le fichier importé"
             return
         }
         defer { try? header.close() }
-        guard let bytes = try? header.read(upToCount: 20),
-              bytes.count >= 20,
-              Array(bytes.prefix(4)) == [0x7F, 0x45, 0x4C, 0x46] else {
+        guard let bytes = try? header.read(upToCount: 32), bytes.count >= 20 else {
+            status = "Fichier invalide : en-tête incomplet"
+            return
+        }
+        if isPKG {
+            guard Array(bytes.prefix(4)) == [0x7F, 0x43, 0x4E, 0x54] else {
+                status = "PKG invalide : signature PS4 absente"
+                return
+            }
+        } else {
+        guard Array(bytes.prefix(4)) == [0x7F, 0x45, 0x4C, 0x46] else {
             status = "Fichier invalide : en-tête ELF absent"
             return
         }
@@ -62,6 +72,7 @@ final class MaxPS4Emulator: ObservableObject {
         guard machine == 0x3E else {
             status = "Architecture incompatible : exécutable x86-64 attendu"
             return
+        }
         }
 
         do {
@@ -85,7 +96,7 @@ final class MaxPS4Emulator: ObservableObject {
 
             games.insert(game, at: 0)
             try saveLibrary()
-            status = "Importé : \(destination.lastPathComponent)"
+            status = isPKG ? "PKG PS4 importé (non exécutable) : \(destination.lastPathComponent)" : "Importé : \(destination.lastPathComponent)"
         } catch {
             status = "Import impossible : \(error.localizedDescription)"
         }
@@ -93,7 +104,15 @@ final class MaxPS4Emulator: ObservableObject {
 
     func inspect(_ game: MaxPS4Game) {
         do {
-            status = try MaxPS4ELFInspector.inspect(url: URL(fileURLWithPath: game.localPath))
+            if game.fileName.lowercased().hasSuffix(".pkg") {
+                let fileURL = URL(fileURLWithPath: game.localPath)
+                let attributes = try fileManager.attributesOfItem(atPath: fileURL.path)
+                let byteCount = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+                let size = ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
+                status = "PKG PS4 reconnu • taille : \(size) • métadonnées détaillées non analysées • exécution indisponible"
+            } else {
+                status = try MaxPS4ELFInspector.inspect(url: URL(fileURLWithPath: game.localPath))
+            }
         } catch {
             status = "Analyse impossible : \(error.localizedDescription)"
         }
@@ -202,6 +221,11 @@ final class MaxPS4Emulator: ObservableObject {
     func launch(_ game: MaxPS4Game) {
         guard fileManager.fileExists(atPath: game.localPath) else {
             status = "Fichier introuvable : \(game.fileName)"
+            return
+        }
+
+        if game.fileName.lowercased().hasSuffix(".pkg") {
+            status = "PKG PS4 sélectionné : importation et identification uniquement • lancement indisponible"
             return
         }
 
