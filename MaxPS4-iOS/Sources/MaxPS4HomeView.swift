@@ -649,6 +649,21 @@ struct MaxPS4HomeView: View {
                 Text("CENTRE DE CONTRÔLE")
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
                     .tracking(2).foregroundStyle(.cyan)
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("APPAREIL iOS")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.cyan)
+                    Text(emulator.deviceDiagnostic)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.82))
+                    Text("shadPS4 / FEX : " + (emulator.backendReady ? "connecté" : "non intégré"))
+                        .font(.caption)
+                        .foregroundStyle(emulator.backendReady ? Color.green : Color.orange)
+                }
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
+
                 secondaryAction(icon: "cpu", title: "Diagnostic du moteur", subtitle: "Tester la connexion native") {
                     emulator.testBackend()
                 }
