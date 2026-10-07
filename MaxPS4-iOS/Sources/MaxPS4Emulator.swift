@@ -109,7 +109,33 @@ final class MaxPS4Emulator: ObservableObject {
                 let attributes = try fileManager.attributesOfItem(atPath: fileURL.path)
                 let byteCount = (attributes[.size] as? NSNumber)?.int64Value ?? 0
                 let size = ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
-                status = "PKG PS4 reconnu • taille : \(size) • métadonnées détaillées non analysées • exécution indisponible"
+                let handle = try FileHandle(forReadingFrom: fileURL)
+                defer { try? handle.close() }
+                let header = try handle.read(upToCount: 128) ?? Data()
+                guard header.count >= 0x64,
+                      Array(header.prefix(4)) == [0x7F, 0x43, 0x4E, 0x54] else {
+                    status = "PKG PS4 : en-tête incomplet ou invalide"
+                    return
+                }
+                // PS4 PKG content_id is an ASCII field at 0x40 (36 bytes).
+                // Never parse encrypted contents or infer a version from arbitrary bytes.
+                let field = header.subdata(in: 0x40..<0x64)
+                let contentID = String(bytes: field.prefix(while: { $0 != 0 }), encoding: .ascii)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let validID = contentID.flatMap { id -> String? in
+                    guard id.count >= 16, id.count <= 36,
+                          id.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || $0 == 45 || $0 == 95 }) else {
+                        return nil
+                    }
+                    return id
+                }
+                let titleID = validID?.split(separator: "-").first(where: { $0.hasPrefix("CUSA") }).map(String.init)
+                    ?? game.fileName.uppercased().components(separatedBy: CharacterSet(charactersIn: "-_")).first(where: { $0.hasPrefix("CUSA") })
+                let title = game.fileName.uppercased().contains("SONICMANIA") ? "Sonic Mania (nom du fichier)" : game.name
+                status = "PKG PS4 reconnu • \(title) • taille : \(size)" +
+                    (validID.map { " • Content ID : " + $0 } ?? " • Content ID indisponible") +
+                    (titleID.map { " • Title ID : " + $0 } ?? "") +
+                    " • version non déterminée • exécution indisponible"
             } else {
                 status = try MaxPS4ELFInspector.inspect(url: URL(fileURLWithPath: game.localPath))
             }
