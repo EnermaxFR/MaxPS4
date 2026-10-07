@@ -237,33 +237,33 @@ struct MaxPS4CPUPrototype {
                          0x48, 0xBB, 0x08, 0, 0, 0, 0, 0, 0, 0,
                          0x48, 0x83, 0xFB, 0x08,
                          0x48, 0x83, 0xEB, 0x02, 0xC3])
-            guard cpu.rax == 8, cpu.registers[3] == 6, !cpu.zeroFlag else { return false }
+            guard cpu.rax == 8, cpu.registers[3] == 6, !cpu.zeroFlag else { print("CPU_DIAG_240"); return false }
             var xorCPU = Self()
             try xorCPU.run([0x48, 0xB8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                             0x31, 0xC0, 0x74, 0x02, 0x0F, 0x0F, 0xC3])
             guard xorCPU.rax == 0, xorCPU.zeroFlag,
-                  xorCPU.executedInstructions == 4 else { return false }
+                  xorCPU.executedInstructions == 4 else { print("CPU_DIAG_245"); return false }
             var testCPU = Self()
             try testCPU.run([0x48, 0xB8, 0x04, 0, 0, 0, 0, 0, 0, 0,
                              0x48, 0xB9, 0x02, 0, 0, 0, 0, 0, 0, 0,
                              0x85, 0xC8, 0x74, 0x02, 0x0F, 0x0F, 0xC3])
             guard testCPU.rax == 4, testCPU.registers[1] == 2,
-                  testCPU.zeroFlag, testCPU.executedInstructions == 5 else { return false }
+                  testCPU.zeroFlag, testCPU.executedInstructions == 5 else { print("CPU_DIAG_251"); return false }
             var invalidTEST = Self()
-            do { try invalidTEST.run([0x85, 0x00]); return false }
+            do { try invalidTEST.run([0x85, 0x00]); print("CPU_DIAG_253"); return false }
             catch CPUError.unsupportedOpcode {}
             var badXOR = Self()
-            do { try badXOR.run([0x31, 0x00]); return false }
+            do { try badXOR.run([0x31, 0x00]); print("CPU_DIAG_256"); return false }
             catch CPUError.unsupportedOpcode {}
             var serviceCPU = Self()
             try serviceCPU.run([0x31, 0xC0, 0x0F, 0x05, 0xC3])
-            guard serviceCPU.rax == 42, serviceCPU.executedInstructions == 3 else { return false }
+            guard serviceCPU.rax == 42, serviceCPU.executedInstructions == 3 else { print("CPU_DIAG_260"); return false }
             var memoryServiceCPU = Self()
             try memoryServiceCPU.prepareGuestMemory(address: 0x9000, size: 4096)
             try memoryServiceCPU.run([0x48, 0xB8, 0x01, 0, 0, 0, 0, 0, 0, 0,
                                       0x0F, 0x05, 0xC3])
             guard memoryServiceCPU.rax == 4096,
-                  memoryServiceCPU.executedInstructions == 3 else { return false }
+                  memoryServiceCPU.executedInstructions == 3 else { print("CPU_DIAG_266"); return false }
             var allocationCPU = Self()
             try allocationCPU.run([
                 0x48, 0xB9, 0x00, 0xA0, 0, 0, 0, 0, 0, 0,
@@ -274,7 +274,7 @@ struct MaxPS4CPUPrototype {
                 0x0F, 0x05, 0xC3
             ])
             guard allocationCPU.rax == 0, allocationCPU.guestMemory.allocatedBytes == 0,
-                  allocationCPU.executedInstructions == 7 else { return false }
+                  allocationCPU.executedInstructions == 7 else { print("CPU_DIAG_277"); return false }
             var protectCPU = Self()
             try protectCPU.prepareGuestMemory(address: 0xB000, size: 4096)
             try protectCPU.run([
@@ -284,12 +284,12 @@ struct MaxPS4CPUPrototype {
                 0x48, 0xB8, 0x04, 0, 0, 0, 0, 0, 0, 0,
                 0x0F, 0x05, 0xC3
             ])
-            guard protectCPU.rax == 0 else { return false }
+            guard protectCPU.rax == 0 else { print("CPU_DIAG_287"); return false }
             do {
                 try protectCPU.guestMemory.write(Data([0x90]), at: 0xB000)
-                return false
+                print("CPU_DIAG_290"); return false
             } catch MaxPS4GuestMemory.MemoryError.accessDenied {}
-            guard try protectCPU.guestMemory.fetchInstructionBytes(at: 0xB000, count: 1) == Data([0]) else { return false }
+            guard try protectCPU.guestMemory.fetchInstructionBytes(at: 0xB000, count: 1) == Data([0]) else { print("CPU_DIAG_292"); return false }
             // Simulated services must reject invalid sizes, overlap and double-free.
             var invalidSizeCPU = Self()
             do {
@@ -299,9 +299,9 @@ struct MaxPS4CPUPrototype {
                     0x48, 0xB8, 0x02, 0, 0, 0, 0, 0, 0, 0,
                     0x0F, 0x05
                 ])
-                return false
+                print("CPU_DIAG_302"); return false
             } catch MaxPS4GuestMemory.MemoryError.invalidRange {}
-            guard invalidSizeCPU.guestMemory.allocatedBytes == 0 else { return false }
+            guard invalidSizeCPU.guestMemory.allocatedBytes == 0 else { print("CPU_DIAG_304"); return false }
             var doubleFreeCPU = Self()
             do {
                 try doubleFreeCPU.run([
@@ -310,19 +310,19 @@ struct MaxPS4CPUPrototype {
                     0x48, 0xB8, 0x03, 0, 0, 0, 0, 0, 0, 0,
                     0x0F, 0x05
                 ])
-                return false
+                print("CPU_DIAG_313"); return false
             } catch MaxPS4GuestMemory.MemoryError.outOfBounds {}
             var invalidService = Self()
-            do { try invalidService.run([0x48, 0xB8, 0x63, 0, 0, 0, 0, 0, 0, 0, 0x0F, 0x05]); return false }
+            do { try invalidService.run([0x48, 0xB8, 0x63, 0, 0, 0, 0, 0, 0, 0, 0x0F, 0x05]); print("CPU_DIAG_316"); return false }
             catch CPUError.unsupportedOpcode {}
             var unsupported = Self()
-            do { try unsupported.run([0x0F, 0x0B]); return false }
+            do { try unsupported.run([0x0F, 0x0B]); print("CPU_DIAG_319"); return false }
             catch CPUError.unsupportedOpcode {}
             var truncated = Self()
-            do { try truncated.run([0x48, 0xB8, 0x01]); return false }
+            do { try truncated.run([0x48, 0xB8, 0x01]); print("CPU_DIAG_322"); return false }
             catch CPUError.truncatedInstruction {}
             var limit = Self()
-            do { try limit.run([0x90, 0x90], limit: 1); return false }
+            do { try limit.run([0x90, 0x90], limit: 1); print("CPU_DIAG_325"); return false }
             catch CPUError.instructionLimit {}
             var memoryCPU = Self()
             try memoryCPU.prepareGuestMemory(address: 0x1000, size: 4096)
@@ -331,7 +331,7 @@ struct MaxPS4CPUPrototype {
             var receiver = Self()
             receiver.guestMemory = memoryCPU.guestMemory
             try receiver.loadRAX(address: 0x1010)
-            guard receiver.rax == 42 else { return false }
+            guard receiver.rax == 42 else { print("CPU_DIAG_334"); return false }
             var instructionCPU = Self()
             try instructionCPU.prepareGuestMemory(address: 0x1000, size: 4096)
             try instructionCPU.run([
@@ -341,7 +341,7 @@ struct MaxPS4CPUPrototype {
                 0x48, 0xA1, 0x10, 0x10, 0, 0, 0, 0, 0, 0,
                 0xC3
             ])
-            guard instructionCPU.rax == 42 else { return false }
+            guard instructionCPU.rax == 42 else { print("CPU_DIAG_344"); return false }
             // A loaded guest-memory program must preserve its memory writes.
             var loadedCPU = Self()
             var loadedMemory = MaxPS4GuestMemory()
@@ -357,7 +357,7 @@ struct MaxPS4CPUPrototype {
             try loadedCPU.runLoadedTest(memory: loadedMemory, entry: 0x4000, length: program.count)
             guard loadedCPU.executedInstructions == 3,
                   try loadedCPU.guestMemory.read(at: 0x6020, count: 8) ==
-                     Data([42, 0, 0, 0, 0, 0, 0, 0]) else { return false }
+                     Data([42, 0, 0, 0, 0, 0, 0, 0]) else { print("CPU_DIAG_360"); return false }
             // Never interpret a guest page without execute permission.
             var deniedCPU = Self()
             var deniedMemory = MaxPS4GuestMemory()
@@ -365,11 +365,11 @@ struct MaxPS4CPUPrototype {
             try deniedMemory.write(Data([0x90, 0xC3]), at: 0x8000)
             do {
                 try deniedCPU.runLoadedTest(memory: deniedMemory, entry: 0x8000, length: 2)
-                return false
+                print("CPU_DIAG_368"); return false
             } catch MaxPS4GuestMemory.MemoryError.accessDenied {}
             try deniedMemory.protect(at: 0x8000, size: 4096, permissions: [.read, .execute])
             try deniedCPU.runLoadedTest(memory: deniedMemory, entry: 0x8000, length: 2)
-            guard deniedCPU.executedInstructions == 2 else { return false }
+            guard deniedCPU.executedInstructions == 2 else { print("CPU_DIAG_372"); return false }
             // Two virtual processes cannot access each other's guest memory.
             var processA = MaxPS4VirtualProcess(pid: 101)
             var processB = MaxPS4VirtualProcess(pid: 102)
@@ -378,10 +378,10 @@ struct MaxPS4CPUPrototype {
             try processA.cpu.storeRAX(address: 0x5000)
             guard processA.pid == 101, processB.pid == 102,
                   try processA.cpu.guestMemory.read(at: 0x5000, count: 1) == Data([42]),
-                  processB.cpu.guestMemory.allocatedBytes == 0 else { return false }
+                  processB.cpu.guestMemory.allocatedBytes == 0 else { print("CPU_DIAG_381"); return false }
             do {
                 try processB.cpu.guestMemory.read(at: 0x5000, count: 1)
-                return false
+                print("CPU_DIAG_384"); return false
             } catch MaxPS4GuestMemory.MemoryError.outOfBounds {}
             var stepped = Self()
             let steppedProgram: [UInt8] = [
@@ -389,100 +389,100 @@ struct MaxPS4CPUPrototype {
                 0x48, 0x83, 0xC0, 0x03, 0xC3
             ]
             try stepped.step(steppedProgram)
-            guard stepped.rax == 5, stepped.rip == 10 else { return false }
+            guard stepped.rax == 5, stepped.rip == 10 else { print("CPU_DIAG_392"); return false }
             try stepped.step(steppedProgram)
-            guard stepped.rax == 8, stepped.rip == 14 else { return false }
+            guard stepped.rax == 8, stepped.rip == 14 else { print("CPU_DIAG_394"); return false }
             try stepped.step(steppedProgram)
-            guard stepped.rip == steppedProgram.count else { return false }
+            guard stepped.rip == steppedProgram.count else { print("CPU_DIAG_396"); return false }
             var processManager = MaxPS4VirtualProcessManager()
             let firstPID = try processManager.create()
             let secondPID = try processManager.create()
             guard firstPID != secondPID, processManager.count == 2,
-                  processManager.process(pid: firstPID) != nil else { return false }
+                  processManager.process(pid: firstPID) != nil else { print("CPU_DIAG_401"); return false }
             guard processManager.terminate(pid: firstPID),
                   processManager.process(pid: firstPID) == nil,
                   !processManager.terminate(pid: firstPID),
                   processManager.count == 1,
-                  processManager.process(pid: secondPID) != nil else { return false }
+                  processManager.process(pid: secondPID) != nil else { print("CPU_DIAG_406"); return false }
             guard processManager.scheduleNext() == secondPID,
                   processManager.currentPID == secondPID,
-                  processManager.process(pid: secondPID)?.state == .running else { return false }
+                  processManager.process(pid: secondPID)?.state == .running else { print("CPU_DIAG_409"); return false }
             let thirdPID = try processManager.create()
             guard processManager.scheduleNext() == thirdPID,
                   processManager.process(pid: secondPID)?.state == .ready,
-                  processManager.scheduleNext() == secondPID else { return false }
+                  processManager.scheduleNext() == secondPID else { print("CPU_DIAG_413"); return false }
             guard processManager.terminate(pid: secondPID),
                   processManager.currentPID == nil,
                   processManager.scheduleNext() == thirdPID,
                   processManager.terminate(pid: thirdPID),
-                  processManager.scheduleNext() == nil else { return false }
+                  processManager.scheduleNext() == nil else { print("CPU_DIAG_418"); return false }
             var guests = MaxPS4VirtualProcessManager()
             let guestA = try guests.create()
             let guestB = try guests.create()
-            guard guests.scheduleNext() == guestA else { return false }
+            guard guests.scheduleNext() == guestA else { print("CPU_DIAG_422"); return false }
             try guests.runCurrent([0x48, 0xB8, 0x2A, 0, 0, 0, 0, 0, 0, 0, 0xC3])
-            guard guests.scheduleNext() == guestB else { return false }
+            guard guests.scheduleNext() == guestB else { print("CPU_DIAG_424"); return false }
             try guests.runCurrent([0x48, 0xB8, 0x07, 0, 0, 0, 0, 0, 0, 0, 0xC3])
             guard guests.process(pid: guestA)?.cpu.rax == 42,
                   guests.process(pid: guestB)?.cpu.rax == 7,
                   guests.process(pid: guestA)?.cpu.guestMemory.allocatedBytes == 0,
-                  guests.process(pid: guestB)?.cpu.guestMemory.allocatedBytes == 0 else { return false }
+                  guests.process(pid: guestB)?.cpu.guestMemory.allocatedBytes == 0 else { print("CPU_DIAG_429"); return false }
             var stepGuests = MaxPS4VirtualProcessManager()
             let stepPID = try stepGuests.create()
-            guard stepGuests.scheduleNext() == stepPID else { return false }
+            guard stepGuests.scheduleNext() == stepPID else { print("CPU_DIAG_432"); return false }
             try stepGuests.stepCurrent(steppedProgram)
             guard stepGuests.process(pid: stepPID)?.cpu.rax == 5,
-                  stepGuests.process(pid: stepPID)?.cpu.rip == 10 else { return false }
+                  stepGuests.process(pid: stepPID)?.cpu.rip == 10 else { print("CPU_DIAG_435"); return false }
             guard stepGuests.suspend(pid: stepPID), stepGuests.resume(pid: stepPID),
-                  stepGuests.scheduleNext() == stepPID else { return false }
+                  stepGuests.scheduleNext() == stepPID else { print("CPU_DIAG_437"); return false }
             try stepGuests.stepCurrent(steppedProgram)
             guard stepGuests.process(pid: stepPID)?.cpu.rax == 8,
-                  stepGuests.process(pid: stepPID)?.cpu.rip == 14 else { return false }
+                  stepGuests.process(pid: stepPID)?.cpu.rip == 14 else { print("CPU_DIAG_440"); return false }
             var memoryGuests = MaxPS4VirtualProcessManager()
             let memoryA = try memoryGuests.create()
             let memoryB = try memoryGuests.create()
-            guard memoryGuests.scheduleNext() == memoryA else { return false }
+            guard memoryGuests.scheduleNext() == memoryA else { print("CPU_DIAG_444"); return false }
             let codeA: [UInt8] = [0x48, 0xB8, 0x2A, 0, 0, 0, 0, 0, 0, 0, 0xC3]
             let codeB: [UInt8] = [0x48, 0xB8, 0x07, 0, 0, 0, 0, 0, 0, 0xC3]
             try memoryGuests.loadCurrent(codeA, at: 0x4000)
             try memoryGuests.runLoadedCurrent(at: 0x4000, length: codeA.count)
-            guard memoryGuests.scheduleNext() == memoryB else { return false }
+            guard memoryGuests.scheduleNext() == memoryB else { print("CPU_DIAG_449"); return false }
             do {
                 try memoryGuests.runLoadedCurrent(at: 0x4000, length: codeA.count)
-                return false
+                print("CPU_DIAG_452"); return false
             } catch MaxPS4GuestMemory.MemoryError.outOfBounds {}
             try memoryGuests.loadCurrent(codeB, at: 0x4000)
             try memoryGuests.runLoadedCurrent(at: 0x4000, length: codeB.count)
             guard memoryGuests.process(pid: memoryA)?.cpu.rax == 42,
-                  memoryGuests.process(pid: memoryB)?.cpu.rax == 7 else { return false }
+                  memoryGuests.process(pid: memoryB)?.cpu.rax == 7 else { print("CPU_DIAG_457"); return false }
             var batch = MaxPS4VirtualProcessManager()
             let batchA = try batch.create()
-            guard batch.scheduleNext() == batchA else { return false }
+            guard batch.scheduleNext() == batchA else { print("CPU_DIAG_460"); return false }
             try batch.loadCurrent(codeA, at: 0x4000)
             let batchB = try batch.create()
-            guard batch.scheduleNext() == batchB else { return false }
+            guard batch.scheduleNext() == batchB else { print("CPU_DIAG_463"); return false }
             try batch.loadCurrent(codeB, at: 0x4000)
             let completed = try batch.runRoundRobinLoaded(
                 at: 0x4000, lengths: [batchA: codeA.count, batchB: codeB.count]
             )
             guard completed == [batchA, batchB],
                   batch.process(pid: batchA)?.cpu.rax == 42,
-                  batch.process(pid: batchB)?.cpu.rax == 7 else { return false }
+                  batch.process(pid: batchB)?.cpu.rax == 7 else { print("CPU_DIAG_470"); return false }
             // Suspension preserves register values and removes the process from scheduling.
             guard batch.suspend(pid: batchA),
                   batch.process(pid: batchA)?.state == .suspended,
                   batch.scheduleNext() == batchB,
                   batch.process(pid: batchA)?.cpu.rax == 42,
-                  !batch.suspend(pid: batchA) else { return false }
+                  !batch.suspend(pid: batchA) else { print("CPU_DIAG_476"); return false }
             guard batch.resume(pid: batchA),
                   batch.process(pid: batchA)?.state == .ready,
                   !batch.resume(pid: batchA),
                   batch.scheduleNext() == batchA,
-                  batch.process(pid: batchA)?.cpu.rax == 42 else { return false }
+                  batch.process(pid: batchA)?.cpu.rax == 42 else { print("CPU_DIAG_481"); return false }
             var invalidAccess = Self()
             do {
                 try invalidAccess.run([0x48, 0xA1, 0, 0, 0, 0, 0, 0, 0, 0])
-                return false
+                print("CPU_DIAG_485"); return false
             } catch MaxPS4GuestMemory.MemoryError.outOfBounds {}
 
             var stackCPU = Self()
@@ -491,7 +491,7 @@ struct MaxPS4CPUPrototype {
                 0x48, 0xB8, 0x2A, 0, 0, 0, 0, 0, 0, 0,
                 0x50, 0x59, 0xC3
             ])
-            guard stackCPU.registers[1] == 42, stackCPU.registers[4] == 0x3000 else { return false }
+            guard stackCPU.registers[1] == 42, stackCPU.registers[4] == 0x3000 else { print("CPU_DIAG_494"); return false }
             var branchCPU = Self()
             try branchCPU.run([
                 0x48, 0xB8, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -501,18 +501,18 @@ struct MaxPS4CPUPrototype {
             guard branchCPU.zeroFlag,
                   branchCPU.executedInstructions == 4,
                   branchCPU.recentInstructionOffsets == [0, 10, 14, 18] else {
-                return false
+                print("CPU_DIAG_504"); return false
             }
             var badBranch = Self()
-            do { try badBranch.run([0xEB, 0x7F]); return false }
+            do { try badBranch.run([0xEB, 0x7F]); print("CPU_DIAG_507"); return false }
             catch CPUError.invalidBranch {}
             var unallocatedStack = Self()
             do {
                 try unallocatedStack.run([0x50])
-                return false
+                print("CPU_DIAG_512"); return false
             } catch MaxPS4GuestMemory.MemoryError.outOfBounds {}
             return true
-        } catch { return false }
+        } catch { print("CPU_DIAG_515"); return false }
     }
 }
 
@@ -564,7 +564,7 @@ struct MaxPS4VirtualProcessManager {
     /// Pause a virtual process without discarding registers or guest memory.
     @discardableResult
     mutating func suspend(pid: UInt32) -> Bool {
-        guard var process = processes[pid], process.state != .suspended else { return false }
+        guard var process = processes[pid], process.state != .suspended else { print("CPU_DIAG_567"); return false }
         process.state = .suspended
         processes[pid] = process
         if runningPID == pid { runningPID = nil }
@@ -573,7 +573,7 @@ struct MaxPS4VirtualProcessManager {
 
     @discardableResult
     mutating func resume(pid: UInt32) -> Bool {
-        guard var process = processes[pid], process.state == .suspended else { return false }
+        guard var process = processes[pid], process.state == .suspended else { print("CPU_DIAG_576"); return false }
         process.state = .ready
         processes[pid] = process
         return true
