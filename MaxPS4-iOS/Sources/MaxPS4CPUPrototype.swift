@@ -215,7 +215,7 @@ struct MaxPS4CPUPrototype {
             do { try invalidService.run([0x48, 0xB8, 0x01, 0, 0, 0, 0, 0, 0, 0, 0x0F, 0x05]); return false }
             catch CPUError.unsupportedOpcode {}
             var unsupported = Self()
-            do { try unsupported.run([0x0F]); return false }
+            do { try unsupported.run([0x0F, 0x0B]); return false }
             catch CPUError.unsupportedOpcode {}
             var truncated = Self()
             do { try truncated.run([0x48, 0xB8, 0x01]); return false }
