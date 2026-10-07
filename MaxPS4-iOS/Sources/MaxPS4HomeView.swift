@@ -120,9 +120,7 @@ struct MaxPS4HomeView: View {
 
                 backendStatusCard
 
-                if emulator.isRunning || !emulator.runtimeDiagnostic.isEmpty {
-                    runtimeSessionCard
-                }
+                runtimeSessionCard
 
                 primaryAction(
                     icon: "square.and.arrow.down.fill",
@@ -731,7 +729,7 @@ struct MaxPS4HomeView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(emulator.currentGameName ?? "Session d’exécution")
                         .font(.headline)
-                    Text(emulator.isRunning ? "Guest actif" : "Dernier état du guest")
+                    Text(emulator.isRunning ? "Guest actif" : "Diagnostic et commandes de session")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.55))
                 }
@@ -805,19 +803,19 @@ struct MaxPS4HomeView: View {
                 .shadow(color: .green.opacity(0.85), radius: 9)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Version intégrée chargée")
+                Text("MaxPS4 • Interface #321")
                     .font(.headline)
 
-                Text("MaxPS4 0.8 • backend natif conservé")
+                Text("Version expérimentale • outils de diagnostic accessibles")
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.62))
             }
 
             Spacer()
 
-            Image(systemName: "checkmark.circle.fill")
+            Image(systemName: "wrench.and.screwdriver.fill")
                 .font(.title3)
-                .foregroundStyle(.green)
+                .foregroundStyle(.cyan)
         }
         .padding(18)
         .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 22))
