@@ -79,6 +79,11 @@ enum MaxPS4ELFLoader {
                 let start = Int(source)
                 try memory.write(file.subdata(in: start..<(start + Int(fileSize))), at: address)
             }
+            // Apply ELF flags after loading the file bytes.
+            try memory.protect(
+                at: address, size: Int(memorySize),
+                permissions: MaxPS4GuestMemory.Permissions(rawValue: UInt8(flags))
+            )
             loaded += 1
         }
         guard loaded > 0, entryCovered else { throw LoaderError.invalid }
