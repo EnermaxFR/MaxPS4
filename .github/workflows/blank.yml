@@ -371,44 +371,132 @@ jobs:
           @end
 
           @implementation MaxPS4FEXGuestViewController
+          - (UILabel *)sectionTitle:(NSString *)text {
+              UILabel *label = [[UILabel alloc] init];
+              label.text = text;
+              label.textColor = UIColor.whiteColor;
+              label.font = [UIFont boldSystemFontOfSize:21];
+              return label;
+          }
+
+          - (UIView *)panelWithTitle:(NSString *)heading detail:(NSString *)detail {
+              UIView *panel = [[UIView alloc] init];
+              panel.backgroundColor = [UIColor colorWithRed:0.09 green:0.13 blue:0.23 alpha:1];
+              panel.layer.cornerRadius = 20;
+              UILabel *name = [self sectionTitle:heading];
+              UILabel *sub = [[UILabel alloc] init];
+              sub.text = detail;
+              sub.numberOfLines = 0;
+              sub.font = [UIFont systemFontOfSize:14];
+              sub.textColor = [UIColor colorWithWhite:0.72 alpha:1];
+              UIStackView *content = [[UIStackView alloc] initWithArrangedSubviews:@[name, sub]];
+              content.axis = UILayoutConstraintAxisVertical;
+              content.spacing = 8;
+              content.translatesAutoresizingMaskIntoConstraints = NO;
+              [panel addSubview:content];
+              [NSLayoutConstraint activateConstraints:@[
+                  [content.topAnchor constraintEqualToAnchor:panel.topAnchor constant:19],
+                  [content.bottomAnchor constraintEqualToAnchor:panel.bottomAnchor constant:-19],
+                  [content.leadingAnchor constraintEqualToAnchor:panel.leadingAnchor constant:19],
+                  [content.trailingAnchor constraintEqualToAnchor:panel.trailingAnchor constant:-19]
+              ]];
+              return panel;
+          }
+
           - (void)viewDidLoad {
               [super viewDidLoad];
-              self.view.backgroundColor = [UIColor colorWithRed:0.025 green:0.045 blue:0.11 alpha:1.0];
+              self.view.backgroundColor = [UIColor colorWithRed:0.035 green:0.055 blue:0.12 alpha:1];
+              UIScrollView *scroll = [[UIScrollView alloc] init];
+              scroll.translatesAutoresizingMaskIntoConstraints = NO;
+              [self.view addSubview:scroll];
+              [NSLayoutConstraint activateConstraints:@[
+                  [scroll.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+                  [scroll.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor],
+                  [scroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+                  [scroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor]
+              ]];
+
+              UILabel *eyebrow = [[UILabel alloc] init];
+              eyebrow.text = @"MAXPS4  •  IOS EDITION";
+              eyebrow.font = [UIFont boldSystemFontOfSize:12];
+              eyebrow.textColor = UIColor.cyanColor;
 
               UILabel *title = [[UILabel alloc] init];
-              title.translatesAutoresizingMaskIntoConstraints = NO;
-              title.text = @"MaxPS4 0.9 • Nouveau design";
-              title.font = [UIFont boldSystemFontOfSize:29.0];
-              title.textColor = UIColor.cyanColor;
+              title.text = @"Ton espace PS4";
+              title.font = [UIFont systemFontOfSize:34 weight:UIFontWeightHeavy];
+              title.textColor = UIColor.whiteColor;
 
-              self.statusLabel = [[UILabel alloc] init];
-              self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
-              self.statusLabel.numberOfLines = 0;
-              self.statusLabel.textColor = UIColor.whiteColor;
-              self.statusLabel.text = @"1. Lance StikDebug avec universal.js\n2. Reviens ici\n3. Appuie sur Tester le bridge";
+              UILabel *subtitle = [[UILabel alloc] init];
+              subtitle.text = @"MaxPS4 1.0  •  Nouvelle interface";
+              subtitle.font = [UIFont systemFontOfSize:14];
+              subtitle.textColor = [UIColor colorWithWhite:0.65 alpha:1];
 
-              self.runButton = [UIButton buttonWithType:UIButtonTypeSystem];
-              self.runButton.translatesAutoresizingMaskIntoConstraints = NO;
-              [self.runButton setTitle:@"Tester le bridge shadPS4/FEX" forState:UIControlStateNormal];
-              self.runButton.titleLabel.font = [UIFont boldSystemFontOfSize:18.0];
-              [self.runButton addTarget:self action:@selector(runProbe) forControlEvents:UIControlEventTouchUpInside];
+              UIView *hero = [self panelWithTitle:@"Centre de lancement"
+                  detail:@"Importe un exécutable PS4 légalement obtenu et vérifie sa compatibilité. L'exécution complète des jeux n'est pas encore prise en charge."];
 
               self.loadButton = [UIButton buttonWithType:UIButtonTypeSystem];
-              self.loadButton.translatesAutoresizingMaskIntoConstraints = NO;
-              [self.loadButton setTitle:@"Choisir un eboot.bin / SELF" forState:UIControlStateNormal];
-              self.loadButton.titleLabel.font = [UIFont boldSystemFontOfSize:18.0];
+              [self.loadButton setTitle:@"＋  Importer un fichier ELF / SELF" forState:UIControlStateNormal];
+              [self.loadButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+              self.loadButton.titleLabel.font = [UIFont boldSystemFontOfSize:16];
+              self.loadButton.backgroundColor = [UIColor colorWithRed:0.10 green:0.40 blue:0.95 alpha:1];
+              self.loadButton.layer.cornerRadius = 16;
+              [self.loadButton.heightAnchor constraintEqualToConstant:56].active = YES;
               [self.loadButton addTarget:self action:@selector(pickExecutable) forControlEvents:UIControlEventTouchUpInside];
 
-              UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[title, self.statusLabel, self.runButton, self.loadButton]];
-              stack.translatesAutoresizingMaskIntoConstraints = NO;
-              stack.axis = UILayoutConstraintAxisVertical;
-              stack.spacing = 24.0;
-              [self.view addSubview:stack];
+              UIView *library = [self panelWithTitle:@"Bibliothèque"
+                  detail:@"Aucun jeu importé pour le moment. Les fichiers sélectionnés sont vérifiés avant utilisation."];
+              UIView *tools = [self panelWithTitle:@"Outils développeur"
+                  detail:@"Diagnostic shadPS4 / FEXCore • Tests expérimentaux"];
 
+              self.runButton = [UIButton buttonWithType:UIButtonTypeSystem];
+              [self.runButton setTitle:@"▶  Tester le backend shadPS4 / FEX" forState:UIControlStateNormal];
+              [self.runButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+              self.runButton.titleLabel.font = [UIFont boldSystemFontOfSize:15];
+              self.runButton.backgroundColor = [UIColor colorWithRed:0.13 green:0.19 blue:0.31 alpha:1];
+              self.runButton.layer.cornerRadius = 16;
+              [self.runButton.heightAnchor constraintEqualToConstant:54].active = YES;
+              [self.runButton addTarget:self action:@selector(runProbe) forControlEvents:UIControlEventTouchUpInside];
+
+              self.statusLabel = [[UILabel alloc] init];
+              self.statusLabel.numberOfLines = 0;
+              self.statusLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
+              self.statusLabel.textColor = [UIColor colorWithWhite:0.82 alpha:1];
+              self.statusLabel.text = @"Diagnostic prêt. Active le JIT via StikDebug si nécessaire.";
+              UIView *status = [[UIView alloc] init];
+              status.backgroundColor = [UIColor colorWithRed:0.08 green:0.12 blue:0.20 alpha:1];
+              status.layer.cornerRadius = 15;
+              [status addSubview:self.statusLabel];
+              self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
               [NSLayoutConstraint activateConstraints:@[
-                  [stack.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:24.0],
-                  [stack.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-24.0],
-                  [stack.centerYAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.centerYAnchor]
+                  [self.statusLabel.topAnchor constraintEqualToAnchor:status.topAnchor constant:16],
+                  [self.statusLabel.bottomAnchor constraintEqualToAnchor:status.bottomAnchor constant:-16],
+                  [self.statusLabel.leadingAnchor constraintEqualToAnchor:status.leadingAnchor constant:16],
+                  [self.statusLabel.trailingAnchor constraintEqualToAnchor:status.trailingAnchor constant:-16]
+              ]];
+
+              UILabel *footer = [[UILabel alloc] init];
+              footer.text = @"MaxPS4 1.0 • Build expérimental • Homebrew uniquement";
+              footer.font = [UIFont systemFontOfSize:12];
+              footer.textColor = [UIColor colorWithWhite:0.48 alpha:1];
+              footer.numberOfLines = 0;
+              footer.textAlignment = NSTextAlignmentCenter;
+
+              UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[
+                  eyebrow, title, subtitle, hero, self.loadButton,
+                  [self sectionTitle:@"Mes jeux"], library,
+                  [self sectionTitle:@"Développeur"], tools, self.runButton,
+                  [self sectionTitle:@"État du système"], status, footer
+              ]];
+              stack.axis = UILayoutConstraintAxisVertical;
+              stack.spacing = 17;
+              stack.translatesAutoresizingMaskIntoConstraints = NO;
+              [scroll addSubview:stack];
+              [NSLayoutConstraint activateConstraints:@[
+                  [stack.topAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.topAnchor constant:24],
+                  [stack.bottomAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.bottomAnchor constant:-28],
+                  [stack.leadingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.leadingAnchor constant:20],
+                  [stack.trailingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.trailingAnchor constant:-20],
+                  [stack.widthAnchor constraintEqualToAnchor:scroll.frameLayoutGuide.widthAnchor constant:-40]
               ]];
           }
 
@@ -1037,7 +1125,7 @@ jobs:
             <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
             <key>CFBundleName</key><string>MaxPS4</string>
             <key>CFBundlePackageType</key><string>APPL</string>
-            <key>CFBundleShortVersionString</key><string>0.9</string>
+            <key>CFBundleShortVersionString</key><string>1.0</string>
             <key>CFBundleVersion</key><string>${{ github.run_number }}</string>
             <key>LSRequiresIPhoneOS</key><true/>
             <key>MinimumOSVersion</key><string>17.4</string>
