@@ -55,6 +55,17 @@ final class MaxPS4Emulator: ObservableObject {
         }
 
         do {
+            let validation = validateExecutable(at: url)
+            guard validation.isValid else {
+                status = "Import refusé • \\(validation.diagnostic)"
+                return
+            }
+
+            if isDuplicateImport(url) {
+                status = "\\(url.lastPathComponent) • déjà présent dans la bibliothèque"
+                return
+            }
+
             let id = UUID()
             let folderURL = try libraryDirectoryURL()
                 .appendingPathComponent(id.uuidString, isDirectory: true)
@@ -211,6 +222,43 @@ final class MaxPS4Emulator: ObservableObject {
         maxps4_backend_stop()
         maxps4_core_stop()
         status = "Arrêté"
+    }
+
+    private func validateExecutable(at url: URL) -> (isValid: Bool, diagnostic: String) {
+        var diagnostic = [CChar](repeating: 0, count: 512)
+
+        let isValid = url.path.withCString { path in
+            diagnostic.withUnsafeMutableBufferPointer { buffer in
+                guard let baseAddress = buffer.baseAddress else { return false }
+                return maxps4_ps4_loader_validate(
+                    path,
+                    nil,
+                    baseAddress,
+                    UInt(buffer.count)
+                )
+            }
+        }
+
+        let message = diagnostic.withUnsafeBufferPointer { buffer -> String in
+            guard let baseAddress = buffer.baseAddress else { return "format PS4 invalide" }
+            let text = String(cString: baseAddress)
+            return text.isEmpty ? "format PS4 invalide" : text
+        }
+
+        return (isValid, message)
+    }
+
+    private func isDuplicateImport(_ sourceURL: URL) -> Bool {
+        let sourceName = sourceURL.lastPathComponent.lowercased()
+        let sourceSize = (try? sourceURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1
+        guard sourceSize >= 0 else { return false }
+
+        return libraryGames.contains { game in
+            let existingURL = managedExecutableURL(for: game)
+            guard existingURL.lastPathComponent.lowercased() == sourceName else { return false }
+            let existingSize = (try? existingURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -2
+            return existingSize == sourceSize
+        }
     }
 
     private func loadLibrary() {

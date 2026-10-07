@@ -97,8 +97,8 @@ struct MaxPS4HomeView: View {
 
                 primaryAction(
                     icon: "square.and.arrow.down.fill",
-                    title: "Importer un eboot.bin / SELF",
-                    subtitle: "Sélectionne un exécutable PS4 autorisé"
+                    title: "Importer un exécutable PS4",
+                    subtitle: "Validation ELF / SELF / PKG avant ajout"
                 ) {
                     importingGame = true
                 }
