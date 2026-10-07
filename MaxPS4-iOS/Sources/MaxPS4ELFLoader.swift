@@ -82,7 +82,7 @@ enum MaxPS4ELFLoader {
             // Apply ELF flags after loading the file bytes.
             try memory.protect(
                 at: address, size: Int(memorySize),
-                permissions: MaxPS4GuestMemory.Permissions(rawValue: UInt8(flags))
+                permissions: { var p: MaxPS4GuestMemory.Permissions = []; if flags & 4 != 0 { p.insert(.read) }; if flags & 2 != 0 { p.insert(.write) }; if flags & 1 != 0 { p.insert(.execute) }; return p }()
             )
             loaded += 1
         }
