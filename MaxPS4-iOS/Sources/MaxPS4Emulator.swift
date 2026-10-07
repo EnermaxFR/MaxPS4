@@ -164,6 +164,12 @@ final class MaxPS4Emulator: ObservableObject {
             : "CPU x86-64 : échec de l’auto-test"
     }
 
+    func testIntegration() {
+        status = MaxPS4ELFLoader.integrationTest()
+            ? "Intégration réussie : ELF64 → CPU x86-64 → mémoire (valeur 42)"
+            : "Échec intégration : vérifier le chargeur ELF64, le CPU ou la mémoire"
+    }
+
     func testELFLoader() {
         status = MaxPS4ELFLoader.selfTest()
             ? "Chargeur ELF64 : auto-test réussi (mémoire simulée)"
