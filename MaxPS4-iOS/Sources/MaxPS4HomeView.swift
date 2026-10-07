@@ -687,6 +687,9 @@ struct MaxPS4HomeView: View {
                 secondaryAction(icon: "doc.zipper", title: "Tester le chargeur ELF64", subtitle: "Segments simulés • sans exécution PS4") {
                     emulator.testELFLoader()
                 }
+                secondaryAction(icon: "square.stack.3d.up", title: "Carte mémoire invitée", subtitle: "Régions et permissions • simulation") {
+                    emulator.showGuestMemoryMap()
+                }
                 secondaryAction(icon: "memorychip", title: "Tester la mémoire invitée", subtitle: "Prototype isolé • sans exécution PS4") {
                     emulator.testGuestMemory()
                 }
