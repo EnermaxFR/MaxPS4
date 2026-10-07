@@ -47,6 +47,22 @@ private enum MaxPS4LibraryCategory: String, CaseIterable, Identifiable {
     }
 }
 
+private enum MaxPS4LibrarySort: String, CaseIterable, Identifiable {
+    case imported = "Ajout récent"
+    case name = "Nom"
+    case lastPlayed = "Dernier lancement"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .imported: return "clock.arrow.circlepath"
+        case .name: return "textformat"
+        case .lastPlayed: return "play.circle"
+        }
+    }
+}
+
 struct MaxPS4HomeView: View {
     @EnvironmentObject private var emulator: MaxPS4Emulator
 
@@ -54,6 +70,7 @@ struct MaxPS4HomeView: View {
     @State private var selectedSection: MaxPS4Section = .home
     @State private var selectedLibraryCategory: MaxPS4LibraryCategory = .all
     @State private var librarySearchText = ""
+    @State private var librarySort: MaxPS4LibrarySort = .imported
 
     var body: some View {
         ZStack {
@@ -195,6 +212,38 @@ struct MaxPS4HomeView: View {
                         .stroke(.white.opacity(0.08), lineWidth: 1)
                 )
 
+                HStack {
+                    Label("Trier", systemImage: "arrow.up.arrow.down")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.60))
+
+                    Spacer()
+
+                    Menu {
+                        ForEach(MaxPS4LibrarySort.allCases) { sort in
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.18)) {
+                                    librarySort = sort
+                                }
+                            } label: {
+                                Label(sort.rawValue, systemImage: sort.icon)
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: librarySort.icon)
+                            Text(librarySort.rawValue)
+                            Image(systemName: "chevron.down")
+                                .font(.caption2)
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.cyan)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(.cyan.opacity(0.08), in: Capsule())
+                    }
+                }
+
                 if filteredLibraryGames.isEmpty {
                     libraryEmptyState
                 } else {
@@ -240,11 +289,29 @@ struct MaxPS4HomeView: View {
         }
 
         let query = librarySearchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return categorized }
+        let searched: [MaxPS4LibraryGame]
 
-        return categorized.filter {
-            $0.name.localizedCaseInsensitiveContains(query) ||
-            $0.executableRelativePath.localizedCaseInsensitiveContains(query)
+        if query.isEmpty {
+            searched = categorized
+        } else {
+            searched = categorized.filter {
+                $0.name.localizedCaseInsensitiveContains(query) ||
+                $0.executableRelativePath.localizedCaseInsensitiveContains(query)
+            }
+        }
+
+        switch librarySort {
+        case .imported:
+            return searched.sorted { $0.importedAt > $1.importedAt }
+        case .name:
+            return searched.sorted {
+                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+        case .lastPlayed:
+            return searched.sorted {
+                ($0.lastPlayedAt ?? .distantPast) >
+                ($1.lastPlayedAt ?? .distantPast)
+            }
         }
     }
 
