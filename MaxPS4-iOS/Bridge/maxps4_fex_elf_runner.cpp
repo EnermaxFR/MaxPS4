@@ -218,7 +218,8 @@ bool AppendGuestPrimitive(MaxPS4GuestPrimitiveSnapshot primitive) {
         return false;
     }
     if (primitive.type != MAXPS4_GUEST_PRIMITIVE_RECT &&
-        primitive.type != MAXPS4_GUEST_PRIMITIVE_TRIANGLE) {
+        primitive.type != MAXPS4_GUEST_PRIMITIVE_TRIANGLE &&
+        primitive.type != MAXPS4_GUEST_PRIMITIVE_TEXTURED_QUAD) {
         return false;
     }
     primitive.x = std::clamp(primitive.x, -1.2f, 1.2f);
