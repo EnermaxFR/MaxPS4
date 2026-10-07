@@ -181,6 +181,14 @@ final class MaxPS4Emulator: ObservableObject {
                 } else {
                     sizeCheck = "taille déclarée différente du fichier (vérification recommandée)"
                 }
+                // The PKG header holds a big-endian entry count at offset 0x10.
+                // Report it only as a diagnostic: no extraction or trust decision.
+                let entryCount = (0..<4).reduce(UInt32(0)) { value, i in
+                    (value << 8) | UInt32(header[0x10 + i])
+                }
+                let entryCheck = entryCount > 0 && entryCount <= 100_000
+                    ? String(entryCount) + " entrées déclarées (non vérifiées)"
+                    : "nombre absent ou inhabituel (non vérifié)"
                 // PS4 PKG content_id is an ASCII field at 0x40 (36 bytes).
                 // Never parse encrypted contents or infer a version from arbitrary bytes.
                 let field = header.subdata(in: 0x40..<0x64)
@@ -202,6 +210,7 @@ final class MaxPS4Emulator: ObservableObject {
                     "Titre : " + title,
                     "Taille : " + size,
                     "Contrôle en-tête : " + sizeCheck,
+                    "Table des entrées : " + entryCheck,
                     "Content ID : " + (validID ?? "indisponible"),
                     "Title ID : " + (titleID ?? "indisponible"),
                     "Version : non déterminée",
