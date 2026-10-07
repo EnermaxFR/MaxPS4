@@ -101,6 +101,7 @@ jobs:
           </dict>
           </plist>
           PLIST
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${GITHUB_RUN_NUMBER}" build/Payload/MaxPS4.app/Info.plist
           plutil -lint build/Payload/MaxPS4.app/Info.plist
 
       - name: Verify executable
