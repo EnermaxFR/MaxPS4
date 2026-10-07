@@ -100,8 +100,8 @@ struct MaxPS4CPUPrototype {
             try memoryCPU.prepareGuestMemory(address: 0x1000, size: 4096)
             try memoryCPU.run([0x48, 0xB8, 0x2A, 0, 0, 0, 0, 0, 0, 0, 0xC3])
             try memoryCPU.storeRAX(address: 0x1010)
-            var receiver = memoryCPU
-            try receiver.run([0x48, 0xB8, 0, 0, 0, 0, 0, 0, 0, 0, 0xC3])
+            var receiver = Self()
+            receiver.guestMemory = memoryCPU.guestMemory
             try receiver.loadRAX(address: 0x1010)
             guard receiver.rax == 42 else { return false }
             return true
