@@ -146,9 +146,12 @@
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         if (self.bootInProgress && generation == self.bootGeneration) {
+            char liveBuf[512] = {};
+            maxps4_backend_live_diagnostic(liveBuf, sizeof(liveBuf));
+            NSString *liveText = [NSString stringWithUTF8String:liveBuf] ?: @"aucun diagnostic live";
             self.statusLabel.text = [NSString stringWithFormat:
-                @"%@ validé.\nFEX est toujours en cours après 5 s.\n\nL’interface reste active : le guest semble bloqué dans l’exécution. Aucun arrêt forcé n’est tenté pour éviter de corrompre l’état du runtime.",
-                url.lastPathComponent];
+                @"%@ validé.\nFEX est toujours en cours après 5 s.\n\nDiagnostic live :\n%@\n\nL’interface reste active : le guest semble bloqué dans l’exécution. Aucun arrêt forcé n’est tenté pour éviter de corrompre l’état du runtime.",
+                url.lastPathComponent, liveText];
             self.importButton.enabled = NO;
         }
     });
