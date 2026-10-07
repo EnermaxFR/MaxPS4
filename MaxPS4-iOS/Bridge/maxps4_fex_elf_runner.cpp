@@ -476,9 +476,40 @@ public:
         return true;
     }
     AetherPS4::Fex::EngineResult<bool> Invoke(Core::GuestCpu::HleCallFrame& frame) override {
-        std::lock_guard<std::recursive_mutex> invoke_lock(invoke_mutex);
         const uint64_t op = frame.operation;
         auto& gpr = frame.gpr;
+
+        // _umtx_op WAIT may sleep until another FEX guest thread performs WAKE.
+        // Do not retain the bridge-wide diagnostic lock across this syscall or
+        // the waking thread would be unable to enter Invoke().
+        if (op == 454) {
+            {
+                std::lock_guard<std::recursive_mutex> invoke_lock(invoke_mutex);
+                RecordSyscall(op);
+            }
+
+            const std::array<uint64_t, 6> umtx_args = {
+                gpr[FEXCore::X86State::REG_RDI],
+                gpr[FEXCore::X86State::REG_RSI],
+                gpr[FEXCore::X86State::REG_RDX],
+                gpr[FEXCore::X86State::REG_R10],
+                gpr[FEXCore::X86State::REG_R8],
+                gpr[FEXCore::X86State::REG_R9],
+            };
+            const auto umtx_result = kernel.Dispatch(op, umtx_args);
+            if (!umtx_result.handled) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, ENOSYS};
+            }
+            if (umtx_result.error != 0) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, umtx_result.error};
+            }
+            gpr[FEXCore::X86State::REG_RAX] = umtx_result.value;
+            return true;
+        }
+
+        std::lock_guard<std::recursive_mutex> invoke_lock(invoke_mutex);
         RecordSyscall(op);
 
         // First-stage MaxPS4Kernel syscall dispatcher. The kernel owns
