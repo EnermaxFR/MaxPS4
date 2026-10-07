@@ -77,6 +77,19 @@ struct MaxPS4GuestMemory {
         regions[index].permissions = permissions
     }
 
+    /// Remove an entire guest region and release its simulated allocation.
+    /// Partial unmapping is intentionally unsupported in this prototype.
+    mutating func unmap(at address: UInt64, size: Int) throws {
+        guard size > 0,
+              let index = regionIndex(at: address, count: size),
+              regions[index].base == address,
+              regions[index].bytes.count == size else {
+            throw MemoryError.outOfBounds
+        }
+        allocatedBytes -= regions[index].bytes.count
+        regions.remove(at: index)
+    }
+
     func fetchInstructionBytes(at address: UInt64, count: Int) throws -> Data {
         guard let index = regionIndex(at: address, count: count) else { throw MemoryError.outOfBounds }
         guard regions[index].permissions.contains(.execute) else { throw MemoryError.accessDenied }
@@ -113,6 +126,19 @@ struct MaxPS4GuestMemory {
                 return false
             } catch MemoryError.accessDenied {}
             guard try memory.fetchInstructionBytes(at: 0x1010, count: 3) == Data([0x50, 0x53, 0x34]) else { return false }
+            // Unmapping makes guest addresses inaccessible and frees the budget.
+            try memory.unmap(at: 0x1000, size: 4096)
+            guard memory.allocatedBytes == 0 else { return false }
+            do {
+                _ = try memory.read(at: 0x1010, count: 1)
+                return false
+            } catch MemoryError.outOfBounds {}
+            try memory.mapZeroFilled(at: 0x1000, size: 4096)
+            guard try memory.read(at: 0x1010, count: 1) == Data([0]) else { return false }
+            do {
+                try memory.unmap(at: 0x1000, size: 100)
+                return false
+            } catch MemoryError.outOfBounds {}
             return true
         } catch {
             return false
