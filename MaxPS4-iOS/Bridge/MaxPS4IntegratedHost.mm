@@ -5,6 +5,7 @@
 
 @interface MaxPS4IntegratedViewController : UIViewController <UIDocumentPickerDelegate>
 @property(nonatomic, strong) UILabel *statusLabel;
+@property(nonatomic, strong) UILabel *guestOutputLabel;
 @property(nonatomic, strong) UILabel *stateValueLabel;
 @property(nonatomic, strong) UILabel *fileValueLabel;
 @property(nonatomic, strong) UIButton *testButton;
@@ -141,6 +142,26 @@
         [detailStack.bottomAnchor constraintEqualToAnchor:detailsCard.bottomAnchor constant:-16.0],
     ]];
 
+    UILabel *outputTitle = [[UILabel alloc] init];
+    outputTitle.text = @"Sortie du programme";
+    outputTitle.textColor = UIColor.whiteColor;
+    outputTitle.font = [UIFont systemFontOfSize:18.0 weight:UIFontWeightBold];
+
+    UIView *outputCard = [self cardView];
+    self.guestOutputLabel = [[UILabel alloc] init];
+    self.guestOutputLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    self.guestOutputLabel.numberOfLines = 0;
+    self.guestOutputLabel.text = @"Aucune sortie pour le moment.";
+    self.guestOutputLabel.font = [UIFont monospacedSystemFontOfSize:14.0 weight:UIFontWeightRegular];
+    self.guestOutputLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.90];
+    [outputCard addSubview:self.guestOutputLabel];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.guestOutputLabel.leadingAnchor constraintEqualToAnchor:outputCard.leadingAnchor constant:16.0],
+        [self.guestOutputLabel.trailingAnchor constraintEqualToAnchor:outputCard.trailingAnchor constant:-16.0],
+        [self.guestOutputLabel.topAnchor constraintEqualToAnchor:outputCard.topAnchor constant:16.0],
+        [self.guestOutputLabel.bottomAnchor constraintEqualToAnchor:outputCard.bottomAnchor constant:-16.0],
+    ]];
+
     UILabel *diagnosticTitle = [[UILabel alloc] init];
     diagnosticTitle.text = @"Diagnostic live";
     diagnosticTitle.textColor = UIColor.whiteColor;
@@ -187,6 +208,8 @@
         self.importButton,
         self.testButton,
         detailsCard,
+        outputTitle,
+        outputCard,
         diagnosticTitle,
         diagnosticCard,
         legal
@@ -382,8 +405,12 @@
         }
 
         char liveBuf[4096] = {};
+        char outputBuf[4096] = {};
         maxps4_backend_live_diagnostic(liveBuf, sizeof(liveBuf));
+        maxps4_backend_live_output(outputBuf, sizeof(outputBuf));
         NSString *live = [NSString stringWithUTF8String:liveBuf] ?: @"aucun diagnostic live";
+        NSString *guestOutput = [NSString stringWithUTF8String:outputBuf] ?: @"";
+        self.guestOutputLabel.text = guestOutput.length ? guestOutput : @"En attente de sortie…";
         NSTimeInterval elapsed = self.bootStartedAt ? -[self.bootStartedAt timeIntervalSinceNow] : 0;
 
         self.stateValueLabel.text = [NSString stringWithFormat:@"FEX • %.0f s", elapsed];
@@ -450,6 +477,7 @@
     self.importButton.enabled = NO;
     self.testButton.enabled = NO;
     self.stateValueLabel.text = @"Validation OK";
+    self.guestOutputLabel.text = @"En attente de sortie…";
 
     [self setDiagnostic:[NSString stringWithFormat:
         @"Fichier sélectionné : %@\nTaille : %llu octets\nValidation : %@\n\nHandoff loader → FEX en cours…",
@@ -474,6 +502,11 @@
             self.testButton.enabled = YES;
 
             NSTimeInterval elapsed = self.bootStartedAt ? -[self.bootStartedAt timeIntervalSinceNow] : 0;
+
+            char finalOutputBuf[4096] = {};
+            maxps4_backend_live_output(finalOutputBuf, sizeof(finalOutputBuf));
+            NSString *finalOutput = [NSString stringWithUTF8String:finalOutputBuf] ?: @"";
+            self.guestOutputLabel.text = finalOutput.length ? finalOutput : @"Aucune sortie produite.";
 
             if (booted) {
                 self.stateValueLabel.text = @"Terminé";
