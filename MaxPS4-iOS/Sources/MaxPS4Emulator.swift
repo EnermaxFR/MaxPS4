@@ -154,7 +154,7 @@ final class MaxPS4Emulator: ObservableObject {
             try cpu.run([0x90, 0x90, 0xC3])
             status = "Trace CPU : \(cpu.executedInstructions) instructions • RIP \(cpu.rip) • offsets \(cpu.recentInstructionOffsets)"
         } catch {
-            status = "Erreur trace CPU : \(error)"
+            status = "Erreur trace CPU : \(error.localizedDescription)"
         }
     }
 
