@@ -18,6 +18,8 @@ extern "C" bool maxps4_fex_get_guest_render_state(MaxPS4GuestRenderState* out);
 extern "C" bool maxps4_fex_get_guest_frame(MaxPS4GuestFrame* out);
 extern "C" bool maxps4_fex_get_guest_scene_frame(MaxPS4GuestSceneFrame* out);
 extern "C" bool maxps4_fex_get_guest_texture(MaxPS4GuestTexture* out);
+extern "C" bool maxps4_fex_get_guest_texture_at(unsigned int slot,
+                                                 MaxPS4GuestTexture* out);
 #endif
 
 static char g_backend_diagnostic[256] =
@@ -114,6 +116,16 @@ bool maxps4_backend_guest_texture(MaxPS4GuestTexture *out) {
     if (!out) return false;
 #if defined(MAXPS4_HAS_SHADPS4_FEX)
     return maxps4_fex_get_guest_texture(out);
+#else
+    *out = {};
+    return false;
+#endif
+}
+
+bool maxps4_backend_guest_texture_at(unsigned int slot, MaxPS4GuestTexture *out) {
+    if (!out || slot >= MAXPS4_GUEST_TEXTURE_MAX_RESOURCES) return false;
+#if defined(MAXPS4_HAS_SHADPS4_FEX)
+    return maxps4_fex_get_guest_texture_at(slot, out);
 #else
     *out = {};
     return false;
