@@ -43,6 +43,11 @@ final class MaxPS4Emulator: ObservableObject {
         }
 
         let isPKG = name.hasSuffix(".pkg")
+        // Prevent importing the same filename twice (case-insensitive).
+        if games.contains(where: { $0.fileName.caseInsensitiveCompare(url.lastPathComponent) == .orderedSame }) {
+            status = "Fichier déjà présent dans la bibliothèque : \(url.lastPathComponent)"
+            return
+        }
         // Identification only: PKG packages are not decrypted, extracted or launched.
         // ELF magic is a useful preliminary check, not proof of PS4 compatibility.
         guard let header = try? FileHandle(forReadingFrom: url) else {
@@ -86,9 +91,10 @@ final class MaxPS4Emulator: ObservableObject {
                 .replacingOccurrences(of: "_", with: " ")
                 .replacingOccurrences(of: "-", with: " ")
 
+            let displayName = isPKG && prettyName.uppercased().contains("SONICMANIA") ? "Sonic Mania" : prettyName
             let game = MaxPS4Game(
                 id: UUID(),
-                name: prettyName,
+                name: displayName,
                 fileName: destination.lastPathComponent,
                 localPath: destination.path,
                 importedAt: Date()
@@ -129,8 +135,9 @@ final class MaxPS4Emulator: ObservableObject {
                     }
                     return id
                 }
-                let titleID = validID?.split(separator: "-").first(where: { $0.hasPrefix("CUSA") }).map(String.init)
-                    ?? game.fileName.uppercased().components(separatedBy: CharacterSet(charactersIn: "-_")).first(where: { $0.hasPrefix("CUSA") })
+                let identifierSource = validID ?? game.fileName.uppercased()
+                let titleID = identifierSource.range(of: "CUSA[0-9]{5}", options: .regularExpression)
+                    .map { String(identifierSource[$0]) }
                 let title = game.fileName.uppercased().contains("SONICMANIA") ? "Sonic Mania (nom du fichier)" : game.name
                 status = "PKG PS4 reconnu • \(title) • taille : \(size)" +
                     (validID.map { " • Content ID : " + $0 } ?? " • Content ID indisponible") +
