@@ -44,6 +44,31 @@ typedef struct MaxPS4GuestRenderState {
 // Returns true after an x86-64 guest has submitted at least one private MaxPS4
 // render command. This is a legal smoke-test ABI, not a PS4 graphics API.
 bool maxps4_backend_guest_render_state(MaxPS4GuestRenderState *out);
+
+#define MAXPS4_GUEST_FRAME_MAX_RECTS 8
+
+typedef struct MaxPS4GuestRect {
+    float x;
+    float y;
+    float scale;
+    float red;
+    float green;
+    float blue;
+    float alpha;
+} MaxPS4GuestRect;
+
+typedef struct MaxPS4GuestFrame {
+    unsigned int sequence;
+    unsigned int rect_count;
+    float clear_red;
+    float clear_green;
+    float clear_blue;
+    float clear_alpha;
+    MaxPS4GuestRect rects[MAXPS4_GUEST_FRAME_MAX_RECTS];
+} MaxPS4GuestFrame;
+
+// Atomic guest frame snapshot produced by the private legal render queue ABI.
+bool maxps4_backend_guest_frame(MaxPS4GuestFrame *out);
 bool maxps4_backend_self_test(void);
 // Validates an imported PS4 SELF/ELF executable using the same structural
 // requirements as the locked shadPS4 loader before any runtime handoff.
