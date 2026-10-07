@@ -107,6 +107,7 @@ typedef struct MaxPS4GuestSceneFrame {
 bool maxps4_backend_guest_scene_frame(MaxPS4GuestSceneFrame *out);
 
 #define MAXPS4_GUEST_TEXTURE_MAX_BYTES 4096
+#define MAXPS4_GUEST_TEXTURE_MAX_RESOURCES 8
 
 typedef struct MaxPS4GuestTexture {
     unsigned int sequence;
@@ -119,6 +120,10 @@ typedef struct MaxPS4GuestTexture {
 
 // Latest guest-uploaded legal RGBA8 texture resource, if one exists.
 bool maxps4_backend_guest_texture(MaxPS4GuestTexture *out);
+
+// Bounded guest texture table. Each active slot contains one texture_id and its
+// latest RGBA8 snapshot. Inactive slots return false.
+bool maxps4_backend_guest_texture_at(unsigned int slot, MaxPS4GuestTexture *out);
 bool maxps4_backend_self_test(void);
 
 typedef enum MaxPS4ImportKind {
