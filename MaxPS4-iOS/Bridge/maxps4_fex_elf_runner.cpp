@@ -122,6 +122,13 @@ public:
             }
 
             last_syscall = op;
+            SetLiveDiag(std::string("missing HLE symbol • handle=") + std::to_string(handle) +
+                        " • symbol=" + (symbol.empty() ? "<unreadable>" : symbol) +
+                        " • out=0x" + Hex(out_addr) +
+                        " • dlsym=" + DlsymTrace() +
+                        (last_sysctl.empty() ? "" : " • sysctl=" + last_sysctl) +
+                        " • args=" + ArgTrace(frame) +
+                        " • trace=" + Trace());
             return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, ENOSYS};
         }
 
@@ -496,6 +503,7 @@ public:
             }
             last_sysctl = mib;
             SetLiveDiag(std::string("guest __sysctl • mib=") + mib +
+                        " • args=" + ArgTrace(frame) +
                         " • dlsym=" + DlsymTrace() +
                         " • trace=" + Trace());
             last_syscall = op;
@@ -513,6 +521,11 @@ public:
         }
 
         last_syscall = op;
+        SetLiveDiag(std::string("missing syscall/HLE • op=") + std::to_string(op) +
+                    " • args=" + ArgTrace(frame) +
+                    " • dlsym=" + DlsymTrace() +
+                    (last_sysctl.empty() ? "" : " • sysctl=" + last_sysctl) +
+                    " • trace=" + Trace());
         return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, ENOSYS};
     }
 
@@ -611,13 +624,23 @@ private:
     void RecordDlsym(uint64_t handle, const std::string& symbol) {
         std::string item = std::to_string(handle) + ":" +
                            (symbol.empty() ? "<unreadable>" : symbol);
-        if (dlsym_requests.size() == 8) dlsym_requests.erase(dlsym_requests.begin());
+        if (dlsym_requests.size() == 16) dlsym_requests.erase(dlsym_requests.begin());
         dlsym_requests.push_back(std::move(item));
     }
 
     void Capture(const char* data, size_t size) {
         const size_t remaining = output.size() < 1024 ? 1024 - output.size() : 0;
         if (remaining != 0 && data != nullptr) output.append(data, std::min(size, remaining));
+    }
+
+    std::string ArgTrace(const Core::GuestCpu::HleCallFrame& frame) const {
+        const auto& gpr = frame.gpr;
+        return std::string("rdi=0x") + Hex(static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDI])) +
+               ",rsi=0x" + Hex(static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RSI])) +
+               ",rdx=0x" + Hex(static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDX])) +
+               ",r10=0x" + Hex(static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_R10])) +
+               ",r8=0x" + Hex(static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_R8])) +
+               ",r9=0x" + Hex(static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_R9]));
     }
 
     void RecordSyscall(uint64_t op) {
@@ -649,7 +672,7 @@ private:
     bool exit_requested{};
     int exit_code{};
     std::string output;
-    std::array<uint64_t, 12> trace{};
+    std::array<uint64_t, 24> trace{};
     size_t trace_count{};
 };} // namespace
 
