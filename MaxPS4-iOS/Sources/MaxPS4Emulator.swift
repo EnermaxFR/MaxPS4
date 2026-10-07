@@ -362,8 +362,14 @@ final class MaxPS4Emulator: ObservableObject {
                 let handle = try FileHandle(forReadingFrom: url)
                 defer { try? handle.close() }
                 let magic = try handle.read(upToCount: 4) ?? Data()
+                // SCE SELF is a container, not a directly executable ELF.
+                // Report this explicitly rather than treating it as a corrupt ELF.
+                if magic == Data([0x4F, 0x15, 0x3D, 0x1D]) {
+                    status = "Essai moteur : conteneur SELF PlayStation détecté • extraction et déchiffrement non implémentés • exécution indisponible"
+                    return
+                }
                 guard magic == Data([0x7F, 0x45, 0x4C, 0x46]) else {
-                    status = "Essai moteur : fichier non ELF64 standard • SELF PS4 non pris en charge"
+                    status = "Essai moteur : signature d'exécutable inconnue • ELF64 x86-64 ou SELF attendu"
                     return
                 }
                 let loaded = try MaxPS4ELFLoader.load(url: url)
