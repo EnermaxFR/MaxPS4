@@ -8,7 +8,7 @@
 @property(nonatomic, strong) UILabel *fileValueLabel;
 @property(nonatomic, strong) UIButton *testButton;
 @property(nonatomic, strong) UIButton *importButton;
-@property(nonatomic, strong) UIButton *copyButton;
+@property(nonatomic, strong) UIButton *diagnosticCopyButton;
 @property(nonatomic, strong) NSTimer *diagnosticTimer;
 @property(nonatomic, strong) NSDate *bootStartedAt;
 @property(nonatomic, strong) NSURL *selectedURL;
@@ -63,7 +63,7 @@
     dot.layer.shadowColor = dot.backgroundColor.CGColor;
     dot.layer.shadowRadius = 8.0;
     dot.layer.shadowOpacity = 0.8;
-    dot.layer.shadowOffset = CGSizeZero;
+    dot.layer.shadowOffset = CGSizeMake(0.0, 0.0);
 
     UILabel *backendTitle = [[UILabel alloc] init];
     backendTitle.text = @"Version intégrée chargée";
@@ -152,23 +152,23 @@
     self.statusLabel.font = [UIFont monospacedSystemFontOfSize:13.0 weight:UIFontWeightRegular];
     self.statusLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.76];
 
-    self.copyButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.copyButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.copyButton setTitle:@"Copier le diagnostic" forState:UIControlStateNormal];
-    [self.copyButton setTitleColor:[UIColor colorWithRed:0.30 green:0.75 blue:1.0 alpha:1.0] forState:UIControlStateNormal];
-    self.copyButton.titleLabel.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightSemibold];
-    [self.copyButton addTarget:self action:@selector(copyDiagnostic) forControlEvents:UIControlEventTouchUpInside];
+    self.diagnosticCopyButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    self.diagnosticCopyButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.diagnosticCopyButton setTitle:@"Copier le diagnostic" forState:UIControlStateNormal];
+    [self.diagnosticCopyButton setTitleColor:[UIColor colorWithRed:0.30 green:0.75 blue:1.0 alpha:1.0] forState:UIControlStateNormal];
+    self.diagnosticCopyButton.titleLabel.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightSemibold];
+    [self.diagnosticCopyButton addTarget:self action:@selector(copyDiagnostic) forControlEvents:UIControlEventTouchUpInside];
 
     [diagnosticCard addSubview:self.statusLabel];
-    [diagnosticCard addSubview:self.copyButton];
+    [diagnosticCard addSubview:self.diagnosticCopyButton];
 
     [NSLayoutConstraint activateConstraints:@[
         [self.statusLabel.leadingAnchor constraintEqualToAnchor:diagnosticCard.leadingAnchor constant:16.0],
         [self.statusLabel.trailingAnchor constraintEqualToAnchor:diagnosticCard.trailingAnchor constant:-16.0],
         [self.statusLabel.topAnchor constraintEqualToAnchor:diagnosticCard.topAnchor constant:16.0],
-        [self.copyButton.leadingAnchor constraintEqualToAnchor:diagnosticCard.leadingAnchor constant:16.0],
-        [self.copyButton.topAnchor constraintEqualToAnchor:self.statusLabel.bottomAnchor constant:12.0],
-        [self.copyButton.bottomAnchor constraintEqualToAnchor:diagnosticCard.bottomAnchor constant:-14.0],
+        [self.diagnosticCopyButton.leadingAnchor constraintEqualToAnchor:diagnosticCard.leadingAnchor constant:16.0],
+        [self.diagnosticCopyButton.topAnchor constraintEqualToAnchor:self.statusLabel.bottomAnchor constant:12.0],
+        [self.diagnosticCopyButton.bottomAnchor constraintEqualToAnchor:diagnosticCard.bottomAnchor constant:-14.0],
     ]];
 
     UILabel *legal = [[UILabel alloc] init];
@@ -307,11 +307,11 @@
 
 - (void)copyDiagnostic {
     UIPasteboard.generalPasteboard.string = self.lastDiagnostic ?: self.statusLabel.text ?: @"";
-    NSString *oldTitle = self.copyButton.currentTitle;
-    [self.copyButton setTitle:@"Copié ✓" forState:UIControlStateNormal];
+    NSString *oldTitle = self.diagnosticCopyButton.currentTitle;
+    [self.diagnosticCopyButton setTitle:@"Copié ✓" forState:UIControlStateNormal];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
-        [self.copyButton setTitle:oldTitle ?: @"Copier le diagnostic" forState:UIControlStateNormal];
+        [self.diagnosticCopyButton setTitle:oldTitle ?: @"Copier le diagnostic" forState:UIControlStateNormal];
     });
 }
 
