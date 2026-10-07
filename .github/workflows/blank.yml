@@ -675,6 +675,103 @@ jobs:
           grep -n "maxps4-fex-guest-probe" "$SRC/CMakeLists.txt"
           grep -n "MaxPS4BreakGetJITMapping" "$SRC/FEXCore/Source/Utils/Allocator.cpp"
 
+
+      - name: Patch FEX bridge for immediate guest exit
+        shell: bash
+        run: |
+          set -euo pipefail
+          ENGINE="$GITHUB_WORKSPACE/build/aether-reference/src/core/fex/fex_guest_engine.cpp"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("build/aether-reference/src/core/fex/fex_guest_engine.cpp")
+          s = p.read_text()
+
+          old_ctor = """  explicit BridgeSyscallHandler(GuestBridge& bridge)
+    : Bridge {bridge} {
+    OSABI = FEXCore::HLE::SyscallOSABI::OS_GENERIC;
+  }
+"""
+          new_ctor = """  explicit BridgeSyscallHandler(GuestBridge& bridge, uintptr_t exitTrampoline)
+    : Bridge {bridge}
+    , ExitTrampoline {exitTrampoline} {
+    OSABI = FEXCore::HLE::SyscallOSABI::OS_GENERIC;
+  }
+"""
+          if old_ctor not in s:
+              raise SystemExit("BridgeSyscallHandler constructor anchor missing")
+          s = s.replace(old_ctor, new_ctor, 1)
+
+          old_error = """    if (const auto* error = std::get_if<EngineFailure>(&result)) {
+      invocation->Failure = *error;
+      frame->State.gregs[FEXCore::X86State::REG_RAX] = static_cast<uint64_t>(-error->Error);
+      // Still try to deliver if kill arrived while blocked in host HLE.
+      FlushPendingOrbisSignal();
+      g_threads_in_hle_syscall.fetch_sub(1, std::memory_order_acq_rel);
+      return frame->State.gregs[FEXCore::X86State::REG_RAX];
+    }
+"""
+          new_error = """    if (const auto* error = std::get_if<EngineFailure>(&result)) {
+      // MaxPS4 uses ECANCELED only as an intentional guest/thread-exit signal.
+      // SYSCALL is block-ending in FEX and reloads CPUState.rip after HLE, so
+      // redirect directly to the engine's existing HLT return trampoline.
+      // This avoids waiting for the generic failure path to unwind on iOS.
+      if (error->Error == ECANCELED && ExitTrampoline != 0) {
+        frame->State.rip = ExitTrampoline;
+        frame->State.gregs[FEXCore::X86State::REG_RAX] = 0;
+        invocation->Result = 0;
+        invocation->WasInvoked = true;
+        g_threads_in_hle_syscall.fetch_sub(1, std::memory_order_acq_rel);
+        return 0;
+      }
+
+      invocation->Failure = *error;
+      frame->State.gregs[FEXCore::X86State::REG_RAX] = static_cast<uint64_t>(-error->Error);
+      // Still try to deliver if kill arrived while blocked in host HLE.
+      FlushPendingOrbisSignal();
+      g_threads_in_hle_syscall.fetch_sub(1, std::memory_order_acq_rel);
+      return frame->State.gregs[FEXCore::X86State::REG_RAX];
+    }
+"""
+          if old_error not in s:
+              raise SystemExit("HandleSyscall error anchor missing")
+          s = s.replace(old_error, new_error, 1)
+
+          old_private = """  GuestBridge& Bridge;
+  std::mutex RangesMutex;
+"""
+          new_private = """  GuestBridge& Bridge;
+  uintptr_t ExitTrampoline {};
+  std::mutex RangesMutex;
+"""
+          if old_private not in s:
+              raise SystemExit("Bridge private member anchor missing")
+          s = s.replace(old_private, new_private, 1)
+
+          old_create = """  impl->Syscalls = std::make_unique<BridgeSyscallHandler>(impl->Bridge);
+  impl->Context->SetSignalDelegator(impl->SignalDelegator.get());
+"""
+          new_create = """#if defined(__APPLE__) && TARGET_OS_IPHONE
+  const auto exitTrampoline =
+      reinterpret_cast<std::uintptr_t>(impl->FunctionReturn->GetRX());
+#else
+  const auto exitTrampoline =
+      reinterpret_cast<std::uintptr_t>(impl->FunctionReturn->Get());
+#endif
+  impl->Syscalls =
+      std::make_unique<BridgeSyscallHandler>(impl->Bridge, exitTrampoline);
+  impl->Context->SetSignalDelegator(impl->SignalDelegator.get());
+"""
+          if old_create not in s:
+              raise SystemExit("BridgeSyscallHandler create anchor missing")
+          s = s.replace(old_create, new_create, 1)
+
+          p.write_text(s)
+          PY
+
+          grep -n "ExitTrampoline\|exitTrampoline\|error->Error == ECANCELED" "$ENGINE"
+
+
       - name: Install FEXCore Python configure dependencies
         shell: bash
         run: |
