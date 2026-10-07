@@ -271,6 +271,28 @@ struct MaxPS4CPUPrototype {
                 return false
             } catch MaxPS4GuestMemory.MemoryError.accessDenied {}
             guard try protectCPU.guestMemory.fetchInstructionBytes(at: 0xB000, count: 1) == Data([0]) else { return false }
+            // Simulated services must reject invalid sizes, overlap and double-free.
+            var invalidSizeCPU = Self()
+            do {
+                try invalidSizeCPU.run([
+                    0x48, 0xB9, 0x00, 0xD0, 0, 0, 0, 0, 0, 0,
+                    0x48, 0xBA, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0x48, 0xB8, 0x02, 0, 0, 0, 0, 0, 0, 0,
+                    0x0F, 0x05
+                ])
+                return false
+            } catch MaxPS4GuestMemory.MemoryError.invalidRange {}
+            guard invalidSizeCPU.guestMemory.allocatedBytes == 0 else { return false }
+            var doubleFreeCPU = Self()
+            do {
+                try doubleFreeCPU.run([
+                    0x48, 0xB9, 0x00, 0xE0, 0, 0, 0, 0, 0, 0,
+                    0x48, 0xBA, 0x00, 0x10, 0, 0, 0, 0, 0, 0,
+                    0x48, 0xB8, 0x03, 0, 0, 0, 0, 0, 0, 0,
+                    0x0F, 0x05
+                ])
+                return false
+            } catch MaxPS4GuestMemory.MemoryError.outOfBounds {}
             var invalidService = Self()
             do { try invalidService.run([0x48, 0xB8, 0x63, 0, 0, 0, 0, 0, 0, 0, 0x0F, 0x05]); return false }
             catch CPUError.unsupportedOpcode {}
