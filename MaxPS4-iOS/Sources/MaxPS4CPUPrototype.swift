@@ -19,6 +19,17 @@ struct MaxPS4CPUPrototype {
         }
     }
 
+    /// Private test ABI, unrelated to real PS4 kernel syscall numbers.
+    private enum SimulatedServices {
+        static func dispatch(number: UInt64, memory: MaxPS4GuestMemory) throws -> UInt64 {
+            switch number {
+            case 0: return 42 // deterministic health check
+            case 1: return UInt64(memory.allocatedBytes) // current guest allocation
+            default: throw CPUError.unsupportedOpcode
+            }
+        }
+    }
+
     // x86-64 register order: RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI.
     private(set) var registers = [UInt64](repeating: 0, count: 8)
     private(set) var rip = 0
@@ -76,10 +87,10 @@ struct MaxPS4CPUPrototype {
             } else if opcode == 0x0F { // Two-byte opcode: isolated synthetic SYSCALL
                 guard rip + 2 <= program.count else { throw CPUError.truncatedInstruction }
                 guard program[rip + 1] == 0x05 else { throw CPUError.unsupportedOpcode }
-                // MaxPS4 test ABI ONLY: service 0 returns a fixed test value.
-                // Never forwards a syscall to iOS, Linux, FreeBSD or a PS4 kernel.
-                guard registers[0] == 0 else { throw CPUError.unsupportedOpcode }
-                registers[0] = 42
+                // Isolated test services; never forwarded to the host OS.
+                registers[0] = try SimulatedServices.dispatch(
+                    number: registers[0], memory: guestMemory
+                )
                 rip += 2
             } else if opcode == 0x31 { // XOR r/m32, r32 (register-only)
                 guard rip + 2 <= program.count else { throw CPUError.truncatedInstruction }
@@ -211,6 +222,12 @@ struct MaxPS4CPUPrototype {
             var serviceCPU = Self()
             try serviceCPU.run([0x31, 0xC0, 0x0F, 0x05, 0xC3])
             guard serviceCPU.rax == 42, serviceCPU.executedInstructions == 3 else { return false }
+            var memoryServiceCPU = Self()
+            try memoryServiceCPU.prepareGuestMemory(address: 0x9000, size: 4096)
+            try memoryServiceCPU.run([0x48, 0xB8, 0x01, 0, 0, 0, 0, 0, 0, 0,
+                                      0x0F, 0x05, 0xC3])
+            guard memoryServiceCPU.rax == 4096,
+                  memoryServiceCPU.executedInstructions == 3 else { return false }
             var invalidService = Self()
             do { try invalidService.run([0x48, 0xB8, 0x01, 0, 0, 0, 0, 0, 0, 0, 0x0F, 0x05]); return false }
             catch CPUError.unsupportedOpcode {}
