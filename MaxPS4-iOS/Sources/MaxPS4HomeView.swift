@@ -222,6 +222,11 @@ struct MaxPS4HomeView: View {
                         Text("Date d’import : " + game.importedAt.formatted(date: .abbreviated, time: .shortened))
                         Text("Exécution PS4 indisponible")
                             .foregroundStyle(.orange)
+                        Button("Essayer le moteur (diagnostic)") {
+                            emulator.tryGameEngine(game)
+                            detailsReport = emulator.status
+                        }
+                        .buttonStyle(.borderedProminent)
                         Button("Analyser les métadonnées") {
                             emulator.inspect(game)
                             detailsReport = emulator.status
