@@ -8,6 +8,8 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <optional>
 #include <cerrno>
 #include <cstdint>
@@ -2000,6 +2002,24 @@ extern "C" void maxps4_fex_guest_run_live_output(char* out, size_t out_size) {
 }
 
 extern "C" int maxps4_fex_guest_run_elf(const char* path) {
+    using TimingClock = std::chrono::steady_clock;
+    const auto timing_start = TimingClock::now();
+    auto elapsed_ms = [](TimingClock::time_point begin,
+                         TimingClock::time_point end) -> long long {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   end - begin).count();
+    };
+
+    long long prep_ms = 0;
+    long long backend_create_ms = 0;
+    long long main_create_ms = 0;
+    long long main_run_ms = 0;
+    long long worker_join_ms = 0;
+    long long main_destroy_ms = 0;
+    std::atomic<long long> worker_create_ms{0};
+    std::atomic<long long> worker_run_ms{0};
+    std::atomic<long long> worker_destroy_ms{0};
+
     g_run_diag = "handoff start";
     SetLiveDiag("handoff start");
     SetLiveOutput("");
@@ -2225,7 +2245,11 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
         g_run_diag = "MaxPS4Kernel arena configure failed";
         return 42;
     }
+    prep_ms = elapsed_ms(timing_start, TimingClock::now());
+    const auto backend_create_begin = TimingClock::now();
     auto backendResult = Core::FexGuestCpuBackend::Create(bridge);
+    backend_create_ms =
+        elapsed_ms(backend_create_begin, TimingClock::now());
     if (const auto* failure = std::get_if<Core::GuestExecutionFailure>(&backendResult)) {
         char buf[160]; snprintf(buf, sizeof(buf), "FEX create failed stage=%d errno=%d",
                                 static_cast<int>(failure->Stage), failure->Error);
@@ -2278,7 +2302,11 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
                     worker_request.GsBase = 0;
 
                     int exit_code = 0;
+                    const auto worker_create_begin = TimingClock::now();
                     auto thread_result = backend->CreateThread(worker_request);
+                    worker_create_ms.fetch_add(
+                        elapsed_ms(worker_create_begin, TimingClock::now()),
+                        std::memory_order_relaxed);
                     if (const auto* failure =
                             std::get_if<Core::GuestExecutionFailure>(&thread_result)) {
                         exit_code = failure->Error ? failure->Error : EIO;
@@ -2287,7 +2315,11 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
                             std::get<std::unique_ptr<Core::FexGuestCpuBackend::Thread>>(
                                 thread_result));
 
+                        const auto worker_run_begin = TimingClock::now();
                         auto run_result = backend->Run(*guest_thread);
+                        worker_run_ms.fetch_add(
+                            elapsed_ms(worker_run_begin, TimingClock::now()),
+                            std::memory_order_relaxed);
                         if (const auto* failure =
                                 std::get_if<Core::GuestExecutionFailure>(&run_result)) {
                             int requested_code = 0;
@@ -2298,8 +2330,12 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
                             }
                         }
 
+                        const auto worker_destroy_begin = TimingClock::now();
                         const auto destroy_result =
                             backend->DestroyThread(guest_thread);
+                        worker_destroy_ms.fetch_add(
+                            elapsed_ms(worker_destroy_begin, TimingClock::now()),
+                            std::memory_order_relaxed);
                         if (const auto* failure =
                                 std::get_if<Core::GuestExecutionFailure>(
                                     &destroy_result)) {
@@ -2343,7 +2379,9 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
                       static_cast<unsigned long long>(stack_top));
         SetLiveDiag(live);
     }
+    const auto main_create_begin = TimingClock::now();
     auto main_thread_result = backend->CreateThread(request);
+    main_create_ms = elapsed_ms(main_create_begin, TimingClock::now());
     if (const auto* failure =
             std::get_if<Core::GuestExecutionFailure>(&main_thread_result)) {
         char buf[240];
@@ -2359,17 +2397,23 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
         std::get<std::unique_ptr<Core::FexGuestCpuBackend::Thread>>(
             main_thread_result));
 
+    const auto main_run_begin = TimingClock::now();
     auto result = backend->Run(*main_thread);
+    main_run_ms = elapsed_ms(main_run_begin, TimingClock::now());
 
     // FEX requires each guest Thread to be destroyed by the same host pthread
     // that created it. More importantly on iOS, do not tear down the main FEX
     // thread while a thr_new worker is still completing DestroyThread(): doing
     // both teardowns concurrently can stall the context for tens of seconds.
     SetLiveDiag("MaxPS4Kernel guest finished • joining worker FEX threads");
+    const auto worker_join_begin = TimingClock::now();
     join_worker_threads();
+    worker_join_ms = elapsed_ms(worker_join_begin, TimingClock::now());
 
     SetLiveDiag("MaxPS4Kernel workers joined • destroying main FEX thread");
+    const auto main_destroy_begin = TimingClock::now();
     const auto main_destroy_result = backend->DestroyThread(main_thread);
+    main_destroy_ms = elapsed_ms(main_destroy_begin, TimingClock::now());
     if (!std::holds_alternative<Core::GuestExecutionFailure>(result)) {
         if (const auto* destroy_failure =
                 std::get_if<Core::GuestExecutionFailure>(
@@ -2378,52 +2422,76 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
         }
     }
 
+    auto build_timing_summary = [&](char* out, size_t out_size) {
+        const long long total_ms =
+            elapsed_ms(timing_start, TimingClock::now());
+        std::snprintf(
+            out, out_size,
+            "timings ms: prep=%lld backend=%lld main-create=%lld "
+            "main-run=%lld worker-create=%lld worker-run=%lld "
+            "worker-destroy=%lld worker-join=%lld main-destroy=%lld total=%lld",
+            prep_ms, backend_create_ms, main_create_ms, main_run_ms,
+            worker_create_ms.load(std::memory_order_relaxed),
+            worker_run_ms.load(std::memory_order_relaxed),
+            worker_destroy_ms.load(std::memory_order_relaxed),
+            worker_join_ms, main_destroy_ms, total_ms);
+    };
+
     if (const auto* failure = std::get_if<Core::GuestExecutionFailure>(&result)) {
         if (bridge.ExitRequested()) {
-            char exitbuf[420];
+            char timing[640];
+            build_timing_summary(timing, sizeof(timing));
+            char exitbuf[1600];
             const auto& captured = bridge.Output();
             const auto trace = bridge.Trace();
             snprintf(exitbuf, sizeof(exitbuf),
-                     "FEX guest exited • code=%d%s%s%s%s • dlsym=%s",
+                     "FEX guest exited • code=%d%s%s%s%s • dlsym=%s • %s",
                      bridge.ExitCode(),
                      captured.empty() ? "" : " • output=",
                      captured.empty() ? "" : captured.c_str(),
                      trace.empty() ? "" : " • trace=",
                      trace.empty() ? "" : trace.c_str(),
-                     bridge.DlsymTrace().c_str());
+                     bridge.DlsymTrace().c_str(),
+                     timing);
             g_run_diag = exitbuf;
             SetLiveDiag(g_run_diag);
             return 0;
         }
-        char buf[420];
+        char timing[640];
+        build_timing_summary(timing, sizeof(timing));
+        char buf[1600];
         const auto& captured = bridge.Output();
         const auto trace = bridge.Trace();
         snprintf(buf, sizeof(buf),
-                 "FEX handoff reached guest • stopped stage=%d errno=%d syscall=%llu%s%s%s%s",
+                 "FEX handoff reached guest • stopped stage=%d errno=%d syscall=%llu%s%s%s%s • %s",
                  static_cast<int>(failure->Stage), failure->Error,
                  static_cast<unsigned long long>(bridge.LastSyscall()),
                  captured.empty() ? "" : " • output=",
                  captured.empty() ? "" : captured.c_str(),
                  trace.empty() ? "" : " • trace=",
-                 trace.empty() ? "" : trace.c_str());
+                 trace.empty() ? "" : trace.c_str(),
+                 timing);
         g_run_diag = buf;
         SetLiveDiag(g_run_diag);
         return 33;
     }
 
     const auto& state = std::get<Core::GuestExecutionState>(result);
-    char buf[420];
+    char timing[640];
+    build_timing_summary(timing, sizeof(timing));
+    char buf[1600];
     const auto& captured = bridge.Output();
     const auto trace = bridge.Trace();
     snprintf(buf, sizeof(buf),
-             "FEX guest executed • stop=%d first=0x%llx last=0x%llx%s%s%s%s",
+             "FEX guest executed • stop=%d first=0x%llx last=0x%llx%s%s%s%s • %s",
              static_cast<int>(state.StopReason),
              static_cast<unsigned long long>(state.FirstRip),
              static_cast<unsigned long long>(state.LastRip),
              captured.empty() ? "" : " • output=",
              captured.empty() ? "" : captured.c_str(),
              trace.empty() ? "" : " • trace=",
-             trace.empty() ? "" : trace.c_str());
+             trace.empty() ? "" : trace.c_str(),
+             timing);
     g_run_diag = buf;
     SetLiveDiag(g_run_diag);
     return 0;
