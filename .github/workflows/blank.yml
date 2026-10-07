@@ -26,6 +26,18 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-path
           swiftc --version
 
+      - name: Swift source typecheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          xcrun --sdk iphoneos swiftc \
+            -target arm64-apple-ios16.0 \
+            -sdk "$SDK" \
+            -parse-as-library \
+            -typecheck \
+            MaxPS4-iOS/Sources/*.swift
+
       - name: Build arm64 iOS executable
         shell: bash
         run: |
