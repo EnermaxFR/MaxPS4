@@ -156,6 +156,15 @@ public:
     bool SleepFor(int64_t seconds, int64_t nanoseconds, int& error) const;
     void YieldCurrentThread() const;
 
+    // FreeBSD/Orbis userspace synchronization. This first stage supports
+    // uncontended mutex ownership plus wait/wake compatibility without
+    // inventing parallel scheduling before FEX guest threads exist.
+    bool LegacyUmtxLock(uintptr_t address, int& error);
+    bool LegacyUmtxUnlock(uintptr_t address, int& error);
+    bool UmtxOperation(uintptr_t object, int operation, uint64_t value,
+                       uintptr_t uaddr, uintptr_t uaddr2,
+                       uint64_t& result_value, int& error);
+
     SyscallResult Dispatch(uint64_t syscall_number,
                            const std::array<uint64_t, 6>& args);
 
