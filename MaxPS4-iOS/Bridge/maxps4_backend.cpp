@@ -9,6 +9,7 @@ extern "C" const char* maxps4_fex_guest_last_error(void);
 extern "C" int maxps4_fex_guest_run_elf(const char* path);
 extern "C" const char* maxps4_fex_guest_run_last_error(void);
 extern "C" void maxps4_fex_guest_run_live_diagnostic(char* out, size_t out_size);
+extern "C" void maxps4_fex_guest_run_live_output(char* out, size_t out_size);
 #endif
 
 static char g_backend_diagnostic[256] =
@@ -44,6 +45,15 @@ void maxps4_backend_live_diagnostic(char *out, size_t out_size) {
     maxps4_fex_guest_run_live_diagnostic(out, out_size);
 #else
     std::snprintf(out, out_size, "%s", g_backend_diagnostic);
+#endif
+}
+
+void maxps4_backend_live_output(char *out, size_t out_size) {
+    if (!out || out_size == 0) return;
+#if defined(MAXPS4_HAS_SHADPS4_FEX)
+    maxps4_fex_guest_run_live_output(out, out_size);
+#else
+    out[0] = '\0';
 #endif
 }
 
