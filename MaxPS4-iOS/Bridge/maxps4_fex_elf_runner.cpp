@@ -487,22 +487,75 @@ public:
         if (op == 202) { // FreeBSD/Orbis __sysctl
             const auto name_addr = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDI]);
             const size_t namelen = static_cast<size_t>(gpr[FEXCore::X86State::REG_RSI]);
+            const auto oldp = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDX]);
+            const auto oldlenp = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_R10]);
+            const auto newp = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_R8]);
+            const size_t newlen = static_cast<size_t>(gpr[FEXCore::X86State::REG_R9]);
+
+            std::array<int, 8> mib_parts{};
+            const size_t count = std::min<size_t>(namelen, mib_parts.size());
             std::string mib;
-            const size_t count = std::min<size_t>(namelen, 8);
             if (count != 0 && IsReadable(name_addr, count * sizeof(int))) {
                 for (size_t i = 0; i < count; ++i) {
-                    int part = 0;
-                    std::memcpy(&part,
+                    std::memcpy(&mib_parts[i],
                                 reinterpret_cast<const void*>(name_addr + i * sizeof(int)),
-                                sizeof(part));
+                                sizeof(int));
                     if (!mib.empty()) mib += ".";
-                    mib += std::to_string(part);
+                    mib += std::to_string(mib_parts[i]);
                 }
             } else {
                 mib = "<unreadable>";
             }
             last_sysctl = mib;
-            SetLiveDiag(std::string("guest __sysctl • mib=") + mib +
+
+            // The pinned legal hello_stdio SDK seeds arc4random through
+            // CTL_KERN/KERN_ARND. Its FreeBSD 9.3 header uses 1.37, while the
+            // observed guest requests 1.38. Accept both for this compatibility path.
+            const bool kern_arnd =
+                count == 2 && mib_parts[0] == 1 &&
+                (mib_parts[1] == 37 || mib_parts[1] == 38) &&
+                newp == 0 && newlen == 0;
+
+            if (kern_arnd) {
+                if (oldlenp == 0 || !IsWritable(oldlenp, sizeof(size_t))) {
+                    return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+                }
+
+                size_t requested = 0;
+                std::memcpy(&requested, reinterpret_cast<const void*>(oldlenp), sizeof(requested));
+                if (oldp == 0) {
+                    const size_t available = 256;
+                    std::memcpy(reinterpret_cast<void*>(oldlenp), &available, sizeof(available));
+                    gpr[FEXCore::X86State::REG_RAX] = 0;
+                    SetLiveDiag(std::string("guest __sysctl KERN_ARND size • mib=") + mib +
+                                " • size=256 • trace=" + Trace());
+                    return true;
+                }
+                if (!IsWritable(oldp, requested)) {
+                    return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+                }
+
+                // Deterministic compatibility entropy for the open-source test payload.
+                // This is intentionally not exposed as cryptographic host randomness.
+                uint64_t state = 0x4d61785053344a49ULL ^ static_cast<uint64_t>(oldp) ^
+                                 static_cast<uint64_t>(trace_count);
+                auto* bytes = reinterpret_cast<uint8_t*>(oldp);
+                for (size_t i = 0; i < requested; ++i) {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    bytes[i] = static_cast<uint8_t>(state >> 24);
+                }
+                std::memcpy(reinterpret_cast<void*>(oldlenp), &requested, sizeof(requested));
+                gpr[FEXCore::X86State::REG_RAX] = 0;
+                SetLiveDiag(std::string("guest __sysctl KERN_ARND • mib=") + mib +
+                            " • bytes=" + std::to_string(requested) +
+                            " • dlsym=" + DlsymTrace() +
+                            " • trace=" + Trace());
+                return true;
+            }
+
+            SetLiveDiag(std::string("guest __sysctl unsupported • mib=") + mib +
                         " • args=" + ArgTrace(frame) +
                         " • dlsym=" + DlsymTrace() +
                         " • trace=" + Trace());
