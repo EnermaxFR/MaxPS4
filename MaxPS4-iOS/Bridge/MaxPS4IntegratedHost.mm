@@ -1,17 +1,21 @@
 #import <UIKit/UIKit.h>
 #import <GameController/GameController.h>
 #import <Metal/Metal.h>
+#import <MetalKit/MetalKit.h>
 
 #include "maxps4_backend.h"
 #include "maxps4_core.h"
 
-@interface MaxPS4IntegratedViewController : UIViewController <UIDocumentPickerDelegate>
+@interface MaxPS4IntegratedViewController : UIViewController <UIDocumentPickerDelegate, MTKViewDelegate>
 @property(nonatomic, strong) UILabel *statusLabel;
 @property(nonatomic, strong) UILabel *guestOutputLabel;
 @property(nonatomic, strong) UILabel *stateValueLabel;
 @property(nonatomic, strong) UILabel *fileValueLabel;
 @property(nonatomic, strong) UILabel *controllerValueLabel;
 @property(nonatomic, strong) UILabel *metalValueLabel;
+@property(nonatomic, strong) UILabel *controllerInputLabel;
+@property(nonatomic, strong) MTKView *metalProbeView;
+@property(nonatomic, strong) id<MTLCommandQueue> metalCommandQueue;
 @property(nonatomic, strong) UIButton *testButton;
 @property(nonatomic, strong) UIButton *importButton;
 @property(nonatomic, strong) UIButton *diagnosticCopyButton;
@@ -131,8 +135,26 @@
     UIStackView *controllerRow = [self infoRowWithLeft:controllerLabel right:self.controllerValueLabel];
     UIStackView *metalRow = [self infoRowWithLeft:metalLabel right:self.metalValueLabel];
 
+    self.controllerInputLabel = [[UILabel alloc] init];
+    self.controllerInputLabel.numberOfLines = 0;
+    self.controllerInputLabel.text = @"Entrées manette : en attente";
+    self.controllerInputLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.58];
+    self.controllerInputLabel.font = [UIFont monospacedSystemFontOfSize:12.0 weight:UIFontWeightRegular];
+
+    id<MTLDevice> probeDevice = MTLCreateSystemDefaultDevice();
+    self.metalProbeView = [[MTKView alloc] initWithFrame:CGRectZero device:probeDevice];
+    self.metalProbeView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.metalProbeView.delegate = self;
+    self.metalProbeView.paused = YES;
+    self.metalProbeView.enableSetNeedsDisplay = YES;
+    self.metalProbeView.clearColor = MTLClearColorMake(0.02, 0.24, 0.72, 1.0);
+    self.metalProbeView.layer.cornerRadius = 14.0;
+    self.metalProbeView.layer.masksToBounds = YES;
+    self.metalCommandQueue = [probeDevice newCommandQueue];
+    [self.metalProbeView.heightAnchor constraintEqualToConstant:86.0].active = YES;
+
     UIStackView *ioStack = [[UIStackView alloc] initWithArrangedSubviews:@[
-        ioTitle, controllerRow, metalRow
+        ioTitle, controllerRow, metalRow, self.controllerInputLabel, self.metalProbeView
     ]];
     ioStack.translatesAutoresizingMaskIntoConstraints = NO;
     ioStack.axis = UILayoutConstraintAxisVertical;
@@ -256,6 +278,7 @@
     [content addSubview:stack];
 
     [self refreshHardwareStatus];
+    [self.metalProbeView setNeedsDisplay];
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(controllerDidChange:)
                                                  name:GCControllerDidConnectNotification
@@ -289,19 +312,82 @@
     [self refreshHardwareStatus];
 }
 
+- (void)publishControllerState:(GCController *)controller {
+    GCExtendedGamepad *pad = controller.extendedGamepad;
+    if (!pad) {
+        maxps4_backend_set_controller_state(0, 0, 0, 0, 0, 0, 0);
+        self.controllerInputLabel.text = @"Entrées manette : profil étendu indisponible";
+        return;
+    }
+
+    unsigned int buttons = 0;
+    if (pad.buttonA.pressed) buttons |= 1u << 0;
+    if (pad.buttonB.pressed) buttons |= 1u << 1;
+    if (pad.buttonX.pressed) buttons |= 1u << 2;
+    if (pad.buttonY.pressed) buttons |= 1u << 3;
+    if (pad.leftShoulder.pressed) buttons |= 1u << 4;
+    if (pad.rightShoulder.pressed) buttons |= 1u << 5;
+    if (pad.dpad.up.pressed) buttons |= 1u << 6;
+    if (pad.dpad.down.pressed) buttons |= 1u << 7;
+    if (pad.dpad.left.pressed) buttons |= 1u << 8;
+    if (pad.dpad.right.pressed) buttons |= 1u << 9;
+    if (pad.buttonMenu.pressed) buttons |= 1u << 10;
+
+    const float lx = pad.leftThumbstick.xAxis.value;
+    const float ly = pad.leftThumbstick.yAxis.value;
+    const float rx = pad.rightThumbstick.xAxis.value;
+    const float ry = pad.rightThumbstick.yAxis.value;
+    const float l2 = pad.leftTrigger.value;
+    const float r2 = pad.rightTrigger.value;
+
+    maxps4_backend_set_controller_state(buttons, lx, ly, rx, ry, l2, r2);
+    self.controllerInputLabel.text =
+        [NSString stringWithFormat:@"Guest input • btn=0x%03X • L %.2f/%.2f • R %.2f/%.2f • LT %.2f RT %.2f",
+                                   buttons, lx, ly, rx, ry, l2, r2];
+}
+
 - (void)refreshHardwareStatus {
-    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    id<MTLDevice> device = self.metalProbeView.device ?: MTLCreateSystemDefaultDevice();
     self.metalValueLabel.text = device ? [NSString stringWithFormat:@"Disponible • %@", device.name ?: @"GPU Apple"] : @"Indisponible";
 
     NSArray<GCController *> *controllers = GCController.controllers;
     if (controllers.count == 0) {
         self.controllerValueLabel.text = @"Aucune";
+        self.controllerInputLabel.text = @"Entrées manette : en attente";
+        maxps4_backend_set_controller_state(0, 0, 0, 0, 0, 0, 0);
         return;
     }
 
     GCController *controller = controllers.firstObject;
     NSString *name = controller.vendorName.length ? controller.vendorName : @"Manette connectée";
     self.controllerValueLabel.text = name;
+
+    __weak typeof(self) weakSelf = self;
+    controller.extendedGamepad.valueChangedHandler = ^(GCExtendedGamepad *gamepad, GCControllerElement *element) {
+        (void)gamepad;
+        (void)element;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf publishControllerState:controller];
+        });
+    };
+    [self publishControllerState:controller];
+}
+
+- (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {
+    (void)view;
+    (void)size;
+}
+
+- (void)drawInMTKView:(MTKView *)view {
+    MTLRenderPassDescriptor *pass = view.currentRenderPassDescriptor;
+    id<CAMetalDrawable> drawable = view.currentDrawable;
+    if (!pass || !drawable || !self.metalCommandQueue) return;
+
+    id<MTLCommandBuffer> commandBuffer = [self.metalCommandQueue commandBuffer];
+    id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:pass];
+    [encoder endEncoding];
+    [commandBuffer presentDrawable:drawable];
+    [commandBuffer commit];
 }
 
 - (NSAttributedString *)brandText {
