@@ -62,13 +62,22 @@ struct HostMapping {
 
 class HomebrewBridge final : public AetherPS4::Fex::GuestBridge {
 public:
+    bool ExitRequested() const { return exit_requested; }
+    int ExitCode() const { return exit_code; }
     AetherPS4::Fex::EngineResult<bool> Invoke(Core::GuestCpu::HleCallFrame& frame) override {
         const uint64_t op = frame.operation;
         auto& gpr = frame.gpr;
         RecordSyscall(op);
 
         // Small, non-proprietary compatibility shim used only by legal homebrew tests.
-        // FreeBSD/Orbis-style syscall numbers used here: read=3, write=4.
+        // FreeBSD/Orbis-style syscall numbers used here: exit=1, read=3, write=4.
+        if (op == 1) {
+            exit_requested = true;
+            exit_code = static_cast<int>(gpr[FEXCore::X86State::REG_RDI]);
+            SetLiveDiag(std::string("guest requested exit • code=") + std::to_string(exit_code) +
+                        " • trace=" + Trace());
+            return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, ECANCELED};
+        }
         // PS4-specific dynlib_dlsym=591 is diagnosed explicitly so the next
         // missing HLE symbol can be identified without guessing.
         if (op == 591) {
@@ -212,6 +221,8 @@ private:
     size_t stack_size{};
     uint64_t last_syscall{};
     bool stdin_sent{};
+    bool exit_requested{};
+    int exit_code{};
     std::string output;
     std::array<uint64_t, 12> trace{};
     size_t trace_count{};
@@ -403,6 +414,21 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     }
     auto result = backend->Run(request);
     if (const auto* failure = std::get_if<Core::GuestExecutionFailure>(&result)) {
+        if (bridge.ExitRequested()) {
+            char exitbuf[420];
+            const auto& captured = bridge.Output();
+            const auto trace = bridge.Trace();
+            snprintf(exitbuf, sizeof(exitbuf),
+                     "FEX guest exited • code=%d%s%s%s%s",
+                     bridge.ExitCode(),
+                     captured.empty() ? "" : " • output=",
+                     captured.empty() ? "" : captured.c_str(),
+                     trace.empty() ? "" : " • trace=",
+                     trace.empty() ? "" : trace.c_str());
+            g_run_diag = exitbuf;
+            SetLiveDiag(g_run_diag);
+            return 0;
+        }
         char buf[420];
         const auto& captured = bridge.Output();
         const auto trace = bridge.Trace();
