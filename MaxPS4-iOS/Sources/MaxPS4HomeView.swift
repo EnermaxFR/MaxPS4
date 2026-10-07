@@ -164,6 +164,17 @@ struct MaxPS4HomeView: View {
                             detailsReport = emulator.status
                         }
                         .buttonStyle(.borderedProminent)
+                        if game.fileName.lowercased().hasSuffix(".pkg") {
+                            Button("Calculer SHA-256 du PKG") {
+                                detailsReport = "Calcul de l’empreinte SHA-256 en cours…"
+                                Task {
+                                    detailsReport = await MaxPS4PKGHash.sha256(
+                                        url: URL(fileURLWithPath: game.localPath)
+                                    )
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                        }
                         if let report = detailsReport {
                             Text(report)
                                 .font(.subheadline)
