@@ -10,6 +10,10 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path);
 extern "C" const char* maxps4_fex_guest_run_last_error(void);
 extern "C" void maxps4_fex_guest_run_live_diagnostic(char* out, size_t out_size);
 extern "C" void maxps4_fex_guest_run_live_output(char* out, size_t out_size);
+extern "C" void maxps4_fex_set_controller_state(unsigned int buttons,
+                                                  float left_x, float left_y,
+                                                  float right_x, float right_y,
+                                                  float left_trigger, float right_trigger);
 #endif
 
 static char g_backend_diagnostic[256] =
@@ -54,6 +58,21 @@ void maxps4_backend_live_output(char *out, size_t out_size) {
     maxps4_fex_guest_run_live_output(out, out_size);
 #else
     out[0] = '\0';
+#endif
+}
+
+void maxps4_backend_set_controller_state(unsigned int buttons,
+                                         float left_x, float left_y,
+                                         float right_x, float right_y,
+                                         float left_trigger, float right_trigger) {
+#if defined(MAXPS4_HAS_SHADPS4_FEX)
+    maxps4_fex_set_controller_state(buttons, left_x, left_y,
+                                    right_x, right_y,
+                                    left_trigger, right_trigger);
+#else
+    (void)buttons; (void)left_x; (void)left_y;
+    (void)right_x; (void)right_y;
+    (void)left_trigger; (void)right_trigger;
 #endif
 }
 
