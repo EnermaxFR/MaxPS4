@@ -165,6 +165,22 @@ final class MaxPS4Emulator: ObservableObject {
                     status = "PKG PS4 : en-tête incomplet ou invalide"
                     return
                 }
+                // Big-endian header fields: distinguish the advertised PKG length
+                // from the actual number of bytes on disk, without reading payload data.
+                func bigEndian64(_ offset: Int) -> UInt64 {
+                    (0..<8).reduce(UInt64(0)) { value, i in
+                        (value << 8) | UInt64(header[offset + i])
+                    }
+                }
+                let declaredSize = bigEndian64(0x18)
+                let sizeCheck: String
+                if declaredSize == 0 {
+                    sizeCheck = "taille déclarée absente"
+                } else if declaredSize == UInt64(byteCount) {
+                    sizeCheck = "taille déclarée cohérente"
+                } else {
+                    sizeCheck = "taille déclarée différente du fichier (vérification recommandée)"
+                }
                 // PS4 PKG content_id is an ASCII field at 0x40 (36 bytes).
                 // Never parse encrypted contents or infer a version from arbitrary bytes.
                 let field = header.subdata(in: 0x40..<0x64)
@@ -185,6 +201,7 @@ final class MaxPS4Emulator: ObservableObject {
                     "Format : PKG PS4 (signature vérifiée)",
                     "Titre : " + title,
                     "Taille : " + size,
+                    "Contrôle en-tête : " + sizeCheck,
                     "Content ID : " + (validID ?? "indisponible"),
                     "Title ID : " + (titleID ?? "indisponible"),
                     "Version : non déterminée",
