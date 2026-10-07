@@ -340,6 +340,42 @@ final class MaxPS4Emulator: ObservableObject {
             : "Diagnostic : iPhone détecté • moteur shadPS4 non connecté"
     }
 
+    /// Read-only game launch preflight. This does not decrypt a PKG or execute PS4 code.
+    func tryGameEngine(_ game: MaxPS4Game) {
+        guard fileManager.fileExists(atPath: game.localPath) else {
+            status = "Essai moteur : fichier introuvable"
+            return
+        }
+        let name = game.fileName.lowercased()
+        let url = URL(fileURLWithPath: game.localPath)
+        do {
+            if name.hasSuffix(".pkg") {
+                let handle = try FileHandle(forReadingFrom: url)
+                defer { try? handle.close() }
+                let header = try handle.read(upToCount: 4) ?? Data()
+                guard header == Data([0x7F, 0x43, 0x4E, 0x54]) else {
+                    status = "Essai moteur : signature PKG invalide"
+                    return
+                }
+                status = "Essai moteur : PKG PS4 reconnu ✅ • extraction/déchiffrement absents • exécution impossible sans moteur PS4 natif"
+            } else if name.hasSuffix(".elf") || name == "eboot.bin" || name.hasSuffix(".self") {
+                let handle = try FileHandle(forReadingFrom: url)
+                defer { try? handle.close() }
+                let magic = try handle.read(upToCount: 4) ?? Data()
+                guard magic == Data([0x7F, 0x45, 0x4C, 0x46]) else {
+                    status = "Essai moteur : fichier non ELF64 standard • SELF PS4 non pris en charge"
+                    return
+                }
+                let loaded = try MaxPS4ELFLoader.load(url: url)
+                status = "Essai moteur : ELF64 analysé ✅ • \(loaded.segments) segments • entrée 0x\(String(loaded.entry, radix: 16)) • pas d'exécution de jeu PS4"
+            } else {
+                status = "Essai moteur : format non pris en charge"
+            }
+        } catch {
+            status = "Essai moteur impossible : \(error.localizedDescription)"
+        }
+    }
+
     func launch(_ game: MaxPS4Game) {
         guard fileManager.fileExists(atPath: game.localPath) else {
             status = "Fichier introuvable : \(game.fileName)"
