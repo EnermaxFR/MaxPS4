@@ -19,7 +19,9 @@ enum MaxPS4ELFLoader {
             (0..<width).reduce(UInt64(0)) { $0 | (UInt64(file[offset + $1]) << ($1 * 8)) }
         }
         guard file.count >= 64, Array(file.prefix(4)) == [0x7F, 0x45, 0x4C, 0x46],
-              file[4] == 2, file[5] == 1, number(18, 2) == 62 else {
+              file[4] == 2, file[5] == 1, file[6] == 1,
+              (number(16, 2) == 2 || number(16, 2) == 3),
+              number(18, 2) == 62, number(20, 4) == 1 else {
             throw LoaderError.invalid
         }
         let table = number(32, 8)
@@ -67,7 +69,10 @@ enum MaxPS4ELFLoader {
             for i in 0..<width { bytes[index + i] = UInt8(truncatingIfNeeded: value >> (i * 8)) }
         }
         bytes[0...5] = [0x7F, 0x45, 0x4C, 0x46, 2, 1]
+        bytes[6] = 1
+        put(2, at: 16, width: 2)
         put(62, at: 18, width: 2)
+        put(1, at: 20, width: 4)
         put(0x1000, at: 24, width: 8)
         put(64, at: 32, width: 8)
         put(56, at: 54, width: 2)
