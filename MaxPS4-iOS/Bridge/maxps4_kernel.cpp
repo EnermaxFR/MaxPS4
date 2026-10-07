@@ -55,6 +55,10 @@ void KernelState::Reset() {
     std::memcpy(process_.threads[0].name.data(), "main", 5);
     process_.thread_count = 1;
 
+    for (auto& descriptor : process_.descriptors) {
+        descriptor.fd = -1;
+    }
+
     process_.descriptors[0] =
         FileDescriptor{0, FileDescriptorKind::Stdin, true, false, -1, 0};
     process_.descriptors[1] =
