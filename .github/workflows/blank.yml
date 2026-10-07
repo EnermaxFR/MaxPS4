@@ -1193,6 +1193,17 @@ jobs:
           readelf -h build/legal-userspace/guest_textured_quad_userspace.elf
           readelf -lW build/legal-userspace/guest_textured_quad_userspace.elf
 
+          clang-18 -c MaxPS4-iOS/Tests/guest_texture_upload_userspace.S -o build/legal-userspace/guest_texture_upload_userspace.o
+          clang-18 -nostdlib -fuse-ld=lld-18 -pie \
+            -Wl,-e,_start \
+            -Wl,-z,max-page-size=16384 \
+            -Wl,-z,common-page-size=16384 \
+            build/legal-userspace/guest_texture_upload_userspace.o \
+            -o build/legal-userspace/guest_texture_upload_userspace.elf
+          file build/legal-userspace/guest_texture_upload_userspace.elf
+          readelf -h build/legal-userspace/guest_texture_upload_userspace.elf
+          readelf -lW build/legal-userspace/guest_texture_upload_userspace.elf
+
       - name: Package legal userspace FEX smoke test
         run: |
           set -euo pipefail
@@ -1205,6 +1216,7 @@ jobs:
           cp build/legal-userspace/guest_frame_queue_userspace.elf "$OUT/guest_frame_queue_userspace.elf"
           cp build/legal-userspace/guest_typed_scene_userspace.elf "$OUT/guest_typed_scene_userspace.elf"
           cp build/legal-userspace/guest_textured_quad_userspace.elf "$OUT/guest_textured_quad_userspace.elf"
+          cp build/legal-userspace/guest_texture_upload_userspace.elf "$OUT/guest_texture_upload_userspace.elf"
           cp MaxPS4-iOS/Tests/hello_stdio_userspace.S "$OUT/source-hello_stdio_userspace.S"
           cp MaxPS4-iOS/Tests/controller_snapshot_userspace.S "$OUT/source-controller_snapshot_userspace.S"
           cp MaxPS4-iOS/Tests/guest_metal_userspace.S "$OUT/source-guest_metal_userspace.S"
@@ -1212,6 +1224,7 @@ jobs:
           cp MaxPS4-iOS/Tests/guest_frame_queue_userspace.S "$OUT/source-guest_frame_queue_userspace.S"
           cp MaxPS4-iOS/Tests/guest_typed_scene_userspace.S "$OUT/source-guest_typed_scene_userspace.S"
           cp MaxPS4-iOS/Tests/guest_textured_quad_userspace.S "$OUT/source-guest_textured_quad_userspace.S"
+          cp MaxPS4-iOS/Tests/guest_texture_upload_userspace.S "$OUT/source-guest_texture_upload_userspace.S"
           cat > "$OUT/PROVENANCE.txt" <<'EOF'
           Purpose: legal/open-source userspace ELFs for validating MaxPS4's FEX userspace bridge.
           Sources:
@@ -1222,6 +1235,7 @@ jobs:
             - MaxPS4-iOS/Tests/guest_frame_queue_userspace.S
             - MaxPS4-iOS/Tests/guest_typed_scene_userspace.S
             - MaxPS4-iOS/Tests/guest_textured_quad_userspace.S
+            - MaxPS4-iOS/Tests/guest_texture_upload_userspace.S
           Architecture: x86-64 System V ELF
           Syscalls exercised:
             - write(4), read(3), exit(1)
@@ -1230,15 +1244,18 @@ jobs:
             - MaxPS4-private frame pacing pseudo-syscall 0x4d52
             - MaxPS4-private begin/rect/present frame queue pseudo-syscalls 0x4d53/0x4d54/0x4d55
             - MaxPS4-private typed scene begin/primitive/present pseudo-syscalls 0x4d56/0x4d57/0x4d58
+            - MaxPS4-private guest RGBA8 texture upload pseudo-syscall 0x4d59
+            - MaxPS4-private guest-textured primitive v2 pseudo-syscall 0x4d5a
           controller_snapshot_userspace.elf prints button mask, both stick axes, and both triggers.
           guest_metal_userspace.elf submits one square render command for the Metal view.
           guest_input_metal_loop_userspace.elf runs a paced ~10 second loop where the guest reads the controller and drives Metal position/color.
           guest_frame_queue_userspace.elf builds atomic frames with three rectangles; one is controller-driven.
           guest_typed_scene_userspace.elf validates typed rectangle/triangle primitives, transforms, controller input, and atomic present.
           guest_textured_quad_userspace.elf validates a procedurally generated checker texture on a controller-driven rotated quad.
+          guest_texture_upload_userspace.elf uploads legal RGBA8 pixels from guest memory and renders the resulting Metal texture.
           Contains no Sony game, firmware, keys, SDK, or proprietary PlayStation content.
           EOF
-          sha256sum "$OUT/hello_stdio_userspace.elf" "$OUT/controller_snapshot_userspace.elf" "$OUT/guest_metal_userspace.elf" "$OUT/guest_input_metal_loop_userspace.elf" "$OUT/guest_frame_queue_userspace.elf" "$OUT/guest_typed_scene_userspace.elf" "$OUT/guest_textured_quad_userspace.elf" > "$OUT/SHA256SUMS.txt"
+          sha256sum "$OUT/hello_stdio_userspace.elf" "$OUT/controller_snapshot_userspace.elf" "$OUT/guest_metal_userspace.elf" "$OUT/guest_input_metal_loop_userspace.elf" "$OUT/guest_frame_queue_userspace.elf" "$OUT/guest_typed_scene_userspace.elf" "$OUT/guest_textured_quad_userspace.elf" "$OUT/guest_texture_upload_userspace.elf" > "$OUT/SHA256SUMS.txt"
 
       - name: Upload legal userspace FEX smoke test
         uses: actions/upload-artifact@v4
