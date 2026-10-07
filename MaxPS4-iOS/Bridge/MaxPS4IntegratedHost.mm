@@ -150,8 +150,9 @@
     self.metalProbeView = [[MTKView alloc] initWithFrame:CGRectZero device:probeDevice];
     self.metalProbeView.translatesAutoresizingMaskIntoConstraints = NO;
     self.metalProbeView.delegate = self;
-    self.metalProbeView.paused = YES;
-    self.metalProbeView.enableSetNeedsDisplay = YES;
+    self.metalProbeView.paused = NO;
+    self.metalProbeView.enableSetNeedsDisplay = NO;
+    self.metalProbeView.preferredFramesPerSecond = 60;
     self.metalProbeView.clearColor = MTLClearColorMake(0.02, 0.24, 0.72, 1.0);
     self.metalProbeView.layer.cornerRadius = 14.0;
     self.metalProbeView.layer.masksToBounds = YES;
@@ -169,7 +170,7 @@
              "vertex VOut maxps4_probe_vertex(const device float2 *v [[buffer(0)]], uint id [[vertex_id]]) {\n"
              "  VOut o; o.position = float4(v[id], 0.0, 1.0); return o;\n"
              "}\n"
-             "fragment float4 maxps4_probe_fragment() { return float4(0.15, 0.95, 1.0, 1.0); }\n";
+             "fragment float4 maxps4_probe_fragment(constant float4 &color [[buffer(0)]]) { return color; }\n";
         NSError *libraryError = nil;
         id<MTLLibrary> library = [probeDevice newLibraryWithSource:shaderSource options:nil error:&libraryError];
         if (library) {
@@ -429,14 +430,28 @@
     id<CAMetalDrawable> drawable = view.currentDrawable;
     if (!pass || !drawable || !self.metalCommandQueue) return;
 
+    float cx = self.probeX;
+    float cy = self.probeY;
+    float scale = self.probeScale;
+    float color[4] = {0.15f, 0.95f, 1.0f, 1.0f};
+
+    MaxPS4GuestRenderState guest{};
+    if (maxps4_backend_guest_render_state(&guest)) {
+        cx = guest.x;
+        cy = guest.y;
+        scale = guest.scale;
+        color[0] = guest.red;
+        color[1] = guest.green;
+        color[2] = guest.blue;
+        color[3] = guest.alpha;
+    }
+
     id<MTLCommandBuffer> commandBuffer = [self.metalCommandQueue commandBuffer];
     id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:pass];
 
     if (self.metalProbePipeline) {
-        const float halfW = 0.15f * self.probeScale;
-        const float halfH = 0.28f * self.probeScale;
-        const float cx = self.probeX;
-        const float cy = self.probeY;
+        const float halfW = 0.15f * scale;
+        const float halfH = 0.28f * scale;
         const float vertices[8] = {
             cx - halfW, cy - halfH,
             cx + halfW, cy - halfH,
@@ -445,6 +460,7 @@
         };
         [encoder setRenderPipelineState:self.metalProbePipeline];
         [encoder setVertexBytes:vertices length:sizeof(vertices) atIndex:0];
+        [encoder setFragmentBytes:color length:sizeof(color) atIndex:0];
         [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
     }
 
