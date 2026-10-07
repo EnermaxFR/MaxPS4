@@ -19,6 +19,7 @@ struct MaxPS4HomeView: View {
     @State private var renamedGameTitle = ""
     @State private var inspectionReport: String?
     @State private var selectedGameDetails: MaxPS4Game?
+    @State private var detailsReport: String?
 
     @AppStorage("showFPS") private var showFPS = false
     @AppStorage("networkEnabled") private var networkEnabled = false
@@ -73,7 +74,7 @@ struct MaxPS4HomeView: View {
         } message: {
             Text(inspectionReport ?? "")
         }
-        .sheet(item: $selectedGameDetails) { game in
+        .sheet(item: $selectedGameDetails, onDismiss: { detailsReport = nil }) { game in
             NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
@@ -89,9 +90,17 @@ struct MaxPS4HomeView: View {
                             .foregroundStyle(.orange)
                         Button("Analyser les métadonnées") {
                             emulator.inspect(game)
-                            inspectionReport = emulator.status
+                            detailsReport = emulator.status
                         }
                         .buttonStyle(.borderedProminent)
+                        if let report = detailsReport {
+                            Text(report)
+                                .font(.subheadline)
+                                .textSelection(.enabled)
+                                .padding(16)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
@@ -100,7 +109,10 @@ struct MaxPS4HomeView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button("Fermer") { selectedGameDetails = nil }
+                        Button("Fermer") {
+                            selectedGameDetails = nil
+                            detailsReport = nil
+                        }
                     }
                 }
             }
