@@ -55,6 +55,40 @@ std::mutex g_guest_render_mutex;
 MaxPS4GuestRenderSnapshot g_guest_render_state;
 bool g_guest_render_active = false;
 
+struct MaxPS4GuestFrameBegin {
+    uint32_t sequence{};
+    float clear_red{};
+    float clear_green{};
+    float clear_blue{};
+    float clear_alpha{1.0f};
+};
+
+struct MaxPS4GuestRectSnapshot {
+    float x{};
+    float y{};
+    float scale{1.0f};
+    float red{1.0f};
+    float green{1.0f};
+    float blue{1.0f};
+    float alpha{1.0f};
+};
+
+struct MaxPS4GuestFrameSnapshot {
+    uint32_t sequence{};
+    uint32_t rect_count{};
+    float clear_red{};
+    float clear_green{};
+    float clear_blue{};
+    float clear_alpha{1.0f};
+    std::array<MaxPS4GuestRectSnapshot, MAXPS4_GUEST_FRAME_MAX_RECTS> rects{};
+};
+
+std::mutex g_guest_frame_mutex;
+MaxPS4GuestFrameSnapshot g_guest_frame_pending;
+MaxPS4GuestFrameSnapshot g_guest_frame_visible;
+bool g_guest_frame_pending_active = false;
+bool g_guest_frame_visible_active = false;
+
 void SetLiveDiag(const std::string& value) {
     std::lock_guard<std::mutex> lock(g_live_diag_mutex);
     g_live_diag = value;
@@ -90,6 +124,50 @@ bool GetGuestRenderState(MaxPS4GuestRenderSnapshot& out) {
     std::lock_guard<std::mutex> lock(g_guest_render_mutex);
     if (!g_guest_render_active) return false;
     out = g_guest_render_state;
+    return true;
+}
+
+void BeginGuestFrame(const MaxPS4GuestFrameBegin& begin) {
+    std::lock_guard<std::mutex> lock(g_guest_frame_mutex);
+    g_guest_frame_pending = {};
+    g_guest_frame_pending.sequence = begin.sequence;
+    g_guest_frame_pending.clear_red = std::clamp(begin.clear_red, 0.0f, 1.0f);
+    g_guest_frame_pending.clear_green = std::clamp(begin.clear_green, 0.0f, 1.0f);
+    g_guest_frame_pending.clear_blue = std::clamp(begin.clear_blue, 0.0f, 1.0f);
+    g_guest_frame_pending.clear_alpha = std::clamp(begin.clear_alpha, 0.0f, 1.0f);
+    g_guest_frame_pending_active = true;
+}
+
+bool AppendGuestRect(MaxPS4GuestRectSnapshot rect) {
+    std::lock_guard<std::mutex> lock(g_guest_frame_mutex);
+    if (!g_guest_frame_pending_active ||
+        g_guest_frame_pending.rect_count >= MAXPS4_GUEST_FRAME_MAX_RECTS) {
+        return false;
+    }
+    rect.x = std::clamp(rect.x, -0.95f, 0.95f);
+    rect.y = std::clamp(rect.y, -0.95f, 0.95f);
+    rect.scale = std::clamp(rect.scale, 0.10f, 1.80f);
+    rect.red = std::clamp(rect.red, 0.0f, 1.0f);
+    rect.green = std::clamp(rect.green, 0.0f, 1.0f);
+    rect.blue = std::clamp(rect.blue, 0.0f, 1.0f);
+    rect.alpha = std::clamp(rect.alpha, 0.0f, 1.0f);
+    g_guest_frame_pending.rects[g_guest_frame_pending.rect_count++] = rect;
+    return true;
+}
+
+bool PresentGuestFrame() {
+    std::lock_guard<std::mutex> lock(g_guest_frame_mutex);
+    if (!g_guest_frame_pending_active) return false;
+    g_guest_frame_visible = g_guest_frame_pending;
+    g_guest_frame_visible_active = true;
+    g_guest_frame_pending_active = false;
+    return true;
+}
+
+bool GetGuestFrame(MaxPS4GuestFrameSnapshot& out) {
+    std::lock_guard<std::mutex> lock(g_guest_frame_mutex);
+    if (!g_guest_frame_visible_active) return false;
+    out = g_guest_frame_visible;
     return true;
 }
 
@@ -559,6 +637,53 @@ public:
             return true;
         }
 
+        // MaxPS4-private frame queue ABI for legal multi-primitive tests.
+        // 0x4d53 begins a frame, 0x4d54 appends a rectangle, 0x4d55 presents
+        // the complete frame atomically to the Metal frontend.
+        if (op == 0x4d53ULL) {
+            const auto src = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDI]);
+            const size_t size = static_cast<size_t>(gpr[FEXCore::X86State::REG_RSI]);
+            if (size < sizeof(MaxPS4GuestFrameBegin) ||
+                !IsReadable(src, sizeof(MaxPS4GuestFrameBegin))) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+            MaxPS4GuestFrameBegin begin{};
+            std::memcpy(&begin, reinterpret_cast<const void*>(src), sizeof(begin));
+            BeginGuestFrame(begin);
+            gpr[FEXCore::X86State::REG_RAX] = 0;
+            return true;
+        }
+
+        if (op == 0x4d54ULL) {
+            const auto src = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDI]);
+            const size_t size = static_cast<size_t>(gpr[FEXCore::X86State::REG_RSI]);
+            if (size < sizeof(MaxPS4GuestRectSnapshot) ||
+                !IsReadable(src, sizeof(MaxPS4GuestRectSnapshot))) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+            MaxPS4GuestRectSnapshot rect{};
+            std::memcpy(&rect, reinterpret_cast<const void*>(src), sizeof(rect));
+            if (!AppendGuestRect(rect)) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, ENOSPC};
+            }
+            gpr[FEXCore::X86State::REG_RAX] = 0;
+            return true;
+        }
+
+        if (op == 0x4d55ULL) {
+            if (!PresentGuestFrame()) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EINVAL};
+            }
+            gpr[FEXCore::X86State::REG_RAX] = 0;
+            SetLiveDiag(std::string("guest frame presented") +
+                        " • trace=" + Trace());
+            return true;
+        }
+
         // MaxPS4-private frame pacing ABI for legal realtime guest tests.
         // The guest supplies a microsecond delay; clamp it to a safe range so
         // one test cannot accidentally spin or sleep for an excessive period.
@@ -916,6 +1041,28 @@ extern "C" bool maxps4_fex_get_guest_render_state(MaxPS4GuestRenderState* out) {
     out->green = snapshot.green;
     out->blue = snapshot.blue;
     out->alpha = snapshot.alpha;
+    return true;
+}
+
+extern "C" bool maxps4_fex_get_guest_frame(MaxPS4GuestFrame* out) {
+    if (!out) return false;
+    MaxPS4GuestFrameSnapshot snapshot{};
+    if (!GetGuestFrame(snapshot)) return false;
+    out->sequence = snapshot.sequence;
+    out->rect_count = snapshot.rect_count;
+    out->clear_red = snapshot.clear_red;
+    out->clear_green = snapshot.clear_green;
+    out->clear_blue = snapshot.clear_blue;
+    out->clear_alpha = snapshot.clear_alpha;
+    for (uint32_t i = 0; i < snapshot.rect_count && i < MAXPS4_GUEST_FRAME_MAX_RECTS; ++i) {
+        out->rects[i].x = snapshot.rects[i].x;
+        out->rects[i].y = snapshot.rects[i].y;
+        out->rects[i].scale = snapshot.rects[i].scale;
+        out->rects[i].red = snapshot.rects[i].red;
+        out->rects[i].green = snapshot.rects[i].green;
+        out->rects[i].blue = snapshot.rects[i].blue;
+        out->rects[i].alpha = snapshot.rects[i].alpha;
+    }
     return true;
 }
 
