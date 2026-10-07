@@ -15,6 +15,8 @@ struct MaxPS4HomeView: View {
     @State private var importingGame = false
     @State private var gameSearch = ""
     @State private var gameFilter = 0
+    @State private var gameToRename: MaxPS4Game?
+    @State private var renamedGameTitle = ""
 
     @AppStorage("showFPS") private var showFPS = false
     @AppStorage("networkEnabled") private var networkEnabled = false
@@ -45,6 +47,21 @@ struct MaxPS4HomeView: View {
         .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) {
             tabBar
+        }
+        .alert("Renommer le jeu", isPresented: Binding(
+            get: { gameToRename != nil },
+            set: { if !$0 { gameToRename = nil } }
+        )) {
+            TextField("Nom du jeu", text: $renamedGameTitle)
+            Button("Annuler", role: .cancel) { gameToRename = nil }
+            Button("Enregistrer") {
+                if let game = gameToRename {
+                    emulator.rename(game, to: renamedGameTitle)
+                }
+                gameToRename = nil
+            }
+        } message: {
+            Text("Le fichier original ne sera pas renommé.")
         }
         .fileImporter(
             isPresented: $importingGame,
@@ -537,6 +554,12 @@ struct MaxPS4HomeView: View {
                 Spacer()
 
                 Menu {
+                    Button {
+                        renamedGameTitle = game.name
+                        gameToRename = game
+                    } label: {
+                        Label("Renommer", systemImage: "pencil")
+                    }
                     Button(role: .destructive) {
                         emulator.remove(game)
                     } label: {
