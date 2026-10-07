@@ -120,9 +120,10 @@ enum MaxPS4ELFLoader {
             let loaded = try load(url: url)
             var cpu = MaxPS4CPUPrototype()
             try cpu.runLoadedTest(memory: loaded.memory, entry: loaded.entry, length: program.count)
+            let writtenBytes = try cpu.guestMemory.read(at: 0x1028, count: 8)
             return loaded.segments == 1 && cpu.rax == 42 &&
                 cpu.executedInstructions == 3 &&
-                (try cpu.guestMemory.read(at: 0x1028, count: 8)) == Data([42, 0, 0, 0, 0, 0, 0, 0])
+                writtenBytes == Data([42, 0, 0, 0, 0, 0, 0, 0])
         } catch {
             return false
         }
