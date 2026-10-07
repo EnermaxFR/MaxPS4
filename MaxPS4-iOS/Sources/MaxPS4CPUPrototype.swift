@@ -208,10 +208,19 @@ struct MaxPS4CPUPrototype {
                 0x48, 0x83, 0xF8, 0,
                 0x74, 0x02, 0x0F, 0x0F, 0xC3
             ])
-            guard branchCPU.zeroFlag else { return false }
+            guard branchCPU.zeroFlag,
+                  branchCPU.executedInstructions == 4,
+                  branchCPU.recentInstructionOffsets == [0, 10, 14, 18] else {
+                return false
+            }
             var badBranch = Self()
             do { try badBranch.run([0xEB, 0x7F]); return false }
             catch CPUError.invalidBranch {}
+            var unallocatedStack = Self()
+            do {
+                try unallocatedStack.run([0x50])
+                return false
+            } catch MaxPS4GuestMemory.MemoryError.outOfBounds {}
             return true
         } catch { return false }
     }
