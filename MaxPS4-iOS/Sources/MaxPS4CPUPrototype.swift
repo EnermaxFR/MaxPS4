@@ -49,7 +49,7 @@ struct MaxPS4CPUPrototype {
     /// This is not an ELF/PS4 execution environment.
     mutating func runLoadedTest(memory: MaxPS4GuestMemory, entry: UInt64, length: Int) throws {
         guard length > 0, length <= 256 else { throw CPUError.instructionLimit }
-        let bytes = try memory.read(at: entry, count: length)
+        let bytes = try memory.fetchInstructionBytes(at: entry, count: length)
         guestMemory = memory
         rip = 0
         try run(Array(bytes), limit: 256)
