@@ -250,6 +250,28 @@ bool GetGuestScene(MaxPS4GuestSceneFrameSnapshot& out) {
     return true;
 }
 
+void ResetGuestGraphicsState() {
+    {
+        std::lock_guard<std::mutex> lock(g_guest_render_mutex);
+        g_guest_render_state = {};
+        g_guest_render_active = false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_guest_frame_mutex);
+        g_guest_frame_pending = {};
+        g_guest_frame_visible = {};
+        g_guest_frame_pending_active = false;
+        g_guest_frame_visible_active = false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_guest_scene_mutex);
+        g_guest_scene_pending = {};
+        g_guest_scene_visible = {};
+        g_guest_scene_pending_active = false;
+        g_guest_scene_visible_active = false;
+    }
+}
+
 static uint16_t U16(const uint8_t* p) {
     return static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
 }
@@ -1238,6 +1260,7 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     g_run_diag = "handoff start";
     SetLiveDiag("handoff start");
     SetLiveOutput("");
+    ResetGuestGraphicsState();
     if (!path) { g_run_diag = "ELF path missing"; return 20; }
 
     FILE* f = fopen(path, "rb");
