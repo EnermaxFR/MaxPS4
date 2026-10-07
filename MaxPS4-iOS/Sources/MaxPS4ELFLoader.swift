@@ -15,6 +15,7 @@ enum MaxPS4ELFLoader {
             throw LoaderError.invalid
         }
         let file = try Data(contentsOf: url, options: [.mappedIfSafe])
+        guard file.count >= 64, file.count <= 32 * 1024 * 1024 else { throw LoaderError.invalid }
         func number(_ offset: Int, _ width: Int) -> UInt64 {
             (0..<width).reduce(UInt64(0)) { $0 | (UInt64(file[offset + $1]) << ($1 * 8)) }
         }
