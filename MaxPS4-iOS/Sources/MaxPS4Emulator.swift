@@ -118,7 +118,7 @@ final class MaxPS4Emulator: ObservableObject {
                 let handle = try FileHandle(forReadingFrom: fileURL)
                 defer { try? handle.close() }
                 let header = try handle.read(upToCount: 128) ?? Data()
-                guard header.count >= 0x64,
+                guard byteCount >= 128, header.count >= 128,
                       Array(header.prefix(4)) == [0x7F, 0x43, 0x4E, 0x54] else {
                     status = "PKG PS4 : en-tête incomplet ou invalide"
                     return
@@ -139,10 +139,17 @@ final class MaxPS4Emulator: ObservableObject {
                 let titleID = identifierSource.range(of: "CUSA[0-9]{5}", options: .regularExpression)
                     .map { String(identifierSource[$0]) }
                 let title = game.fileName.uppercased().contains("SONICMANIA") ? "Sonic Mania (nom du fichier)" : game.name
-                status = "PKG PS4 reconnu • \(title) • taille : \(size)" +
-                    (validID.map { " • Content ID : " + $0 } ?? " • Content ID indisponible") +
-                    (titleID.map { " • Title ID : " + $0 } ?? "") +
-                    " • version non déterminée • exécution indisponible"
+                let report = [
+                    "Format : PKG PS4 (signature vérifiée)",
+                    "Titre : " + title,
+                    "Taille : " + size,
+                    "Content ID : " + (validID ?? "indisponible"),
+                    "Title ID : " + (titleID ?? "indisponible"),
+                    "Version : non déterminée",
+                    "Contenu : non extrait, non déchiffré",
+                    "Exécution PS4 : indisponible"
+                ]
+                status = report.joined(separator: "\n")
             } else {
                 status = try MaxPS4ELFInspector.inspect(url: URL(fileURLWithPath: game.localPath))
             }
