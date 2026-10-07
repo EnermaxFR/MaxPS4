@@ -122,6 +122,12 @@ jobs:
           unzip -Z1 build/MaxPS4-unsigned.ipa | grep -Fx 'Payload/MaxPS4.app/MaxPS4'
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' build/Payload/MaxPS4.app/Info.plist
           xcrun lipo -info build/Payload/MaxPS4.app/MaxPS4
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' build/Payload/MaxPS4.app/Info.plist | grep -Fx MaxPS4
+          /usr/libexec/PlistBuddy -c 'Print :CFBundlePackageType' build/Payload/MaxPS4.app/Info.plist | grep -Fx APPL
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' build/Payload/MaxPS4.app/Info.plist | grep -Fx com.enermaxfr.maxps4
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' build/Payload/MaxPS4.app/Info.plist | grep -Ex '[0-9]+'
+          xcrun lipo -archs build/Payload/MaxPS4.app/MaxPS4 | grep -w arm64
+
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
