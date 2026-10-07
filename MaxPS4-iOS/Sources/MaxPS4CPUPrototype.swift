@@ -21,10 +21,18 @@ struct MaxPS4CPUPrototype {
 
     /// Private test ABI, unrelated to real PS4 kernel syscall numbers.
     private enum SimulatedServices {
-        static func dispatch(number: UInt64, memory: MaxPS4GuestMemory) throws -> UInt64 {
+        static func dispatch(number: UInt64, address: UInt64, size: UInt64, memory: inout MaxPS4GuestMemory) throws -> UInt64 {
             switch number {
             case 0: return 42 // deterministic health check
             case 1: return UInt64(memory.allocatedBytes) // current guest allocation
+            case 2:
+                guard size > 0 && size <= UInt64(MaxPS4GuestMemory.maximumBytes) else { throw MaxPS4GuestMemory.MemoryError.invalidRange }
+                try memory.mapZeroFilled(at: address, size: Int(size))
+                return 0
+            case 3:
+                guard size > 0 && size <= UInt64(MaxPS4GuestMemory.maximumBytes) else { throw MaxPS4GuestMemory.MemoryError.invalidRange }
+                try memory.unmap(at: address, size: Int(size))
+                return 0
             default: throw CPUError.unsupportedOpcode
             }
         }
@@ -89,7 +97,7 @@ struct MaxPS4CPUPrototype {
                 guard program[rip + 1] == 0x05 else { throw CPUError.unsupportedOpcode }
                 // Isolated test services; never forwarded to the host OS.
                 registers[0] = try SimulatedServices.dispatch(
-                    number: registers[0], memory: guestMemory
+                    number: registers[0], address: registers[1], size: registers[2], memory: &guestMemory
                 )
                 rip += 2
             } else if opcode == 0x31 { // XOR r/m32, r32 (register-only)
