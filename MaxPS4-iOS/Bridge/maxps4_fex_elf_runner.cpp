@@ -21,6 +21,7 @@
 #include <unistd.h>
 #include <variant>
 #include <vector>
+#include <thread>
 
 namespace {
 thread_local std::string g_run_diag = "not run";
@@ -53,6 +54,25 @@ struct MaxPS4GuestTimezone {
     int32_t minutes_west{};
     int32_t dst_time{};
 };
+
+struct MaxPS4ThrParam {
+    uintptr_t start_func{};
+    uintptr_t arg{};
+    uintptr_t stack_base{};
+    uint64_t stack_size{};
+    uintptr_t tls_base{};
+    uint64_t tls_size{};
+    uintptr_t child_tid{};
+    uintptr_t parent_tid{};
+    int32_t flags{};
+    uint32_t padding{};
+    uintptr_t rtp{};
+    std::array<uintptr_t, 3> spare{};
+};
+static_assert(sizeof(MaxPS4ThrParam) == 104);
+
+thread_local bool g_maxps4_thread_exit_requested = false;
+thread_local int g_maxps4_thread_exit_code = 0;
 
 std::mutex g_controller_mutex;
 MaxPS4ControllerSnapshot g_controller_state;
@@ -429,11 +449,34 @@ struct HostMapping {
 
 class HomebrewBridge final : public AetherPS4::Fex::GuestBridge {
 public:
+    using SpawnThreadCallback =
+        std::function<int(uint32_t, const MaxPS4ThrParam&)>;
+
     HomebrewBridge() { kernel.Reset(); }
 
     bool ExitRequested() const { return exit_requested; }
     int ExitCode() const { return exit_code; }
+
+    void SetSpawnThreadCallback(SpawnThreadCallback callback) {
+        spawn_thread_callback = std::move(callback);
+    }
+
+    MaxPS4::Kernel::KernelState& Kernel() { return kernel; }
+
+    void ResetThreadExitState() {
+        g_maxps4_thread_exit_requested = false;
+        g_maxps4_thread_exit_code = 0;
+    }
+
+    bool ConsumeThreadExit(int& code) {
+        if (!g_maxps4_thread_exit_requested) return false;
+        code = g_maxps4_thread_exit_code;
+        g_maxps4_thread_exit_requested = false;
+        g_maxps4_thread_exit_code = 0;
+        return true;
+    }
     AetherPS4::Fex::EngineResult<bool> Invoke(Core::GuestCpu::HleCallFrame& frame) override {
+        std::lock_guard<std::recursive_mutex> invoke_lock(invoke_mutex);
         const uint64_t op = frame.operation;
         auto& gpr = frame.gpr;
         RecordSyscall(op);
@@ -465,6 +508,108 @@ public:
                     AetherPS4::Fex::EngineStage::Bridge, kernel_result.error};
             }
             gpr[FEXCore::X86State::REG_RAX] = kernel_result.value;
+            return true;
+        }
+
+        if (op == 431) { // FreeBSD thr_exit
+            g_maxps4_thread_exit_requested = true;
+            g_maxps4_thread_exit_code = 0;
+            SetLiveDiag(std::string("MaxPS4Kernel thr_exit • tid=") +
+                        std::to_string(kernel.CurrentTid()) +
+                        " • trace=" + Trace());
+            return AetherPS4::Fex::EngineFailure{
+                AetherPS4::Fex::EngineStage::Bridge, ECANCELED};
+        }
+
+        if (op == 455) { // FreeBSD thr_new
+            const auto param_addr =
+                static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDI]);
+            const size_t param_size =
+                static_cast<size_t>(gpr[FEXCore::X86State::REG_RSI]);
+
+            if (param_size < sizeof(MaxPS4ThrParam) ||
+                !IsReadable(param_addr, sizeof(MaxPS4ThrParam))) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EINVAL};
+            }
+
+            MaxPS4ThrParam param{};
+            std::memcpy(&param, reinterpret_cast<const void*>(param_addr),
+                        sizeof(param));
+
+            if (param.start_func == 0 || param.stack_base == 0 ||
+                param.stack_size < 16384 ||
+                param.stack_base > UINTPTR_MAX - param.stack_size) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EINVAL};
+            }
+
+            if (!kernel.ContainsMemory(param.stack_base,
+                                       static_cast<size_t>(param.stack_size),
+                                       MaxPS4::Kernel::MemoryWrite) ||
+                !IsWritable(param.stack_base,
+                            static_cast<size_t>(param.stack_size))) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+
+            if ((param.parent_tid != 0 &&
+                 !IsWritable(param.parent_tid, sizeof(int64_t))) ||
+                (param.child_tid != 0 &&
+                 !IsWritable(param.child_tid, sizeof(int64_t)))) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+
+            if ((param.flags & ~0x0003) != 0 || (param.flags & 0x0001) != 0) {
+                // THR_SUSPENDED is not supported until suspend/wake scheduling
+                // is wired; system-scope is accepted.
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, ENOTSUP};
+            }
+
+            int error = 0;
+            const uint32_t tid = kernel.CreateLogicalThread("thr_new", error);
+            if (tid == 0) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge,
+                    error ? error : EAGAIN};
+            }
+
+            const int64_t guest_tid = static_cast<int64_t>(tid);
+            if (param.parent_tid != 0) {
+                std::memcpy(reinterpret_cast<void*>(param.parent_tid),
+                            &guest_tid, sizeof(guest_tid));
+            }
+            if (param.child_tid != 0) {
+                std::memcpy(reinterpret_cast<void*>(param.child_tid),
+                            &guest_tid, sizeof(guest_tid));
+            }
+
+            if (!spawn_thread_callback) {
+                int complete_error = 0;
+                int ignored = 0;
+                kernel.CompleteLogicalThread(tid, ENOSYS, complete_error);
+                kernel.JoinLogicalThread(tid, ignored, complete_error);
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, ENOSYS};
+            }
+
+            const int spawn_error = spawn_thread_callback(tid, param);
+            if (spawn_error != 0) {
+                int complete_error = 0;
+                int ignored = 0;
+                kernel.CompleteLogicalThread(tid, spawn_error, complete_error);
+                kernel.JoinLogicalThread(tid, ignored, complete_error);
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, spawn_error};
+            }
+
+            SetLiveDiag(std::string("MaxPS4Kernel thr_new • tid=") +
+                        std::to_string(tid) +
+                        " • entry=0x" + Hex(param.start_func) +
+                        " • trace=" + Trace());
+            gpr[FEXCore::X86State::REG_RAX] = 0;
             return true;
         }
 
@@ -1671,6 +1816,8 @@ private:
     }
 
     MaxPS4::Kernel::KernelState kernel;
+    SpawnThreadCallback spawn_thread_callback;
+    std::recursive_mutex invoke_mutex;
     uintptr_t image_begin{};
     size_t image_size{};
     uintptr_t stack_begin{};
@@ -2066,6 +2213,94 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     request.MappedRanges.push_back({errno_buffer, errno_storage.size, false, true});
     request.MappedRanges.push_back({kernel_arena_begin, kernel_arena.size, true, true});
 
+    std::mutex worker_list_mutex;
+    std::vector<std::thread> worker_threads;
+
+    bridge.SetSpawnThreadCallback(
+        [&](uint32_t tid, const MaxPS4ThrParam& param) -> int {
+            try {
+                std::lock_guard<std::mutex> list_lock(worker_list_mutex);
+                worker_threads.emplace_back([&, tid, param]() {
+                    int bind_error = 0;
+                    if (!bridge.Kernel().BindCurrentThread(tid, bind_error)) {
+                        int complete_error = 0;
+                        bridge.Kernel().CompleteLogicalThread(
+                            tid, bind_error ? bind_error : ESRCH, complete_error);
+                        return;
+                    }
+
+                    bridge.ResetThreadExitState();
+
+                    Core::GuestExecutionRequest worker_request = request;
+                    worker_request.Rip = param.start_func;
+                    const uintptr_t stack_end =
+                        param.stack_base + static_cast<uintptr_t>(param.stack_size);
+                    worker_request.Rsp =
+                        (stack_end - 16) & ~static_cast<uintptr_t>(0xF);
+                    worker_request.Gpr.fill(0);
+                    worker_request.Gpr[FEXCore::X86State::REG_RDI] = param.arg;
+                    worker_request.Rflags = 1U << 1;
+                    worker_request.FsBase = param.tls_base;
+                    worker_request.GsBase = 0;
+
+                    int exit_code = 0;
+                    auto thread_result = backend->CreateThread(worker_request);
+                    if (const auto* failure =
+                            std::get_if<Core::GuestExecutionFailure>(&thread_result)) {
+                        exit_code = failure->Error ? failure->Error : EIO;
+                    } else {
+                        auto guest_thread = std::move(
+                            std::get<std::unique_ptr<Core::FexGuestCpuBackend::Thread>>(
+                                thread_result));
+
+                        auto run_result = backend->Run(*guest_thread);
+                        if (const auto* failure =
+                                std::get_if<Core::GuestExecutionFailure>(&run_result)) {
+                            int requested_code = 0;
+                            if (bridge.ConsumeThreadExit(requested_code)) {
+                                exit_code = requested_code;
+                            } else {
+                                exit_code = failure->Error ? failure->Error : EIO;
+                            }
+                        }
+
+                        const auto destroy_result =
+                            backend->DestroyThread(guest_thread);
+                        if (const auto* failure =
+                                std::get_if<Core::GuestExecutionFailure>(
+                                    &destroy_result)) {
+                            if (exit_code == 0) {
+                                exit_code =
+                                    failure->Error ? failure->Error : EIO;
+                            }
+                        }
+                    }
+
+                    int complete_error = 0;
+                    bridge.Kernel().CompleteLogicalThread(
+                        tid, exit_code, complete_error);
+                    bridge.Kernel().UnbindCurrentThread();
+                });
+            } catch (...) {
+                return EAGAIN;
+            }
+            return 0;
+        });
+
+    auto join_worker_threads = [&]() {
+        for (;;) {
+            std::vector<std::thread> batch;
+            {
+                std::lock_guard<std::mutex> list_lock(worker_list_mutex);
+                if (worker_threads.empty()) break;
+                batch.swap(worker_threads);
+            }
+            for (auto& worker : batch) {
+                if (worker.joinable()) worker.join();
+            }
+        }
+    };
+
     {
         char live[220];
         std::snprintf(live, sizeof(live),
@@ -2075,6 +2310,7 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
         SetLiveDiag(live);
     }
     auto result = backend->Run(request);
+    join_worker_threads();
     if (const auto* failure = std::get_if<Core::GuestExecutionFailure>(&result)) {
         if (bridge.ExitRequested()) {
             char exitbuf[420];
