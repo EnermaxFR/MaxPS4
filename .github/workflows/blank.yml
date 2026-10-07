@@ -26,6 +26,10 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-path
           swiftc --version
 
+      - name: Prepare diagnostics directory
+        shell: bash
+        run: mkdir -p build/diagnostics
+
       - name: Run CPU memory and ELF smoke tests
         shell: bash
         run: |
@@ -35,12 +39,8 @@ jobs:
             MaxPS4-iOS/Sources/MaxPS4CPUPrototype.swift \
             MaxPS4-iOS/Sources/MaxPS4ELFLoader.swift \
             MaxPS4-iOS/Tests/PrototypeSmokeTest.swift \
-            -o /tmp/maxps4-prototype-tests
-          /tmp/maxps4-prototype-tests
-
-      - name: Prepare diagnostics directory
-        shell: bash
-        run: mkdir -p build/diagnostics
+            -o /tmp/maxps4-prototype-tests 2>&1 | tee build/diagnostics/smoke-compile.log
+          /tmp/maxps4-prototype-tests 2>&1 | tee build/diagnostics/smoke-results.log
 
       - name: Swift source typecheck
         shell: bash
