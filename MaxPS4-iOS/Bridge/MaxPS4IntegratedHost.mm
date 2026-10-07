@@ -362,12 +362,12 @@
     NSString *name = controller.vendorName.length ? controller.vendorName : @"Manette connectée";
     self.controllerValueLabel.text = name;
 
-    __weak typeof(self) weakSelf = self;
+    __unsafe_unretained MaxPS4IntegratedViewController *unsafeSelf = self;
     controller.extendedGamepad.valueChangedHandler = ^(GCExtendedGamepad *gamepad, GCControllerElement *element) {
         (void)gamepad;
         (void)element;
         dispatch_async(dispatch_get_main_queue(), ^{
-            [weakSelf publishControllerState:controller];
+            [unsafeSelf publishControllerState:controller];
         });
     };
     [self publishControllerState:controller];
