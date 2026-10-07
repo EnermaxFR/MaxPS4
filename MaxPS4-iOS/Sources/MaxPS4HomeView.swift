@@ -133,11 +133,29 @@ struct MaxPS4HomeView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         Text(game.fileName.uppercased().contains("SONICMANIA") ? "Sonic Mania" : game.name)
                             .font(.largeTitle.bold())
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(LinearGradient(colors: [.blue, .purple, .black], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            VStack(spacing: 12) {
+                                Image(systemName: "gamecontroller.fill").font(.system(size: 48))
+                                Text(game.fileName.uppercased().contains("SONICMANIA") ? "SONIC MANIA" : game.name.uppercased())
+                                    .font(.title2.bold())
+                            }
+                            .foregroundStyle(.white)
+                        }
+                        .frame(height: 180)
                         Text(game.fileName)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                         Text(game.fileName.lowercased().hasSuffix(".pkg") ? "Format : PKG PS4" : "Format : ELF / SELF")
+                        if game.fileName.uppercased().contains("SONICMANIA") {
+                            Text("Identifiant PS4 observé : CUSA07023").foregroundStyle(.cyan)
+                        }
+                        if let attributes = try? FileManager.default.attributesOfItem(atPath: game.localPath),
+                           let value = attributes[.size] as? NSNumber {
+                            Text("Taille locale : " + ByteCountFormatter.string(fromByteCount: value.int64Value, countStyle: .file))
+                        }
                         Text("Date d’import : " + game.importedAt.formatted(date: .abbreviated, time: .shortened))
                         Text("Exécution PS4 indisponible")
                             .foregroundStyle(.orange)
