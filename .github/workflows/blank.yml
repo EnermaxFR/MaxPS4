@@ -859,6 +859,16 @@ jobs:
           rm -rf "$PAYLOAD/MaxPS4.app"
           cp -R "$APP" "$PAYLOAD/MaxPS4.app"
           mv "$PAYLOAD/MaxPS4.app/maxps4-integrated" "$PAYLOAD/MaxPS4.app/MaxPS4"
+
+          # Render the saved MaxPS4 icon design (original neon M, no controller)
+          # and generate legacy icon files for sideloaded iOS bundles.
+          ICON_SRC="$PAYLOAD/MaxPS4.app/MaxPS4Icon.png"
+          xcrun swift "$GITHUB_WORKSPACE/scripts/render_maxps4_icon.swift" "$ICON_SRC"
+          sips -z 120 120 "$ICON_SRC" --out "$PAYLOAD/MaxPS4.app/Icon60@2x.png" >/dev/null
+          sips -z 180 180 "$ICON_SRC" --out "$PAYLOAD/MaxPS4.app/Icon60@3x.png" >/dev/null
+          sips -z 152 152 "$ICON_SRC" --out "$PAYLOAD/MaxPS4.app/Icon76@2x.png" >/dev/null
+          sips -z 167 167 "$ICON_SRC" --out "$PAYLOAD/MaxPS4.app/Icon83.5@2x.png" >/dev/null
+
           cat > "$PAYLOAD/MaxPS4.app/Info.plist" <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -875,6 +885,17 @@ jobs:
             <key>LSRequiresIPhoneOS</key><true/>
             <key>MinimumOSVersion</key><string>17.4</string>
             <key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
+            <key>CFBundleIconFiles</key><array><string>Icon60</string></array>
+            <key>CFBundleIcons</key><dict>
+              <key>CFBundlePrimaryIcon</key><dict>
+                <key>CFBundleIconFiles</key><array><string>Icon60</string></array>
+              </dict>
+            </dict>
+            <key>CFBundleIcons~ipad</key><dict>
+              <key>CFBundlePrimaryIcon</key><dict>
+                <key>CFBundleIconFiles</key><array><string>Icon76</string><string>Icon83.5</string></array>
+              </dict>
+            </dict>
             <key>UILaunchScreen</key><dict/>
           </dict></plist>
           PLIST
