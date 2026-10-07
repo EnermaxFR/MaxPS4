@@ -75,6 +75,7 @@ bool maxps4_backend_guest_frame(MaxPS4GuestFrame *out);
 typedef enum MaxPS4GuestPrimitiveType {
     MAXPS4_GUEST_PRIMITIVE_RECT = 1,
     MAXPS4_GUEST_PRIMITIVE_TRIANGLE = 2,
+    MAXPS4_GUEST_PRIMITIVE_TEXTURED_QUAD = 3,
 } MaxPS4GuestPrimitiveType;
 
 typedef struct MaxPS4GuestPrimitive {
