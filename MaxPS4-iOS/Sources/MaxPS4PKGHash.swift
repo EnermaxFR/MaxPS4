@@ -3,6 +3,17 @@ import CryptoKit
 
 /// Read-only, streaming file fingerprint. This does not authenticate PS4 content.
 enum MaxPS4PKGHash {
+    static func digest(url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while true {
+            try Task.checkCancellation()
+            guard let chunk = try handle.read(upToCount: 1024 * 1024), !chunk.isEmpty else { break }
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
     static func sha256(url: URL) async -> String {
         await Task.detached(priority: .utility) {
             do {
