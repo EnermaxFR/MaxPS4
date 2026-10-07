@@ -2,6 +2,7 @@
 #include "core/fex/fex_guest_engine.h"
 #include "core/guest_cpu/fex_guest_cpu.h"
 #include "maxps4_backend.h"
+#include "maxps4_kernel.h"
 
 #include <FEXCore/Core/X86Enums.h>
 
@@ -413,6 +414,8 @@ struct HostMapping {
 
 class HomebrewBridge final : public AetherPS4::Fex::GuestBridge {
 public:
+    HomebrewBridge() { kernel.Reset(); }
+
     bool ExitRequested() const { return exit_requested; }
     int ExitCode() const { return exit_code; }
     AetherPS4::Fex::EngineResult<bool> Invoke(Core::GuestCpu::HleCallFrame& frame) override {
@@ -420,15 +423,39 @@ public:
         auto& gpr = frame.gpr;
         RecordSyscall(op);
 
-        // Small, non-proprietary compatibility shim used only by legal homebrew tests.
-        // FreeBSD/Orbis-style syscall numbers used here: exit=1, read=3, write=4.
-        if (op == 1) {
-            exit_requested = true;
-            exit_code = static_cast<int>(gpr[FEXCore::X86State::REG_RDI]);
-            SetLiveDiag(std::string("guest requested exit • code=") + std::to_string(exit_code) +
-                        " • trace=" + Trace());
-            return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, ECANCELED};
+        // First-stage MaxPS4Kernel syscall dispatcher. The kernel owns
+        // process/thread identity and exit semantics; richer I/O/sysctl/HLE
+        // paths remain in this bridge while they are migrated incrementally.
+        const std::array<uint64_t, 6> kernel_args = {
+            gpr[FEXCore::X86State::REG_RDI],
+            gpr[FEXCore::X86State::REG_RSI],
+            gpr[FEXCore::X86State::REG_RDX],
+            gpr[FEXCore::X86State::REG_R10],
+            gpr[FEXCore::X86State::REG_R8],
+            gpr[FEXCore::X86State::REG_R9],
+        };
+        const auto kernel_result = kernel.Dispatch(op, kernel_args);
+        if (kernel_result.handled) {
+            if (kernel_result.request_exit) {
+                exit_requested = true;
+                exit_code = kernel_result.exit_code;
+                SetLiveDiag(std::string("MaxPS4Kernel exit • code=") +
+                            std::to_string(exit_code) +
+                            " • trace=" + Trace());
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, ECANCELED};
+            }
+            if (kernel_result.error != 0) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, kernel_result.error};
+            }
+            gpr[FEXCore::X86State::REG_RAX] = kernel_result.value;
+            return true;
         }
+
+        // Small, non-proprietary compatibility shim used only by legal homebrew tests.
+        // FreeBSD/Orbis-style syscall numbers read=3 and write=4 are still
+        // migrated through the bridge for now.
         // PS4-specific dynlib_dlsym=591 is diagnosed explicitly so the next
         // missing HLE symbol can be identified without guessing.
         if (op == 591) {
@@ -1169,16 +1196,6 @@ public:
             return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, ENOSYS};
         }
 
-        // Harmless identity/query calls commonly reached by tiny libc startup paths.
-        if (op == 20) { // getpid
-            gpr[FEXCore::X86State::REG_RAX] = 1;
-            return true;
-        }
-        if (op == 24 || op == 25 || op == 43 || op == 47) { // getuid/geteuid/getegid/getgid
-            gpr[FEXCore::X86State::REG_RAX] = 0;
-            return true;
-        }
-
         last_syscall = op;
         SetLiveDiag(std::string("missing syscall/HLE • op=") + std::to_string(op) +
                     " • args=" + ArgTrace(frame) +
@@ -1188,10 +1205,27 @@ public:
         return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, ENOSYS};
     }
 
-    void SetImage(uintptr_t begin, size_t size) { image_begin = begin; image_size = size; }
-    void SetStack(uintptr_t begin, size_t size) { stack_begin = begin; stack_size = size; }
+    void SetImage(uintptr_t begin, size_t size) {
+        image_begin = begin;
+        image_size = size;
+        kernel.RegisterMemoryRegion(
+            begin, size,
+            MaxPS4::Kernel::MemoryRead | MaxPS4::Kernel::MemoryExecute);
+    }
+    void SetStack(uintptr_t begin, size_t size) {
+        stack_begin = begin;
+        stack_size = size;
+        kernel.RegisterMemoryRegion(
+            begin, size,
+            MaxPS4::Kernel::MemoryRead | MaxPS4::Kernel::MemoryWrite);
+    }
     void SetWritableRanges(std::vector<std::pair<uintptr_t, size_t>> ranges) {
         writable_ranges = std::move(ranges);
+        for (const auto& range : writable_ranges) {
+            kernel.RegisterMemoryRegion(
+                range.first, range.second,
+                MaxPS4::Kernel::MemoryRead | MaxPS4::Kernel::MemoryWrite);
+        }
     }
     void SetExitVeneer(uintptr_t address) { exit_veneer = address; }
     void SetSnprintfVeneer(uintptr_t address) { snprintf_veneer = address; }
@@ -1201,10 +1235,16 @@ public:
     void SetErrnoBuffer(uintptr_t address, size_t size) {
         errno_buffer = address;
         errno_buffer_size = size;
+        kernel.RegisterMemoryRegion(
+            address, size,
+            MaxPS4::Kernel::MemoryRead | MaxPS4::Kernel::MemoryWrite);
     }
     void SetStrerrorBuffer(uintptr_t address, size_t size) {
         strerror_buffer = address;
         strerror_buffer_size = size;
+        kernel.RegisterMemoryRegion(
+            address, size,
+            MaxPS4::Kernel::MemoryRead | MaxPS4::Kernel::MemoryWrite);
     }
     uint64_t LastSyscall() const { return last_syscall; }
     const std::string& Output() const { return output; }
@@ -1320,6 +1360,7 @@ private:
                     (output.empty() ? "" : " • output=" + output));
     }
 
+    MaxPS4::Kernel::KernelState kernel;
     uintptr_t image_begin{};
     size_t image_size{};
     uintptr_t stack_begin{};
