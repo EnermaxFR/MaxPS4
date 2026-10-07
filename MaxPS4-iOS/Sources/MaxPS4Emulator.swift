@@ -69,6 +69,27 @@ final class MaxPS4Emulator: ObservableObject {
         }
     }
 
+    func rename(_ game: MaxPS4Game, to proposedName: String) {
+        let name = proposedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            status = "Le nom du jeu ne peut pas être vide"
+            return
+        }
+        guard let index = games.firstIndex(where: { $0.id == game.id }) else { return }
+        let previous = games[index]
+        games[index] = MaxPS4Game(
+            id: previous.id, name: name, fileName: previous.fileName,
+            localPath: previous.localPath, importedAt: previous.importedAt
+        )
+        do {
+            try saveLibrary()
+            status = "Jeu renommé : \\(name)"
+        } catch {
+            games[index] = previous
+            status = "Renommage impossible : \\(error.localizedDescription)"
+        }
+    }
+
     func remove(_ game: MaxPS4Game) {
         do {
             if fileManager.fileExists(atPath: game.localPath) {
