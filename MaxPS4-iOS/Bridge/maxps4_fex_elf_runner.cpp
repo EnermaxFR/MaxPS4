@@ -471,7 +471,11 @@ public:
             return true;
         }
 
-        if (op == 0x100000006ULL) {
+        // MaxPS4-private controller snapshot ABI.
+        // 0x100000006 is the internal HLE operation; 0x4d50 ("MP") is the
+        // legal userspace smoke-test pseudo-syscall so an x86-64 guest can
+        // prove that buttons/sticks/triggers cross the FEX boundary.
+        if (op == 0x100000006ULL || op == 0x4d50ULL) {
             const auto dst = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDI]);
             const size_t capacity = static_cast<size_t>(gpr[FEXCore::X86State::REG_RSI]);
             const auto snapshot = GetControllerState();
@@ -481,7 +485,12 @@ public:
             std::memcpy(reinterpret_cast<void*>(dst), &snapshot, sizeof(snapshot));
             gpr[FEXCore::X86State::REG_RAX] = 0;
             SetLiveDiag(std::string("guest controller snapshot • buttons=0x") +
-                        Hex(snapshot.buttons) + " • trace=" + Trace());
+                        Hex(snapshot.buttons) +
+                        " • L=" + std::to_string(snapshot.left_x) + "/" + std::to_string(snapshot.left_y) +
+                        " • R=" + std::to_string(snapshot.right_x) + "/" + std::to_string(snapshot.right_y) +
+                        " • LT=" + std::to_string(snapshot.left_trigger) +
+                        " • RT=" + std::to_string(snapshot.right_trigger) +
+                        " • trace=" + Trace());
             return true;
         }
 
