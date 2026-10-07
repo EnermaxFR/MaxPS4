@@ -14,6 +14,24 @@ struct MaxPS4CPUPrototype {
     private(set) var rip = 0
     private(set) var zeroFlag = false
     var rax: UInt64 { registers[0] }
+    private(set) var guestMemory = MaxPS4GuestMemory()
+
+    mutating func prepareGuestMemory(address: UInt64, size: Int) throws {
+        try guestMemory.mapZeroFilled(at: address, size: size)
+    }
+
+    mutating func storeRAX(address: UInt64) throws {
+        let bytes = Data((0..<8).map { UInt8(truncatingIfNeeded: rax >> ($0 * 8)) })
+        try guestMemory.write(bytes, at: address)
+    }
+
+    mutating func loadRAX(address: UInt64) throws {
+        let bytes = try guestMemory.read(at: address, count: 8)
+        registers[0] = (0..<8).reduce(UInt64(0)) { result, index in
+            result | (UInt64(bytes[index]) << (index * 8))
+        }
+    }
+
 
     mutating func run(_ program: [UInt8], limit: Int = 256) throws {
         var steps = 0
