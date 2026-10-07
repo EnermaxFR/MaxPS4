@@ -142,7 +142,7 @@ bool maxps4_backend_self_test(void) {
 
 bool maxps4_backend_validate_executable(const char *path) {
     MaxPS4ExecutableInfo info{};
-    char loader_diagnostic[192]{};
+    char loader_diagnostic[256]{};
     const bool ok = maxps4_ps4_loader_validate(path, &info, loader_diagnostic,
                                                 sizeof(loader_diagnostic));
     std::snprintf(g_backend_diagnostic, sizeof(g_backend_diagnostic),
@@ -150,8 +150,44 @@ bool maxps4_backend_validate_executable(const char *path) {
     return ok;
 }
 
+MaxPS4ImportKind maxps4_backend_import_kind(const char *path) {
+    MaxPS4ExecutableInfo info{};
+    char loader_diagnostic[256]{};
+    if (!maxps4_ps4_loader_validate(path, &info, loader_diagnostic,
+                                     sizeof(loader_diagnostic))) {
+        std::snprintf(g_backend_diagnostic, sizeof(g_backend_diagnostic),
+                      "%s", loader_diagnostic);
+        return MAXPS4_IMPORT_INVALID;
+    }
+    std::snprintf(g_backend_diagnostic, sizeof(g_backend_diagnostic),
+                  "%s", loader_diagnostic);
+    return info.kind == MAXPS4_EXEC_PKG
+        ? MAXPS4_IMPORT_PKG
+        : MAXPS4_IMPORT_EXECUTABLE;
+}
+
+bool maxps4_backend_extract_plain_pkg_executable(const char *pkg_path,
+                                                 const char *output_path) {
+    char loader_diagnostic[256]{};
+    const bool ok = maxps4_ps4_loader_extract_plain_pkg_executable(
+        pkg_path, output_path, loader_diagnostic, sizeof(loader_diagnostic));
+    std::snprintf(g_backend_diagnostic, sizeof(g_backend_diagnostic),
+                  "%s", loader_diagnostic);
+    return ok;
+}
+
 bool maxps4_backend_boot(const char *path) {
-    if (!maxps4_backend_validate_executable(path)) {
+    MaxPS4ExecutableInfo info{};
+    char loader_diagnostic[256]{};
+    if (!maxps4_ps4_loader_validate(path, &info, loader_diagnostic,
+                                     sizeof(loader_diagnostic))) {
+        std::snprintf(g_backend_diagnostic, sizeof(g_backend_diagnostic),
+                      "%s", loader_diagnostic);
+        return false;
+    }
+    if (info.kind == MAXPS4_EXEC_PKG) {
+        std::snprintf(g_backend_diagnostic, sizeof(g_backend_diagnostic),
+                      "PKG reconnu mais non executable directement. Extrais d'abord un ELF/SELF homebrew lisible.");
         return false;
     }
 #if defined(MAXPS4_HAS_SHADPS4_FEX)
