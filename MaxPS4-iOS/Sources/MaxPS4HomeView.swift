@@ -7,11 +7,52 @@ private enum MaxPS4Section: Hashable {
     case settings
 }
 
+private enum MaxPS4LibraryCategory: String, CaseIterable, Identifiable {
+    case all = "Tous"
+    case favorites = "Favoris"
+    case recent = "Récents"
+    case homebrew = "Homebrew"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .all: return "square.grid.2x2.fill"
+        case .favorites: return "heart.fill"
+        case .recent: return "clock.fill"
+        case .homebrew: return "hammer.fill"
+        }
+    }
+
+    var emptyTitle: String {
+        switch self {
+        case .all: return "Bibliothèque prête"
+        case .favorites: return "Aucun favori"
+        case .recent: return "Aucun jeu récent"
+        case .homebrew: return "Aucun homebrew"
+        }
+    }
+
+    var emptySubtitle: String {
+        switch self {
+        case .all:
+            return "Importe un exécutable PS4 autorisé pour commencer."
+        case .favorites:
+            return "Les jeux marqués comme favoris seront regroupés ici."
+        case .recent:
+            return "Les derniers jeux utilisés seront regroupés ici."
+        case .homebrew:
+            return "Les applications et homebrews PS4 pourront être regroupés ici."
+        }
+    }
+}
+
 struct MaxPS4HomeView: View {
     @EnvironmentObject private var emulator: MaxPS4Emulator
 
     @State private var importingGame = false
     @State private var selectedSection: MaxPS4Section = .home
+    @State private var selectedLibraryCategory: MaxPS4LibraryCategory = .all
 
     var body: some View {
         ZStack {
@@ -125,15 +166,17 @@ struct MaxPS4HomeView: View {
                     }
                 }
 
+                libraryCategoryPicker
+
                 VStack(spacing: 14) {
-                    Image(systemName: "gamecontroller")
+                    Image(systemName: selectedLibraryCategory.icon)
                         .font(.system(size: 42))
                         .foregroundStyle(.white.opacity(0.55))
 
-                    Text("Bibliothèque prête")
+                    Text(selectedLibraryCategory.emptyTitle)
                         .font(.headline)
 
-                    Text("La version intégrée actuelle lance directement le fichier sélectionné. Cette nouvelle interface conserve ce fonctionnement sans modifier le backend.")
+                    Text(selectedLibraryCategory.emptySubtitle)
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.58))
                         .multilineTextAlignment(.center)
@@ -163,6 +206,47 @@ struct MaxPS4HomeView: View {
             }
             .padding(.horizontal, 20)
             .padding(.top, 12)
+        }
+    }
+
+    private var libraryCategoryPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(MaxPS4LibraryCategory.allCases) { category in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            selectedLibraryCategory = category
+                        }
+                    } label: {
+                        Label(category.rawValue, systemImage: category.icon)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(
+                                selectedLibraryCategory == category
+                                    ? Color.white
+                                    : Color.white.opacity(0.68)
+                            )
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(
+                                selectedLibraryCategory == category
+                                    ? Color.blue
+                                    : Color.white.opacity(0.055),
+                                in: Capsule()
+                            )
+                            .overlay(
+                                Capsule()
+                                    .stroke(
+                                        selectedLibraryCategory == category
+                                            ? Color.cyan.opacity(0.75)
+                                            : Color.white.opacity(0.08),
+                                        lineWidth: 1
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 2)
         }
     }
 
