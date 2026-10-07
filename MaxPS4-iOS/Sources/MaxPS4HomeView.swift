@@ -103,10 +103,22 @@ struct MaxPS4HomeView: View {
                                 let message = await Task.detached(priority: .utility) { () -> String in
                                     var groups: [String: [String]] = [:]
                                     var errors: [String] = []
+                                    var details: [String] = []
                                     for game in files {
                                         do {
                                             let fingerprint = try MaxPS4PKGHash.digest(url: URL(fileURLWithPath: game.localPath))
                                             groups[fingerprint, default: []].append(game.fileName)
+                                            let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: game.localPath))
+                                            defer { try? handle.close() }
+                                            let header = try handle.read(upToCount: 128) ?? Data()
+                                            let length = (try? FileManager.default.attributesOfItem(atPath: game.localPath)[.size] as? NSNumber)?.int64Value ?? 0
+                                            var contentID = "indisponible"
+                                            if header.count >= 0x64 && Array(header.prefix(4)) == [0x7F, 0x43, 0x4E, 0x54] {
+                                                let field = header.subdata(in: 0x40..<0x64)
+                                                contentID = String(bytes: field.prefix(while: { $0 != 0 }), encoding: .ascii) ?? "indisponible"
+                                            }
+                                            let titleID = contentID.range(of: "CUSA[0-9]{5}", options: .regularExpression).map { String(contentID[$0]) } ?? "indisponible"
+                                            details.append(game.fileName + "\nTaille : " + String(length) + " octets\nContent ID : " + contentID + "\nTitle ID : " + titleID + "\nSHA-256 : " + fingerprint)
                                         } catch { errors.append(game.fileName + " : " + error.localizedDescription) }
                                     }
                                     let duplicates = groups.values.filter { $0.count > 1 }
@@ -115,7 +127,7 @@ struct MaxPS4HomeView: View {
                                         duplicates.map { "Copies identiques : " + $0.sorted().joined(separator: " / ") }.joined(separator: "\n")
                                     if files.count < 2 { message += "\nIl faut au moins deux PKG présents pour comparer des copies." }
                                     if !errors.isEmpty { message += "\nFichiers non comparés : " + errors.joined(separator: " / ") }
-                                    return message + "\nAucune suppression automatique."
+                                    return message + "\n\nDétails des fichiers :\n" + details.joined(separator: "\n\n") + "\nAucune suppression automatique."
                                 }.value
                                 comparisonReport = message
                                 comparingPKGs = false
