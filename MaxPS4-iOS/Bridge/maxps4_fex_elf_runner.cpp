@@ -95,6 +95,16 @@ public:
                         (last_sysctl.empty() ? "" : " • sysctl=" + last_sysctl) +
                         " • trace=" + Trace());
 
+            if (symbol == "_exit" && handle == 0x2001) {
+                // ps4-payload-dev's CRT probes handle 0x2001 to detect a hijacked
+                // host process. MaxPS4 is a standalone userspace guest, so this
+                // probe must fail and let the CRT fall back to handle 0x1.
+                SetLiveDiag(std::string("guest _exit host probe rejected • handle=8193") +
+                            " • dlsym=" + DlsymTrace() +
+                            " • trace=" + Trace());
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, ENOENT};
+            }
             if (symbol == "_exit" && exit_veneer != 0 && IsWritable(out_addr, sizeof(uintptr_t))) {
                 std::memcpy(reinterpret_cast<void*>(out_addr), &exit_veneer, sizeof(exit_veneer));
                 gpr[FEXCore::X86State::REG_RAX] = 0;
@@ -508,12 +518,24 @@ public:
             }
             last_sysctl = mib;
 
-            // The pinned legal hello_stdio SDK seeds arc4random through
-            // CTL_KERN/KERN_ARND. Its FreeBSD 9.3 header uses 1.37, while the
-            // observed guest requests 1.38. Accept both for this compatibility path.
+            // FreeBSD KERN_ARND is {1,37} in the pinned SDK headers.
+            // The SDK separately uses {1,38} for the PS4 firmware-version query.
+            const bool ps4_fw_version =
+                count == 2 && mib_parts[0] == 1 && mib_parts[1] == 38 &&
+                newp == 0 && newlen == 0;
+            if (ps4_fw_version) {
+                // ps4-payload-dev's CRT uses {1,38} for the real-console
+                // firmware version. There is no PS4 kernel on iOS, so report
+                // the query as unsupported instead of fabricating firmware.
+                SetLiveDiag(std::string("guest PS4 firmware sysctl unsupported • mib=") + mib +
+                            " • dlsym=" + DlsymTrace() +
+                            " • trace=" + Trace());
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, ENOSYS};
+            }
+
             const bool kern_arnd =
-                count == 2 && mib_parts[0] == 1 &&
-                (mib_parts[1] == 37 || mib_parts[1] == 38) &&
+                count == 2 && mib_parts[0] == 1 && mib_parts[1] == 37 &&
                 newp == 0 && newlen == 0;
 
             if (kern_arnd) {
