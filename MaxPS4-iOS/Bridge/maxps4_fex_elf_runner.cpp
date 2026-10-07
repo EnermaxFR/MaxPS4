@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <optional>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -105,6 +106,11 @@ public:
             }
             if (symbol == "strerror" && strerror_veneer != 0 && IsWritable(out_addr, sizeof(uintptr_t))) {
                 std::memcpy(reinterpret_cast<void*>(out_addr), &strerror_veneer, sizeof(strerror_veneer));
+                gpr[FEXCore::X86State::REG_RAX] = 0;
+                return true;
+            }
+            if (symbol == "vsnprintf" && vsnprintf_veneer != 0 && IsWritable(out_addr, sizeof(uintptr_t))) {
+                std::memcpy(reinterpret_cast<void*>(out_addr), &vsnprintf_veneer, sizeof(vsnprintf_veneer));
                 gpr[FEXCore::X86State::REG_RAX] = 0;
                 return true;
             }
@@ -253,6 +259,154 @@ public:
                         " • trace=" + Trace());
             return true;
         }
+        if (op == 0x100000004ULL) {
+            const auto dst = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDI]);
+            const size_t capacity = static_cast<size_t>(gpr[FEXCore::X86State::REG_RSI]);
+            const auto fmt_addr = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDX]);
+            const auto va_addr = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_R10]);
+            const std::string fmt = ReadCString(fmt_addr, 512);
+
+            if (capacity != 0 && !IsWritable(dst, capacity)) {
+                return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+            if ((fmt.empty() && !IsReadable(fmt_addr, 1)) || !IsReadable(va_addr, 24)) {
+                return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+
+            struct GuestVaList {
+                uint32_t gp_offset;
+                uint32_t fp_offset;
+                uint64_t overflow_arg_area;
+                uint64_t reg_save_area;
+            } va{};
+            std::memcpy(&va, reinterpret_cast<const void*>(va_addr), sizeof(va));
+
+            auto next_gp_arg = [&]() -> std::optional<uint64_t> {
+                uint64_t value = 0;
+                if (va.gp_offset <= 40) {
+                    const uintptr_t addr = static_cast<uintptr_t>(va.reg_save_area) + va.gp_offset;
+                    if (!IsReadable(addr, sizeof(value))) return std::nullopt;
+                    std::memcpy(&value, reinterpret_cast<const void*>(addr), sizeof(value));
+                    va.gp_offset += 8;
+                    return value;
+                }
+                const uintptr_t addr = static_cast<uintptr_t>(va.overflow_arg_area);
+                if (!IsReadable(addr, sizeof(value))) return std::nullopt;
+                std::memcpy(&value, reinterpret_cast<const void*>(addr), sizeof(value));
+                va.overflow_arg_area += 8;
+                return value;
+            };
+
+            std::string rendered;
+            rendered.reserve(std::min<size_t>(capacity ? capacity : 128, 1024));
+
+            auto append_number = [&](uint64_t value, int base, bool upper, bool signed_value) {
+                char tmp[80]{};
+                if (signed_value) {
+                    std::snprintf(tmp, sizeof(tmp), "%lld",
+                                  static_cast<long long>(static_cast<int64_t>(value)));
+                } else if (base == 16) {
+                    std::snprintf(tmp, sizeof(tmp), upper ? "%llX" : "%llx",
+                                  static_cast<unsigned long long>(value));
+                } else {
+                    std::snprintf(tmp, sizeof(tmp), "%llu",
+                                  static_cast<unsigned long long>(value));
+                }
+                rendered += tmp;
+            };
+
+            for (size_t i = 0; i < fmt.size(); ++i) {
+                if (fmt[i] != '%') {
+                    rendered.push_back(fmt[i]);
+                    continue;
+                }
+                if (i + 1 >= fmt.size()) {
+                    rendered.push_back('%');
+                    break;
+                }
+                if (fmt[i + 1] == '%') {
+                    rendered.push_back('%');
+                    ++i;
+                    continue;
+                }
+
+                size_t j = i + 1;
+                while (j < fmt.size() &&
+                       (fmt[j] == '-' || fmt[j] == '+' || fmt[j] == ' ' ||
+                        fmt[j] == '#' || fmt[j] == '0' ||
+                        (fmt[j] >= '0' && fmt[j] <= '9') || fmt[j] == '.')) {
+                    ++j;
+                }
+                bool long_long = false;
+                if (j + 1 < fmt.size() && fmt[j] == 'l' && fmt[j + 1] == 'l') {
+                    long_long = true;
+                    j += 2;
+                } else if (j < fmt.size() && fmt[j] == 'l') {
+                    ++j;
+                }
+                if (j >= fmt.size()) break;
+
+                const char spec = fmt[j];
+                auto next = next_gp_arg();
+                if (!next.has_value()) {
+                    rendered += "<arg?>";
+                    i = j;
+                    continue;
+                }
+                const uint64_t value = *next;
+
+                switch (spec) {
+                case 's': {
+                    const std::string s = ReadCString(static_cast<uintptr_t>(value), 512);
+                    rendered += s.empty() ? "" : s;
+                    break;
+                }
+                case 'c':
+                    rendered.push_back(static_cast<char>(value & 0xff));
+                    break;
+                case 'd':
+                case 'i':
+                    append_number(value, 10, false, true);
+                    break;
+                case 'u':
+                    append_number(value, 10, false, false);
+                    break;
+                case 'x':
+                    append_number(value, 16, false, false);
+                    break;
+                case 'X':
+                    append_number(value, 16, true, false);
+                    break;
+                case 'p':
+                    rendered += "0x";
+                    append_number(value, 16, false, false);
+                    break;
+                default:
+                    rendered.push_back('%');
+                    if (long_long) rendered += "ll";
+                    rendered.push_back(spec);
+                    break;
+                }
+                i = j;
+            }
+
+            const size_t full_length = rendered.size();
+            if (capacity != 0) {
+                const size_t copy_length = std::min(full_length, capacity - 1);
+                if (copy_length != 0) {
+                    std::memcpy(reinterpret_cast<void*>(dst), rendered.data(), copy_length);
+                }
+                *reinterpret_cast<char*>(dst + copy_length) = '\0';
+            }
+
+            gpr[FEXCore::X86State::REG_RAX] = static_cast<uint64_t>(full_length);
+            SetLiveDiag(std::string("guest HLE vsnprintf • fmt=") + fmt +
+                        " • result=" + rendered +
+                        " • dlsym=" + DlsymTrace() +
+                        " • trace=" + Trace());
+            return true;
+        }
+
         if (op == 0x100000003ULL) {
             if (strerror_buffer == 0 || strerror_buffer_size < 2) {
                 return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, EFAULT};
@@ -328,6 +482,7 @@ public:
     void SetExitVeneer(uintptr_t address) { exit_veneer = address; }
     void SetSnprintfVeneer(uintptr_t address) { snprintf_veneer = address; }
     void SetStrerrorVeneer(uintptr_t address) { strerror_veneer = address; }
+    void SetVsnprintfVeneer(uintptr_t address) { vsnprintf_veneer = address; }
     void SetStrerrorBuffer(uintptr_t address, size_t size) {
         strerror_buffer = address;
         strerror_buffer_size = size;
@@ -429,6 +584,7 @@ private:
     uintptr_t exit_veneer{};
     uintptr_t snprintf_veneer{};
     uintptr_t strerror_veneer{};
+    uintptr_t vsnprintf_veneer{};
     uintptr_t strerror_buffer{};
     size_t strerror_buffer_size{};
     std::vector<std::pair<uintptr_t, size_t>> writable_ranges;
@@ -607,6 +763,7 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     constexpr uint64_t kExitOperation = 0x100000001ULL;
     constexpr uint64_t kSnprintfOperation = 0x100000002ULL;
     constexpr uint64_t kStrerrorOperation = 0x100000003ULL;
+    constexpr uint64_t kVsnprintfOperation = 0x100000004ULL;
     auto make_stub = [](uint64_t operation) {
         std::array<uint8_t, 16> stub = {
             0x49, 0x89, 0xca,             // mov r10, rcx
@@ -621,12 +778,14 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     const auto exit_stub = make_stub(kExitOperation);
     const auto snprintf_stub = make_stub(kSnprintfOperation);
     const auto strerror_stub = make_stub(kStrerrorOperation);
+    const auto vsnprintf_stub = make_stub(kVsnprintfOperation);
     auto* veneer_bytes = reinterpret_cast<uint8_t*>(veneers.ptr);
     std::memcpy(veneer_bytes, exit_stub.data(), exit_stub.size());
     std::memcpy(veneer_bytes + 32, snprintf_stub.data(), snprintf_stub.size());
     std::memcpy(veneer_bytes + 64, strerror_stub.data(), strerror_stub.size());
+    std::memcpy(veneer_bytes + 96, vsnprintf_stub.data(), vsnprintf_stub.size());
     __builtin___clear_cache(reinterpret_cast<char*>(veneers.ptr),
-                            reinterpret_cast<char*>(veneers.ptr) + 80);
+                            reinterpret_cast<char*>(veneers.ptr) + 112);
     if (mprotect(veneers.ptr, veneers.size, PROT_READ) != 0) {
         g_run_diag = "HLE veneer mprotect failed";
         return 38;
@@ -634,6 +793,7 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     const uintptr_t exit_veneer = reinterpret_cast<uintptr_t>(veneers.ptr);
     const uintptr_t snprintf_veneer = exit_veneer + 32;
     const uintptr_t strerror_veneer = exit_veneer + 64;
+    const uintptr_t vsnprintf_veneer = exit_veneer + 96;
 
     HostMapping strerror_storage(static_cast<size_t>(page));
     if (!strerror_storage.ok()) { g_run_diag = "HLE strerror buffer mmap failed"; return 39; }
@@ -647,6 +807,7 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     bridge.SetExitVeneer(exit_veneer);
     bridge.SetSnprintfVeneer(snprintf_veneer);
     bridge.SetStrerrorVeneer(strerror_veneer);
+    bridge.SetVsnprintfVeneer(vsnprintf_veneer);
     bridge.SetStrerrorBuffer(strerror_buffer, strerror_storage.size);
     auto backendResult = Core::FexGuestCpuBackend::Create(bridge);
     if (const auto* failure = std::get_if<Core::GuestExecutionFailure>(&backendResult)) {
