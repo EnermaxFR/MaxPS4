@@ -545,7 +545,7 @@ jobs:
               "${CMAKE_SOURCE_DIR}/Source/Tools/CommonTools")
             target_link_libraries(maxps4-fex-probe PRIVATE
               FEXCore Common CommonTools JemallocLibs ${PTHREAD_LIB}
-              "-framework UIKit" "-framework Foundation")
+              "-framework UIKit" "-framework Foundation" "-framework GameController" "-framework Metal")
 
             add_executable(maxps4-fex-guest-probe
               "${CMAKE_SOURCE_DIR}/MaxPS4FEXGuestHost.mm"
