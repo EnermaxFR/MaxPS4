@@ -529,8 +529,14 @@ public:
         if (op == 0x4d51ULL) {
             const auto src = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDI]);
             const size_t size = static_cast<size_t>(gpr[FEXCore::X86State::REG_RSI]);
-            if (size < sizeof(MaxPS4GuestRenderSnapshot) ||
-                !IsReadable(src, sizeof(MaxPS4GuestRenderSnapshot))) {
+            const bool readable = IsReadable(src, sizeof(MaxPS4GuestRenderSnapshot));
+            if (size < sizeof(MaxPS4GuestRenderSnapshot) || !readable) {
+                SetLiveDiag(std::string("guest Metal command rejected") +
+                            " • src=0x" + Hex(src) +
+                            " • size=" + std::to_string(size) +
+                            " • need=" + std::to_string(sizeof(MaxPS4GuestRenderSnapshot)) +
+                            " • readable=" + (readable ? "yes" : "no") +
+                            " • trace=" + Trace());
                 return AetherPS4::Fex::EngineFailure{
                     AetherPS4::Fex::EngineStage::Bridge, EFAULT};
             }
@@ -792,10 +798,17 @@ private:
     }
 
     bool IsReadable(uintptr_t addr, size_t size) const {
-        return Contains(image_begin, image_size, addr, size) ||
-               Contains(stack_begin, stack_size, addr, size) ||
-               Contains(strerror_buffer, strerror_buffer_size, addr, size) ||
-               Contains(errno_buffer, errno_buffer_size, addr, size);
+        if (Contains(image_begin, image_size, addr, size) ||
+            Contains(stack_begin, stack_size, addr, size) ||
+            Contains(strerror_buffer, strerror_buffer_size, addr, size) ||
+            Contains(errno_buffer, errno_buffer_size, addr, size)) return true;
+        // PT_LOAD writable guest mappings are mapped read/write by this runner.
+        // Treat them as readable too so guest-owned command structures living
+        // in writable data/stack-backed ranges can be safely consumed by HLE.
+        for (const auto& range : writable_ranges) {
+            if (Contains(range.first, range.second, addr, size)) return true;
+        }
+        return false;
     }
 
     bool IsWritable(uintptr_t addr, size_t size) const {
