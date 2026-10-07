@@ -19,25 +19,27 @@ _start:
     mov $(prompt_end-prompt), %rdx
     syscall
 
-    /* read(0, rsp_buffer, 255) */
-    sub $256, %rsp
+    /*
+     * Build one contiguous response buffer:
+     *   "Hello, " + bytes returned by read()
+     * This keeps the post-read output to a single write syscall.
+     */
+    sub $272, %rsp
+    movabs $0x00202c6f6c6c6548, %rax
+    mov %rax, (%rsp)
+
+    /* read(0, rsp+7, 248) */
     mov $3, %rax
     xor %rdi, %rdi
-    mov %rsp, %rsi
-    mov $255, %rdx
+    lea 7(%rsp), %rsi
+    mov $248, %rdx
     syscall
     mov %rax, %r12
 
-    /* write(1, "Hello, ", 7) */
-    mov $4, %rax
-    mov $1, %rdi
-    lea hello(%rip), %rsi
-    mov $(hello_end-hello), %rdx
-    syscall
-
-    /* Echo the bytes returned by read(). */
+    /* write(1, buffer, 7 + bytes_read) */
     test %r12, %r12
     jle 1f
+    add $7, %r12
     mov $4, %rax
     mov $1, %rdi
     mov %rsp, %rsi
@@ -45,20 +47,16 @@ _start:
     syscall
 
 1:
-    add $256, %rsp
+    add $272, %rsp
 
     /* exit(0) */
     mov $1, %rax
     xor %rdi, %rdi
     syscall
 
-    /* The bridge treats exit as non-returning. */
     ud2
 
 .section .rodata
 prompt:
     .ascii "enter name\n"
 prompt_end:
-hello:
-    .ascii "Hello, "
-hello_end:
