@@ -22,6 +22,13 @@ const char *maxps4_backend_name(void);
 const char *maxps4_backend_diagnostic(void);
 void maxps4_backend_live_diagnostic(char *out, size_t out_size);
 void maxps4_backend_live_output(char *out, size_t out_size);
+
+// Host controller snapshot forwarded to the FEX guest compatibility bridge.
+// This is a MaxPS4-private userspace ABI, not a claim of PS4 kernel compatibility.
+void maxps4_backend_set_controller_state(unsigned int buttons,
+                                         float left_x, float left_y,
+                                         float right_x, float right_y,
+                                         float left_trigger, float right_trigger);
 bool maxps4_backend_self_test(void);
 // Validates an imported PS4 SELF/ELF executable using the same structural
 // requirements as the locked shadPS4 loader before any runtime handoff.
