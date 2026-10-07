@@ -24,17 +24,25 @@ enum MaxPS4ELFLoader {
 
         var memory = MaxPS4GuestMemory()
         var loaded = 0
+        var entryCovered = false
+        let entry = number(24, 8)
         for i in 0..<Int(count) {
             let offset = Int(table + UInt64(i) * size)
             guard number(offset, 4) == 1 else { continue }
+            let flags = number(offset + 4, 4)
             let source = number(offset + 8, 8)
             let address = number(offset + 16, 8)
             let fileSize = number(offset + 32, 8)
             let memorySize = number(offset + 40, 8)
             guard memorySize >= fileSize, memorySize <= UInt64(MaxPS4GuestMemory.maximumBytes),
+                  address <= UInt64.max - memorySize,
+                  flags & ~UInt64(7) == 0,
                   source <= UInt64(file.count),
                   fileSize <= UInt64(file.count) - source else { throw LoaderError.invalid }
             if memorySize == 0 { continue }
+            if flags & 1 != 0 && entry >= address && entry < address + memorySize {
+                entryCovered = true
+            }
             try memory.mapZeroFilled(at: address, size: Int(memorySize))
             if fileSize > 0 {
                 let start = Int(source)
@@ -42,7 +50,8 @@ enum MaxPS4ELFLoader {
             }
             loaded += 1
         }
-        return (memory, number(24, 8), loaded)
+        guard loaded > 0, entryCovered else { throw LoaderError.invalid }
+        return (memory, entry, loaded)
     }
 
     static func selfTest() -> Bool {
@@ -58,6 +67,7 @@ enum MaxPS4ELFLoader {
         put(56, at: 54, width: 2)
         put(1, at: 56, width: 2)
         put(1, at: 64, width: 4)
+        put(5, at: 68, width: 4)
         put(120, at: 72, width: 8)
         put(0x1000, at: 80, width: 8)
         put(4, at: 96, width: 8)
