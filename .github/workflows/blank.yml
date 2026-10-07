@@ -1204,6 +1204,89 @@ jobs:
           readelf -h build/legal-userspace/guest_texture_upload_userspace.elf
           readelf -lW build/legal-userspace/guest_texture_upload_userspace.elf
 
+          # Build a legal minimal PKG smoke container. It uses the documented
+          # PS4 PKG magic/header + file-table layout and stores our own legal
+          # hello ELF directly as one readable table entry. It has no PFS,
+          # encryption, Sony code, keys, firmware, or commercial content.
+          python3 - <<'PY'
+          from pathlib import Path
+          import struct
+
+          elf_path = Path("build/legal-userspace/hello_stdio_userspace.elf")
+          elf = elf_path.read_bytes()
+
+          header = bytearray(0x1000)
+          struct.pack_into(">I", header, 0x000, 0x7F434E54)  # .CNT
+          struct.pack_into(">I", header, 0x004, 0x01000000)  # simple v1 smoke flag
+          struct.pack_into(">I", header, 0x00C, 1)           # file count
+          struct.pack_into(">I", header, 0x010, 1)           # table count
+          struct.pack_into(">H", header, 0x016, 1)           # table count copy
+          struct.pack_into(">I", header, 0x018, 0x100)       # table offset
+          struct.pack_into(">Q", header, 0x020, 0x1000)      # body offset
+          struct.pack_into(">Q", header, 0x028, len(elf))    # body size
+          struct.pack_into(">Q", header, 0x030, 0x1000)      # content offset
+          struct.pack_into(">Q", header, 0x038, len(elf))    # content size
+
+          content_id = b"MAXPS4-LEGAL-PLAIN-PKG-SMOKE"
+          header[0x040:0x040 + 36] = content_id.ljust(36, b"\0")[:36]
+          struct.pack_into(">I", header, 0x070, 0)           # drm type: none in smoke
+          struct.pack_into(">I", header, 0x074, 0)           # content type: test
+
+          entry = struct.pack(
+              ">IIIIIIQ",
+              0x2000,   # private smoke entry id
+              0,        # filename offset unused
+              0, 0,     # no encryption/key flags
+              0x1000,   # raw executable offset
+              len(elf),
+              0,
+          )
+          header[0x100:0x120] = entry
+
+          out = Path("build/legal-userspace/hello_stdio_plain.pkg")
+          out.write_bytes(header + elf)
+          print(f"wrote {out} ({out.stat().st_size} bytes)")
+          PY
+
+          cat > build/legal-userspace/pkg_loader_smoke.cpp <<'CPP'
+          #include "maxps4_ps4_loader.h"
+          #include <cstdio>
+          int main() {
+              MaxPS4ExecutableInfo info{};
+              char diag[512]{};
+              if (!maxps4_ps4_loader_validate(
+                      "build/legal-userspace/hello_stdio_plain.pkg",
+                      &info, diag, sizeof(diag))) {
+                  std::fprintf(stderr, "PKG validate failed: %s\n", diag);
+                  return 1;
+              }
+              if (info.kind != MAXPS4_EXEC_PKG) {
+                  std::fprintf(stderr, "not PKG kind: %d\n", (int)info.kind);
+                  return 2;
+              }
+              if (!maxps4_ps4_loader_extract_plain_pkg_executable(
+                      "build/legal-userspace/hello_stdio_plain.pkg",
+                      "build/legal-userspace/pkg_extracted.elf",
+                      diag, sizeof(diag))) {
+                  std::fprintf(stderr, "PKG extract failed: %s\n", diag);
+                  return 3;
+              }
+              std::printf("%s\n", diag);
+              return 0;
+          }
+          CPP
+
+          g++ -std=c++17 -O2 \
+            -IMaxPS4-iOS/Bridge \
+            build/legal-userspace/pkg_loader_smoke.cpp \
+            MaxPS4-iOS/Bridge/maxps4_ps4_loader.cpp \
+            -o build/legal-userspace/pkg_loader_smoke
+
+          build/legal-userspace/pkg_loader_smoke
+          cmp build/legal-userspace/hello_stdio_userspace.elf \
+              build/legal-userspace/pkg_extracted.elf
+          echo "Legal plain PKG importer smoke: OK"
+
       - name: Package legal userspace FEX smoke test
         run: |
           set -euo pipefail
@@ -1217,6 +1300,7 @@ jobs:
           cp build/legal-userspace/guest_typed_scene_userspace.elf "$OUT/guest_typed_scene_userspace.elf"
           cp build/legal-userspace/guest_textured_quad_userspace.elf "$OUT/guest_textured_quad_userspace.elf"
           cp build/legal-userspace/guest_texture_upload_userspace.elf "$OUT/guest_texture_upload_userspace.elf"
+          cp build/legal-userspace/hello_stdio_plain.pkg "$OUT/hello_stdio_plain.pkg"
           cp MaxPS4-iOS/Tests/hello_stdio_userspace.S "$OUT/source-hello_stdio_userspace.S"
           cp MaxPS4-iOS/Tests/controller_snapshot_userspace.S "$OUT/source-controller_snapshot_userspace.S"
           cp MaxPS4-iOS/Tests/guest_metal_userspace.S "$OUT/source-guest_metal_userspace.S"
@@ -1253,9 +1337,10 @@ jobs:
           guest_typed_scene_userspace.elf validates typed rectangle/triangle primitives, transforms, controller input, and atomic present.
           guest_textured_quad_userspace.elf validates a procedurally generated checker texture on a controller-driven rotated quad.
           guest_texture_upload_userspace.elf uploads legal RGBA8 pixels from guest memory and renders the resulting Metal texture.
+          hello_stdio_plain.pkg is a minimal MaxPS4 PKG importer smoke container: documented PKG magic/header/file-table fields plus the legal hello_stdio_userspace.elf stored directly, with no PFS or encryption.
           Contains no Sony game, firmware, keys, SDK, or proprietary PlayStation content.
           EOF
-          sha256sum "$OUT/hello_stdio_userspace.elf" "$OUT/controller_snapshot_userspace.elf" "$OUT/guest_metal_userspace.elf" "$OUT/guest_input_metal_loop_userspace.elf" "$OUT/guest_frame_queue_userspace.elf" "$OUT/guest_typed_scene_userspace.elf" "$OUT/guest_textured_quad_userspace.elf" "$OUT/guest_texture_upload_userspace.elf" > "$OUT/SHA256SUMS.txt"
+          sha256sum "$OUT/hello_stdio_userspace.elf" "$OUT/controller_snapshot_userspace.elf" "$OUT/guest_metal_userspace.elf" "$OUT/guest_input_metal_loop_userspace.elf" "$OUT/guest_frame_queue_userspace.elf" "$OUT/guest_typed_scene_userspace.elf" "$OUT/guest_textured_quad_userspace.elf" "$OUT/guest_texture_upload_userspace.elf" "$OUT/hello_stdio_plain.pkg" > "$OUT/SHA256SUMS.txt"
 
       - name: Upload legal userspace FEX smoke test
         uses: actions/upload-artifact@v4
