@@ -21,7 +21,7 @@ struct MaxPS4CPUPrototype {
 
     /// Private test ABI, unrelated to real PS4 kernel syscall numbers.
     private enum SimulatedServices {
-        static func dispatch(number: UInt64, address: UInt64, size: UInt64, memory: inout MaxPS4GuestMemory) throws -> UInt64 {
+        static func dispatch(number: UInt64, address: UInt64, size: UInt64, flags: UInt64, memory: inout MaxPS4GuestMemory) throws -> UInt64 {
             switch number {
             case 0: return 42 // deterministic health check
             case 1: return UInt64(memory.allocatedBytes) // current guest allocation
@@ -32,6 +32,15 @@ struct MaxPS4CPUPrototype {
             case 3:
                 guard size > 0 && size <= UInt64(MaxPS4GuestMemory.maximumBytes) else { throw MaxPS4GuestMemory.MemoryError.invalidRange }
                 try memory.unmap(at: address, size: Int(size))
+                return 0
+            case 4:
+                guard size > 0 && size <= UInt64(MaxPS4GuestMemory.maximumBytes),
+                      flags <= 7 else { throw MaxPS4GuestMemory.MemoryError.invalidRange }
+                var permissions: MaxPS4GuestMemory.Permissions = []
+                if flags & 1 != 0 { permissions.insert(.read) }
+                if flags & 2 != 0 { permissions.insert(.write) }
+                if flags & 4 != 0 { permissions.insert(.execute) }
+                try memory.protect(at: address, size: Int(size), permissions: permissions)
                 return 0
             default: throw CPUError.unsupportedOpcode
             }
@@ -97,7 +106,7 @@ struct MaxPS4CPUPrototype {
                 guard program[rip + 1] == 0x05 else { throw CPUError.unsupportedOpcode }
                 // Isolated test services; never forwarded to the host OS.
                 registers[0] = try SimulatedServices.dispatch(
-                    number: registers[0], address: registers[1], size: registers[2], memory: &guestMemory
+                    number: registers[0], address: registers[1], size: registers[2], flags: registers[3], memory: &guestMemory
                 )
                 rip += 2
             } else if opcode == 0x31 { // XOR r/m32, r32 (register-only)
@@ -247,6 +256,21 @@ struct MaxPS4CPUPrototype {
             ])
             guard allocationCPU.rax == 0, allocationCPU.guestMemory.allocatedBytes == 0,
                   allocationCPU.executedInstructions == 7 else { return false }
+            var protectCPU = Self()
+            try protectCPU.prepareGuestMemory(address: 0xB000, size: 4096)
+            try protectCPU.run([
+                0x48, 0xB9, 0x00, 0xB0, 0, 0, 0, 0, 0, 0,
+                0x48, 0xBA, 0x00, 0x10, 0, 0, 0, 0, 0, 0,
+                0x48, 0xBB, 0x05, 0, 0, 0, 0, 0, 0, 0,
+                0x48, 0xB8, 0x04, 0, 0, 0, 0, 0, 0, 0,
+                0x0F, 0x05, 0xC3
+            ])
+            guard protectCPU.rax == 0 else { return false }
+            do {
+                try protectCPU.guestMemory.write(Data([0x90]), at: 0xB000)
+                return false
+            } catch MaxPS4GuestMemory.MemoryError.accessDenied {}
+            guard try protectCPU.guestMemory.fetchInstructionBytes(at: 0xB000, count: 1) == Data([0]) else { return false }
             var invalidService = Self()
             do { try invalidService.run([0x48, 0xB8, 0x63, 0, 0, 0, 0, 0, 0, 0, 0x0F, 0x05]); return false }
             catch CPUError.unsupportedOpcode {}
