@@ -56,6 +56,17 @@ struct MaxPS4CPUPrototype {
     var rax: UInt64 { registers[0] }
     private(set) var guestMemory = MaxPS4GuestMemory()
 
+    /// Load bounded synthetic instructions into this CPU's isolated guest memory.
+    mutating func loadTestProgram(_ program: [UInt8], at address: UInt64) throws {
+        guard !program.isEmpty && program.count <= 256 else {
+            throw CPUError.instructionLimit
+        }
+        try guestMemory.mapZeroFilled(at: address, size: program.count)
+        try guestMemory.write(Data(program), at: address)
+        try guestMemory.protect(at: address, size: program.count,
+                                permissions: [.read, .execute])
+    }
+
     mutating func prepareGuestMemory(address: UInt64, size: Int) throws {
         try guestMemory.mapZeroFilled(at: address, size: size)
     }
@@ -603,11 +614,7 @@ struct MaxPS4VirtualProcessManager {
         guard !program.isEmpty && program.count <= 256 else {
             throw MaxPS4CPUPrototype.CPUError.instructionLimit
         }
-        try process.cpu.guestMemory.mapZeroFilled(at: address, size: program.count)
-        try process.cpu.guestMemory.write(Data(program), at: address)
-        try process.cpu.guestMemory.protect(
-            at: address, size: program.count, permissions: [.read, .execute]
-        )
+        try process.cpu.loadTestProgram(program, at: address)
         processes[pid] = process
     }
 
