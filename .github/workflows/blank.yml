@@ -26,6 +26,18 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-path
           swiftc --version
 
+      - name: Run CPU memory and ELF smoke tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc -parse-as-library \
+            MaxPS4-iOS/Sources/MaxPS4GuestMemory.swift \
+            MaxPS4-iOS/Sources/MaxPS4CPUPrototype.swift \
+            MaxPS4-iOS/Sources/MaxPS4ELFLoader.swift \
+            MaxPS4-iOS/Tests/PrototypeSmokeTest.swift \
+            -o /tmp/maxps4-prototype-tests
+          /tmp/maxps4-prototype-tests
+
       - name: Swift source typecheck
         shell: bash
         run: |
