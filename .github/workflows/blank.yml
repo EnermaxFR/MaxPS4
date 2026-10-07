@@ -678,110 +678,82 @@ jobs:
 
 
 
+
       - name: Patch FEX JIT for direct thread stop on guest exit
         shell: bash
         run: |
           set -euo pipefail
-          ENGINE="$GITHUB_WORKSPACE/build/aether-reference/src/core/fex/fex_guest_engine.cpp"
-          JIT="$GITHUB_WORKSPACE/build/aether-reference/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp"
-
           python3 - <<'PY'
           from pathlib import Path
 
           engine = Path("build/aether-reference/src/core/fex/fex_guest_engine.cpp")
           s = engine.read_text()
 
-          old = """    auto result = Bridge.Invoke(hleFrame);
-    if (const auto* error = std::get_if<EngineFailure>(&result)) {
-      invocation->Failure = *error;
-      frame->State.gregs[FEXCore::X86State::REG_RAX] = static_cast<uint64_t>(-error->Error);
-      // Still try to deliver if kill arrived while blocked in host HLE.
-      FlushPendingOrbisSignal();
-      g_threads_in_hle_syscall.fetch_sub(1, std::memory_order_acq_rel);
-      return frame->State.gregs[FEXCore::X86State::REG_RAX];
-    }
-"""
-          new = """    auto result = Bridge.Invoke(hleFrame);
-    if (const auto* error = std::get_if<EngineFailure>(&result)) {
-      invocation->Failure = *error;
-      frame->State.gregs[FEXCore::X86State::REG_RAX] = static_cast<uint64_t>(-error->Error);
-
-      // MaxPS4 uses ECANCELED only for intentional process/thread exit.
-      // Tell the ARM64 JIT syscall epilogue to leave ExecuteDispatch through
-      // FEX's native ThreadStopHandler instead of resuming guest execution.
-      if (error->Error == ECANCELED) {
-        frame->InSyscallInfo |= (uint64_t{1} << 63);
-      }
-
-      // Still try to deliver if kill arrived while blocked in host HLE.
-      FlushPendingOrbisSignal();
-      g_threads_in_hle_syscall.fetch_sub(1, std::memory_order_acq_rel);
-      return frame->State.gregs[FEXCore::X86State::REG_RAX];
-    }
-"""
+          old = (
+              "    auto result = Bridge.Invoke(hleFrame);\n"
+              "    if (const auto* error = std::get_if<EngineFailure>(&result)) {\n"
+              "      invocation->Failure = *error;\n"
+              "      frame->State.gregs[FEXCore::X86State::REG_RAX] = static_cast<uint64_t>(-error->Error);\n"
+              "      // Still try to deliver if kill arrived while blocked in host HLE.\n"
+              "      FlushPendingOrbisSignal();\n"
+              "      g_threads_in_hle_syscall.fetch_sub(1, std::memory_order_acq_rel);\n"
+              "      return frame->State.gregs[FEXCore::X86State::REG_RAX];\n"
+              "    }\n"
+          )
+          new = (
+              "    auto result = Bridge.Invoke(hleFrame);\n"
+              "    if (const auto* error = std::get_if<EngineFailure>(&result)) {\n"
+              "      invocation->Failure = *error;\n"
+              "      frame->State.gregs[FEXCore::X86State::REG_RAX] = static_cast<uint64_t>(-error->Error);\n"
+              "      if (error->Error == ECANCELED) {\n"
+              "        frame->InSyscallInfo |= (uint64_t{1} << 63);\n"
+              "      }\n"
+              "      // Still try to deliver if kill arrived while blocked in host HLE.\n"
+              "      FlushPendingOrbisSignal();\n"
+              "      g_threads_in_hle_syscall.fetch_sub(1, std::memory_order_acq_rel);\n"
+              "      return frame->State.gregs[FEXCore::X86State::REG_RAX];\n"
+              "    }\n"
+          )
           if old not in s:
               raise SystemExit("HandleSyscall error anchor missing")
-          s = s.replace(old, new, 1)
-          engine.write_text(s)
+          engine.write_text(s.replace(old, new, 1))
 
           jit = Path("build/aether-reference/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp")
           j = jit.read_text()
 
-          old_jit = """  // Result is now in x0
-  // Fix the stack and any values that were stepped on
-  FillStaticRegs({
-    .OptionalReg = ARMEmitter::Reg::r1,
-    .OptionalReg2 = ARMEmitter::Reg::r2,
-    .GPRFillMask = GPRSpillMask,
-    .FPRFillMask = FPRSpillMask,
-  });
-
-  // Now the registers we've spilled are back in their original host registers
-  // We can safely claim we are no longer in a syscall
-  str(ARMEmitter::XReg::zr, STATE, offsetof(FEXCore::Core::CpuStateFrame, InSyscallInfo));
-
-  PopDynamicRegs();
-
-  const auto OSABI = CTX->SyscallHandler->GetOSABI();
-"""
-          new_jit = """  // Result is now in x0
-  // Fix the stack and any values that were stepped on
-  FillStaticRegs({
-    .OptionalReg = ARMEmitter::Reg::r1,
-    .OptionalReg2 = ARMEmitter::Reg::r2,
-    .GPRFillMask = GPRSpillMask,
-    .FPRFillMask = FPRSpillMask,
-  });
-
-  // Bit 63 is a MaxPS4-only request from BridgeSyscallHandler to stop this
-  // FEX thread immediately. At this point static guest state has been restored
-  // and the syscall argument stack is already gone. After PopDynamicRegs the
-  // host SP is exactly the dispatcher ReturningStackLocation, so FEX's own
-  // ThreadStopHandlerSpillSRA can safely spill final state, pop the dispatcher's
-  // callee-saved frame, and ret() out of ExecuteDispatch.
-  ARMEmitter::ForwardLabel ContinueAfterSyscall;
-  ldr(TMP1, STATE, offsetof(FEXCore::Core::CpuStateFrame, InSyscallInfo));
-
-  // We can safely claim we are no longer in a syscall before either path.
-  str(ARMEmitter::XReg::zr, STATE, offsetof(FEXCore::Core::CpuStateFrame, InSyscallInfo));
-
-  (void)tbz(TMP1, 63, &ContinueAfterSyscall);
-  PopDynamicRegs();
-  ldr(TMP1, STATE, offsetof(FEXCore::Core::CpuStateFrame, Pointers.ThreadStopHandlerSpillSRA));
-  br(TMP1);
-
-  (void)Bind(&ContinueAfterSyscall);
-  PopDynamicRegs();
-
-  const auto OSABI = CTX->SyscallHandler->GetOSABI();
-"""
+          old_jit = (
+              "  // Now the registers we've spilled are back in their original host registers\n"
+              "  // We can safely claim we are no longer in a syscall\n"
+              "  str(ARMEmitter::XReg::zr, STATE, offsetof(FEXCore::Core::CpuStateFrame, InSyscallInfo));\n"
+              "\n"
+              "  PopDynamicRegs();\n"
+              "\n"
+              "  const auto OSABI = CTX->SyscallHandler->GetOSABI();\n"
+          )
+          new_jit = (
+              "  // Now the registers we've spilled are back in their original host registers.\n"
+              "  ldr(TMP1, STATE, offsetof(FEXCore::Core::CpuStateFrame, InSyscallInfo));\n"
+              "  str(ARMEmitter::XReg::zr, STATE, offsetof(FEXCore::Core::CpuStateFrame, InSyscallInfo));\n"
+              "\n"
+              "  ARMEmitter::ForwardLabel ContinueAfterSyscall;\n"
+              "  (void)tbz(TMP1, 63, &ContinueAfterSyscall);\n"
+              "  PopDynamicRegs();\n"
+              "  ldr(TMP1, STATE, offsetof(FEXCore::Core::CpuStateFrame, Pointers.ThreadStopHandlerSpillSRA));\n"
+              "  br(TMP1);\n"
+              "\n"
+              "  (void)Bind(&ContinueAfterSyscall);\n"
+              "  PopDynamicRegs();\n"
+              "\n"
+              "  const auto OSABI = CTX->SyscallHandler->GetOSABI();\n"
+          )
           if old_jit not in j:
               raise SystemExit("JIT syscall epilogue anchor missing")
-          j = j.replace(old_jit, new_jit, 1)
-          jit.write_text(j)
+          jit.write_text(j.replace(old_jit, new_jit, 1))
           PY
 
-          grep -n "InSyscallInfo.*63\|ThreadStopHandlerSpillSRA\|ContinueAfterSyscall" "$ENGINE" "$JIT"
+          grep -n "InSyscallInfo.*63\|ThreadStopHandlerSpillSRA\|ContinueAfterSyscall" \
+            "$GITHUB_WORKSPACE/build/aether-reference/src/core/fex/fex_guest_engine.cpp" \
+            "$GITHUB_WORKSPACE/build/aether-reference/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp"
 
       - name: Install FEXCore Python configure dependencies
         shell: bash
