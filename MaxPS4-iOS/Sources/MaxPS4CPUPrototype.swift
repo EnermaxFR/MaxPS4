@@ -200,6 +200,7 @@ struct MaxPS4CPUPrototype {
                 0xC3
             ]
             try loadedMemory.write(Data(program), at: 0x4000)
+            try loadedMemory.protect(at: 0x4000, size: 4096, permissions: [.read, .execute])
             try loadedCPU.runLoadedTest(memory: loadedMemory, entry: 0x4000, length: program.count)
             guard loadedCPU.executedInstructions == 3,
                   try loadedCPU.guestMemory.read(at: 0x6020, count: 8) ==
