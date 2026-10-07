@@ -8,6 +8,12 @@ enum MaxPS4ELFLoader {
     }
 
     static func load(url: URL) throws -> (memory: MaxPS4GuestMemory, entry: UInt64, segments: Int) {
+        // Keep this diagnostic loader bounded even for unexpectedly large inputs.
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        guard let size = attributes[.size] as? NSNumber,
+              size.uint64Value <= 32 * 1024 * 1024 else {
+            throw LoaderError.invalid
+        }
         let file = try Data(contentsOf: url, options: [.mappedIfSafe])
         func number(_ offset: Int, _ width: Int) -> UInt64 {
             (0..<width).reduce(UInt64(0)) { $0 | (UInt64(file[offset + $1]) << ($1 * 8)) }
