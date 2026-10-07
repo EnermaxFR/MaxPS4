@@ -57,7 +57,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
 
-    self.view.backgroundColor = [UIColor colorWithRed:0.015 green:0.035 blue:0.085 alpha:1.0];
+    self.view.backgroundColor = [UIColor colorWithRed:0.018 green:0.022 blue:0.032 alpha:1.0];
     self.lastDiagnostic = @"Backend intégré. Active le JIT avec StikDebug, puis teste le backend ou importe ton propre eboot.bin / SELF.";
     [self loadLibrary];
 
@@ -75,12 +75,12 @@
     UILabel *brand = [[UILabel alloc] init];
     brand.translatesAutoresizingMaskIntoConstraints = NO;
     brand.attributedText = [self brandText];
-    brand.font = [UIFont systemFontOfSize:42.0 weight:UIFontWeightBlack];
+    brand.font = [UIFont systemFontOfSize:34.0 weight:UIFontWeightBlack];
     brand.accessibilityLabel = @"MaxPS4";
 
     UILabel *subtitle = [[UILabel alloc] init];
     subtitle.translatesAutoresizingMaskIntoConstraints = NO;
-    subtitle.text = @"iPhone • shadPS4 / FEXCore • Integration 0.8";
+    subtitle.text = @"Ta bibliothèque PS4 sur iPhone";
     subtitle.textColor = [UIColor colorWithWhite:1.0 alpha:0.58];
     subtitle.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightMedium];
 
@@ -93,7 +93,9 @@
 
     UIView *dot = [[UIView alloc] init];
     dot.translatesAutoresizingMaskIntoConstraints = NO;
-    dot.backgroundColor = [UIColor colorWithRed:0.20 green:0.90 blue:0.45 alpha:1.0];
+    dot.backgroundColor = maxps4_core_jit_available()
+        ? [UIColor colorWithRed:0.20 green:0.90 blue:0.45 alpha:1.0]
+        : [UIColor colorWithRed:1.0 green:0.55 blue:0.12 alpha:1.0];
     dot.layer.cornerRadius = 7.0;
     dot.layer.shadowColor = dot.backgroundColor.CGColor;
     dot.layer.shadowRadius = 8.0;
@@ -101,12 +103,14 @@
     dot.layer.shadowOffset = CGSizeMake(0.0, 0.0);
 
     UILabel *backendTitle = [[UILabel alloc] init];
-    backendTitle.text = @"Version intégrée chargée";
+    backendTitle.text = maxps4_core_jit_available() ? @"JIT actif • prêt à lancer" : @"JIT requis";
     backendTitle.textColor = UIColor.whiteColor;
     backendTitle.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
 
     UILabel *backendSubtitle = [[UILabel alloc] init];
-    backendSubtitle.text = @"Backend shadPS4/FEXCore conservé";
+    backendSubtitle.text = maxps4_core_jit_available()
+        ? @"StikDebug détecté • FEXCore disponible"
+        : @"Active StikDebug avant de lancer un jeu";
     backendSubtitle.textColor = [UIColor colorWithWhite:1.0 alpha:0.56];
     backendSubtitle.font = [UIFont systemFontOfSize:13.0];
 
@@ -134,8 +138,8 @@
         [backendStack.bottomAnchor constraintEqualToAnchor:backendCard.bottomAnchor constant:-16.0],
     ]];
 
-    self.importButton = [self actionButtonWithTitle:@"Importer eboot.bin / SELF / PKG"
-                                          subtitle:@"Sélectionne un exécutable ou PKG autorisé"
+    self.importButton = [self actionButtonWithTitle:@"+  Ajouter un jeu"
+                                          subtitle:@"Importer eboot.bin, SELF ou PKG autorisé"
                                            primary:YES];
     [self.importButton addTarget:self action:@selector(pickExecutable) forControlEvents:UIControlEventTouchUpInside];
 
@@ -153,7 +157,7 @@
                           forControlEvents:UIControlEventTouchUpInside];
 
     UILabel *libraryTitle = [[UILabel alloc] init];
-    libraryTitle.text = @"Bibliothèque";
+    libraryTitle.text = @"Mes jeux";
     libraryTitle.textColor = UIColor.whiteColor;
     libraryTitle.font = [UIFont systemFontOfSize:20.0 weight:UIFontWeightBold];
 
@@ -161,6 +165,16 @@
         initWithItems:@[@"Tous", @"Favoris", @"Récents", @"Homebrew"]];
     self.libraryCategoryControl.selectedSegmentIndex = 0;
     self.libraryCategoryControl.translatesAutoresizingMaskIntoConstraints = NO;
+    self.libraryCategoryControl.selectedSegmentTintColor =
+        [UIColor colorWithRed:0.14 green:0.42 blue:1.0 alpha:1.0];
+    [self.libraryCategoryControl setTitleTextAttributes:@{
+        NSForegroundColorAttributeName: [UIColor colorWithWhite:1.0 alpha:0.62],
+        NSFontAttributeName: [UIFont systemFontOfSize:12.0 weight:UIFontWeightSemibold]
+    } forState:UIControlStateNormal];
+    [self.libraryCategoryControl setTitleTextAttributes:@{
+        NSForegroundColorAttributeName: UIColor.whiteColor,
+        NSFontAttributeName: [UIFont systemFontOfSize:12.0 weight:UIFontWeightBold]
+    } forState:UIControlStateSelected];
     [self.libraryCategoryControl addTarget:self
                                     action:@selector(libraryCategoryChanged:)
                           forControlEvents:UIControlEventValueChanged];
@@ -393,6 +407,40 @@
         [self.diagnosticCopyButton.bottomAnchor constraintEqualToAnchor:diagnosticCard.bottomAnchor constant:-14.0],
     ]];
 
+    UILabel *developerTitle = [[UILabel alloc] init];
+    developerTitle.text = @"Développeur";
+    developerTitle.textColor = [UIColor colorWithWhite:1.0 alpha:0.80];
+    developerTitle.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightBold];
+
+    UILabel *developerSubtitle = [[UILabel alloc] init];
+    developerSubtitle.numberOfLines = 0;
+    developerSubtitle.text = @"Noyau, FEX, Metal et diagnostics";
+    developerSubtitle.textColor = [UIColor colorWithWhite:1.0 alpha:0.42];
+    developerSubtitle.font = [UIFont systemFontOfSize:12.0 weight:UIFontWeightMedium];
+
+    UIView *developerCard = [self cardView];
+    UIStackView *developerStack = [[UIStackView alloc] initWithArrangedSubviews:@[
+        developerSubtitle,
+        self.testButton,
+        self.multithreadTestButton,
+        ioCard,
+        detailsCard,
+        outputTitle,
+        outputCard,
+        diagnosticTitle,
+        diagnosticCard
+    ]];
+    developerStack.translatesAutoresizingMaskIntoConstraints = NO;
+    developerStack.axis = UILayoutConstraintAxisVertical;
+    developerStack.spacing = 12.0;
+    [developerCard addSubview:developerStack];
+    [NSLayoutConstraint activateConstraints:@[
+        [developerStack.leadingAnchor constraintEqualToAnchor:developerCard.leadingAnchor constant:12.0],
+        [developerStack.trailingAnchor constraintEqualToAnchor:developerCard.trailingAnchor constant:-12.0],
+        [developerStack.topAnchor constraintEqualToAnchor:developerCard.topAnchor constant:12.0],
+        [developerStack.bottomAnchor constraintEqualToAnchor:developerCard.bottomAnchor constant:-12.0],
+    ]];
+
     UILabel *legal = [[UILabel alloc] init];
     legal.translatesAutoresizingMaskIntoConstraints = NO;
     legal.numberOfLines = 0;
@@ -404,18 +452,12 @@
         brand,
         subtitle,
         backendCard,
-        self.importButton,
-        self.testButton,
-        self.multithreadTestButton,
         libraryTitle,
         self.libraryCategoryControl,
         libraryCard,
-        ioCard,
-        detailsCard,
-        outputTitle,
-        outputCard,
-        diagnosticTitle,
-        diagnosticCard,
+        self.importButton,
+        developerTitle,
+        developerCard,
         legal
     ]];
     stack.translatesAutoresizingMaskIntoConstraints = NO;
@@ -763,10 +805,10 @@
 - (UIView *)cardView {
     UIView *view = [[UIView alloc] init];
     view.translatesAutoresizingMaskIntoConstraints = NO;
-    view.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.055];
-    view.layer.cornerRadius = 22.0;
+    view.backgroundColor = [UIColor colorWithRed:0.055 green:0.065 blue:0.085 alpha:0.96];
+    view.layer.cornerRadius = 20.0;
     view.layer.borderWidth = 1.0;
-    view.layer.borderColor = [UIColor colorWithRed:0.08 green:0.42 blue:1.0 alpha:0.24].CGColor;
+    view.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.075].CGColor;
     return view;
 }
 
@@ -796,15 +838,15 @@
     button.layer.borderWidth = 1.0;
 
     if (primary) {
-        button.backgroundColor = [UIColor colorWithRed:0.02 green:0.36 blue:0.95 alpha:1.0];
-        button.layer.borderColor = [UIColor colorWithRed:0.10 green:0.72 blue:1.0 alpha:0.65].CGColor;
-        button.layer.shadowColor = [UIColor colorWithRed:0.0 green:0.38 blue:1.0 alpha:0.45].CGColor;
-        button.layer.shadowOpacity = 0.45;
-        button.layer.shadowRadius = 16.0;
-        button.layer.shadowOffset = CGSizeMake(0, 7);
+        button.backgroundColor = [UIColor colorWithRed:0.12 green:0.36 blue:0.98 alpha:1.0];
+        button.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.12].CGColor;
+        button.layer.shadowColor = [UIColor blackColor].CGColor;
+        button.layer.shadowOpacity = 0.22;
+        button.layer.shadowRadius = 10.0;
+        button.layer.shadowOffset = CGSizeMake(0, 5);
     } else {
         button.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.045];
-        button.layer.borderColor = [UIColor colorWithRed:0.10 green:0.50 blue:1.0 alpha:0.24].CGColor;
+        button.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.07].CGColor;
     }
     return button;
 }
@@ -989,30 +1031,41 @@
             rowCard.layer.borderColor =
                 [UIColor colorWithWhite:1.0 alpha:0.08].CGColor;
 
+            UIView *cover = [[UIView alloc] init];
+            cover.translatesAutoresizingMaskIntoConstraints = NO;
+            cover.backgroundColor = [UIColor colorWithRed:0.11 green:0.24 blue:0.62 alpha:1.0];
+            cover.layer.cornerRadius = 14.0;
+
+            UILabel *coverMark = [[UILabel alloc] init];
+            coverMark.translatesAutoresizingMaskIntoConstraints = NO;
+            coverMark.text = @"PS4";
+            coverMark.textColor = UIColor.whiteColor;
+            coverMark.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightBlack];
+            coverMark.textAlignment = NSTextAlignmentCenter;
+            [cover addSubview:coverMark];
+
             UILabel *name = [[UILabel alloc] init];
             name.numberOfLines = 2;
             name.textColor = UIColor.whiteColor;
-            name.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold];
+            name.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightBold];
+
+            UILabel *meta = [[UILabel alloc] init];
+            meta.textColor = [UIColor colorWithWhite:1.0 alpha:0.46];
+            meta.font = [UIFont systemFontOfSize:12.0 weight:UIFontWeightMedium];
 
             NSMutableArray<NSString *> *badges = [NSMutableArray array];
             if ([game[@"favorite"] boolValue]) [badges addObject:@"Favori"];
             if ([game[@"homebrew"] boolValue]) [badges addObject:@"Homebrew"];
-
-            NSString *baseName = game[@"name"] ?: @"Jeu PS4";
-            if (badges.count) {
-                name.text = [NSString stringWithFormat:@"%@\n%@",
-                             baseName,
-                             [badges componentsJoinedByString:@" • "]];
-            } else {
-                name.text = baseName;
-            }
+            name.text = game[@"name"] ?: @"Jeu PS4";
+            meta.text = badges.count ? [badges componentsJoinedByString:@"  •  "] : @"Prêt à lancer";
 
             UIButton *play =
-                [self smallLibraryButtonWithTitle:@"▶︎ Lancer"
+                [self smallLibraryButtonWithTitle:@"▶  Lancer"
                                            action:@selector(launchLibraryGame:)
                                               tag:(NSInteger)idx];
+            play.backgroundColor = [UIColor colorWithRed:0.12 green:0.36 blue:0.98 alpha:1.0];
 
-            NSString *heart = [game[@"favorite"] boolValue] ? @"♥︎" : @"♡";
+            NSString *heart = [game[@"favorite"] boolValue] ? @"♥" : @"♡";
             UIButton *favorite =
                 [self smallLibraryButtonWithTitle:heart
                                            action:@selector(toggleLibraryFavorite:)
@@ -1025,25 +1078,33 @@
                                               tag:(NSInteger)idx];
 
             UIStackView *actions =
-                [[UIStackView alloc] initWithArrangedSubviews:@[
-                    play, favorite, homebrew
-                ]];
+                [[UIStackView alloc] initWithArrangedSubviews:@[play, favorite, homebrew]];
             actions.axis = UILayoutConstraintAxisHorizontal;
-            actions.spacing = 8.0;
+            actions.spacing = 7.0;
             actions.distribution = UIStackViewDistributionFillProportionally;
 
+            UIStackView *gameText =
+                [[UIStackView alloc] initWithArrangedSubviews:@[name, meta, actions]];
+            gameText.axis = UILayoutConstraintAxisVertical;
+            gameText.spacing = 7.0;
+
             UIStackView *content =
-                [[UIStackView alloc] initWithArrangedSubviews:@[name, actions]];
+                [[UIStackView alloc] initWithArrangedSubviews:@[cover, gameText]];
             content.translatesAutoresizingMaskIntoConstraints = NO;
-            content.axis = UILayoutConstraintAxisVertical;
-            content.spacing = 10.0;
+            content.axis = UILayoutConstraintAxisHorizontal;
+            content.alignment = UIStackViewAlignmentCenter;
+            content.spacing = 13.0;
 
             [rowCard addSubview:content];
             [NSLayoutConstraint activateConstraints:@[
-                [content.leadingAnchor constraintEqualToAnchor:rowCard.leadingAnchor constant:13.0],
-                [content.trailingAnchor constraintEqualToAnchor:rowCard.trailingAnchor constant:-13.0],
-                [content.topAnchor constraintEqualToAnchor:rowCard.topAnchor constant:13.0],
-                [content.bottomAnchor constraintEqualToAnchor:rowCard.bottomAnchor constant:-13.0],
+                [cover.widthAnchor constraintEqualToConstant:72.0],
+                [cover.heightAnchor constraintEqualToConstant:92.0],
+                [coverMark.centerXAnchor constraintEqualToAnchor:cover.centerXAnchor],
+                [coverMark.centerYAnchor constraintEqualToAnchor:cover.centerYAnchor],
+                [content.leadingAnchor constraintEqualToAnchor:rowCard.leadingAnchor constant:12.0],
+                [content.trailingAnchor constraintEqualToAnchor:rowCard.trailingAnchor constant:-12.0],
+                [content.topAnchor constraintEqualToAnchor:rowCard.topAnchor constant:12.0],
+                [content.bottomAnchor constraintEqualToAnchor:rowCard.bottomAnchor constant:-12.0],
             ]];
 
             [self.libraryStack addArrangedSubview:rowCard];
