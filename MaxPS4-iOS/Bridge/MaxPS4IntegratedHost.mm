@@ -121,8 +121,8 @@
         [backendStack.bottomAnchor constraintEqualToAnchor:backendCard.bottomAnchor constant:-16.0],
     ]];
 
-    self.importButton = [self actionButtonWithTitle:@"Importer un eboot.bin / SELF"
-                                          subtitle:@"Sélectionne un exécutable PS4 autorisé"
+    self.importButton = [self actionButtonWithTitle:@"Importer eboot.bin / SELF / PKG"
+                                          subtitle:@"Sélectionne un exécutable ou PKG autorisé"
                                            primary:YES];
     [self.importButton addTarget:self action:@selector(pickExecutable) forControlEvents:UIControlEventTouchUpInside];
 
@@ -876,18 +876,24 @@
     BOOL scoped = [url startAccessingSecurityScopedResource];
 
     NSError *attrError = nil;
-    NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:url.path error:&attrError];
+    NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:url.path
+                                                                            error:&attrError];
     unsigned long long fileSize = [attrs[NSFileSize] unsignedLongLongValue];
 
     BOOL valid = maxps4_backend_validate_executable(url.fileSystemRepresentation);
+    MaxPS4ImportKind importKind = valid
+        ? maxps4_backend_import_kind(url.fileSystemRepresentation)
+        : MAXPS4_IMPORT_INVALID;
+
     const char *detail = maxps4_backend_diagnostic();
     NSString *detailText = detail ? [NSString stringWithUTF8String:detail] : @"aucun détail";
 
     self.selectedURL = url;
     self.selectedFileSize = fileSize;
-    self.fileValueLabel.text = [NSString stringWithFormat:@"%@ • %llu o", url.lastPathComponent, fileSize];
+    self.fileValueLabel.text =
+        [NSString stringWithFormat:@"%@ • %llu o", url.lastPathComponent, fileSize];
 
-    if (!valid) {
+    if (!valid || importKind == MAXPS4_IMPORT_INVALID) {
         self.stateValueLabel.text = @"Refusé";
         [self setDiagnostic:[NSString stringWithFormat:
             @"Fichier refusé : %@\nTaille : %llu octets\n%@",
@@ -898,15 +904,90 @@
         return;
     }
 
+    NSString *launchPath = url.path;
+    NSString *displayFile = url.lastPathComponent;
+    BOOL scopedForBoot = scoped;
+
+    if (importKind == MAXPS4_IMPORT_PKG) {
+        self.stateValueLabel.text = @"PKG reconnu";
+        [self setDiagnostic:[NSString stringWithFormat:
+            @"PKG sélectionné : %@\nTaille : %llu octets\n%@\n\nRecherche d’un ELF/SELF homebrew stocké directement et lisible…",
+            url.lastPathComponent,
+            fileSize,
+            detailText]];
+
+        NSString *pkgDir =
+            [NSTemporaryDirectory() stringByAppendingPathComponent:@"MaxPS4PkgImport"];
+        NSFileManager *fm = NSFileManager.defaultManager;
+        [fm removeItemAtPath:pkgDir error:nil];
+        NSError *mkdirError = nil;
+        if (![fm createDirectoryAtPath:pkgDir
+            withIntermediateDirectories:YES
+                             attributes:nil
+                                  error:&mkdirError]) {
+            self.stateValueLabel.text = @"PKG reconnu";
+            [self setDiagnostic:[NSString stringWithFormat:
+                @"%@\n\nPKG reconnu, mais le dossier temporaire d’extraction n’a pas pu être créé : %@",
+                detailText,
+                mkdirError.localizedDescription ?: @"erreur inconnue"]];
+            if (scoped) [url stopAccessingSecurityScopedResource];
+            return;
+        }
+
+        NSString *plainExecutable =
+            [pkgDir stringByAppendingPathComponent:@"eboot.bin"];
+        BOOL extracted = maxps4_backend_extract_plain_pkg_executable(
+            url.fileSystemRepresentation,
+            plainExecutable.fileSystemRepresentation);
+
+        const char *extractDetail = maxps4_backend_diagnostic();
+        NSString *extractText = extractDetail
+            ? [NSString stringWithUTF8String:extractDetail]
+            : @"aucun détail d’extraction";
+
+        if (!extracted) {
+            self.stateValueLabel.text = @"PKG reconnu";
+            self.guestOutputLabel.text = @"PKG inspecté • aucun exécutable direct lancé.";
+            [self setDiagnostic:[NSString stringWithFormat:
+                @"PKG reconnu : %@\nTaille : %llu octets\n\n%@\n\n"
+                 "MaxPS4 n’utilise ici aucune clé et ne déchiffre pas le PFS ou le contenu protégé. "
+                 "Un PKG standard/chiffré est donc reconnu et inspecté, mais pas extrait par ce chemin.",
+                url.lastPathComponent,
+                fileSize,
+                extractText]];
+            if (scoped) [url stopAccessingSecurityScopedResource];
+            return;
+        }
+
+        // The readable homebrew executable is now in our own temp directory,
+        // so the original security-scoped PKG can be released before FEX starts.
+        if (scoped) {
+            [url stopAccessingSecurityScopedResource];
+            scopedForBoot = NO;
+        }
+
+        launchPath = plainExecutable;
+        displayFile =
+            [NSString stringWithFormat:@"%@ → eboot.bin", url.lastPathComponent];
+        self.fileValueLabel.text =
+            [NSString stringWithFormat:@"%@ • %llu o", displayFile, fileSize];
+        detailText = extractText;
+    }
+
     if (!maxps4_core_jit_available()) {
         const char *jitDetail = maxps4_core_jit_diagnostic();
-        NSString *jitText = jitDetail ? [NSString stringWithUTF8String:jitDetail] : @"aucun diagnostic JIT";
+        NSString *jitText = jitDetail
+            ? [NSString stringWithUTF8String:jitDetail]
+            : @"aucun diagnostic JIT";
         self.stateValueLabel.text = @"JIT indisponible";
         [self setDiagnostic:[NSString stringWithFormat:
-            @"%@ validé, mais l’exécution FEX n’a pas été lancée.\n\nJIT requis : %@\n\nActive StikDebug/JIT puis réessaie. Cette vérification empêche FEX de démarrer sans mémoire exécutable valide.",
-            url.lastPathComponent,
+            @"%@ validé, mais l’exécution FEX n’a pas été lancée.\n\n"
+             "JIT requis : %@\n\n"
+             "Active StikDebug/JIT puis réessaie. Cette vérification empêche FEX "
+             "de démarrer sans mémoire exécutable valide.",
+            displayFile,
             jitText]];
-        if (scoped) [url stopAccessingSecurityScopedResource];
+        if (scopedForBoot) [url stopAccessingSecurityScopedResource];
         return;
     }
 
@@ -917,22 +998,26 @@
 
     self.importButton.enabled = NO;
     self.testButton.enabled = NO;
-    self.stateValueLabel.text = @"Validation OK";
+    self.stateValueLabel.text =
+        importKind == MAXPS4_IMPORT_PKG ? @"PKG homebrew extrait" : @"Validation OK";
     self.guestOutputLabel.text = @"En attente de sortie…";
 
     [self setDiagnostic:[NSString stringWithFormat:
-        @"Fichier sélectionné : %@\nTaille : %llu octets\nValidation : %@\n\nHandoff loader → FEX en cours…",
-        url.lastPathComponent,
+        @"Fichier sélectionné : %@\nTaille source : %llu octets\nValidation : %@\n\n"
+         "Handoff loader → FEX en cours…",
+        displayFile,
         fileSize,
         detailText]];
 
     [self startDiagnosticPollingForGeneration:generation];
 
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        BOOL booted = maxps4_backend_boot(url.fileSystemRepresentation);
+        BOOL booted = maxps4_backend_boot(launchPath.fileSystemRepresentation);
         const char *bootDetail = maxps4_backend_diagnostic();
-        NSString *bootText = bootDetail ? [NSString stringWithUTF8String:bootDetail] : @"aucun détail";
-        if (scoped) [url stopAccessingSecurityScopedResource];
+        NSString *bootText = bootDetail
+            ? [NSString stringWithUTF8String:bootDetail]
+            : @"aucun détail";
+        if (scopedForBoot) [url stopAccessingSecurityScopedResource];
 
         dispatch_async(dispatch_get_main_queue(), ^{
             if (generation != self.bootGeneration) return;
@@ -942,26 +1027,33 @@
             self.importButton.enabled = YES;
             self.testButton.enabled = YES;
 
-            NSTimeInterval elapsed = self.bootStartedAt ? -[self.bootStartedAt timeIntervalSinceNow] : 0;
+            NSTimeInterval elapsed =
+                self.bootStartedAt ? -[self.bootStartedAt timeIntervalSinceNow] : 0;
 
             char finalOutputBuf[4096] = {};
             maxps4_backend_live_output(finalOutputBuf, sizeof(finalOutputBuf));
-            NSString *finalOutput = [NSString stringWithUTF8String:finalOutputBuf] ?: @"";
-            self.guestOutputLabel.text = finalOutput.length ? finalOutput : @"Aucune sortie produite.";
+            NSString *finalOutput =
+                [NSString stringWithUTF8String:finalOutputBuf] ?: @"";
+            self.guestOutputLabel.text =
+                finalOutput.length ? finalOutput : @"Aucune sortie produite.";
 
             if (booted) {
                 self.stateValueLabel.text = @"Terminé";
                 [self setDiagnostic:[NSString stringWithFormat:
-                    @"Exécution terminée : %@\nTaille : %llu octets\nDurée : %.2f s\n\n%@",
-                    url.lastPathComponent,
+                    @"Exécution terminée : %@\nTaille source : %llu octets\n"
+                     "Durée : %.2f s\n\n%@",
+                    displayFile,
                     fileSize,
                     elapsed,
                     bootText]];
             } else {
                 self.stateValueLabel.text = @"Handoff arrêté";
                 [self setDiagnostic:[NSString stringWithFormat:
-                    @"%@ validé.\nTaille : %llu octets\nDurée : %.2f s\n\n%@\n\nLe handoff loader → FEX a été tenté. Le diagnostic ci-dessus indique précisément le dernier stade atteint ou le service/HLE manquant.",
-                    url.lastPathComponent,
+                    @"%@ validé.\nTaille source : %llu octets\nDurée : %.2f s\n\n"
+                     "%@\n\nLe handoff loader → FEX a été tenté. Le diagnostic "
+                     "ci-dessus indique précisément le dernier stade atteint ou le "
+                     "service/HLE manquant.",
+                    displayFile,
                     fileSize,
                     elapsed,
                     bootText]];
