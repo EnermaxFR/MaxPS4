@@ -6,6 +6,9 @@
 #include <cstdint>
 #include <string_view>
 #include <mutex>
+#include <condition_variable>
+#include <memory>
+#include <unordered_map>
 
 namespace MaxPS4::Kernel {
 
@@ -181,7 +184,14 @@ private:
     ProcessState process_{};
     uintptr_t managed_arena_base_{};
     size_t managed_arena_size_{};
+    struct UmtxWaitQueue {
+        std::condition_variable_any condition;
+        uint64_t generation{};
+        uint32_t waiters{};
+    };
+
     mutable std::recursive_mutex state_mutex_{};
+    std::unordered_map<uintptr_t, std::unique_ptr<UmtxWaitQueue>> umtx_wait_queues_{};
 
     static thread_local const KernelState* bound_kernel_;
     static thread_local uint32_t bound_tid_;
