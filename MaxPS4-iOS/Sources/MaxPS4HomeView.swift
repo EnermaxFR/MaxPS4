@@ -71,6 +71,7 @@ struct MaxPS4HomeView: View {
     @State private var selectedLibraryCategory: MaxPS4LibraryCategory = .all
     @State private var librarySearchText = ""
     @State private var librarySort: MaxPS4LibrarySort = .imported
+    @State private var selectedGame: MaxPS4LibraryGame?
 
     var body: some View {
         ZStack {
@@ -103,6 +104,11 @@ struct MaxPS4HomeView: View {
             case .failure(let error):
                 emulator.status = "Import impossible: \(error.localizedDescription)"
             }
+        }
+        .sheet(item: $selectedGame) { game in
+            gameDetailSheet(game)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -458,6 +464,16 @@ struct MaxPS4HomeView: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(game.isFavorite ? .pink : .white)
+
+                Button {
+                    selectedGame = game
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.headline)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.bordered)
+                .tint(.cyan)
             }
         }
         .padding(16)
@@ -466,6 +482,113 @@ struct MaxPS4HomeView: View {
             RoundedRectangle(cornerRadius: 22)
                 .stroke(.white.opacity(0.08), lineWidth: 1)
         )
+    }
+
+    private func gameDetailSheet(_ game: MaxPS4LibraryGame) -> some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    HStack(spacing: 16) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [.blue.opacity(0.95), .cyan.opacity(0.55)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 74, height: 74)
+
+                            Image(systemName: game.isHomebrew ? "hammer.fill" : "gamecontroller.fill")
+                                .font(.system(size: 30))
+                                .foregroundStyle(.white)
+                        }
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(game.name)
+                                .font(.title2.bold())
+                                .lineLimit(2)
+
+                            HStack(spacing: 8) {
+                                if game.isFavorite {
+                                    Label("Favori", systemImage: "heart.fill")
+                                        .foregroundStyle(.pink)
+                                }
+                                Label(game.isHomebrew ? "Homebrew" : "PS4", systemImage: game.isHomebrew ? "hammer.fill" : "playstation.logo")
+                                    .foregroundStyle(.cyan)
+                            }
+                            .font(.caption.weight(.semibold))
+                        }
+                    }
+
+                    VStack(spacing: 0) {
+                        detailRow(title: "Importé", value: game.importedAt.formatted(date: .abbreviated, time: .shortened))
+                        Divider().overlay(.white.opacity(0.08))
+                        detailRow(
+                            title: "Dernier lancement",
+                            value: game.lastPlayedAt?.formatted(date: .abbreviated, time: .shortened) ?? "Jamais"
+                        )
+                        Divider().overlay(.white.opacity(0.08))
+                        detailRow(title: "Fichier", value: game.executableRelativePath)
+                    }
+                    .padding(.horizontal, 16)
+                    .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 20))
+
+                    Button {
+                        emulator.launchGame(game.id)
+                        selectedGame = nil
+                    } label: {
+                        Label("Lancer", systemImage: "play.fill")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 13)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.blue)
+
+                    HStack(spacing: 12) {
+                        Button {
+                            emulator.toggleFavorite(game.id)
+                            selectedGame = emulator.libraryGames.first(where: { $0.id == game.id })
+                        } label: {
+                            Label(game.isFavorite ? "Retirer favori" : "Ajouter favori", systemImage: game.isFavorite ? "heart.slash" : "heart")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button(role: .destructive) {
+                            emulator.removeGame(game.id)
+                            selectedGame = nil
+                        } label: {
+                            Label("Supprimer", systemImage: "trash")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                .padding(20)
+            }
+            .background(background)
+            .navigationTitle("Détails")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private func detailRow(title: String, value: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(title)
+                .foregroundStyle(.white.opacity(0.55))
+                .frame(width: 110, alignment: .leading)
+
+            Text(value)
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.trailing)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .font(.subheadline)
+        .padding(.vertical, 14)
     }
 
     private var libraryCategoryPicker: some View {
