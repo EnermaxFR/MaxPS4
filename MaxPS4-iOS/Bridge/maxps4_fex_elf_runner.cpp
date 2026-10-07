@@ -559,6 +559,17 @@ public:
             return true;
         }
 
+        // MaxPS4-private frame pacing ABI for legal realtime guest tests.
+        // The guest supplies a microsecond delay; clamp it to a safe range so
+        // one test cannot accidentally spin or sleep for an excessive period.
+        if (op == 0x4d52ULL) {
+            uint64_t delay_us = gpr[FEXCore::X86State::REG_RDI];
+            delay_us = std::clamp<uint64_t>(delay_us, 1000, 50000);
+            usleep(static_cast<useconds_t>(delay_us));
+            gpr[FEXCore::X86State::REG_RAX] = 0;
+            return true;
+        }
+
         if (op == 0x100000003ULL) {
             if (strerror_buffer == 0 || strerror_buffer_size < 2) {
                 return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, EFAULT};
