@@ -69,6 +69,39 @@ typedef struct MaxPS4GuestFrame {
 
 // Atomic guest frame snapshot produced by the private legal render queue ABI.
 bool maxps4_backend_guest_frame(MaxPS4GuestFrame *out);
+
+#define MAXPS4_GUEST_SCENE_MAX_PRIMITIVES 12
+
+typedef enum MaxPS4GuestPrimitiveType {
+    MAXPS4_GUEST_PRIMITIVE_RECT = 1,
+    MAXPS4_GUEST_PRIMITIVE_TRIANGLE = 2,
+} MaxPS4GuestPrimitiveType;
+
+typedef struct MaxPS4GuestPrimitive {
+    unsigned int type;
+    float x;
+    float y;
+    float width;
+    float height;
+    float rotation;
+    float red;
+    float green;
+    float blue;
+    float alpha;
+} MaxPS4GuestPrimitive;
+
+typedef struct MaxPS4GuestSceneFrame {
+    unsigned int sequence;
+    unsigned int primitive_count;
+    float clear_red;
+    float clear_green;
+    float clear_blue;
+    float clear_alpha;
+    MaxPS4GuestPrimitive primitives[MAXPS4_GUEST_SCENE_MAX_PRIMITIVES];
+} MaxPS4GuestSceneFrame;
+
+// Typed primitive command buffer used by the next legal graphics bridge stage.
+bool maxps4_backend_guest_scene_frame(MaxPS4GuestSceneFrame *out);
 bool maxps4_backend_self_test(void);
 // Validates an imported PS4 SELF/ELF executable using the same structural
 // requirements as the locked shadPS4 loader before any runtime handoff.
