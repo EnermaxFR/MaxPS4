@@ -39,6 +39,21 @@ struct MaxPS4ControllerSnapshot {
     float right_trigger{};
 };
 
+struct MaxPS4GuestTimeval {
+    int64_t seconds{};
+    int64_t microseconds{};
+};
+
+struct MaxPS4GuestTimespec {
+    int64_t seconds{};
+    int64_t nanoseconds{};
+};
+
+struct MaxPS4GuestTimezone {
+    int32_t minutes_west{};
+    int32_t dst_time{};
+};
+
 std::mutex g_controller_mutex;
 MaxPS4ControllerSnapshot g_controller_state;
 
@@ -450,6 +465,119 @@ public:
                     AetherPS4::Fex::EngineStage::Bridge, kernel_result.error};
             }
             gpr[FEXCore::X86State::REG_RAX] = kernel_result.value;
+            return true;
+        }
+
+        // MaxPS4Kernel time services. Guest pointers are validated against
+        // both the kernel memory table and the live FEX mapping before access.
+        if (op == 116) { // gettimeofday
+            const auto tv_addr =
+                static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDI]);
+            const auto tz_addr =
+                static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RSI]);
+
+            if (tv_addr != 0) {
+                if (!kernel.ContainsMemory(tv_addr, sizeof(MaxPS4GuestTimeval),
+                                           MaxPS4::Kernel::MemoryWrite) ||
+                    !IsWritable(tv_addr, sizeof(MaxPS4GuestTimeval))) {
+                    return AetherPS4::Fex::EngineFailure{
+                        AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+                }
+                const auto now = kernel.GetTimeOfDay();
+                const MaxPS4GuestTimeval value{now.seconds, now.fraction};
+                std::memcpy(reinterpret_cast<void*>(tv_addr),
+                            &value, sizeof(value));
+            }
+
+            if (tz_addr != 0) {
+                if (!kernel.ContainsMemory(tz_addr, sizeof(MaxPS4GuestTimezone),
+                                           MaxPS4::Kernel::MemoryWrite) ||
+                    !IsWritable(tz_addr, sizeof(MaxPS4GuestTimezone))) {
+                    return AetherPS4::Fex::EngineFailure{
+                        AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+                }
+                const MaxPS4GuestTimezone timezone{};
+                std::memcpy(reinterpret_cast<void*>(tz_addr),
+                            &timezone, sizeof(timezone));
+            }
+
+            gpr[FEXCore::X86State::REG_RAX] = 0;
+            return true;
+        }
+
+        if (op == 232 || op == 234) { // clock_gettime / clock_getres
+            const int clock_id =
+                static_cast<int>(gpr[FEXCore::X86State::REG_RDI]);
+            const auto out_addr =
+                static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RSI]);
+
+            if (out_addr == 0 ||
+                !kernel.ContainsMemory(out_addr, sizeof(MaxPS4GuestTimespec),
+                                       MaxPS4::Kernel::MemoryWrite) ||
+                !IsWritable(out_addr, sizeof(MaxPS4GuestTimespec))) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+
+            MaxPS4::Kernel::KernelTimeValue value{};
+            int error = 0;
+            const bool ok = op == 232
+                ? kernel.ClockGetTime(clock_id, value, error)
+                : kernel.ClockGetResolution(clock_id, value, error);
+            if (!ok) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge,
+                    error ? error : EINVAL};
+            }
+
+            const MaxPS4GuestTimespec guest{value.seconds, value.fraction};
+            std::memcpy(reinterpret_cast<void*>(out_addr),
+                        &guest, sizeof(guest));
+            gpr[FEXCore::X86State::REG_RAX] = 0;
+            return true;
+        }
+
+        if (op == 240) { // nanosleep
+            const auto request_addr =
+                static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDI]);
+            const auto remain_addr =
+                static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RSI]);
+
+            if (request_addr == 0 ||
+                !kernel.ContainsMemory(request_addr, sizeof(MaxPS4GuestTimespec),
+                                       MaxPS4::Kernel::MemoryRead) ||
+                !IsReadable(request_addr, sizeof(MaxPS4GuestTimespec))) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+
+            MaxPS4GuestTimespec request{};
+            std::memcpy(&request,
+                        reinterpret_cast<const void*>(request_addr),
+                        sizeof(request));
+
+            if (remain_addr != 0 &&
+                (!kernel.ContainsMemory(remain_addr, sizeof(MaxPS4GuestTimespec),
+                                        MaxPS4::Kernel::MemoryWrite) ||
+                 !IsWritable(remain_addr, sizeof(MaxPS4GuestTimespec)))) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+
+            int error = 0;
+            if (!kernel.SleepFor(request.seconds, request.nanoseconds, error)) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge,
+                    error ? error : EINVAL};
+            }
+
+            if (remain_addr != 0) {
+                const MaxPS4GuestTimespec remaining{};
+                std::memcpy(reinterpret_cast<void*>(remain_addr),
+                            &remaining, sizeof(remaining));
+            }
+
+            gpr[FEXCore::X86State::REG_RAX] = 0;
             return true;
         }
 
