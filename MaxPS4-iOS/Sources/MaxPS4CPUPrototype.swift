@@ -364,6 +364,16 @@ struct MaxPS4CPUPrototype {
                 try processB.cpu.guestMemory.read(at: 0x5000, count: 1)
                 return false
             } catch MaxPS4GuestMemory.MemoryError.outOfBounds {}
+            var processManager = MaxPS4VirtualProcessManager()
+            let firstPID = try processManager.create()
+            let secondPID = try processManager.create()
+            guard firstPID != secondPID, processManager.count == 2,
+                  processManager.process(pid: firstPID) != nil else { return false }
+            guard processManager.terminate(pid: firstPID),
+                  processManager.process(pid: firstPID) == nil,
+                  !processManager.terminate(pid: firstPID),
+                  processManager.count == 1,
+                  processManager.process(pid: secondPID) != nil else { return false }
             var invalidAccess = Self()
             do {
                 try invalidAccess.run([0x48, 0xA1, 0, 0, 0, 0, 0, 0, 0, 0])
@@ -408,5 +418,36 @@ struct MaxPS4VirtualProcess {
 
     init(pid: UInt32) {
         self.pid = pid
+    }
+}
+
+ 
+/// Bounded registry for toy guest processes; never starts host processes.
+struct MaxPS4VirtualProcessManager {
+    enum ProcessError: Error {
+        case capacityReached
+    }
+
+    private var processes: [UInt32: MaxPS4VirtualProcess] = [:]
+    private var nextPID: UInt32 = 100
+    private let maximumProcesses = 16
+
+    var count: Int { processes.count }
+
+    mutating func create() throws -> UInt32 {
+        guard processes.count < maximumProcesses else { throw ProcessError.capacityReached }
+        let pid = nextPID
+        nextPID += 1
+        processes[pid] = MaxPS4VirtualProcess(pid: pid)
+        return pid
+    }
+
+    func process(pid: UInt32) -> MaxPS4VirtualProcess? {
+        processes[pid]
+    }
+
+    @discardableResult
+    mutating func terminate(pid: UInt32) -> Bool {
+        processes.removeValue(forKey: pid) != nil
     }
 }
