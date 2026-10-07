@@ -186,6 +186,19 @@ final class MaxPS4Emulator: ObservableObject {
                 let entryCount = (0..<4).reduce(UInt32(0)) { value, i in
                     (value << 8) | UInt32(header[0x10 + i])
                 }
+                let secondaryCount = (0..<4).reduce(UInt32(0)) { value, i in
+                    (value << 8) | UInt32(header[0x14 + i])
+                }
+                let tableCheck: String
+                if entryCount == 0 {
+                    tableCheck = "aucune entrée déclarée ; table non vérifiée"
+                } else if entryCount > 100_000 {
+                    tableCheck = "nombre d’entrées inhabituellement élevé ; table non vérifiée"
+                } else if secondaryCount > entryCount {
+                    tableCheck = "compteur secondaire supérieur au total ; en-tête suspect"
+                } else {
+                    tableCheck = "compteurs plausibles ; positions et contenu de la table non vérifiés"
+                }
                 let entryCheck = entryCount > 0 && entryCount <= 100_000
                     ? String(entryCount) + " entrées déclarées (non vérifiées)"
                     : "nombre absent ou inhabituel (non vérifié)"
@@ -211,6 +224,7 @@ final class MaxPS4Emulator: ObservableObject {
                     "Taille : " + size,
                     "Contrôle en-tête : " + sizeCheck,
                     "Table des entrées : " + entryCheck,
+                    "Cohérence compteurs : " + tableCheck,
                     "Content ID : " + (validID ?? "indisponible"),
                     "Title ID : " + (titleID ?? "indisponible"),
                     "Version : non déterminée",
