@@ -240,6 +240,61 @@ final class MaxPS4Emulator: ObservableObject {
         }
     }
 
+    /// Inspect only the public PKG header and the declared entry-table bounds.
+    /// Entries may be encrypted; no content is extracted or executed.
+    func inspectPKGStructure(_ game: MaxPS4Game) {
+        guard game.fileName.lowercased().hasSuffix(".pkg") else {
+            status = "Structure PKG : sélectionnez un fichier .pkg"
+            return
+        }
+        do {
+            let url = URL(fileURLWithPath: game.localPath)
+            let attributes = try fileManager.attributesOfItem(atPath: url.path)
+            guard let size = (attributes[.size] as? NSNumber)?.uint64Value, size >= 128 else {
+                status = "Structure PKG : fichier trop court"
+                return
+            }
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let header = try handle.read(upToCount: 128) ?? Data()
+            guard header.count == 128,
+                  Array(header.prefix(4)) == [0x7F, 0x43, 0x4E, 0x54] else {
+                status = "Structure PKG : signature invalide"
+                return
+            }
+            func be32(_ offset: Int) -> UInt32 {
+                (0..<4).reduce(UInt32(0)) { ($0 << 8) | UInt32(header[offset + $1]) }
+            }
+            func be64(_ offset: Int) -> UInt64 {
+                (0..<8).reduce(UInt64(0)) { ($0 << 8) | UInt64(header[offset + $1]) }
+            }
+            let count = UInt64(be32(0x10))
+            let secondCount = UInt64(be32(0x14))
+            let declaredSize = be64(0x18)
+            // Header offsets are displayed as diagnostics only; layout is not
+            // trusted as an authenticated or decrypted PKG index.
+            let entryTableOffset = UInt64(be32(0x00 + 0x18 + 0x08))
+            let tableCheck = count > 0 && count <= 100_000
+                && entryTableOffset <= size
+                ? "index potentiel dans le fichier (non vérifié)"
+                : "index non validé"
+            let message = [
+                "Structure PKG • lecture seule",
+                "Taille réelle : \(size) octets",
+                "Taille déclarée : \(declaredSize == 0 ? "absente" : String(declaredSize))",
+                "Entrées déclarées : \(count)",
+                "Compteur secondaire : \(secondCount)",
+                "Décalage d'index candidat : 0x\(String(entryTableOffset, radix: 16))",
+                "Contrôle : \(tableCheck)",
+                "Entrées internes : non listées, potentiellement protégées",
+                "Déchiffrement et exécution : non disponibles"
+            ]
+            status = message.joined(separator: "\n")
+        } catch {
+            status = "Analyse de structure impossible : \(error.localizedDescription)"
+        }
+    }
+
     func rename(_ game: MaxPS4Game, to proposedName: String) {
         let name = proposedName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
