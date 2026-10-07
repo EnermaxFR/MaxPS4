@@ -224,6 +224,15 @@ struct MaxPS4HomeView: View {
                 .pickerStyle(.segmented)
                 .tint(.cyan)
 
+                Button {
+                    emulator.inspectDuplicates()
+                    inspectionReport = emulator.status
+                } label: {
+                    Label("Rechercher les doublons", systemImage: "square.on.square")
+                        .font(.subheadline.weight(.medium))
+                }
+                .tint(.cyan)
+
                 if emulator.games.isEmpty {
                     emptyLibrary.padding(.top, 24)
                 } else if filteredGames.isEmpty {
