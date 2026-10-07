@@ -1194,18 +1194,51 @@ jobs:
       - name: Checkout MaxPS4
         uses: actions/checkout@v4
 
-      - name: Verify preinstalled open-source toolchain
+      - name: Normalize preinstalled open-source toolchain
+        shell: bash
         run: |
           set -euo pipefail
-          for tool in bash clang ld.lld make git file readelf python3; do
+          mkdir -p "$GITHUB_WORKSPACE/build/toolbin"
+
+          pick() {
+            for candidate in "$@"; do
+              if command -v "$candidate" >/dev/null 2>&1; then
+                command -v "$candidate"
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          CLANG_BIN="$(pick clang-18 clang-19 clang-20 clang)" || {
+            echo "::error::No usable clang found"
+            exit 1
+          }
+          LLD_BIN="$(pick ld.lld-18 ld.lld-19 ld.lld-20 ld.lld)" || {
+            echo "::error::No usable LLD linker found"
+            exit 1
+          }
+          READELF_BIN="$(pick readelf llvm-readelf-18 llvm-readelf-19 llvm-readelf-20 llvm-readelf)" || {
+            echo "::error::No usable readelf found"
+            exit 1
+          }
+
+          for tool in bash make git file python3; do
             command -v "$tool" >/dev/null 2>&1 || {
-              echo "::error::Required preinstalled tool is missing: $tool"
+              echo "::error::Required tool is missing: $tool"
               exit 1
             }
           done
-          clang --version
-          ld.lld --version
-          echo "Preinstalled toolchain ready."
+
+          ln -sf "$CLANG_BIN" "$GITHUB_WORKSPACE/build/toolbin/clang"
+          ln -sf "$LLD_BIN" "$GITHUB_WORKSPACE/build/toolbin/ld.lld"
+          ln -sf "$READELF_BIN" "$GITHUB_WORKSPACE/build/toolbin/readelf"
+          echo "$GITHUB_WORKSPACE/build/toolbin" >> "$GITHUB_PATH"
+
+          "$CLANG_BIN" --version
+          "$LLD_BIN" --version
+          "$READELF_BIN" --version || true
+          echo "Preinstalled toolchain normalized."
 
       - name: Fetch pinned GPLv3+ PS4 payload SDK
         run: |
