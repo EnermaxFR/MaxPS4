@@ -18,6 +18,8 @@
 @property(nonatomic, strong) MTKView *metalProbeView;
 @property(nonatomic, strong) id<MTLCommandQueue> metalCommandQueue;
 @property(nonatomic, strong) id<MTLRenderPipelineState> metalProbePipeline;
+@property(nonatomic, strong) id<MTLRenderPipelineState> metalTexturePipeline;
+@property(nonatomic, strong) id<MTLTexture> metalProbeTexture;
 @property(nonatomic, assign) float probeX;
 @property(nonatomic, assign) float probeY;
 @property(nonatomic, assign) float probeScale;
@@ -171,7 +173,14 @@
              "vertex VOut maxps4_probe_vertex(const device float2 *v [[buffer(0)]], uint id [[vertex_id]]) {\n"
              "  VOut o; o.position = float4(v[id], 0.0, 1.0); return o;\n"
              "}\n"
-             "fragment float4 maxps4_probe_fragment(constant float4 &color [[buffer(0)]]) { return color; }\n";
+             "fragment float4 maxps4_probe_fragment(constant float4 &color [[buffer(0)]]) { return color; }\n"
+             "struct VTexOut { float4 position [[position]]; float2 uv; };\n"
+             "vertex VTexOut maxps4_texture_vertex(const device float4 *v [[buffer(0)]], uint id [[vertex_id]]) {\n"
+             "  VTexOut o; o.position = float4(v[id].xy, 0.0, 1.0); o.uv = v[id].zw; return o;\n"
+             "}\n"
+             "fragment float4 maxps4_texture_fragment(VTexOut in [[stage_in]], texture2d<float> tex [[texture(0)]]) {\n"
+             "  constexpr sampler s(address::repeat, filter::nearest); return tex.sample(s, in.uv);\n"
+             "}\n";
         NSError *libraryError = nil;
         id<MTLLibrary> library = [probeDevice newLibraryWithSource:shaderSource options:nil error:&libraryError];
         if (library) {
@@ -181,7 +190,46 @@
             desc.colorAttachments[0].pixelFormat = self.metalProbeView.colorPixelFormat;
             NSError *pipelineError = nil;
             self.metalProbePipeline = [probeDevice newRenderPipelineStateWithDescriptor:desc error:&pipelineError];
+
+            MTLRenderPipelineDescriptor *textureDesc = [[MTLRenderPipelineDescriptor alloc] init];
+            textureDesc.vertexFunction = [library newFunctionWithName:@"maxps4_texture_vertex"];
+            textureDesc.fragmentFunction = [library newFunctionWithName:@"maxps4_texture_fragment"];
+            textureDesc.colorAttachments[0].pixelFormat = self.metalProbeView.colorPixelFormat;
+            NSError *texturePipelineError = nil;
+            self.metalTexturePipeline =
+                [probeDevice newRenderPipelineStateWithDescriptor:textureDesc
+                                                            error:&texturePipelineError];
+
+            // Small procedurally generated 8x8 checker texture. It contains no
+            // external/proprietary image data and exists only for the legal
+            // guest-to-Metal texture smoke test.
+            MTLTextureDescriptor *textureDescriptor =
+                [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                                                   width:8
+                                                                  height:8
+                                                               mipmapped:NO];
+            textureDescriptor.usage = MTLTextureUsageShaderRead;
+            self.metalProbeTexture = [probeDevice newTextureWithDescriptor:textureDescriptor];
+            if (self.metalProbeTexture) {
+                unsigned char pixels[8 * 8 * 4];
+                for (NSUInteger y = 0; y < 8; ++y) {
+                    for (NSUInteger x = 0; x < 8; ++x) {
+                        const BOOL bright = (((x / 2) + (y / 2)) & 1) == 0;
+                        const NSUInteger p = (y * 8 + x) * 4;
+                        pixels[p + 0] = bright ? 35 : 255;
+                        pixels[p + 1] = bright ? 220 : 65;
+                        pixels[p + 2] = bright ? 255 : 180;
+                        pixels[p + 3] = 255;
+                    }
+                }
+                [self.metalProbeTexture replaceRegion:MTLRegionMake2D(0, 0, 8, 8)
+                                         mipmapLevel:0
+                                           withBytes:pixels
+                                         bytesPerRow:8 * 4];
+            }
+
             (void)pipelineError;
+            (void)texturePipelineError;
         }
         (void)libraryError;
     }
@@ -462,6 +510,40 @@
                 const float sn = (float)std::sin((double)primitive.rotation);
                 const float hx = primitive.width * 0.5f;
                 const float hy = primitive.height * 0.5f;
+
+                if (primitive.type == MAXPS4_GUEST_PRIMITIVE_TEXTURED_QUAD &&
+                    self.metalTexturePipeline && self.metalProbeTexture) {
+                    const float local[8] = {
+                        -hx, -hy,
+                         hx, -hy,
+                        -hx,  hy,
+                         hx,  hy,
+                    };
+                    const float uv[8] = {
+                        0.0f, 1.0f,
+                        1.0f, 1.0f,
+                        0.0f, 0.0f,
+                        1.0f, 0.0f,
+                    };
+                    float vertices[16];
+                    for (int v = 0; v < 4; ++v) {
+                        const float lx = local[v * 2];
+                        const float ly = local[v * 2 + 1];
+                        vertices[v * 4] =
+                            primitive.x + lx * cs - ly * sn;
+                        vertices[v * 4 + 1] =
+                            primitive.y + lx * sn + ly * cs;
+                        vertices[v * 4 + 2] = uv[v * 2];
+                        vertices[v * 4 + 3] = uv[v * 2 + 1];
+                    }
+                    [encoder setRenderPipelineState:self.metalTexturePipeline];
+                    [encoder setVertexBytes:vertices length:sizeof(vertices) atIndex:0];
+                    [encoder setFragmentTexture:self.metalProbeTexture atIndex:0];
+                    [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+                    continue;
+                }
+
+                [encoder setRenderPipelineState:self.metalProbePipeline];
                 const float color[4] = {
                     primitive.red, primitive.green, primitive.blue, primitive.alpha
                 };
