@@ -73,6 +73,14 @@ struct MaxPS4CPUPrototype {
             let opcode = program[rip]
             if opcode == 0x90 { // NOP
                 rip += 1
+            } else if opcode == 0x0F { // Two-byte opcode: isolated synthetic SYSCALL
+                guard rip + 2 <= program.count else { throw CPUError.truncatedInstruction }
+                guard program[rip + 1] == 0x05 else { throw CPUError.unsupportedOpcode }
+                // MaxPS4 test ABI ONLY: service 0 returns a fixed test value.
+                // Never forwards a syscall to iOS, Linux, FreeBSD or a PS4 kernel.
+                guard registers[0] == 0 else { throw CPUError.unsupportedOpcode }
+                registers[0] = 42
+                rip += 2
             } else if opcode == 0x31 { // XOR r/m32, r32 (register-only)
                 guard rip + 2 <= program.count else { throw CPUError.truncatedInstruction }
                 let modrm = program[rip + 1]
@@ -199,6 +207,12 @@ struct MaxPS4CPUPrototype {
             catch CPUError.unsupportedOpcode {}
             var badXOR = Self()
             do { try badXOR.run([0x31, 0x00]); return false }
+            catch CPUError.unsupportedOpcode {}
+            var serviceCPU = Self()
+            try serviceCPU.run([0x31, 0xC0, 0x0F, 0x05, 0xC3])
+            guard serviceCPU.rax == 42, serviceCPU.executedInstructions == 3 else { return false }
+            var invalidService = Self()
+            do { try invalidService.run([0x48, 0xB8, 0x01, 0, 0, 0, 0, 0, 0, 0, 0x0F, 0x05]); return false }
             catch CPUError.unsupportedOpcode {}
             var unsupported = Self()
             do { try unsupported.run([0x0F]); return false }
