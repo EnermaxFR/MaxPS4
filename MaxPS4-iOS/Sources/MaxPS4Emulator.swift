@@ -148,6 +148,12 @@ final class MaxPS4Emulator: ObservableObject {
         return "iOS \(process.operatingSystemVersionString) • \(process.processorCount) cœurs logiques • \(String(format: "%.1f", memoryGB)) Go RAM"
     }
 
+    func testCPUPrototype() {
+        status = MaxPS4CPUPrototype.selfTest()
+            ? "CPU x86-64 : auto-tests réussis (NOP, MOV, ADD, RET)"
+            : "CPU x86-64 : échec de l’auto-test"
+    }
+
     func testGuestMemory() {
         status = MaxPS4GuestMemory.selfTest()
             ? "Mémoire invitée : auto-test réussi (prototype, 16 Mio maximum)"
