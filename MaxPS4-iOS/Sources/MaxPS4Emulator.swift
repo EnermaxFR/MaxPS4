@@ -117,6 +117,11 @@ final class MaxPS4Emulator: ObservableObject {
     }
 
     func launchGame(_ id: UUID) {
+        guard !bootInProgress && !isRunning else {
+            status = "Une session est déjà active. Arrête-la avant un nouveau lancement."
+            return
+        }
+
         guard let index = libraryGames.firstIndex(where: { $0.id == id }) else {
             status = "Jeu introuvable dans la bibliothèque"
             return
@@ -133,6 +138,17 @@ final class MaxPS4Emulator: ObservableObject {
 
         guard FileManager.default.fileExists(atPath: executableURL.path) else {
             status = "\(game.name) • fichier importé introuvable"
+            return
+        }
+
+        let validation = validateExecutable(at: executableURL)
+        guard validation.isValid else {
+            status = "Lancement refusé • \(validation.diagnostic)"
+            return
+        }
+
+        guard executableURL.pathExtension.lowercased() != "pkg" else {
+            status = "PKG reconnu, mais non exécutable directement. Importe un ELF/SELF homebrew autorisé."
             return
         }
 
@@ -164,19 +180,29 @@ final class MaxPS4Emulator: ObservableObject {
 
                 switch result {
                 case MAXPS4_CORE_OK:
-                    self.status = "Démarrage : \(name)"
+                    self.isRunning = false
+                    self.currentGameName = nil
+                    self.status = "\(name) • session terminée avec succès"
                     self.refreshRuntimeSnapshot()
                 case MAXPS4_CORE_JIT_UNAVAILABLE:
                     self.isRunning = false
+                    self.currentGameName = nil
+                    self.refreshRuntimeSnapshot()
                     self.status = "JIT indisponible • \(diagnostic)"
                 case MAXPS4_CORE_NOT_READY:
                     self.isRunning = false
+                    self.currentGameName = nil
+                    self.refreshRuntimeSnapshot()
                     self.status = "JIT OK • \(backendDiagnostic)"
                 case MAXPS4_CORE_INVALID_PATH:
                     self.isRunning = false
+                    self.currentGameName = nil
+                    self.refreshRuntimeSnapshot()
                     self.status = "Exécutable PS4 invalide • \(backendDiagnostic)"
                 default:
                     self.isRunning = false
+                    self.currentGameName = nil
+                    self.refreshRuntimeSnapshot()
                     self.status = "Échec du cœur MaxPS4 (\(result.rawValue))"
                 }
             }
