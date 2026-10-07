@@ -248,7 +248,8 @@ bool AppendGuestPrimitive(MaxPS4GuestPrimitiveSnapshot primitive) {
     }
     if (primitive.type != MAXPS4_GUEST_PRIMITIVE_RECT &&
         primitive.type != MAXPS4_GUEST_PRIMITIVE_TRIANGLE &&
-        primitive.type != MAXPS4_GUEST_PRIMITIVE_TEXTURED_QUAD) {
+        primitive.type != MAXPS4_GUEST_PRIMITIVE_TEXTURED_QUAD &&
+        primitive.type != MAXPS4_GUEST_PRIMITIVE_GUEST_TEXTURED_QUAD) {
         return false;
     }
     primitive.x = std::clamp(primitive.x, -1.2f, 1.2f);
@@ -298,7 +299,6 @@ bool UploadGuestTexture(uint32_t texture_id,
     }
 
     MaxPS4GuestTextureSnapshot next{};
-    next.sequence = ++g_guest_texture_sequence;
     next.texture_id = texture_id;
     next.width = width;
     next.height = height;
@@ -306,6 +306,7 @@ bool UploadGuestTexture(uint32_t texture_id,
     std::memcpy(next.rgba.data(), reinterpret_cast<const void*>(src), byte_count);
 
     std::lock_guard<std::mutex> lock(g_guest_texture_mutex);
+    next.sequence = ++g_guest_texture_sequence;
     g_guest_texture = next;
     g_guest_texture_active = true;
     return true;
