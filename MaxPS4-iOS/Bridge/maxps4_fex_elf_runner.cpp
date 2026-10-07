@@ -180,6 +180,15 @@ public:
         return result;
     }
 
+    std::string DlsymTrace() const {
+        std::string result;
+        for (const auto& item : dlsym_requests) {
+            if (!result.empty()) result += ",";
+            result += item;
+        }
+        return result;
+    }
+
 private:
     static std::string Hex(uintptr_t value) {
         char buf[32];
@@ -231,15 +240,6 @@ private:
                            (symbol.empty() ? "<unreadable>" : symbol);
         if (dlsym_requests.size() == 8) dlsym_requests.erase(dlsym_requests.begin());
         dlsym_requests.push_back(std::move(item));
-    }
-
-    std::string DlsymTrace() const {
-        std::string result;
-        for (const auto& item : dlsym_requests) {
-            if (!result.empty()) result += ",";
-            result += item;
-        }
-        return result;
     }
 
     void Capture(const char* data, size_t size) {
