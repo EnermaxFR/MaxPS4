@@ -1075,24 +1075,41 @@ public:
             const int fd = static_cast<int>(gpr[FEXCore::X86State::REG_RDI]);
             const auto addr = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RSI]);
             const size_t len = static_cast<size_t>(gpr[FEXCore::X86State::REG_RDX]);
-            if ((fd == 1 || fd == 2) && IsReadable(addr, len)) {
-                FILE* out = fd == 1 ? stdout : stderr;
-                const size_t done = fwrite(reinterpret_cast<const void*>(addr), 1, len, out);
-                fflush(out);
-                Capture(reinterpret_cast<const char*>(addr), done);
-                gpr[FEXCore::X86State::REG_RAX] = done;
-                return true;
+
+            if (!kernel.HasFileDescriptor(fd, false, true)) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EBADF};
             }
-            return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            if (!kernel.ContainsMemory(addr, len, MaxPS4::Kernel::MemoryRead) ||
+                !IsReadable(addr, len)) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+
+            FILE* out = fd == 2 ? stderr : stdout;
+            const size_t done =
+                fwrite(reinterpret_cast<const void*>(addr), 1, len, out);
+            fflush(out);
+            Capture(reinterpret_cast<const char*>(addr), done);
+            gpr[FEXCore::X86State::REG_RAX] = done;
+            return true;
         }
 
         if (op == 3) {
             const int fd = static_cast<int>(gpr[FEXCore::X86State::REG_RDI]);
             const auto addr = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RSI]);
             const size_t len = static_cast<size_t>(gpr[FEXCore::X86State::REG_RDX]);
-            if (fd != 0 || !IsWritable(addr, len)) {
-                return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+
+            if (!kernel.HasFileDescriptor(fd, true, false)) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EBADF};
             }
+            if (!kernel.ContainsMemory(addr, len, MaxPS4::Kernel::MemoryWrite) ||
+                !IsWritable(addr, len)) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+
             // Deterministic stdin for legal stdio homebrew: one short line, then EOF.
             static constexpr char kInput[] = "MaxPS4\n";
             const size_t available = stdin_sent ? 0 : sizeof(kInput) - 1;
