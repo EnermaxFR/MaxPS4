@@ -88,12 +88,20 @@ struct MaxPS4CPUPrototype {
         registers[4] = address + UInt64(size)
     }
 
-    mutating func run(_ program: [UInt8], limit: Int = 256) throws {
+    /// Execute at most one instruction, preserving RIP and registers for resumption.
+    mutating func step(_ program: [UInt8]) throws {
+        try run(program, limit: 1, pauseAtLimit: true)
+    }
+
+    mutating func run(_ program: [UInt8], limit: Int = 256, pauseAtLimit: Bool = false) throws {
         var steps = 0
         executedInstructions = 0
         recentInstructionOffsets = []
         while rip < program.count {
-            guard steps < limit else { throw CPUError.instructionLimit }
+            guard steps < limit else {
+                if pauseAtLimit { return }
+                throw CPUError.instructionLimit
+            }
             steps += 1
             executedInstructions += 1
             recentInstructionOffsets.append(rip)
@@ -364,6 +372,17 @@ struct MaxPS4CPUPrototype {
                 try processB.cpu.guestMemory.read(at: 0x5000, count: 1)
                 return false
             } catch MaxPS4GuestMemory.MemoryError.outOfBounds {}
+            var stepped = Self()
+            let steppedProgram: [UInt8] = [
+                0x48, 0xB8, 0x05, 0, 0, 0, 0, 0, 0, 0,
+                0x48, 0x83, 0xC0, 0x03, 0xC3
+            ]
+            try stepped.step(steppedProgram)
+            guard stepped.rax == 5, stepped.rip == 10 else { return false }
+            try stepped.step(steppedProgram)
+            guard stepped.rax == 8, stepped.rip == 14 else { return false }
+            try stepped.step(steppedProgram)
+            guard stepped.rip == steppedProgram.count else { return false }
             var processManager = MaxPS4VirtualProcessManager()
             let firstPID = try processManager.create()
             let secondPID = try processManager.create()
