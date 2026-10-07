@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include <mutex>
 
 namespace MaxPS4::Kernel {
 
@@ -140,7 +141,9 @@ public:
     uint32_t CreateLogicalThread(std::string_view name, int& error);
     bool CompleteLogicalThread(uint32_t tid, int exit_code, int& error);
     bool JoinLogicalThread(uint32_t tid, int& exit_code, int& error);
-    uint32_t CurrentTid() const { return process_.current_tid; }
+    bool BindCurrentThread(uint32_t tid, int& error);
+    void UnbindCurrentThread();
+    uint32_t CurrentTid() const;
 
     uint32_t CreateMutex(int& error);
     bool LockMutex(uint32_t id, uint32_t tid, int& error);
@@ -178,6 +181,10 @@ private:
     ProcessState process_{};
     uintptr_t managed_arena_base_{};
     size_t managed_arena_size_{};
+    mutable std::recursive_mutex state_mutex_{};
+
+    static thread_local const KernelState* bound_kernel_;
+    static thread_local uint32_t bound_tid_;
 };
 
 } // namespace MaxPS4::Kernel
