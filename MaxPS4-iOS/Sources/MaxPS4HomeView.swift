@@ -110,8 +110,10 @@ struct MaxPS4HomeView: View {
                                         } catch { errors.append(game.fileName + " : " + error.localizedDescription) }
                                     }
                                     let duplicates = groups.values.filter { $0.count > 1 }
-                                    var message = duplicates.isEmpty ? "Aucun PKG strictement identique détecté." :
+                                    var message = "PKG présents : " + String(files.count) + " • comparés : " + String(files.count - errors.count) + " • erreurs : " + String(errors.count) + "\n"
+                                    message += duplicates.isEmpty ? "Aucun PKG strictement identique détecté." :
                                         duplicates.map { "Copies identiques : " + $0.sorted().joined(separator: " / ") }.joined(separator: "\n")
+                                    if files.count < 2 { message += "\nIl faut au moins deux PKG présents pour comparer des copies." }
                                     if !errors.isEmpty { message += "\nFichiers non comparés : " + errors.joined(separator: " / ") }
                                     return message + "\nAucune suppression automatique."
                                 }.value
