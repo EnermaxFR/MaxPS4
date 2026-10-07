@@ -76,6 +76,7 @@ typedef enum MaxPS4GuestPrimitiveType {
     MAXPS4_GUEST_PRIMITIVE_RECT = 1,
     MAXPS4_GUEST_PRIMITIVE_TRIANGLE = 2,
     MAXPS4_GUEST_PRIMITIVE_TEXTURED_QUAD = 3,
+    MAXPS4_GUEST_PRIMITIVE_GUEST_TEXTURED_QUAD = 4,
 } MaxPS4GuestPrimitiveType;
 
 typedef struct MaxPS4GuestPrimitive {
@@ -89,6 +90,7 @@ typedef struct MaxPS4GuestPrimitive {
     float green;
     float blue;
     float alpha;
+    unsigned int texture_id;
 } MaxPS4GuestPrimitive;
 
 typedef struct MaxPS4GuestSceneFrame {
@@ -103,6 +105,20 @@ typedef struct MaxPS4GuestSceneFrame {
 
 // Typed primitive command buffer used by the next legal graphics bridge stage.
 bool maxps4_backend_guest_scene_frame(MaxPS4GuestSceneFrame *out);
+
+#define MAXPS4_GUEST_TEXTURE_MAX_BYTES 4096
+
+typedef struct MaxPS4GuestTexture {
+    unsigned int sequence;
+    unsigned int texture_id;
+    unsigned int width;
+    unsigned int height;
+    unsigned int byte_count;
+    unsigned char rgba[MAXPS4_GUEST_TEXTURE_MAX_BYTES];
+} MaxPS4GuestTexture;
+
+// Latest guest-uploaded legal RGBA8 texture resource, if one exists.
+bool maxps4_backend_guest_texture(MaxPS4GuestTexture *out);
 bool maxps4_backend_self_test(void);
 // Validates an imported PS4 SELF/ELF executable using the same structural
 // requirements as the locked shadPS4 loader before any runtime handoff.
