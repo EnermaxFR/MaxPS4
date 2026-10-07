@@ -29,6 +29,21 @@ void maxps4_backend_set_controller_state(unsigned int buttons,
                                          float left_x, float left_y,
                                          float right_x, float right_y,
                                          float left_trigger, float right_trigger);
+
+typedef struct MaxPS4GuestRenderState {
+    unsigned int sequence;
+    float x;
+    float y;
+    float scale;
+    float red;
+    float green;
+    float blue;
+    float alpha;
+} MaxPS4GuestRenderState;
+
+// Returns true after an x86-64 guest has submitted at least one private MaxPS4
+// render command. This is a legal smoke-test ABI, not a PS4 graphics API.
+bool maxps4_backend_guest_render_state(MaxPS4GuestRenderState *out);
 bool maxps4_backend_self_test(void);
 // Validates an imported PS4 SELF/ELF executable using the same structural
 // requirements as the locked shadPS4 loader before any runtime handoff.
