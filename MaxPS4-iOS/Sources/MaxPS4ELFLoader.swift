@@ -120,6 +120,31 @@ enum MaxPS4ELFLoader {
             try cpu.runLoadedTest(memory: result.memory, entry: result.entry, length: 2)
             guard cpu.rip == 2 else { return false }
 
+            // End-to-end test: ELF file -> PT_LOAD -> guest CPU -> guest memory.
+            // A synthetic MOV RAX,42 / MOV [0x1028],RAX / RET program.
+            var integrated = bytes + [UInt8](repeating: 0, count: 64)
+            let instructions: [UInt8] = [
+                0x48, 0xB8, 42, 0, 0, 0, 0, 0, 0, 0,
+                0x48, 0xA3, 0x28, 0x10, 0, 0, 0, 0, 0, 0,
+                0xC3
+            ]
+            integrated.replaceSubrange(120..<(120 + instructions.count), with: instructions)
+            for index in 0..<8 {
+                integrated[96 + index] = UInt8(truncatingIfNeeded: UInt64(instructions.count) >> (index * 8))
+                integrated[104 + index] = UInt8(truncatingIfNeeded: UInt64(64) >> (index * 8))
+            }
+            try Data(integrated).write(to: url, options: .atomic)
+            let integratedImage = try load(url: url)
+            var integratedCPU = MaxPS4CPUPrototype()
+            try integratedCPU.runLoadedTest(
+                memory: integratedImage.memory, entry: integratedImage.entry,
+                length: instructions.count
+            )
+            guard integratedCPU.rax == 42,
+                  integratedCPU.executedInstructions == 3,
+                  try integratedCPU.guestMemory.read(at: 0x1028, count: 8) ==
+                      Data([42, 0, 0, 0, 0, 0, 0, 0]) else { return false }
+
             // An executable entry point outside PT_LOAD must be rejected.
             put(0x2000, at: 24, width: 8)
             try Data(bytes).write(to: url, options: .atomic)
