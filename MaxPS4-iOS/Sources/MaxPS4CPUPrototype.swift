@@ -84,6 +84,16 @@ struct MaxPS4CPUPrototype {
                 registers[dest] = UInt64(value) // x86-64 clears upper 32 bits
                 zeroFlag = value == 0
                 rip += 2
+            } else if opcode == 0x85 { // TEST r/m32, r32 (register-only)
+                guard rip + 2 <= program.count else { throw CPUError.truncatedInstruction }
+                let modrm = program[rip + 1]
+                guard modrm & 0xC0 == 0xC0 else { throw CPUError.unsupportedOpcode }
+                let lhs = Int(modrm & 7)
+                let rhs = Int((modrm >> 3) & 7)
+                let value = UInt32(truncatingIfNeeded: registers[lhs]) &
+                    UInt32(truncatingIfNeeded: registers[rhs])
+                zeroFlag = value == 0 // TEST does not change either register
+                rip += 2
             } else if opcode == 0xC3 { // RET ends the isolated test
                 rip += 1
                 return
@@ -178,6 +188,15 @@ struct MaxPS4CPUPrototype {
                             0x31, 0xC0, 0x74, 0x02, 0x0F, 0x0F, 0xC3])
             guard xorCPU.rax == 0, xorCPU.zeroFlag,
                   xorCPU.executedInstructions == 4 else { return false }
+            var testCPU = Self()
+            try testCPU.run([0x48, 0xB8, 0x04, 0, 0, 0, 0, 0, 0, 0,
+                             0x48, 0xB9, 0x02, 0, 0, 0, 0, 0, 0, 0,
+                             0x85, 0xC8, 0x74, 0x02, 0x0F, 0x0F, 0xC3])
+            guard testCPU.rax == 4, testCPU.registers[1] == 2,
+                  testCPU.zeroFlag, testCPU.executedInstructions == 5 else { return false }
+            var invalidTEST = Self()
+            do { try invalidTEST.run([0x85, 0x00]); return false }
+            catch CPUError.unsupportedOpcode {}
             var badXOR = Self()
             do { try badXOR.run([0x31, 0x00]); return false }
             catch CPUError.unsupportedOpcode {}
