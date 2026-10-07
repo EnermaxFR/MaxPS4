@@ -74,24 +74,24 @@
 
     UILabel *brand = [[UILabel alloc] init];
     brand.translatesAutoresizingMaskIntoConstraints = NO;
-    brand.text = @"MAXPS4  1.1";
+    brand.text = @"MAXPS4  1.2";
     brand.textColor = [UIColor colorWithRed:0.28 green:0.80 blue:1.0 alpha:1.0];
     brand.font = [UIFont systemFontOfSize:34.0 weight:UIFontWeightBlack];
     brand.accessibilityLabel = @"MaxPS4";
 
     UILabel *subtitle = [[UILabel alloc] init];
     subtitle.translatesAutoresizingMaskIntoConstraints = NO;
-    subtitle.text = @"Ton espace PS4 • Nouvelle interface";
+    subtitle.text = @"Édition iPhone • Bibliothèque et lancement";
     subtitle.textColor = [UIColor colorWithWhite:1.0 alpha:0.58];
     subtitle.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightMedium];
 
     UILabel *welcomeTitle = [[UILabel alloc] init];
-    welcomeTitle.text = @"Centre de lancement";
+    welcomeTitle.text = @"Bienvenue sur MaxPS4";
     welcomeTitle.font = [UIFont systemFontOfSize:26.0 weight:UIFontWeightHeavy];
     welcomeTitle.textColor = UIColor.whiteColor;
 
     UILabel *welcomeDescription = [[UILabel alloc] init];
-    welcomeDescription.text = @"Importe tes fichiers autorisés, explore ta bibliothèque et vérifie le moteur expérimental.";
+    welcomeDescription.text = @"Ta collection au même endroit. Ajoute un jeu, retrouve tes favoris et lance tes tests en un geste.";
     welcomeDescription.numberOfLines = 0;
     welcomeDescription.font = [UIFont systemFontOfSize:14.0];
     welcomeDescription.textColor = [UIColor colorWithWhite:0.77 alpha:1.0];
@@ -183,7 +183,7 @@
                           forControlEvents:UIControlEventTouchUpInside];
 
     UILabel *libraryTitle = [[UILabel alloc] init];
-    libraryTitle.text = @"Bibliothèque";
+    libraryTitle.text = @"Ma collection PS4";
     libraryTitle.textColor = UIColor.whiteColor;
     libraryTitle.font = [UIFont systemFontOfSize:20.0 weight:UIFontWeightBold];
 
@@ -1053,7 +1053,7 @@
             UIView *rowCard = [[UIView alloc] init];
             rowCard.translatesAutoresizingMaskIntoConstraints = NO;
             rowCard.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.045];
-            rowCard.layer.cornerRadius = 16.0;
+            rowCard.layer.cornerRadius = 20.0;
             rowCard.layer.borderWidth = 1.0;
             rowCard.layer.borderColor =
                 [UIColor colorWithWhite:1.0 alpha:0.08].CGColor;
@@ -1062,10 +1062,33 @@
             cover.translatesAutoresizingMaskIntoConstraints = NO;
             cover.backgroundColor = [UIColor colorWithRed:0.11 green:0.24 blue:0.62 alpha:1.0];
             cover.layer.cornerRadius = 14.0;
+            cover.clipsToBounds = YES;
+            NSString *relativePath = game[@"relativePath"];
+            NSString *gameDirectory = [[[self libraryRootPath] stringByAppendingPathComponent:relativePath ?: @""] stringByDeletingLastPathComponent];
+            NSArray<NSString *> *artNames = @[@"cover.jpg", @"cover.png", @"icon0.png", @"ICON0.PNG"];
+            UIImage *artwork = nil;
+            for (NSString *artName in artNames) {
+                artwork = [UIImage imageWithContentsOfFile:[gameDirectory stringByAppendingPathComponent:artName]];
+                if (artwork) break;
+            }
+            if (artwork) {
+                UIImageView *artView = [[UIImageView alloc] initWithImage:artwork];
+                artView.translatesAutoresizingMaskIntoConstraints = NO;
+                artView.contentMode = UIViewContentModeScaleAspectFill;
+                artView.clipsToBounds = YES;
+                [cover addSubview:artView];
+                [NSLayoutConstraint activateConstraints:@[
+                    [artView.leadingAnchor constraintEqualToAnchor:cover.leadingAnchor],
+                    [artView.trailingAnchor constraintEqualToAnchor:cover.trailingAnchor],
+                    [artView.topAnchor constraintEqualToAnchor:cover.topAnchor],
+                    [artView.bottomAnchor constraintEqualToAnchor:cover.bottomAnchor]
+                ]];
+            }
 
             UILabel *coverMark = [[UILabel alloc] init];
             coverMark.translatesAutoresizingMaskIntoConstraints = NO;
-            coverMark.text = @"PS4";
+            coverMark.text = artwork ? @"" : @"PS4\n◆";
+            coverMark.numberOfLines = 2;
             coverMark.textColor = UIColor.whiteColor;
             coverMark.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightBlack];
             coverMark.textAlignment = NSTextAlignmentCenter;
@@ -1084,7 +1107,7 @@
             if ([game[@"favorite"] boolValue]) [badges addObject:@"Favori"];
             if ([game[@"homebrew"] boolValue]) [badges addObject:@"Homebrew"];
             name.text = game[@"name"] ?: @"Jeu PS4";
-            meta.text = badges.count ? [badges componentsJoinedByString:@"  •  "] : @"Prêt à lancer";
+            meta.text = badges.count ? [badges componentsJoinedByString:@"  •  "] : @"Jeu importé • PS4";
 
             UIButton *play =
                 [self smallLibraryButtonWithTitle:@"▶  Lancer"
