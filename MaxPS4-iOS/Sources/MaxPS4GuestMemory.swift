@@ -37,6 +37,21 @@ struct MaxPS4GuestMemory {
     private(set) var allocatedBytes = 0
     static let maximumBytes = 16 * 1024 * 1024
 
+    var regionCount: Int { regions.count }
+
+    var memoryMapSummary: String {
+        let entries = regions.sorted { $0.base < $1.base }.map { region in
+            let flags = String([
+                region.permissions.contains(.read) ? "r" : "-",
+                region.permissions.contains(.write) ? "w" : "-",
+                region.permissions.contains(.execute) ? "x" : "-"
+            ].joined())
+            return "0x" + String(region.base, radix: 16) + " : " +
+                String(region.bytes.count) + " octets [" + flags + "]"
+        }
+        return entries.isEmpty ? "Aucune région invitée" : entries.joined(separator: " • ")
+    }
+
     mutating func mapZeroFilled(at address: UInt64, size: Int, permissions: Permissions = .readWrite) throws {
         guard size > 0, size <= Self.maximumBytes - allocatedBytes,
               address <= UInt64.max - UInt64(size) else {
