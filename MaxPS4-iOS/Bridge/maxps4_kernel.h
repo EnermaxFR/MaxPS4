@@ -93,6 +93,11 @@ struct ProcessState {
     std::array<KernelMutexState, kMaxKernelMutexes> mutexes{};
 };
 
+struct KernelTimeValue {
+    int64_t seconds{};
+    int64_t fraction{};
+};
+
 struct SyscallResult {
     bool handled{};
     bool request_exit{};
@@ -141,6 +146,15 @@ public:
     bool LockMutex(uint32_t id, uint32_t tid, int& error);
     bool UnlockMutex(uint32_t id, uint32_t tid, int& error);
     bool DestroyMutex(uint32_t id, int& error);
+
+    // Time/scheduler services used by the FreeBSD/Orbis userspace ABI.
+    // GetTimeOfDay returns microseconds in fraction; clock methods return
+    // nanoseconds in fraction.
+    KernelTimeValue GetTimeOfDay() const;
+    bool ClockGetTime(int clock_id, KernelTimeValue& out, int& error) const;
+    bool ClockGetResolution(int clock_id, KernelTimeValue& out, int& error) const;
+    bool SleepFor(int64_t seconds, int64_t nanoseconds, int& error) const;
+    void YieldCurrentThread() const;
 
     SyscallResult Dispatch(uint64_t syscall_number,
                            const std::array<uint64_t, 6>& args);
