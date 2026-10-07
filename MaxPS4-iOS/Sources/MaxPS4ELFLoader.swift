@@ -31,6 +31,28 @@ enum MaxPS4ELFLoader {
         guard size == 56, count <= 64, table <= UInt64(file.count),
               count <= (UInt64(file.count) - table) / size else { throw LoaderError.invalid }
 
+        // Preflight every loadable segment before allocating guest memory.
+        var ranges: [(start: UInt64, end: UInt64)] = []
+        var totalMemory: UInt64 = 0
+        for i in 0..<Int(count) {
+            let offset = Int(table + UInt64(i) * size)
+            guard number(offset, 4) == 1 else { continue }
+            let start = number(offset + 16, 8)
+            let segmentMemory = number(offset + 40, 8)
+            guard start <= UInt64.max - segmentMemory else { throw LoaderError.invalid }
+            guard segmentMemory <= UInt64(MaxPS4GuestMemory.maximumBytes),
+                  totalMemory <= UInt64(MaxPS4GuestMemory.maximumBytes) - segmentMemory else {
+                throw LoaderError.invalid
+            }
+            totalMemory += segmentMemory
+            guard segmentMemory > 0 else { continue }
+            let end = start + segmentMemory
+            guard ranges.allSatisfy({ end <= $0.start || start >= $0.end }) else {
+                throw MaxPS4GuestMemory.MemoryError.overlappingRegion
+            }
+            ranges.append((start: start, end: end))
+        }
+
         var memory = MaxPS4GuestMemory()
         var loaded = 0
         var entryCovered = false
