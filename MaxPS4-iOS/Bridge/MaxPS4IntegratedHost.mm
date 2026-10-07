@@ -27,6 +27,7 @@
 @property(nonatomic, assign) float probeScale;
 @property(nonatomic, assign) unsigned int probeButtons;
 @property(nonatomic, strong) UIButton *testButton;
+@property(nonatomic, strong) UIButton *multithreadTestButton;
 @property(nonatomic, strong) UIButton *importButton;
 @property(nonatomic, strong) UIButton *diagnosticCopyButton;
 @property(nonatomic, strong) NSTimer *diagnosticTimer;
@@ -142,6 +143,14 @@
                                         subtitle:@"Vérifie le cœur intégré et son état"
                                          primary:NO];
     [self.testButton addTarget:self action:@selector(runBackendTest) forControlEvents:UIControlEventTouchUpInside];
+
+    self.multithreadTestButton =
+        [self actionButtonWithTitle:@"Tester MaxPS4Kernel multi-thread"
+                           subtitle:@"Lance le test thr_new sur un second contexte FEX"
+                            primary:NO];
+    [self.multithreadTestButton addTarget:self
+                                    action:@selector(runMultithreadKernelTest)
+                          forControlEvents:UIControlEventTouchUpInside];
 
     UILabel *libraryTitle = [[UILabel alloc] init];
     libraryTitle.text = @"Bibliothèque";
@@ -397,6 +406,7 @@
         backendCard,
         self.importButton,
         self.testButton,
+        self.multithreadTestButton,
         libraryTitle,
         self.libraryCategoryControl,
         libraryCard,
@@ -1190,6 +1200,7 @@
     self.bootStartedAt = [NSDate date];
     self.importButton.enabled = NO;
     self.testButton.enabled = NO;
+    self.multithreadTestButton.enabled = NO;
     self.stateValueLabel.text = @"Validation OK";
     self.fileValueLabel.text =
         [NSString stringWithFormat:@"%@ • %llu o", displayName, fileSize];
@@ -1215,6 +1226,7 @@
             self.bootInProgress = NO;
             self.importButton.enabled = YES;
             self.testButton.enabled = YES;
+            self.multithreadTestButton.enabled = YES;
 
             NSTimeInterval elapsed =
                 self.bootStartedAt ? -[self.bootStartedAt timeIntervalSinceNow] : 0;
@@ -1234,6 +1246,36 @@
                 bootText]];
         });
     });
+}
+
+- (void)runMultithreadKernelTest {
+    if (self.bootInProgress) {
+        [self setDiagnostic:@"Un guest FEX est déjà en cours. Attends sa fin avant de lancer le test multi-thread."];
+        return;
+    }
+
+    NSString *path =
+        [NSBundle.mainBundle pathForResource:@"MaxPS4KernelThreadTest"
+                                     ofType:@"elf"];
+    if (path.length == 0) {
+        self.stateValueLabel.text = @"Test absent";
+        [self setDiagnostic:
+            @"Le test MaxPS4Kernel multi-thread n’est pas présent dans ce build."];
+        return;
+    }
+
+    NSDictionary *attrs =
+        [NSFileManager.defaultManager attributesOfItemAtPath:path error:nil];
+    unsigned long long fileSize =
+        [attrs[NSFileSize] unsignedLongLongValue];
+
+    self.stateValueLabel.text = @"Test multi-thread…";
+    [self setDiagnostic:
+        @"Test intégré MaxPS4Kernel : thr_new(455) → second contexte FEX → thr_self(432) → thr_exit(431). JIT/StikDebug doit être actif."];
+
+    [self launchManagedExecutableAtPath:path
+                           displayName:@"MaxPS4Kernel multi-thread"
+                              fileSize:fileSize];
 }
 
 - (void)runBackendTest {
@@ -1452,6 +1494,7 @@
 
     self.importButton.enabled = NO;
     self.testButton.enabled = NO;
+    self.multithreadTestButton.enabled = NO;
     self.stateValueLabel.text =
         importKind == MAXPS4_IMPORT_PKG ? @"PKG homebrew extrait" : @"Validation OK";
     self.guestOutputLabel.text = @"En attente de sortie…";
@@ -1480,6 +1523,7 @@
             self.bootInProgress = NO;
             self.importButton.enabled = YES;
             self.testButton.enabled = YES;
+            self.multithreadTestButton.enabled = YES;
 
             NSTimeInterval elapsed =
                 self.bootStartedAt ? -[self.bootStartedAt timeIntervalSinceNow] : 0;
