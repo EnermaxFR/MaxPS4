@@ -55,6 +55,18 @@ struct MaxPS4CPUPrototype {
                     }
                     registers[Int(next - 0xB8)] = value
                     rip += 10
+                } else if next == 0xA1 || next == 0xA3 { // MOV RAX, moffs64 / MOV moffs64, RAX
+                    guard rip + 10 <= program.count else { throw CPUError.truncatedInstruction }
+                    var address: UInt64 = 0
+                    for index in 0..<8 {
+                        address |= UInt64(program[rip + 2 + index]) << (index * 8)
+                    }
+                    if next == 0xA1 {
+                        try loadRAX(address: address)
+                    } else {
+                        try storeRAX(address: address)
+                    }
+                    rip += 10
                 } else if next == 0x83 { // ADD/SUB/CMP r64, sign-extended imm8
                     guard rip + 4 <= program.count else { throw CPUError.truncatedInstruction }
                     let modrm = program[rip + 2]
@@ -104,6 +116,22 @@ struct MaxPS4CPUPrototype {
             receiver.guestMemory = memoryCPU.guestMemory
             try receiver.loadRAX(address: 0x1010)
             guard receiver.rax == 42 else { return false }
+            var instructionCPU = Self()
+            try instructionCPU.prepareGuestMemory(address: 0x1000, size: 4096)
+            try instructionCPU.run([
+                0x48, 0xB8, 0x2A, 0, 0, 0, 0, 0, 0, 0,
+                0x48, 0xA3, 0x10, 0x10, 0, 0, 0, 0, 0, 0,
+                0x48, 0xB8, 0, 0, 0, 0, 0, 0, 0, 0,
+                0x48, 0xA1, 0x10, 0x10, 0, 0, 0, 0, 0, 0,
+                0xC3
+            ])
+            guard instructionCPU.rax == 42 else { return false }
+            var invalidAccess = Self()
+            do {
+                try invalidAccess.run([0x48, 0xA1, 0, 0, 0, 0, 0, 0, 0, 0])
+                return false
+            } catch MaxPS4GuestMemory.MemoryError.outOfBounds {}
+
             return true
         } catch { return false }
     }
