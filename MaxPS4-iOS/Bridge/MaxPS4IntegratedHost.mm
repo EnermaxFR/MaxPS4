@@ -37,6 +37,11 @@
 @property(nonatomic, assign) BOOL bootInProgress;
 @property(nonatomic, assign) NSUInteger bootGeneration;
 @property(nonatomic, assign) NSUInteger copyFeedbackGeneration;
+@property(nonatomic, strong) UISegmentedControl *libraryCategoryControl;
+@property(nonatomic, strong) UIStackView *libraryStack;
+@property(nonatomic, strong) UILabel *libraryEmptyLabel;
+@property(nonatomic, strong) NSMutableArray<NSMutableDictionary *> *libraryGames;
+@property(nonatomic, strong) NSArray<NSMutableDictionary *> *visibleLibraryGames;
 @end
 
 @implementation MaxPS4IntegratedViewController
@@ -46,6 +51,7 @@
 
     self.view.backgroundColor = [UIColor colorWithRed:0.015 green:0.035 blue:0.085 alpha:1.0];
     self.lastDiagnostic = @"Backend intégré. Active le JIT avec StikDebug, puis teste le backend ou importe ton propre eboot.bin / SELF.";
+    [self loadLibrary];
 
     UIScrollView *scroll = [[UIScrollView alloc] init];
     scroll.translatesAutoresizingMaskIntoConstraints = NO;
@@ -129,6 +135,41 @@
                                         subtitle:@"Vérifie le cœur intégré et son état"
                                          primary:NO];
     [self.testButton addTarget:self action:@selector(runBackendTest) forControlEvents:UIControlEventTouchUpInside];
+
+    UILabel *libraryTitle = [[UILabel alloc] init];
+    libraryTitle.text = @"Bibliothèque";
+    libraryTitle.textColor = UIColor.whiteColor;
+    libraryTitle.font = [UIFont systemFontOfSize:20.0 weight:UIFontWeightBold];
+
+    self.libraryCategoryControl = [[UISegmentedControl alloc]
+        initWithItems:@[@"Tous", @"Favoris", @"Récents", @"Homebrew"]];
+    self.libraryCategoryControl.selectedSegmentIndex = 0;
+    self.libraryCategoryControl.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.libraryCategoryControl addTarget:self
+                                    action:@selector(libraryCategoryChanged:)
+                          forControlEvents:UIControlEventValueChanged];
+
+    UIView *libraryCard = [self cardView];
+    self.libraryStack = [[UIStackView alloc] init];
+    self.libraryStack.translatesAutoresizingMaskIntoConstraints = NO;
+    self.libraryStack.axis = UILayoutConstraintAxisVertical;
+    self.libraryStack.spacing = 12.0;
+
+    self.libraryEmptyLabel = [[UILabel alloc] init];
+    self.libraryEmptyLabel.numberOfLines = 0;
+    self.libraryEmptyLabel.textAlignment = NSTextAlignmentCenter;
+    self.libraryEmptyLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.56];
+    self.libraryEmptyLabel.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightMedium];
+
+    [libraryCard addSubview:self.libraryStack];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.libraryStack.leadingAnchor constraintEqualToAnchor:libraryCard.leadingAnchor constant:14.0],
+        [self.libraryStack.trailingAnchor constraintEqualToAnchor:libraryCard.trailingAnchor constant:-14.0],
+        [self.libraryStack.topAnchor constraintEqualToAnchor:libraryCard.topAnchor constant:14.0],
+        [self.libraryStack.bottomAnchor constraintEqualToAnchor:libraryCard.bottomAnchor constant:-14.0],
+    ]];
+
+    [self refreshLibraryUI];
 
     UIView *ioCard = [self cardView];
     UILabel *ioTitle = [[UILabel alloc] init];
@@ -349,6 +390,9 @@
         backendCard,
         self.importButton,
         self.testButton,
+        libraryTitle,
+        self.libraryCategoryControl,
+        libraryCard,
         ioCard,
         detailsCard,
         outputTitle,
