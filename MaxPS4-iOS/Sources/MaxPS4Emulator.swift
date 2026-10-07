@@ -42,6 +42,28 @@ final class MaxPS4Emulator: ObservableObject {
             return
         }
 
+        // ELF magic is a useful preliminary check, not proof of PS4 compatibility.
+        guard let header = try? FileHandle(forReadingFrom: url) else {
+            status = "Impossible de lire le fichier importé"
+            return
+        }
+        defer { try? header.close() }
+        guard let bytes = try? header.read(upToCount: 20),
+              bytes.count >= 20,
+              Array(bytes.prefix(4)) == [0x7F, 0x45, 0x4C, 0x46] else {
+            status = "Fichier invalide : en-tête ELF absent"
+            return
+        }
+        guard bytes[4] == 2, bytes[5] == 1 else {
+            status = "Format ELF incompatible : 64 bits little-endian requis"
+            return
+        }
+        let machine = UInt16(bytes[18]) | (UInt16(bytes[19]) << 8)
+        guard machine == 0x3E else {
+            status = "Architecture incompatible : exécutable x86-64 attendu"
+            return
+        }
+
         do {
             let folder = try importFolder()
             let destination = uniqueDestination(for: url.lastPathComponent, in: folder)
@@ -115,7 +137,7 @@ final class MaxPS4Emulator: ObservableObject {
     var deviceDiagnostic: String {
         let process = ProcessInfo.processInfo
         let memoryGB = Double(process.physicalMemory) / 1_073_741_824
-        return "iOS \\(process.operatingSystemVersionString) • \\(process.processorCount) cœurs logiques • \\(String(format: "%.1f", memoryGB)) Go RAM"
+        return "iOS \(process.operatingSystemVersionString) • \(process.processorCount) cœurs logiques • \(String(format: "%.1f", memoryGB)) Go RAM"
     }
 
     func testBackend() {
