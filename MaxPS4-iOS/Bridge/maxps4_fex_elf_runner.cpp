@@ -69,6 +69,21 @@ public:
 
         // Small, non-proprietary compatibility shim used only by legal homebrew tests.
         // FreeBSD/Orbis-style syscall numbers used here: read=3, write=4.
+        // PS4-specific dynlib_dlsym=591 is diagnosed explicitly so the next
+        // missing HLE symbol can be identified without guessing.
+        if (op == 591) {
+            const uint64_t handle = gpr[FEXCore::X86State::REG_RDI];
+            const auto symbol_addr = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RSI]);
+            const auto out_addr = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDX]);
+            const std::string symbol = ReadCString(symbol_addr, 160);
+            SetLiveDiag(std::string("guest running • syscall=591 dynlib_dlsym") +
+                        " • handle=" + std::to_string(handle) +
+                        " • symbol=" + (symbol.empty() ? "<unreadable>" : symbol) +
+                        " • out=0x" + Hex(out_addr) +
+                        " • trace=" + Trace());
+            last_syscall = op;
+            return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, ENOSYS};
+        }
         if (op == 4) {
             const int fd = static_cast<int>(gpr[FEXCore::X86State::REG_RDI]);
             const auto addr = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RSI]);
@@ -135,6 +150,31 @@ public:
     }
 
 private:
+    static std::string Hex(uintptr_t value) {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%llx",
+                      static_cast<unsigned long long>(value));
+        return buf;
+    }
+
+    std::string ReadCString(uintptr_t addr, size_t limit) const {
+        if (addr == 0 || limit == 0) return {};
+        std::string result;
+        result.reserve(std::min<size_t>(limit, 64));
+        for (size_t i = 0; i < limit; ++i) {
+            if (!IsReadable(addr + i, 1)) return {};
+            const char c = *reinterpret_cast<const char*>(addr + i);
+            if (c == '\0') return result;
+            if (static_cast<unsigned char>(c) < 0x20 ||
+                static_cast<unsigned char>(c) > 0x7e) {
+                result.push_back('?');
+            } else {
+                result.push_back(c);
+            }
+        }
+        return result + "…";
+    }
+
     bool Contains(uintptr_t begin, size_t span, uintptr_t addr, size_t size) const {
         if (size == 0) return true;
         if (begin == 0 || addr < begin || addr > UINTPTR_MAX - size) return false;
