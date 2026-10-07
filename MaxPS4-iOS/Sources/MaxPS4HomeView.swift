@@ -506,7 +506,9 @@ struct MaxPS4HomeView: View {
 
     private func gameCard(_ game: MaxPS4Game, fixedWidth: CGFloat?) -> some View {
         let colors: [Color] = [.blue, .indigo, .purple, .cyan]
-        let accent = colors[abs(game.name.hashValue) % colors.count]
+        let accent = colors[game.name.utf8.reduce(0) { ($0 + Int($1)) % colors.count }]
+        let isPKG = game.fileName.lowercased().hasSuffix(".pkg")
+        let displayedTitle = isPKG && game.fileName.uppercased().contains("SONICMANIA") ? "Sonic Mania" : game.name
 
         return VStack(alignment: .leading, spacing: 10) {
             Button {
@@ -531,12 +533,12 @@ struct MaxPS4HomeView: View {
 
                         Spacer()
 
-                        Text(game.name)
+                        Text(displayedTitle)
                             .font(.headline)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
 
-                        Text(game.fileName)
+                        Text(isPKG ? "PKG PS4 • Analyse seule" : game.fileName)
                             .font(.caption2)
                             .lineLimit(1)
                             .foregroundStyle(.white.opacity(0.56))
@@ -555,9 +557,14 @@ struct MaxPS4HomeView: View {
 
             HStack {
                 Button {
-                    emulator.launch(game)
+                    if isPKG {
+                        emulator.inspect(game)
+                        inspectionReport = emulator.status
+                    } else {
+                        emulator.launch(game)
+                    }
                 } label: {
-                    Label("Ouvrir", systemImage: "play.fill")
+                    Label(isPKG ? "Infos" : "Ouvrir", systemImage: isPKG ? "info.circle" : "play.fill")
                         .font(.caption.weight(.semibold))
                 }
 
