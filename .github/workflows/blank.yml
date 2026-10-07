@@ -38,6 +38,10 @@ jobs:
             -o /tmp/maxps4-prototype-tests
           /tmp/maxps4-prototype-tests
 
+      - name: Prepare diagnostics directory
+        shell: bash
+        run: mkdir -p build/diagnostics
+
       - name: Swift source typecheck
         shell: bash
         run: |
@@ -48,7 +52,7 @@ jobs:
             -sdk "$SDK" \
             -parse-as-library \
             -typecheck \
-            MaxPS4-iOS/Sources/*.swift
+            MaxPS4-iOS/Sources/*.swift 2>&1 | tee build/diagnostics/typecheck.log
 
       - name: Build arm64 iOS executable
         shell: bash
@@ -65,7 +69,7 @@ jobs:
             -framework SwiftUI \
             -framework UIKit \
             MaxPS4-iOS/Sources/*.swift \
-            -o build/Payload/MaxPS4.app/MaxPS4
+            -o build/Payload/MaxPS4.app/MaxPS4 2>&1 | tee build/diagnostics/compile.log
 
       - name: Create Info.plist
         shell: bash
@@ -124,4 +128,13 @@ jobs:
           name: MaxPS4-unsigned
           path: build/MaxPS4-unsigned.ipa
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload compilation diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-build-diagnostics
+          path: build/diagnostics/
+          if-no-files-found: ignore
           retention-days: 14
