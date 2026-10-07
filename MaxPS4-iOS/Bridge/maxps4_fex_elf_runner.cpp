@@ -26,6 +26,19 @@ std::string g_live_diag = "not run";
 std::mutex g_live_output_mutex;
 std::string g_live_output;
 
+struct MaxPS4ControllerSnapshot {
+    uint32_t buttons{};
+    float left_x{};
+    float left_y{};
+    float right_x{};
+    float right_y{};
+    float left_trigger{};
+    float right_trigger{};
+};
+
+std::mutex g_controller_mutex;
+MaxPS4ControllerSnapshot g_controller_state;
+
 void SetLiveDiag(const std::string& value) {
     std::lock_guard<std::mutex> lock(g_live_diag_mutex);
     g_live_diag = value;
@@ -44,6 +57,11 @@ void SetLiveOutput(const std::string& value) {
 std::string GetLiveOutput() {
     std::lock_guard<std::mutex> lock(g_live_output_mutex);
     return g_live_output;
+}
+
+MaxPS4ControllerSnapshot GetControllerState() {
+    std::lock_guard<std::mutex> lock(g_controller_mutex);
+    return g_controller_state;
 }
 
 static uint16_t U16(const uint8_t* p) {
@@ -453,6 +471,20 @@ public:
             return true;
         }
 
+        if (op == 0x100000006ULL) {
+            const auto dst = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDI]);
+            const size_t capacity = static_cast<size_t>(gpr[FEXCore::X86State::REG_RSI]);
+            const auto snapshot = GetControllerState();
+            if (capacity < sizeof(snapshot) || !IsWritable(dst, sizeof(snapshot))) {
+                return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+            std::memcpy(reinterpret_cast<void*>(dst), &snapshot, sizeof(snapshot));
+            gpr[FEXCore::X86State::REG_RAX] = 0;
+            SetLiveDiag(std::string("guest controller snapshot • buttons=0x") +
+                        Hex(snapshot.buttons) + " • trace=" + Trace());
+            return true;
+        }
+
         if (op == 0x100000003ULL) {
             if (strerror_buffer == 0 || strerror_buffer_size < 2) {
                 return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, EFAULT};
@@ -765,6 +797,20 @@ private:
     std::array<uint64_t, 24> trace{};
     size_t trace_count{};
 };} // namespace
+
+extern "C" void maxps4_fex_set_controller_state(unsigned int buttons,
+                                                  float left_x, float left_y,
+                                                  float right_x, float right_y,
+                                                  float left_trigger, float right_trigger) {
+    std::lock_guard<std::mutex> lock(g_controller_mutex);
+    g_controller_state.buttons = static_cast<uint32_t>(buttons);
+    g_controller_state.left_x = left_x;
+    g_controller_state.left_y = left_y;
+    g_controller_state.right_x = right_x;
+    g_controller_state.right_y = right_y;
+    g_controller_state.left_trigger = left_trigger;
+    g_controller_state.right_trigger = right_trigger;
+}
 
 extern "C" const char* maxps4_fex_guest_run_last_error(void) {
     return g_run_diag.c_str();
