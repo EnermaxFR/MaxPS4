@@ -205,6 +205,18 @@ struct MaxPS4CPUPrototype {
             guard loadedCPU.executedInstructions == 3,
                   try loadedCPU.guestMemory.read(at: 0x6020, count: 8) ==
                      Data([42, 0, 0, 0, 0, 0, 0, 0]) else { return false }
+            // Never interpret a guest page without execute permission.
+            var deniedCPU = Self()
+            var deniedMemory = MaxPS4GuestMemory()
+            try deniedMemory.mapZeroFilled(at: 0x8000, size: 4096)
+            try deniedMemory.write(Data([0x90, 0xC3]), at: 0x8000)
+            do {
+                try deniedCPU.runLoadedTest(memory: deniedMemory, entry: 0x8000, length: 2)
+                return false
+            } catch MaxPS4GuestMemory.MemoryError.accessDenied {}
+            try deniedMemory.protect(at: 0x8000, size: 4096, permissions: [.read, .execute])
+            try deniedCPU.runLoadedTest(memory: deniedMemory, entry: 0x8000, length: 2)
+            guard deniedCPU.executedInstructions == 2 else { return false }
             var invalidAccess = Self()
             do {
                 try invalidAccess.run([0x48, 0xA1, 0, 0, 0, 0, 0, 0, 0, 0])
