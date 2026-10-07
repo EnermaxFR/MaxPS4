@@ -3,8 +3,10 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <limits>
+#include <thread>
 
 namespace MaxPS4::Kernel {
 namespace {
@@ -518,6 +520,90 @@ bool KernelState::DestroyMutex(uint32_t id, int& error) {
     return false;
 }
 
+KernelTimeValue KernelState::GetTimeOfDay() const {
+    using namespace std::chrono;
+    const auto micros =
+        duration_cast<microseconds>(system_clock::now().time_since_epoch()).count();
+
+    KernelTimeValue value{};
+    value.seconds = micros / 1000000;
+    value.fraction = micros % 1000000;
+    return value;
+}
+
+bool KernelState::ClockGetTime(int clock_id, KernelTimeValue& out,
+                               int& error) const {
+    using namespace std::chrono;
+    error = 0;
+
+    const bool realtime =
+        clock_id == 0 || clock_id == 9 || clock_id == 10 || clock_id == 13;
+    const bool monotonic =
+        clock_id == 4 || clock_id == 5 || clock_id == 7 || clock_id == 8 ||
+        clock_id == 11 || clock_id == 12;
+
+    int64_t nanos = 0;
+    if (realtime) {
+        nanos =
+            duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count();
+    } else if (monotonic) {
+        nanos =
+            duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count();
+    } else {
+        error = EINVAL;
+        return false;
+    }
+
+    out.seconds = nanos / 1000000000LL;
+    out.fraction = nanos % 1000000000LL;
+    return true;
+}
+
+bool KernelState::ClockGetResolution(int clock_id, KernelTimeValue& out,
+                                     int& error) const {
+    error = 0;
+    switch (clock_id) {
+    case 0:
+    case 4:
+    case 5:
+    case 7:
+    case 8:
+    case 9:
+    case 10:
+    case 11:
+    case 12:
+        out.seconds = 0;
+        out.fraction = 1;
+        return true;
+    case 13: // CLOCK_SECOND
+        out.seconds = 1;
+        out.fraction = 0;
+        return true;
+    default:
+        error = EINVAL;
+        return false;
+    }
+}
+
+bool KernelState::SleepFor(int64_t seconds, int64_t nanoseconds,
+                           int& error) const {
+    error = 0;
+    if (seconds < 0 || nanoseconds < 0 || nanoseconds >= 1000000000LL) {
+        error = EINVAL;
+        return false;
+    }
+
+    using namespace std::chrono;
+    const auto duration = std::chrono::seconds(seconds) +
+                          std::chrono::nanoseconds(nanoseconds);
+    std::this_thread::sleep_for(duration);
+    return true;
+}
+
+void KernelState::YieldCurrentThread() const {
+    std::this_thread::yield();
+}
+
 SyscallResult KernelState::Dispatch(
     uint64_t syscall_number,
     const std::array<uint64_t, 6>& args) {
@@ -581,6 +667,11 @@ SyscallResult KernelState::Dispatch(
         }
         return result;
     }
+
+    case 331: // sched_yield
+        result.handled = true;
+        YieldCurrentThread();
+        return result;
 
     case 477: { // FreeBSD mmap
         result.handled = true;
