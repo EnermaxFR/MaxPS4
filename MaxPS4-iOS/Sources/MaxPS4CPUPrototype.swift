@@ -351,6 +351,19 @@ struct MaxPS4CPUPrototype {
             try deniedMemory.protect(at: 0x8000, size: 4096, permissions: [.read, .execute])
             try deniedCPU.runLoadedTest(memory: deniedMemory, entry: 0x8000, length: 2)
             guard deniedCPU.executedInstructions == 2 else { return false }
+            // Two virtual processes cannot access each other's guest memory.
+            var processA = MaxPS4VirtualProcess(pid: 101)
+            var processB = MaxPS4VirtualProcess(pid: 102)
+            try processA.cpu.prepareGuestMemory(address: 0x5000, size: 4096)
+            try processA.cpu.run([0x48, 0xB8, 0x2A, 0, 0, 0, 0, 0, 0, 0, 0xC3])
+            try processA.cpu.storeRAX(address: 0x5000)
+            guard processA.pid == 101, processB.pid == 102,
+                  try processA.cpu.guestMemory.read(at: 0x5000, count: 1) == Data([42]),
+                  processB.cpu.guestMemory.allocatedBytes == 0 else { return false }
+            do {
+                try processB.cpu.guestMemory.read(at: 0x5000, count: 1)
+                return false
+            } catch MaxPS4GuestMemory.MemoryError.outOfBounds {}
             var invalidAccess = Self()
             do {
                 try invalidAccess.run([0x48, 0xA1, 0, 0, 0, 0, 0, 0, 0, 0])
@@ -385,5 +398,15 @@ struct MaxPS4CPUPrototype {
             } catch MaxPS4GuestMemory.MemoryError.outOfBounds {}
             return true
         } catch { return false }
+    }
+}
+
+/// Isolated virtual test process. No host process or PS4 process is created.
+struct MaxPS4VirtualProcess {
+    let pid: UInt32
+    var cpu = MaxPS4CPUPrototype()
+
+    init(pid: UInt32) {
+        self.pid = pid
     }
 }
