@@ -427,6 +427,17 @@ struct MaxPS4CPUPrototype {
             guard completed == [batchA, batchB],
                   batch.process(pid: batchA)?.cpu.rax == 42,
                   batch.process(pid: batchB)?.cpu.rax == 7 else { return false }
+            // Suspension preserves register values and removes the process from scheduling.
+            guard batch.suspend(pid: batchA),
+                  batch.process(pid: batchA)?.state == .suspended,
+                  batch.scheduleNext() == batchB,
+                  batch.process(pid: batchA)?.cpu.rax == 42,
+                  !batch.suspend(pid: batchA) else { return false }
+            guard batch.resume(pid: batchA),
+                  batch.process(pid: batchA)?.state == .ready,
+                  !batch.resume(pid: batchA),
+                  batch.scheduleNext() == batchA,
+                  batch.process(pid: batchA)?.cpu.rax == 42 else { return false }
             var invalidAccess = Self()
             do {
                 try invalidAccess.run([0x48, 0xA1, 0, 0, 0, 0, 0, 0, 0, 0])
@@ -468,7 +479,7 @@ struct MaxPS4CPUPrototype {
 struct MaxPS4VirtualProcess {
     let pid: UInt32
     var cpu = MaxPS4CPUPrototype()
-    enum State { case ready, running, stopped }
+    enum State { case ready, running, suspended, stopped }
     var state: State = .ready
 
     init(pid: UInt32) {
@@ -495,7 +506,7 @@ struct MaxPS4VirtualProcessManager {
     /// Deterministic round-robin state switch; executes no guest instructions.
     @discardableResult
     mutating func scheduleNext() -> UInt32? {
-        let ready = processes.keys.sorted()
+        let ready = processes.values.filter { $0.state == .ready || $0.state == .running }.map { $0.pid }.sorted()
         guard !ready.isEmpty else { runningPID = nil; return nil }
         let next = ready.first(where: { $0 > (runningPID ?? 0) }) ?? ready[0]
         if let old = runningPID, var previous = processes[old] {
@@ -507,6 +518,24 @@ struct MaxPS4VirtualProcessManager {
         processes[next] = selected
         runningPID = next
         return next
+    }
+
+    /// Pause a virtual process without discarding registers or guest memory.
+    @discardableResult
+    mutating func suspend(pid: UInt32) -> Bool {
+        guard var process = processes[pid], process.state != .suspended else { return false }
+        process.state = .suspended
+        processes[pid] = process
+        if runningPID == pid { runningPID = nil }
+        return true
+    }
+
+    @discardableResult
+    mutating func resume(pid: UInt32) -> Bool {
+        guard var process = processes[pid], process.state == .suspended else { return false }
+        process.state = .ready
+        processes[pid] = process
+        return true
     }
 
     mutating func create() throws -> UInt32 {
