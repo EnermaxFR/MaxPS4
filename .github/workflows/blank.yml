@@ -595,7 +595,7 @@ jobs:
             target_compile_definitions(maxps4-integrated PRIVATE MAXPS4_HAS_SHADPS4_FEX=1)
             target_link_libraries(maxps4-integrated PRIVATE
               FEXCore Common CommonTools JemallocLibs ${PTHREAD_LIB}
-              "-framework UIKit" "-framework Foundation" "-framework GameController" "-framework Metal")
+              "-framework UIKit" "-framework Foundation" "-framework GameController" "-framework Metal" "-framework MetalKit")
           '''
           needle = '''    target_link_libraries(fexcore-smoke PRIVATE
                 FEXCore Common CommonTools JemallocLibs ${PTHREAD_LIB})
