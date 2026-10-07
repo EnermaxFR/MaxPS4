@@ -126,7 +126,13 @@ final class MaxPS4Emulator: ObservableObject {
             return
         }
         let fileCount = duplicates.reduce(0) { $0 + $1.count }
-        status = "Doublons possibles : \(fileCount) fichiers dans \(duplicates.count) groupes • suppression manuelle uniquement"
+        let filenames = duplicates
+            .flatMap { $0 }
+            .map { "• " + $0.fileName }
+            .sorted()
+            .joined(separator: "\n")
+        status = "Doublons possibles : \(fileCount) fichiers dans \(duplicates.count) groupes\n" +
+            filenames + "\nAucun fichier supprimé. Utilisez ••• → Supprimer pour retirer manuellement une copie."
     }
 
     func inspect(_ game: MaxPS4Game) {
