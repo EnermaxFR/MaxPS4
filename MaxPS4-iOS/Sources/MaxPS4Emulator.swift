@@ -36,6 +36,12 @@ final class MaxPS4Emulator: ObservableObject {
             if access { url.stopAccessingSecurityScopedResource() }
         }
 
+        let name = url.lastPathComponent.lowercased()
+        guard name == "eboot.bin" || name.hasSuffix(".self") || name.hasSuffix(".elf") else {
+            status = "Format non pris en charge : sélectionnez eboot.bin, SELF ou ELF"
+            return
+        }
+
         do {
             let folder = try importFolder()
             let destination = uniqueDestination(for: url.lastPathComponent, in: folder)
@@ -100,14 +106,14 @@ final class MaxPS4Emulator: ObservableObject {
         // Keep all native emulator execution behind this method. Once the
         // shadPS4/FEX bridge is linked, this is the single place the UI calls.
         guard let nativeEngine, nativeEngine.isReady else {
-            status = "Jeu sélectionné : \\(game.name) • moteur natif non connecté"
+            status = "Jeu sélectionné : \(game.name) • moteur natif non connecté"
             return
         }
         do {
             try nativeEngine.launchGame(at: URL(fileURLWithPath: game.localPath))
-            status = "Lancement demandé : \\(game.name)"
+            status = "Lancement demandé : \(game.name)"
         } catch {
-            status = "Échec du lancement : \\(error.localizedDescription)"
+            status = "Échec du lancement : \(error.localizedDescription)"
         }
     }
 
