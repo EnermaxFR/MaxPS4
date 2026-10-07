@@ -373,16 +373,18 @@ jobs:
           @implementation MaxPS4FEXGuestViewController
           - (void)viewDidLoad {
               [super viewDidLoad];
-              self.view.backgroundColor = UIColor.systemBackgroundColor;
+              self.view.backgroundColor = [UIColor colorWithRed:0.025 green:0.045 blue:0.11 alpha:1.0];
 
               UILabel *title = [[UILabel alloc] init];
               title.translatesAutoresizingMaskIntoConstraints = NO;
-              title.text = @"MaxPS4 shadPS4/FEX 0.8";
-              title.font = [UIFont boldSystemFontOfSize:26.0];
+              title.text = @"MaxPS4 0.9 • Nouveau design";
+              title.font = [UIFont boldSystemFontOfSize:29.0];
+              title.textColor = UIColor.cyanColor;
 
               self.statusLabel = [[UILabel alloc] init];
               self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
               self.statusLabel.numberOfLines = 0;
+              self.statusLabel.textColor = UIColor.whiteColor;
               self.statusLabel.text = @"1. Lance StikDebug avec universal.js\n2. Reviens ici\n3. Appuie sur Tester le bridge";
 
               self.runButton = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -1035,7 +1037,7 @@ jobs:
             <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
             <key>CFBundleName</key><string>MaxPS4</string>
             <key>CFBundlePackageType</key><string>APPL</string>
-            <key>CFBundleShortVersionString</key><string>0.8</string>
+            <key>CFBundleShortVersionString</key><string>0.9</string>
             <key>CFBundleVersion</key><string>${{ github.run_number }}</string>
             <key>LSRequiresIPhoneOS</key><true/>
             <key>MinimumOSVersion</key><string>17.4</string>
