@@ -7,6 +7,7 @@ struct MaxPS4CPUPrototype {
         case unsupportedOpcode
         case truncatedInstruction
         case instructionLimit
+        case invalidBranch
     }
 
     // x86-64 register order: RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI.
@@ -33,6 +34,11 @@ struct MaxPS4CPUPrototype {
     }
 
 
+    mutating func prepareTestStack(address: UInt64, size: Int) throws {
+        try guestMemory.mapZeroFilled(at: address, size: size)
+        registers[4] = address + UInt64(size)
+    }
+
     mutating func run(_ program: [UInt8], limit: Int = 256) throws {
         var steps = 0
         while rip < program.count {
@@ -44,6 +50,37 @@ struct MaxPS4CPUPrototype {
             } else if opcode == 0xC3 { // RET ends the isolated test
                 rip += 1
                 return
+            } else if opcode == 0xEB || opcode == 0x74 || opcode == 0x75 {
+                // JMP rel8, JZ rel8, JNZ rel8. Jumps are confined to the test program.
+                guard rip + 2 <= program.count else { throw CPUError.truncatedInstruction }
+                let taken = opcode == 0xEB || (opcode == 0x74 ? zeroFlag : !zeroFlag)
+                if taken {
+                    let target = rip + 2 + Int(Int8(bitPattern: program[rip + 1]))
+                    guard target >= 0 && target < program.count else { throw CPUError.invalidBranch }
+                    rip = target
+                } else {
+                    rip += 2
+                }
+            } else if opcode >= 0x50 && opcode <= 0x57 {
+                // PUSH r64 into bounded guest memory.
+                let index = Int(opcode - 0x50)
+                let stack = registers[4]
+                guard stack >= 8 else { throw MaxPS4GuestMemory.MemoryError.outOfBounds }
+                let address = stack - 8
+                let data = Data((0..<8).map { UInt8(truncatingIfNeeded: registers[index] >> ($0 * 8)) })
+                try guestMemory.write(data, at: address)
+                registers[4] = address
+                rip += 1
+            } else if opcode >= 0x58 && opcode <= 0x5F {
+                // POP r64; update RSP only after a successful memory read.
+                let index = Int(opcode - 0x58)
+                let stack = registers[4]
+                guard stack <= UInt64.max - 8 else { throw MaxPS4GuestMemory.MemoryError.outOfBounds }
+                let bytes = try guestMemory.read(at: stack, count: 8)
+                let value = (0..<8).reduce(UInt64(0)) { $0 | (UInt64(bytes[$1]) << ($1 * 8)) }
+                registers[4] = stack + 8
+                registers[index] = value
+                rip += 1
             } else if opcode == 0x48 {
                 guard rip + 2 <= program.count else { throw CPUError.truncatedInstruction }
                 let next = program[rip + 1]
@@ -132,6 +169,23 @@ struct MaxPS4CPUPrototype {
                 return false
             } catch MaxPS4GuestMemory.MemoryError.outOfBounds {}
 
+            var stackCPU = Self()
+            try stackCPU.prepareTestStack(address: 0x2000, size: 4096)
+            try stackCPU.run([
+                0x48, 0xB8, 0x2A, 0, 0, 0, 0, 0, 0, 0,
+                0x50, 0x59, 0xC3
+            ])
+            guard stackCPU.registers[1] == 42, stackCPU.registers[4] == 0x3000 else { return false }
+            var branchCPU = Self()
+            try branchCPU.run([
+                0x48, 0xB8, 0, 0, 0, 0, 0, 0, 0, 0,
+                0x48, 0x83, 0xF8, 0,
+                0x74, 0x02, 0x0F, 0x0F, 0xC3
+            ])
+            guard branchCPU.zeroFlag else { return false }
+            var badBranch = Self()
+            do { try badBranch.run([0xEB, 0x7F]); return false }
+            catch CPUError.invalidBranch {}
             return true
         } catch { return false }
     }
