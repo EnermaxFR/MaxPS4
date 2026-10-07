@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "core/fex/fex_guest_engine.h"
 #include "core/guest_cpu/fex_guest_cpu.h"
+#include "maxps4_backend.h"
 
 #include <FEXCore/Core/X86Enums.h>
 
@@ -39,6 +40,21 @@ struct MaxPS4ControllerSnapshot {
 std::mutex g_controller_mutex;
 MaxPS4ControllerSnapshot g_controller_state;
 
+struct MaxPS4GuestRenderSnapshot {
+    uint32_t sequence{};
+    float x{};
+    float y{};
+    float scale{1.0f};
+    float red{0.15f};
+    float green{0.95f};
+    float blue{1.0f};
+    float alpha{1.0f};
+};
+
+std::mutex g_guest_render_mutex;
+MaxPS4GuestRenderSnapshot g_guest_render_state;
+bool g_guest_render_active = false;
+
 void SetLiveDiag(const std::string& value) {
     std::lock_guard<std::mutex> lock(g_live_diag_mutex);
     g_live_diag = value;
@@ -62,6 +78,19 @@ std::string GetLiveOutput() {
 MaxPS4ControllerSnapshot GetControllerState() {
     std::lock_guard<std::mutex> lock(g_controller_mutex);
     return g_controller_state;
+}
+
+void SetGuestRenderState(const MaxPS4GuestRenderSnapshot& value) {
+    std::lock_guard<std::mutex> lock(g_guest_render_mutex);
+    g_guest_render_state = value;
+    g_guest_render_active = true;
+}
+
+bool GetGuestRenderState(MaxPS4GuestRenderSnapshot& out) {
+    std::lock_guard<std::mutex> lock(g_guest_render_mutex);
+    if (!g_guest_render_active) return false;
+    out = g_guest_render_state;
+    return true;
 }
 
 static uint16_t U16(const uint8_t* p) {
@@ -494,6 +523,36 @@ public:
             return true;
         }
 
+        // MaxPS4-private legal graphics smoke-test ABI.
+        // Guest submits one 32-byte square command:
+        // sequence, x, y, scale, red, green, blue, alpha.
+        if (op == 0x4d51ULL) {
+            const auto src = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDI]);
+            const size_t size = static_cast<size_t>(gpr[FEXCore::X86State::REG_RSI]);
+            if (size < sizeof(MaxPS4GuestRenderSnapshot) ||
+                !IsReadable(src, sizeof(MaxPS4GuestRenderSnapshot))) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+            MaxPS4GuestRenderSnapshot command{};
+            std::memcpy(&command, reinterpret_cast<const void*>(src), sizeof(command));
+            command.x = std::clamp(command.x, -0.90f, 0.90f);
+            command.y = std::clamp(command.y, -0.90f, 0.90f);
+            command.scale = std::clamp(command.scale, 0.20f, 1.80f);
+            command.red = std::clamp(command.red, 0.0f, 1.0f);
+            command.green = std::clamp(command.green, 0.0f, 1.0f);
+            command.blue = std::clamp(command.blue, 0.0f, 1.0f);
+            command.alpha = std::clamp(command.alpha, 0.0f, 1.0f);
+            SetGuestRenderState(command);
+            gpr[FEXCore::X86State::REG_RAX] = 0;
+            SetLiveDiag(std::string("guest Metal command • seq=") +
+                        std::to_string(command.sequence) +
+                        " • xy=" + std::to_string(command.x) + "/" + std::to_string(command.y) +
+                        " • scale=" + std::to_string(command.scale) +
+                        " • trace=" + Trace());
+            return true;
+        }
+
         if (op == 0x100000003ULL) {
             if (strerror_buffer == 0 || strerror_buffer_size < 2) {
                 return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, EFAULT};
@@ -819,6 +878,21 @@ extern "C" void maxps4_fex_set_controller_state(unsigned int buttons,
     g_controller_state.right_y = right_y;
     g_controller_state.left_trigger = left_trigger;
     g_controller_state.right_trigger = right_trigger;
+}
+
+extern "C" bool maxps4_fex_get_guest_render_state(MaxPS4GuestRenderState* out) {
+    if (!out) return false;
+    MaxPS4GuestRenderSnapshot snapshot{};
+    if (!GetGuestRenderState(snapshot)) return false;
+    out->sequence = snapshot.sequence;
+    out->x = snapshot.x;
+    out->y = snapshot.y;
+    out->scale = snapshot.scale;
+    out->red = snapshot.red;
+    out->green = snapshot.green;
+    out->blue = snapshot.blue;
+    out->alpha = snapshot.alpha;
+    return true;
 }
 
 extern "C" const char* maxps4_fex_guest_run_last_error(void) {
