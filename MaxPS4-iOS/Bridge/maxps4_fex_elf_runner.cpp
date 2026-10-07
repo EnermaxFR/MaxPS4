@@ -85,13 +85,31 @@ public:
             const auto symbol_addr = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RSI]);
             const auto out_addr = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDX]);
             const std::string symbol = ReadCString(symbol_addr, 160);
+            RecordDlsym(handle, symbol);
             SetLiveDiag(std::string("guest running • syscall=591 dynlib_dlsym") +
                         " • handle=" + std::to_string(handle) +
                         " • symbol=" + (symbol.empty() ? "<unreadable>" : symbol) +
                         " • out=0x" + Hex(out_addr) +
+                        " • dlsym=" + DlsymTrace() +
                         " • trace=" + Trace());
+
+            if (symbol == "_exit" && exit_veneer != 0 && IsWritable(out_addr, sizeof(uintptr_t))) {
+                std::memcpy(reinterpret_cast<void*>(out_addr), &exit_veneer, sizeof(exit_veneer));
+                gpr[FEXCore::X86State::REG_RAX] = 0;
+                return true;
+            }
+
             last_syscall = op;
             return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, ENOSYS};
+        }
+
+        if (op == 0x100000001ULL) {
+            exit_requested = true;
+            exit_code = static_cast<int>(gpr[FEXCore::X86State::REG_RDI]);
+            SetLiveDiag(std::string("guest called HLE _exit • code=") + std::to_string(exit_code) +
+                        " • dlsym=" + DlsymTrace() +
+                        " • trace=" + Trace());
+            return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, ECANCELED};
         }
         if (op == 4) {
             const int fd = static_cast<int>(gpr[FEXCore::X86State::REG_RDI]);
@@ -143,6 +161,10 @@ public:
 
     void SetImage(uintptr_t begin, size_t size) { image_begin = begin; image_size = size; }
     void SetStack(uintptr_t begin, size_t size) { stack_begin = begin; stack_size = size; }
+    void SetWritableRanges(std::vector<std::pair<uintptr_t, size_t>> ranges) {
+        writable_ranges = std::move(ranges);
+    }
+    void SetExitVeneer(uintptr_t address) { exit_veneer = address; }
     uint64_t LastSyscall() const { return last_syscall; }
     const std::string& Output() const { return output; }
 
@@ -197,9 +219,27 @@ private:
     }
 
     bool IsWritable(uintptr_t addr, size_t size) const {
-        // The legal stdio probe reads into a stack buffer. Keep this conservative rather than
-        // guessing which ELF image pages are writable after W^X sealing.
-        return Contains(stack_begin, stack_size, addr, size);
+        if (Contains(stack_begin, stack_size, addr, size)) return true;
+        for (const auto& range : writable_ranges) {
+            if (Contains(range.first, range.second, addr, size)) return true;
+        }
+        return false;
+    }
+
+    void RecordDlsym(uint64_t handle, const std::string& symbol) {
+        std::string item = std::to_string(handle) + ":" +
+                           (symbol.empty() ? "<unreadable>" : symbol);
+        if (dlsym_requests.size() == 8) dlsym_requests.erase(dlsym_requests.begin());
+        dlsym_requests.push_back(std::move(item));
+    }
+
+    std::string DlsymTrace() const {
+        std::string result;
+        for (const auto& item : dlsym_requests) {
+            if (!result.empty()) result += ",";
+            result += item;
+        }
+        return result;
     }
 
     void Capture(const char* data, size_t size) {
@@ -219,6 +259,9 @@ private:
     size_t image_size{};
     uintptr_t stack_begin{};
     size_t stack_size{};
+    uintptr_t exit_veneer{};
+    std::vector<std::pair<uintptr_t, size_t>> writable_ranges;
+    std::vector<std::string> dlsym_requests;
     uint64_t last_syscall{};
     bool stdin_sent{};
     bool exit_requested{};
@@ -331,6 +374,7 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
 
     const uintptr_t image_begin = reinterpret_cast<uintptr_t>(image.ptr);
     std::vector<Core::GuestExecutionRange> image_ranges;
+    std::vector<std::pair<uintptr_t, size_t>> writable_ranges;
     bool entry_is_executable = false;
 
     for (size_t first = 0; first < page_flags.size();) {
@@ -368,6 +412,7 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
         }
 
         image_ranges.push_back({begin, length, executable, writable});
+        if (writable) writable_ranges.emplace_back(begin, length);
 
         const uintptr_t translated_entry =
             image_begin + static_cast<uintptr_t>(entry - min_page);
@@ -386,9 +431,31 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     const uintptr_t stack_begin = reinterpret_cast<uintptr_t>(stack.ptr);
     const uintptr_t stack_top = (stack_begin + stack.size - 32) & ~static_cast<uintptr_t>(0xF);
 
+    HostMapping veneers(static_cast<size_t>(page));
+    if (!veneers.ok()) { g_run_diag = "HLE veneer mmap failed"; return 37; }
+    constexpr uint64_t kExitOperation = 0x100000001ULL;
+    uint8_t exit_stub[16] = {
+        0x49, 0x89, 0xca,             // mov r10, rcx
+        0x48, 0xb8,                   // mov rax, imm64
+        0,0,0,0,0,0,0,0,
+        0x0f, 0x05,                   // syscall
+        0xc3                          // ret
+    };
+    std::memcpy(exit_stub + 5, &kExitOperation, sizeof(kExitOperation));
+    std::memcpy(veneers.ptr, exit_stub, sizeof(exit_stub));
+    __builtin___clear_cache(reinterpret_cast<char*>(veneers.ptr),
+                            reinterpret_cast<char*>(veneers.ptr) + sizeof(exit_stub));
+    if (mprotect(veneers.ptr, veneers.size, PROT_READ) != 0) {
+        g_run_diag = "HLE veneer mprotect failed";
+        return 38;
+    }
+    const uintptr_t exit_veneer = reinterpret_cast<uintptr_t>(veneers.ptr);
+
     HomebrewBridge bridge;
     bridge.SetImage(image_begin, image.size);
     bridge.SetStack(stack_begin, stack.size);
+    bridge.SetWritableRanges(writable_ranges);
+    bridge.SetExitVeneer(exit_veneer);
     auto backendResult = Core::FexGuestCpuBackend::Create(bridge);
     if (const auto* failure = std::get_if<Core::GuestExecutionFailure>(&backendResult)) {
         char buf[160]; snprintf(buf, sizeof(buf), "FEX create failed stage=%d errno=%d",
@@ -403,6 +470,7 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     request.Rflags = 1U << 1;
     request.MappedRanges = image_ranges;
     request.MappedRanges.push_back({stack_begin, stack.size, false, true});
+    request.MappedRanges.push_back({exit_veneer, veneers.size, true, false});
 
     {
         char live[220];
@@ -419,12 +487,13 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
             const auto& captured = bridge.Output();
             const auto trace = bridge.Trace();
             snprintf(exitbuf, sizeof(exitbuf),
-                     "FEX guest exited • code=%d%s%s%s%s",
+                     "FEX guest exited • code=%d%s%s%s%s • dlsym=%s",
                      bridge.ExitCode(),
                      captured.empty() ? "" : " • output=",
                      captured.empty() ? "" : captured.c_str(),
                      trace.empty() ? "" : " • trace=",
-                     trace.empty() ? "" : trace.c_str());
+                     trace.empty() ? "" : trace.c_str(),
+                     bridge.DlsymTrace().c_str());
             g_run_diag = exitbuf;
             SetLiveDiag(g_run_diag);
             return 0;
