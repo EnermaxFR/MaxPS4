@@ -109,6 +109,21 @@ final class MaxPS4Emulator: ObservableObject {
     }
 
     /// Report possible duplicate imports without deleting any user files.
+    var duplicateGroups: [[MaxPS4Game]] {
+        let groups = Dictionary(grouping: games) { game -> String in
+            let filename = game.fileName.lowercased()
+            let stem = (filename as NSString).deletingPathExtension
+            let ext = (filename as NSString).pathExtension
+            let normalized = stem.replacingOccurrences(
+                of: "-[0-9]+$", with: "", options: .regularExpression
+            )
+            return normalized + "." + ext
+        }
+        return groups.values.filter { $0.count > 1 }
+            .map { $0.sorted { $0.importedAt < $1.importedAt } }
+            .sorted { ($0.first?.fileName ?? "") < ($1.first?.fileName ?? "") }
+    }
+
     func inspectDuplicates() {
         let groups = Dictionary(grouping: games) { game -> String in
             let filename = game.fileName.lowercased()
