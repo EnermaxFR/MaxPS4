@@ -114,6 +114,11 @@ public:
                 gpr[FEXCore::X86State::REG_RAX] = 0;
                 return true;
             }
+            if (symbol == "__error" && error_veneer != 0 && IsWritable(out_addr, sizeof(uintptr_t))) {
+                std::memcpy(reinterpret_cast<void*>(out_addr), &error_veneer, sizeof(error_veneer));
+                gpr[FEXCore::X86State::REG_RAX] = 0;
+                return true;
+            }
 
             last_syscall = op;
             return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, ENOSYS};
@@ -407,6 +412,17 @@ public:
             return true;
         }
 
+        if (op == 0x100000005ULL) {
+            if (errno_buffer == 0 || errno_buffer_size < sizeof(int)) {
+                return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+            gpr[FEXCore::X86State::REG_RAX] = errno_buffer;
+            SetLiveDiag(std::string("guest HLE __error • ptr=0x") + Hex(errno_buffer) +
+                        " • dlsym=" + DlsymTrace() +
+                        " • trace=" + Trace());
+            return true;
+        }
+
         if (op == 0x100000003ULL) {
             if (strerror_buffer == 0 || strerror_buffer_size < 2) {
                 return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, EFAULT};
@@ -483,6 +499,11 @@ public:
     void SetSnprintfVeneer(uintptr_t address) { snprintf_veneer = address; }
     void SetStrerrorVeneer(uintptr_t address) { strerror_veneer = address; }
     void SetVsnprintfVeneer(uintptr_t address) { vsnprintf_veneer = address; }
+    void SetErrorVeneer(uintptr_t address) { error_veneer = address; }
+    void SetErrnoBuffer(uintptr_t address, size_t size) {
+        errno_buffer = address;
+        errno_buffer_size = size;
+    }
     void SetStrerrorBuffer(uintptr_t address, size_t size) {
         strerror_buffer = address;
         strerror_buffer_size = size;
@@ -546,11 +567,15 @@ private:
 
     bool IsReadable(uintptr_t addr, size_t size) const {
         return Contains(image_begin, image_size, addr, size) ||
-               Contains(stack_begin, stack_size, addr, size);
+               Contains(stack_begin, stack_size, addr, size) ||
+               Contains(strerror_buffer, strerror_buffer_size, addr, size) ||
+               Contains(errno_buffer, errno_buffer_size, addr, size);
     }
 
     bool IsWritable(uintptr_t addr, size_t size) const {
-        if (Contains(stack_begin, stack_size, addr, size)) return true;
+        if (Contains(stack_begin, stack_size, addr, size) ||
+            Contains(strerror_buffer, strerror_buffer_size, addr, size) ||
+            Contains(errno_buffer, errno_buffer_size, addr, size)) return true;
         for (const auto& range : writable_ranges) {
             if (Contains(range.first, range.second, addr, size)) return true;
         }
@@ -585,8 +610,11 @@ private:
     uintptr_t snprintf_veneer{};
     uintptr_t strerror_veneer{};
     uintptr_t vsnprintf_veneer{};
+    uintptr_t error_veneer{};
     uintptr_t strerror_buffer{};
     size_t strerror_buffer_size{};
+    uintptr_t errno_buffer{};
+    size_t errno_buffer_size{};
     std::vector<std::pair<uintptr_t, size_t>> writable_ranges;
     std::vector<std::string> dlsym_requests;
     uint64_t last_syscall{};
@@ -764,6 +792,7 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     constexpr uint64_t kSnprintfOperation = 0x100000002ULL;
     constexpr uint64_t kStrerrorOperation = 0x100000003ULL;
     constexpr uint64_t kVsnprintfOperation = 0x100000004ULL;
+    constexpr uint64_t kErrorOperation = 0x100000005ULL;
     auto make_stub = [](uint64_t operation) {
         std::array<uint8_t, 16> stub = {
             0x49, 0x89, 0xca,             // mov r10, rcx
@@ -779,13 +808,15 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     const auto snprintf_stub = make_stub(kSnprintfOperation);
     const auto strerror_stub = make_stub(kStrerrorOperation);
     const auto vsnprintf_stub = make_stub(kVsnprintfOperation);
+    const auto error_stub = make_stub(kErrorOperation);
     auto* veneer_bytes = reinterpret_cast<uint8_t*>(veneers.ptr);
     std::memcpy(veneer_bytes, exit_stub.data(), exit_stub.size());
     std::memcpy(veneer_bytes + 32, snprintf_stub.data(), snprintf_stub.size());
     std::memcpy(veneer_bytes + 64, strerror_stub.data(), strerror_stub.size());
     std::memcpy(veneer_bytes + 96, vsnprintf_stub.data(), vsnprintf_stub.size());
+    std::memcpy(veneer_bytes + 128, error_stub.data(), error_stub.size());
     __builtin___clear_cache(reinterpret_cast<char*>(veneers.ptr),
-                            reinterpret_cast<char*>(veneers.ptr) + 112);
+                            reinterpret_cast<char*>(veneers.ptr) + 144);
     if (mprotect(veneers.ptr, veneers.size, PROT_READ) != 0) {
         g_run_diag = "HLE veneer mprotect failed";
         return 38;
@@ -794,11 +825,17 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     const uintptr_t snprintf_veneer = exit_veneer + 32;
     const uintptr_t strerror_veneer = exit_veneer + 64;
     const uintptr_t vsnprintf_veneer = exit_veneer + 96;
+    const uintptr_t error_veneer = exit_veneer + 128;
 
     HostMapping strerror_storage(static_cast<size_t>(page));
     if (!strerror_storage.ok()) { g_run_diag = "HLE strerror buffer mmap failed"; return 39; }
     const uintptr_t strerror_buffer = reinterpret_cast<uintptr_t>(strerror_storage.ptr);
     std::memset(strerror_storage.ptr, 0, strerror_storage.size);
+
+    HostMapping errno_storage(static_cast<size_t>(page));
+    if (!errno_storage.ok()) { g_run_diag = "HLE errno buffer mmap failed"; return 40; }
+    std::memset(errno_storage.ptr, 0, errno_storage.size);
+    const uintptr_t errno_buffer = reinterpret_cast<uintptr_t>(errno_storage.ptr);
 
     HomebrewBridge bridge;
     bridge.SetImage(image_begin, image.size);
@@ -808,7 +845,9 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     bridge.SetSnprintfVeneer(snprintf_veneer);
     bridge.SetStrerrorVeneer(strerror_veneer);
     bridge.SetVsnprintfVeneer(vsnprintf_veneer);
+    bridge.SetErrorVeneer(error_veneer);
     bridge.SetStrerrorBuffer(strerror_buffer, strerror_storage.size);
+    bridge.SetErrnoBuffer(errno_buffer, errno_storage.size);
     auto backendResult = Core::FexGuestCpuBackend::Create(bridge);
     if (const auto* failure = std::get_if<Core::GuestExecutionFailure>(&backendResult)) {
         char buf[160]; snprintf(buf, sizeof(buf), "FEX create failed stage=%d errno=%d",
@@ -825,6 +864,7 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     request.MappedRanges.push_back({stack_begin, stack.size, false, true});
     request.MappedRanges.push_back({exit_veneer, veneers.size, true, false});
     request.MappedRanges.push_back({strerror_buffer, strerror_storage.size, false, true});
+    request.MappedRanges.push_back({errno_buffer, errno_storage.size, false, true});
 
     {
         char live[220];
