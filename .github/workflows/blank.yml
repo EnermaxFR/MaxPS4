@@ -21,6 +21,7 @@ env:
 
 jobs:
   fexcore-ios-gate:
+    needs: legal-homebrew-elf
     runs-on: macos-latest
     timeout-minutes: 30
     continue-on-error: true
@@ -851,6 +852,19 @@ jobs:
           cmake --build build/fexcore-ios --target maxps4-integrated --parallel 3
           file build/fexcore-ios/Bin/maxps4-integrated.app/maxps4-integrated
 
+      - name: Download legal MaxPS4Kernel multithread test
+        uses: actions/download-artifact@v4
+        with:
+          name: MaxPS4-Legal-Userspace-ELF
+          path: build/legal-userspace-artifact
+
+      - name: Verify bundled multithread test input
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f build/legal-userspace-artifact/guest_kernel_services_userspace.elf
+          file build/legal-userspace-artifact/guest_kernel_services_userspace.elf
+
       - name: Package compliant integrated MaxPS4 IPA
         shell: bash
         run: |
@@ -906,6 +920,8 @@ jobs:
           cp THIRD_PARTY_NOTICES.md "$PAYLOAD/MaxPS4.app/THIRD_PARTY_NOTICES.md"
           cp docs/fexcore-0.6-lock.md "$PAYLOAD/MaxPS4.app/FEXCORE_0_6_PROVENANCE.md"
           cp docs/shadps4-fex-0.7-lock.md "$PAYLOAD/MaxPS4.app/SHADPS4_FEX_0_7_PROVENANCE.md"
+          cp build/legal-userspace-artifact/guest_kernel_services_userspace.elf             "$PAYLOAD/MaxPS4.app/MaxPS4KernelThreadTest.elf"
+          test -f "$PAYLOAD/MaxPS4.app/MaxPS4KernelThreadTest.elf"
           cat > "$PAYLOAD/MaxPS4.app/LEGAL_USE.txt" <<'TXT'
           MaxPS4 does not include games, firmware, keys, or PlayStation system files.
           Users must supply only files they are legally authorized to use.
