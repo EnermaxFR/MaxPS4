@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 
 #include "maxps4_backend.h"
+#include "maxps4_core.h"
 
 @interface MaxPS4IntegratedViewController : UIViewController <UIDocumentPickerDelegate>
 @property(nonatomic, strong) UILabel *statusLabel;
@@ -409,6 +410,18 @@
             url.lastPathComponent,
             fileSize,
             detailText]];
+        if (scoped) [url stopAccessingSecurityScopedResource];
+        return;
+    }
+
+    if (!maxps4_core_jit_available()) {
+        const char *jitDetail = maxps4_core_jit_diagnostic();
+        NSString *jitText = jitDetail ? [NSString stringWithUTF8String:jitDetail] : @"aucun diagnostic JIT";
+        self.stateValueLabel.text = @"JIT indisponible";
+        [self setDiagnostic:[NSString stringWithFormat:
+            @"%@ validé, mais l’exécution FEX n’a pas été lancée.\n\nJIT requis : %@\n\nActive StikDebug/JIT puis réessaie. Cette vérification empêche FEX de démarrer sans mémoire exécutable valide.",
+            url.lastPathComponent,
+            jitText]];
         if (scoped) [url stopAccessingSecurityScopedResource];
         return;
     }
