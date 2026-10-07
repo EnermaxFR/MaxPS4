@@ -23,6 +23,8 @@ namespace {
 thread_local std::string g_run_diag = "not run";
 std::mutex g_live_diag_mutex;
 std::string g_live_diag = "not run";
+std::mutex g_live_output_mutex;
+std::string g_live_output;
 
 void SetLiveDiag(const std::string& value) {
     std::lock_guard<std::mutex> lock(g_live_diag_mutex);
@@ -32,6 +34,16 @@ void SetLiveDiag(const std::string& value) {
 std::string GetLiveDiag() {
     std::lock_guard<std::mutex> lock(g_live_diag_mutex);
     return g_live_diag;
+}
+
+void SetLiveOutput(const std::string& value) {
+    std::lock_guard<std::mutex> lock(g_live_output_mutex);
+    g_live_output = value;
+}
+
+std::string GetLiveOutput() {
+    std::lock_guard<std::mutex> lock(g_live_output_mutex);
+    return g_live_output;
 }
 
 static uint16_t U16(const uint8_t* p) {
@@ -704,8 +716,11 @@ private:
     }
 
     void Capture(const char* data, size_t size) {
-        const size_t remaining = output.size() < 1024 ? 1024 - output.size() : 0;
-        if (remaining != 0 && data != nullptr) output.append(data, std::min(size, remaining));
+        const size_t remaining = output.size() < 4096 ? 4096 - output.size() : 0;
+        if (remaining != 0 && data != nullptr) {
+            output.append(data, std::min(size, remaining));
+            SetLiveOutput(output);
+        }
     }
 
     std::string ArgTrace(const Core::GuestCpu::HleCallFrame& frame) const {
@@ -761,9 +776,16 @@ extern "C" void maxps4_fex_guest_run_live_diagnostic(char* out, size_t out_size)
     std::snprintf(out, out_size, "%s", value.c_str());
 }
 
+extern "C" void maxps4_fex_guest_run_live_output(char* out, size_t out_size) {
+    if (!out || out_size == 0) return;
+    const std::string value = GetLiveOutput();
+    std::snprintf(out, out_size, "%s", value.c_str());
+}
+
 extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     g_run_diag = "handoff start";
     SetLiveDiag("handoff start");
+    SetLiveOutput("");
     if (!path) { g_run_diag = "ELF path missing"; return 20; }
 
     FILE* f = fopen(path, "rb");
