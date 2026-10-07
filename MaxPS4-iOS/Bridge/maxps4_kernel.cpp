@@ -604,6 +604,193 @@ void KernelState::YieldCurrentThread() const {
     std::this_thread::yield();
 }
 
+bool KernelState::LegacyUmtxLock(uintptr_t address, int& error) {
+    error = 0;
+    if (!ContainsMemory(address, sizeof(uint64_t), MemoryRead | MemoryWrite)) {
+        error = EFAULT;
+        return false;
+    }
+
+    uint64_t owner = 0;
+    std::memcpy(&owner, reinterpret_cast<const void*>(address), sizeof(owner));
+    const uint64_t tid = static_cast<uint64_t>(CurrentTid());
+
+    if (owner == 0) {
+        std::memcpy(reinterpret_cast<void*>(address), &tid, sizeof(tid));
+        return true;
+    }
+    if ((owner & ~(1ULL << 63)) == tid) {
+        error = EDEADLK;
+        return false;
+    }
+
+    error = EBUSY;
+    return false;
+}
+
+bool KernelState::LegacyUmtxUnlock(uintptr_t address, int& error) {
+    error = 0;
+    if (!ContainsMemory(address, sizeof(uint64_t), MemoryRead | MemoryWrite)) {
+        error = EFAULT;
+        return false;
+    }
+
+    uint64_t owner = 0;
+    std::memcpy(&owner, reinterpret_cast<const void*>(address), sizeof(owner));
+    const uint64_t tid = static_cast<uint64_t>(CurrentTid());
+    if ((owner & ~(1ULL << 63)) != tid) {
+        error = EPERM;
+        return false;
+    }
+
+    const uint64_t unowned = 0;
+    std::memcpy(reinterpret_cast<void*>(address), &unowned, sizeof(unowned));
+    return true;
+}
+
+bool KernelState::UmtxOperation(uintptr_t object, int operation, uint64_t value,
+                                uintptr_t uaddr, uintptr_t uaddr2,
+                                uint64_t& result_value, int& error) {
+    result_value = 0;
+    error = 0;
+
+    constexpr int kUmtxOpLock = 0;
+    constexpr int kUmtxOpUnlock = 1;
+    constexpr int kUmtxOpWait = 2;
+    constexpr int kUmtxOpWake = 3;
+    constexpr int kUmtxOpMutexTryLock = 4;
+    constexpr int kUmtxOpMutexLock = 5;
+    constexpr int kUmtxOpMutexUnlock = 6;
+    constexpr int kUmtxOpWaitUInt = 11;
+    constexpr int kUmtxOpWaitUIntPrivate = 15;
+    constexpr int kUmtxOpWakePrivate = 16;
+
+    switch (operation) {
+    case kUmtxOpLock:
+        return LegacyUmtxLock(object, error);
+
+    case kUmtxOpUnlock:
+        return LegacyUmtxUnlock(object, error);
+
+    case kUmtxOpWake:
+    case kUmtxOpWakePrivate:
+        // There is no parallel guest waiter yet. Treat wake as a successful
+        // no-op so userland can complete uncontended synchronization paths.
+        return true;
+
+    case kUmtxOpWait: {
+        if (!ContainsMemory(object, sizeof(uint64_t), MemoryRead)) {
+            error = EFAULT;
+            return false;
+        }
+        uint64_t current = 0;
+        std::memcpy(&current, reinterpret_cast<const void*>(object), sizeof(current));
+        if (current != value) {
+            error = EWOULDBLOCK;
+            return false;
+        }
+
+        // Until parallel FEX guest scheduling exists, never sleep forever.
+        // A supplied timeout is honored; otherwise report would-block.
+        if (uaddr2 == 0) {
+            error = EWOULDBLOCK;
+            return false;
+        }
+        if (!ContainsMemory(uaddr2, sizeof(int64_t) * 2, MemoryRead)) {
+            error = EFAULT;
+            return false;
+        }
+        int64_t timeout[2]{};
+        std::memcpy(timeout, reinterpret_cast<const void*>(uaddr2), sizeof(timeout));
+        if (!SleepFor(timeout[0], timeout[1], error)) return false;
+        error = ETIMEDOUT;
+        return false;
+    }
+
+    case kUmtxOpWaitUInt:
+    case kUmtxOpWaitUIntPrivate: {
+        if (!ContainsMemory(object, sizeof(uint32_t), MemoryRead)) {
+            error = EFAULT;
+            return false;
+        }
+        uint32_t current = 0;
+        std::memcpy(&current, reinterpret_cast<const void*>(object), sizeof(current));
+        if (current != static_cast<uint32_t>(value)) {
+            error = EWOULDBLOCK;
+            return false;
+        }
+        if (uaddr2 == 0) {
+            error = EWOULDBLOCK;
+            return false;
+        }
+        if (!ContainsMemory(uaddr2, sizeof(int64_t) * 2, MemoryRead)) {
+            error = EFAULT;
+            return false;
+        }
+        int64_t timeout[2]{};
+        std::memcpy(timeout, reinterpret_cast<const void*>(uaddr2), sizeof(timeout));
+        if (!SleepFor(timeout[0], timeout[1], error)) return false;
+        error = ETIMEDOUT;
+        return false;
+    }
+
+    case kUmtxOpMutexTryLock:
+    case kUmtxOpMutexLock: {
+        // struct umutex starts with a 32-bit owner field followed by flags.
+        if (!ContainsMemory(object, sizeof(uint32_t) * 2,
+                            MemoryRead | MemoryWrite)) {
+            error = EFAULT;
+            return false;
+        }
+
+        uint32_t owner = 0;
+        uint32_t flags = 0;
+        std::memcpy(&owner, reinterpret_cast<const void*>(object), sizeof(owner));
+        std::memcpy(&flags,
+                    reinterpret_cast<const void*>(object + sizeof(uint32_t)),
+                    sizeof(flags));
+
+        const uint32_t tid = CurrentTid();
+        const uint32_t plain_owner = owner & ~0x80000000U;
+        if (owner == 0 || owner == 0x80000000U) {
+            std::memcpy(reinterpret_cast<void*>(object), &tid, sizeof(tid));
+            return true;
+        }
+        if (plain_owner == tid) {
+            error = (flags & 0x0002U) ? EDEADLK : EBUSY;
+            return false;
+        }
+
+        error = EBUSY;
+        return false;
+    }
+
+    case kUmtxOpMutexUnlock: {
+        if (!ContainsMemory(object, sizeof(uint32_t),
+                            MemoryRead | MemoryWrite)) {
+            error = EFAULT;
+            return false;
+        }
+
+        uint32_t owner = 0;
+        std::memcpy(&owner, reinterpret_cast<const void*>(object), sizeof(owner));
+        if ((owner & ~0x80000000U) != CurrentTid()) {
+            error = EPERM;
+            return false;
+        }
+
+        const uint32_t unowned = 0;
+        std::memcpy(reinterpret_cast<void*>(object), &unowned, sizeof(unowned));
+        return true;
+    }
+
+    default:
+        (void)uaddr;
+        error = ENOSYS;
+        return false;
+    }
+}
+
 SyscallResult KernelState::Dispatch(
     uint64_t syscall_number,
     const std::array<uint64_t, 6>& args) {
@@ -672,6 +859,41 @@ SyscallResult KernelState::Dispatch(
         result.handled = true;
         YieldCurrentThread();
         return result;
+
+    case 434: { // legacy _umtx_lock
+        result.handled = true;
+        int error = 0;
+        if (!LegacyUmtxLock(static_cast<uintptr_t>(args[0]), error)) {
+            result.error = error;
+        }
+        return result;
+    }
+
+    case 435: { // legacy _umtx_unlock
+        result.handled = true;
+        int error = 0;
+        if (!LegacyUmtxUnlock(static_cast<uintptr_t>(args[0]), error)) {
+            result.error = error;
+        }
+        return result;
+    }
+
+    case 454: { // _umtx_op
+        result.handled = true;
+        int error = 0;
+        uint64_t value = 0;
+        if (!UmtxOperation(static_cast<uintptr_t>(args[0]),
+                           static_cast<int>(args[1]),
+                           args[2],
+                           static_cast<uintptr_t>(args[3]),
+                           static_cast<uintptr_t>(args[4]),
+                           value, error)) {
+            result.error = error;
+        } else {
+            result.value = value;
+        }
+        return result;
+    }
 
     case 477: { // FreeBSD mmap
         result.handled = true;
