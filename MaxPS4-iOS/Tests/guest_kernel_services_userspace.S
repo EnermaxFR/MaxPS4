@@ -11,6 +11,7 @@
  *   logical thread create/complete/join
  *   logical recursive mutex create/lock/unlock/destroy
  *   realtime/monotonic clocks, nanosleep, scheduler yield
+ *   FreeBSD legacy umtx + _umtx_op uncontended mutex/wake paths
  */
 
 .section .text
@@ -208,6 +209,62 @@ _start:
     jne failed
 
     mov $331, %rax
+    syscall
+    test %rax, %rax
+    jne failed
+
+    /* legacy _umtx_lock / _umtx_unlock */
+    movq $0, 224(%rsp)
+    mov $434, %rax
+    lea 224(%rsp), %rdi
+    syscall
+    test %rax, %rax
+    jne failed
+    cmpq $1, 224(%rsp)
+    jne failed
+
+    mov $435, %rax
+    lea 224(%rsp), %rdi
+    syscall
+    test %rax, %rax
+    jne failed
+    cmpq $0, 224(%rsp)
+    jne failed
+
+    /* _umtx_op umutex lock/unlock, then private wake */
+    movl $0, 232(%rsp)
+    movl $0, 236(%rsp)
+    mov $454, %rax
+    lea 232(%rsp), %rdi
+    mov $5, %rsi
+    xor %rdx, %rdx
+    xor %r10, %r10
+    xor %r8, %r8
+    syscall
+    test %rax, %rax
+    jne failed
+    cmpl $1, 232(%rsp)
+    jne failed
+
+    mov $454, %rax
+    lea 232(%rsp), %rdi
+    mov $6, %rsi
+    xor %rdx, %rdx
+    xor %r10, %r10
+    xor %r8, %r8
+    syscall
+    test %rax, %rax
+    jne failed
+    cmpl $0, 232(%rsp)
+    jne failed
+
+    movl $0, 240(%rsp)
+    mov $454, %rax
+    lea 240(%rsp), %rdi
+    mov $16, %rsi
+    mov $1, %rdx
+    xor %r10, %r10
+    xor %r8, %r8
     syscall
     test %rax, %rax
     jne failed
