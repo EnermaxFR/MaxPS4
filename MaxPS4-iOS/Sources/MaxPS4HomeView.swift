@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 private enum MaxPS4Tab: Hashable {
     case home
     case games
+    case tools
     case settings
 }
 
@@ -26,6 +27,8 @@ struct MaxPS4HomeView: View {
                     home
                 case .games:
                     library
+                case .tools:
+                    toolsPage
                 case .settings:
                     settings
                 }
@@ -55,6 +58,8 @@ struct MaxPS4HomeView: View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 20) {
                 header
+
+                heroPanel
 
                 backendCard
 
@@ -103,7 +108,7 @@ struct MaxPS4HomeView: View {
             VStack(alignment: .leading, spacing: 18) {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Jeux")
+                        Text("BIBLIOTHÈQUE")
                             .font(.system(size: 36, weight: .black, design: .rounded))
 
                         Text("Votre bibliothèque locale")
@@ -151,7 +156,7 @@ struct MaxPS4HomeView: View {
     private var settings: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Paramètres")
+                Text("RÉGLAGES")
                     .font(.system(size: 36, weight: .black, design: .rounded))
                     .padding(.top, 12)
 
@@ -216,7 +221,7 @@ struct MaxPS4HomeView: View {
                 Text("PS4")
                     .foregroundStyle(
                         LinearGradient(
-                            colors: [.cyan, .blue],
+                            colors: [.cyan, .purple, .blue],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
@@ -224,7 +229,7 @@ struct MaxPS4HomeView: View {
             }
             .font(.system(size: 42, weight: .black, design: .rounded))
 
-            Text("iPhone • interface moderne")
+            Text("NEXT-GEN CONTROL CENTER  /  iOS")
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.white.opacity(0.60))
         }
@@ -520,41 +525,104 @@ struct MaxPS4HomeView: View {
         }
     }
 
-    private var tabBar: some View {
-        HStack {
-            tabButton(.home, icon: "house.fill", title: "Accueil")
-            Spacer()
-            tabButton(.games, icon: "gamecontroller.fill", title: "Jeux")
-            Spacer()
-            tabButton(.settings, icon: "gearshape.fill", title: "Paramètres")
+    private var heroPanel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("MAXPS4 SYSTEM", systemImage: "sparkles.rectangle.stack.fill")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .tracking(2)
+                    .foregroundStyle(.cyan)
+                Spacer()
+                Text("V1 • UI NOVA")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            Text("Votre univers.\nVos jeux.")
+                .font(.system(size: 34, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+            Text("Bibliothèque et commandes dans une interface nouvelle génération.")
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.66))
+            HStack(spacing: 10) {
+                Label("\(emulator.games.count) JEUX", systemImage: "gamecontroller.fill")
+                Spacer()
+                Label("iOS", systemImage: "iphone.gen3")
+            }
+            .font(.system(size: 11, weight: .bold, design: .monospaced))
+            .foregroundStyle(.cyan)
         }
-        .padding(.horizontal, 32)
-        .padding(.vertical, 13)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28))
-        .overlay(
-            RoundedRectangle(cornerRadius: 28)
-                .stroke(.white.opacity(0.08), lineWidth: 1)
+        .padding(22)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LinearGradient(colors: [
+                Color(red: 0.07, green: 0.12, blue: 0.28),
+                Color(red: 0.19, green: 0.07, blue: 0.34),
+                Color(red: 0.03, green: 0.06, blue: 0.17)
+            ], startPoint: .topLeading, endPoint: .bottomTrailing),
+            in: RoundedRectangle(cornerRadius: 28)
         )
-        .padding(.horizontal, 14)
+        .overlay(RoundedRectangle(cornerRadius: 28)
+            .stroke(LinearGradient(colors: [.cyan.opacity(0.8), .purple.opacity(0.65)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.3))
+        .shadow(color: .purple.opacity(0.22), radius: 20, y: 8)
+    }
+
+    private var toolsPage: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("OUTILS")
+                    .font(.system(size: 36, weight: .black, design: .rounded))
+                Text("CENTRE DE CONTRÔLE")
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .tracking(2).foregroundStyle(.cyan)
+                secondaryAction(icon: "cpu", title: "Diagnostic du moteur", subtitle: "Tester la connexion native") {
+                    emulator.testBackend()
+                }
+                primaryAction(icon: "square.and.arrow.down.fill", title: "Importer un jeu", subtitle: "Sélectionner un fichier local") {
+                    importingGame = true
+                }
+                statusCard
+            }
+            .padding(.horizontal, 20).padding(.top, 20)
+        }
+    }
+
+    private var tabBar: some View {
+        HStack(spacing: 0) {
+            tabButton(.home, icon: "house.fill", title: "Accueil")
+            tabButton(.games, icon: "square.grid.2x2.fill", title: "Jeux")
+            tabButton(.tools, icon: "slider.horizontal.3", title: "Outils")
+            tabButton(.settings, icon: "gearshape.fill", title: "Réglages")
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 11)
+        .background(Color(red: 0.035, green: 0.055, blue: 0.14).opacity(0.98),
+                    in: RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24)
+                    .stroke(.cyan.opacity(0.35), lineWidth: 1))
+        .shadow(color: .cyan.opacity(0.17), radius: 17, y: -3)
+        .padding(.horizontal, 12)
         .padding(.bottom, 4)
     }
 
     private func tabButton(_ tab: MaxPS4Tab, icon: String, title: String) -> some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.18)) {
-                selectedTab = tab
-            }
+            withAnimation(.easeInOut(duration: 0.22)) { selectedTab = tab }
         } label: {
-            VStack(spacing: 5) {
+            VStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.title3)
+                    .font(.system(size: 19, weight: .semibold))
+                    .frame(height: 23)
                 Text(title)
-                    .font(.caption2.weight(.semibold))
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
             }
-            .foregroundStyle(selectedTab == tab ? Color.cyan : Color.white.opacity(0.55))
-            .frame(minWidth: 64)
+            .foregroundStyle(selectedTab == tab ? Color.cyan : Color.white.opacity(0.52))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 7)
+            .background(selectedTab == tab ? Color.cyan.opacity(0.12) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 16))
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
     }
 
     private func settingsCard<Content: View>(
@@ -620,8 +688,8 @@ private struct MaxPS4Background: View {
         ZStack {
             LinearGradient(
                 colors: [
-                    Color(red: 0.015, green: 0.035, blue: 0.085),
-                    Color(red: 0.005, green: 0.075, blue: 0.18),
+                    Color(red: 0.025, green: 0.018, blue: 0.085),
+                    Color(red: 0.055, green: 0.025, blue: 0.17),
                     .black
                 ],
                 startPoint: .topLeading,
@@ -630,7 +698,7 @@ private struct MaxPS4Background: View {
             .ignoresSafeArea()
 
             Circle()
-                .fill(.blue.opacity(0.18))
+                .fill(.purple.opacity(0.24))
                 .frame(width: 360, height: 360)
                 .blur(radius: 80)
                 .offset(x: 180, y: -300)
