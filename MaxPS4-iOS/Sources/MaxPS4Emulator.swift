@@ -15,15 +15,19 @@ final class MaxPS4Emulator: ObservableObject {
     @Published private(set) var games: [MaxPS4Game] = []
 
     private let fileManager = FileManager.default
+    private var nativeEngine: (any MaxPS4NativeEngine)?
+
+    func connectNativeEngine(_ engine: any MaxPS4NativeEngine) {
+        nativeEngine = engine
+        status = "Moteur natif connecté"
+    }
 
     init() {
         loadLibrary()
     }
 
     var backendReady: Bool {
-        // The current standalone frontend is ready, but the native shadPS4/FEX
-        // execution bridge is intentionally kept behind this abstraction layer.
-        false
+        nativeEngine?.isReady == true
     }
 
     func importGame(from url: URL) {
@@ -95,7 +99,16 @@ final class MaxPS4Emulator: ObservableObject {
 
         // Keep all native emulator execution behind this method. Once the
         // shadPS4/FEX bridge is linked, this is the single place the UI calls.
-        status = "Sélectionné : \(game.name)"
+        guard let nativeEngine, nativeEngine.isReady else {
+            status = "Jeu sélectionné : \\(game.name) • moteur natif non connecté"
+            return
+        }
+        do {
+            try nativeEngine.launchGame(at: URL(fileURLWithPath: game.localPath))
+            status = "Lancement demandé : \\(game.name)"
+        } catch {
+            status = "Échec du lancement : \\(error.localizedDescription)"
+        }
     }
 
     private var libraryURL: URL {
@@ -148,4 +161,13 @@ final class MaxPS4Emulator: ObservableObject {
         let data = try encoder.encode(games)
         try data.write(to: libraryURL, options: .atomic)
     }
+}
+
+
+// Interface entre la nouvelle UI MaxPS4 et un futur port natif shadPS4/FEX.
+// La compilation standalone ne contient pas encore ce moteur.
+@MainActor
+protocol MaxPS4NativeEngine {
+    var isReady: Bool { get }
+    func launchGame(at url: URL) throws
 }
