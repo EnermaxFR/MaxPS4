@@ -30,10 +30,31 @@ jobs:
 
       - name: Fetch locked FEXCore Darwin reference
         shell: bash
+        timeout-minutes: 6
+        env:
+          GIT_TERMINAL_PROMPT: "0"
         run: |
           set -euo pipefail
-          git clone --filter=blob:none --no-checkout "$FEXCORE_REFERENCE_REPO" build/aether-reference
-          git -C build/aether-reference fetch --depth 1 origin "$FEXCORE_REFERENCE_REV"
+          rm -rf build/aether-reference
+          mkdir -p build/aether-reference
+          git -C build/aether-reference init
+          git -C build/aether-reference remote add origin "$FEXCORE_REFERENCE_REPO"
+
+          fetched=0
+          for attempt in 1 2 3; do
+            echo "FEXCore reference fetch attempt $attempt/3"
+            if git -C build/aether-reference \
+              -c protocol.version=2 \
+              -c http.lowSpeedLimit=1024 \
+              -c http.lowSpeedTime=45 \
+              fetch --no-tags --depth 1 origin "$FEXCORE_REFERENCE_REV"; then
+              fetched=1
+              break
+            fi
+            sleep $((attempt * 5))
+          done
+
+          test "$fetched" = "1"
           git -C build/aether-reference checkout --detach FETCH_HEAD
           test "$(git -C build/aether-reference rev-parse HEAD)" = "$FEXCORE_REFERENCE_REV"
           test -f build/aether-reference/runtime/sources/fexcore-darwin/LICENSE
