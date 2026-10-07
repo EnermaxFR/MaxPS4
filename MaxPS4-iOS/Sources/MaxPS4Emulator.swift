@@ -176,6 +176,17 @@ final class MaxPS4Emulator: ObservableObject {
             : "Chargeur ELF64 : échec de l’auto-test"
     }
 
+    func showGuestMemoryMap() {
+        do {
+            var memory = MaxPS4GuestMemory()
+            try memory.mapZeroFilled(at: 0x1000, size: 4096, permissions: [.read, .write])
+            try memory.mapZeroFilled(at: 0x4000, size: 4096, permissions: [.read, .execute])
+            status = "Plan mémoire invité : " + memory.memoryMapSummary
+        } catch {
+            status = "Diagnostic mémoire impossible : " + error.localizedDescription
+        }
+    }
+
     func testGuestMemory() {
         status = MaxPS4GuestMemory.selfTest()
             ? "Mémoire invitée : auto-test réussi (prototype, 16 Mio maximum)"
