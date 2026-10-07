@@ -453,6 +453,7 @@ struct MaxPS4CPUPrototype {
             } catch MaxPS4GuestMemory.MemoryError.outOfBounds {}
             try memoryGuests.loadCurrent(codeB, at: 0x4000)
             try memoryGuests.runLoadedCurrent(at: 0x4000, length: codeB.count)
+            print("CPU_VALUES", memoryGuests.process(pid: memoryA)?.cpu.rax as Any, memoryGuests.process(pid: memoryB)?.cpu.rax as Any)
             guard memoryGuests.process(pid: memoryA)?.cpu.rax == 42,
                   memoryGuests.process(pid: memoryB)?.cpu.rax == 7 else { print("CPU_DIAG_457"); return false }
             var batch = MaxPS4VirtualProcessManager()
