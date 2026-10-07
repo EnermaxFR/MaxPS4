@@ -438,6 +438,25 @@ struct MaxPS4CPUPrototype {
             try stepGuests.stepCurrent(steppedProgram)
             guard stepGuests.process(pid: stepPID)?.cpu.rax == 8,
                   stepGuests.process(pid: stepPID)?.cpu.rip == 14 else { return false }
+            var alternating = MaxPS4VirtualProcessManager()
+            let altA = try alternating.create()
+            let altB = try alternating.create()
+            let altPrograms: [UInt32: [UInt8]] = [
+                altA: [0x48, 0xB8, 0x05, 0, 0, 0, 0, 0, 0, 0, 0xC3],
+                altB: [0x48, 0xB8, 0x07, 0, 0, 0, 0, 0, 0, 0, 0xC3]
+            ]
+            guard try alternating.stepRoundRobin(altPrograms) == [altA, altB],
+                  alternating.process(pid: altA)?.cpu.rax == 5,
+                  alternating.process(pid: altB)?.cpu.rax == 7,
+                  alternating.process(pid: altA)?.cpu.rip == 10,
+                  alternating.process(pid: altB)?.cpu.rip == 10 else { return false }
+            guard alternating.suspend(pid: altA),
+                  try alternating.stepRoundRobin(altPrograms) == [altB],
+                  alternating.process(pid: altA)?.cpu.rip == 10,
+                  alternating.resume(pid: altA),
+                  try alternating.stepRoundRobin(altPrograms) == [altA],
+                  alternating.process(pid: altA)?.cpu.rip == 11,
+                  alternating.process(pid: altB)?.cpu.rip == 11 else { return false }
             var memoryGuests = MaxPS4VirtualProcessManager()
             let memoryA = try memoryGuests.create()
             let memoryB = try memoryGuests.create()
@@ -643,6 +662,26 @@ struct MaxPS4VirtualProcessManager {
             completed.append(pid)
         }
         return completed
+    }
+
+    /// One instruction per runnable guest, in deterministic PID order.
+    /// No host threads or real PS4 scheduling.
+    mutating func stepRoundRobin(_ programs: [UInt32: [UInt8]]) throws -> [UInt32] {
+        let runnable = processes.values.filter { $0.state == .ready || $0.state == .running }
+            .map { $0.pid }.sorted()
+        guard runnable.allSatisfy({ programs[$0] != nil }) else {
+            throw ProcessError.noRunningProcess
+        }
+        var stepped: [UInt32] = []
+        for pid in runnable {
+            guard let chosen = scheduleNext(), chosen == pid,
+                  let program = programs[pid] else { throw ProcessError.noRunningProcess }
+            if let process = processes[pid], process.cpu.rip < program.count {
+                try stepCurrent(program)
+                stepped.append(pid)
+            }
+        }
+        return stepped
     }
 
     func process(pid: UInt32) -> MaxPS4VirtualProcess? {
