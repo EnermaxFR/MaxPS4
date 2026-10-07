@@ -91,8 +91,8 @@ struct MaxPS4HomeView: View {
 
                 primaryAction(
                     icon: "square.and.arrow.down.fill",
-                    title: "Importer un eboot.bin / SELF",
-                    subtitle: "Ajoute un fichier à votre bibliothèque"
+                    title: "Importer un PKG / eboot.bin / SELF",
+                    subtitle: "PKG PS4 : identification uniquement, sans lancement"
                 ) {
                     importingGame = true
                 }
