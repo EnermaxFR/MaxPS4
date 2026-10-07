@@ -150,7 +150,7 @@ final class MaxPS4Emulator: ObservableObject {
 
     func testCPUPrototype() {
         status = MaxPS4CPUPrototype.selfTest()
-            ? "CPU x86-64 : auto-tests réussis (registres, MOV, ADD, SUB, CMP, RET)"
+            ? "CPU x86-64 : tests registres, mémoire, pile et branchements réussis"
             : "CPU x86-64 : échec de l’auto-test"
     }
 
