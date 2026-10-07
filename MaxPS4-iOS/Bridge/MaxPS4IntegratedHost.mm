@@ -17,6 +17,7 @@
 @property(nonatomic, assign) unsigned long long selectedFileSize;
 @property(nonatomic, assign) BOOL bootInProgress;
 @property(nonatomic, assign) NSUInteger bootGeneration;
+@property(nonatomic, assign) NSUInteger copyFeedbackGeneration;
 @end
 
 @implementation MaxPS4IntegratedViewController
@@ -307,12 +308,27 @@
 }
 
 - (void)copyDiagnostic {
-    UIPasteboard.generalPasteboard.string = self.lastDiagnostic ?: self.statusLabel.text ?: @"";
-    NSString *oldTitle = self.diagnosticCopyButton.currentTitle;
-    [self.diagnosticCopyButton setTitle:@"Copié ✓" forState:UIControlStateNormal];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)),
+    // Always copy what is currently visible. During live polling this avoids
+    // copying a stale diagnostic between timer updates.
+    NSString *text = self.statusLabel.text;
+    if (text.length == 0) text = self.lastDiagnostic;
+    if (text.length == 0) text = @"aucun diagnostic";
+
+    UIPasteboard *pasteboard = UIPasteboard.generalPasteboard;
+    [pasteboard setItems:@[@{ UIPasteboardTypeListString.firstObject : text }]
+                 options:@{}];
+
+    self.copyFeedbackGeneration += 1;
+    const NSUInteger feedbackGeneration = self.copyFeedbackGeneration;
+
+    self.diagnosticCopyButton.enabled = NO;
+    [self.diagnosticCopyButton setTitle:@"Diagnostic copié ✓" forState:UIControlStateNormal];
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.9 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
-        [self.diagnosticCopyButton setTitle:oldTitle ?: @"Copier le diagnostic" forState:UIControlStateNormal];
+        if (feedbackGeneration != self.copyFeedbackGeneration) return;
+        [self.diagnosticCopyButton setTitle:@"Copier le diagnostic" forState:UIControlStateNormal];
+        self.diagnosticCopyButton.enabled = YES;
     });
 }
 
