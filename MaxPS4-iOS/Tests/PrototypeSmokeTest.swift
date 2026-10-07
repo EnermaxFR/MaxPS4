@@ -7,7 +7,8 @@ struct PrototypeSmokeTest {
         let checks: [(String, Bool)] = [
             ("Mémoire invitée", MaxPS4GuestMemory.selfTest()),
             ("CPU x86-64", MaxPS4CPUPrototype.selfTest()),
-            ("Chargeur ELF64", MaxPS4ELFLoader.selfTest())
+            ("Chargeur ELF64", MaxPS4ELFLoader.selfTest()),
+            ("Intégration ELF-CPU-mémoire", MaxPS4ELFLoader.integrationTest())
         ]
         for (name, passed) in checks {
             print("\(passed ? "PASS" : "FAIL") — \(name)")
