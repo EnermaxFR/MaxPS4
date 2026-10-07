@@ -1091,6 +1091,45 @@ jobs:
           print("16K ELF page-permission audit: OK")
           PY
 
+      - name: Build legal userspace FEX smoke-test ELF
+        run: |
+          set -euo pipefail
+          mkdir -p build/legal-userspace
+          clang-18 -c MaxPS4-iOS/Tests/hello_stdio_userspace.S -o build/legal-userspace/hello_stdio_userspace.o
+          clang-18 -nostdlib -fuse-ld=lld-18 -pie \
+            -Wl,-e,_start \
+            -Wl,-z,max-page-size=16384 \
+            -Wl,-z,common-page-size=16384 \
+            build/legal-userspace/hello_stdio_userspace.o \
+            -o build/legal-userspace/hello_stdio_userspace.elf
+          file build/legal-userspace/hello_stdio_userspace.elf
+          readelf -h build/legal-userspace/hello_stdio_userspace.elf
+          readelf -lW build/legal-userspace/hello_stdio_userspace.elf
+
+      - name: Package legal userspace FEX smoke test
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/build/MaxPS4-Legal-Userspace-ELF"
+          mkdir -p "$OUT"
+          cp build/legal-userspace/hello_stdio_userspace.elf "$OUT/hello_stdio_userspace.elf"
+          cp MaxPS4-iOS/Tests/hello_stdio_userspace.S "$OUT/source-hello_stdio_userspace.S"
+          cat > "$OUT/PROVENANCE.txt" <<'EOF'
+          Purpose: legal/open-source userspace ELF for validating MaxPS4's FEX syscall bridge.
+          Source: MaxPS4-iOS/Tests/hello_stdio_userspace.S
+          Architecture: x86-64 System V ELF
+          Syscalls exercised: write(4), read(3), exit(1)
+          Contains no Sony game, firmware, keys, SDK, or proprietary PlayStation content.
+          EOF
+          sha256sum "$OUT/hello_stdio_userspace.elf" > "$OUT/SHA256SUMS.txt"
+
+      - name: Upload legal userspace FEX smoke test
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-Legal-Userspace-ELF
+          path: build/MaxPS4-Legal-Userspace-ELF
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Package source, license and provenance
         run: |
           set -euo pipefail
