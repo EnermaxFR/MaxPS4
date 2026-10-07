@@ -3,11 +3,20 @@ import Foundation
 /// Educational, bounded x86-64 instruction interpreter.
 /// Operates exclusively on supplied test bytes; does not launch PS4 software.
 struct MaxPS4CPUPrototype {
-    enum CPUError: Error {
+    enum CPUError: LocalizedError {
         case unsupportedOpcode
         case truncatedInstruction
         case instructionLimit
         case invalidBranch
+
+        var errorDescription: String? {
+            switch self {
+            case .unsupportedOpcode: return "Instruction x86-64 non prise en charge"
+            case .truncatedInstruction: return "Instruction CPU incomplète"
+            case .instructionLimit: return "Limite de 256 instructions ou programme de test dépassée"
+            case .invalidBranch: return "Branchement hors du programme de test"
+            }
+        }
     }
 
     // x86-64 register order: RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI.
