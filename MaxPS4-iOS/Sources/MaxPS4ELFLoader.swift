@@ -102,6 +102,31 @@ enum MaxPS4ELFLoader {
                 _ = try load(url: url)
                 return false
             } catch LoaderError.invalid {}
+
+            // Two overlapping PT_LOAD regions must fail with a memory error.
+            var overlapping = [UInt8](repeating: 0, count: 184)
+            overlapping.replaceSubrange(0..<120, with: bytes[0..<120])
+            overlapping[120...123] = [1, 0, 0, 0]
+            overlapping[124...127] = [5, 0, 0, 0]
+            overlapping[176...179] = [0x90, 0xC3, 0x90, 0x90]
+            // Update the two 56-byte headers to point at the new file payload.
+            func setValue(_ value: UInt64, at index: Int, width: Int) {
+                for i in 0..<width {
+                    overlapping[index + i] = UInt8(truncatingIfNeeded: value >> (i * 8))
+                }
+            }
+            setValue(2, at: 56, width: 2)
+            setValue(16, at: 104, width: 8)
+            setValue(176, at: 72, width: 8)
+            setValue(176, at: 128, width: 8)
+            setValue(0x1008, at: 136, width: 8)
+            setValue(4, at: 152, width: 8)
+            setValue(16, at: 160, width: 8)
+            try Data(overlapping).write(to: url, options: .atomic)
+            do {
+                _ = try load(url: url)
+                return false
+            } catch MaxPS4GuestMemory.MemoryError.overlappingRegion {}
             return true
         } catch { return false }
     }
