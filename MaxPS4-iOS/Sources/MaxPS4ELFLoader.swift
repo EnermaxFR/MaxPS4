@@ -72,15 +72,19 @@ enum MaxPS4ELFLoader {
         put(0x1000, at: 80, width: 8)
         put(4, at: 96, width: 8)
         put(16, at: 104, width: 8)
-        bytes[120...123] = [1, 2, 3, 4]
+        bytes[120...123] = [0x90, 0xC3, 0x90, 0x90]
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: url) }
         do {
             try Data(bytes).write(to: url)
             let result = try load(url: url)
-            return result.segments == 1 &&
-                result.entry == 0x1000 &&
-                (try result.memory.read(at: 0x1000, count: 5)) == Data([1, 2, 3, 4, 0])
+            guard result.segments == 1, result.entry == 0x1000,
+                  try result.memory.read(at: 0x1000, count: 5) == Data([0x90, 0xC3, 0x90, 0x90, 0]) else {
+                return false
+            }
+            var cpu = MaxPS4CPUPrototype()
+            try cpu.runLoadedTest(memory: result.memory, entry: result.entry, length: 2)
+            return cpu.rip == 2
         } catch { return false }
     }
 }
