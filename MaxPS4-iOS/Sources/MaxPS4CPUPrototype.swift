@@ -189,6 +189,21 @@ struct MaxPS4CPUPrototype {
                 0xC3
             ])
             guard instructionCPU.rax == 42 else { return false }
+            // A loaded guest-memory program must preserve its memory writes.
+            var loadedCPU = Self()
+            var loadedMemory = MaxPS4GuestMemory()
+            try loadedMemory.mapZeroFilled(at: 0x4000, size: 4096)
+            try loadedMemory.mapZeroFilled(at: 0x6000, size: 4096)
+            let program: [UInt8] = [
+                0x48, 0xB8, 0x2A, 0, 0, 0, 0, 0, 0, 0,
+                0x48, 0xA3, 0x20, 0x60, 0, 0, 0, 0, 0, 0,
+                0xC3
+            ]
+            try loadedMemory.write(Data(program), at: 0x4000)
+            try loadedCPU.runLoadedTest(memory: loadedMemory, entry: 0x4000, length: program.count)
+            guard loadedCPU.executedInstructions == 3,
+                  try loadedCPU.guestMemory.read(at: 0x6020, count: 8) ==
+                     Data([42, 0, 0, 0, 0, 0, 0, 0]) else { return false }
             var invalidAccess = Self()
             do {
                 try invalidAccess.run([0x48, 0xA1, 0, 0, 0, 0, 0, 0, 0, 0])
