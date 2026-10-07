@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -19,6 +20,18 @@
 
 namespace {
 thread_local std::string g_run_diag = "not run";
+std::mutex g_live_diag_mutex;
+std::string g_live_diag = "not run";
+
+void SetLiveDiag(const std::string& value) {
+    std::lock_guard<std::mutex> lock(g_live_diag_mutex);
+    g_live_diag = value;
+}
+
+std::string GetLiveDiag() {
+    std::lock_guard<std::mutex> lock(g_live_diag_mutex);
+    return g_live_diag;
+}
 
 static uint16_t U16(const uint8_t* p) {
     return static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
@@ -148,6 +161,9 @@ private:
     void RecordSyscall(uint64_t op) {
         trace[trace_count % trace.size()] = op;
         ++trace_count;
+        SetLiveDiag(std::string("guest running • syscall=") + std::to_string(op) +
+                    " • trace=" + Trace() +
+                    (output.empty() ? "" : " • output=" + output));
     }
 
     uintptr_t image_begin{};
@@ -165,8 +181,15 @@ extern "C" const char* maxps4_fex_guest_run_last_error(void) {
     return g_run_diag.c_str();
 }
 
+extern "C" void maxps4_fex_guest_run_live_diagnostic(char* out, size_t out_size) {
+    if (!out || out_size == 0) return;
+    const std::string value = GetLiveDiag();
+    std::snprintf(out, out_size, "%s", value.c_str());
+}
+
 extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     g_run_diag = "handoff start";
+    SetLiveDiag("handoff start");
     if (!path) { g_run_diag = "ELF path missing"; return 20; }
 
     FILE* f = fopen(path, "rb");
@@ -330,6 +353,14 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     request.MappedRanges = image_ranges;
     request.MappedRanges.push_back({stack_begin, stack.size, false, true});
 
+    {
+        char live[220];
+        std::snprintf(live, sizeof(live),
+                      "guest entered • entry=0x%llx • rsp=0x%llx • waiting for syscall/HLT",
+                      static_cast<unsigned long long>(guest_entry),
+                      static_cast<unsigned long long>(stack_top));
+        SetLiveDiag(live);
+    }
     auto result = backend->Run(request);
     if (const auto* failure = std::get_if<Core::GuestExecutionFailure>(&result)) {
         char buf[420];
@@ -344,6 +375,7 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
                  trace.empty() ? "" : " • trace=",
                  trace.empty() ? "" : trace.c_str());
         g_run_diag = buf;
+        SetLiveDiag(g_run_diag);
         return 33;
     }
 
@@ -361,5 +393,6 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
              trace.empty() ? "" : " • trace=",
              trace.empty() ? "" : trace.c_str());
     g_run_diag = buf;
+    SetLiveDiag(g_run_diag);
     return 0;
 }
