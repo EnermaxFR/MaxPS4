@@ -17,6 +17,7 @@ struct MaxPS4HomeView: View {
     @State private var gameFilter = 0
     @State private var gameToRename: MaxPS4Game?
     @State private var renamedGameTitle = ""
+    @State private var inspectionReport: String?
 
     @AppStorage("showFPS") private var showFPS = false
     @AppStorage("networkEnabled") private var networkEnabled = false
@@ -62,6 +63,14 @@ struct MaxPS4HomeView: View {
             }
         } message: {
             Text("Le fichier original ne sera pas renommé.")
+        }
+        .alert("Résultat de l’analyse", isPresented: Binding(
+            get: { inspectionReport != nil },
+            set: { if !$0 { inspectionReport = nil } }
+        )) {
+            Button("Fermer") { inspectionReport = nil }
+        } message: {
+            Text(inspectionReport ?? "")
         }
         .fileImporter(
             isPresented: $importingGame,
@@ -563,6 +572,7 @@ struct MaxPS4HomeView: View {
                     }
                     Button {
                         emulator.inspect(game)
+                        inspectionReport = emulator.status
                     } label: {
                         Label(game.fileName.lowercased().hasSuffix(".pkg") ? "Analyser le PKG" : "Analyser l’exécutable", systemImage: "doc.text.magnifyingglass")
                     }
