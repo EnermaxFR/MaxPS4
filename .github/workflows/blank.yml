@@ -1228,6 +1228,17 @@ jobs:
           readelf -h build/legal-userspace/guest_kernel_state_userspace.elf
           readelf -lW build/legal-userspace/guest_kernel_state_userspace.elf
 
+          clang-18 -c MaxPS4-iOS/Tests/guest_kernel_services_userspace.S -o build/legal-userspace/guest_kernel_services_userspace.o
+          clang-18 -nostdlib -fuse-ld=lld-18 -pie \
+            -Wl,-e,_start \
+            -Wl,-z,max-page-size=16384 \
+            -Wl,-z,common-page-size=16384 \
+            build/legal-userspace/guest_kernel_services_userspace.o \
+            -o build/legal-userspace/guest_kernel_services_userspace.elf
+          file build/legal-userspace/guest_kernel_services_userspace.elf
+          readelf -h build/legal-userspace/guest_kernel_services_userspace.elf
+          readelf -lW build/legal-userspace/guest_kernel_services_userspace.elf
+
           # Build a legal minimal PKG smoke container. It uses the documented
           # PS4 PKG magic/header + file-table layout and stores our own legal
           # hello ELF directly as one readable table entry. It has no PFS,
@@ -1316,9 +1327,11 @@ jobs:
           #include <array>
           #include <cstdint>
           #include <cstdio>
+          #include <cstring>
 
           int main() {
-              MaxPS4::Kernel::KernelState kernel;
+              using namespace MaxPS4::Kernel;
+              KernelState kernel;
 
               if (!kernel.HasFileDescriptor(0, true, false) ||
                   !kernel.HasFileDescriptor(1, false, true) ||
@@ -1327,22 +1340,76 @@ jobs:
                   return 1;
               }
 
+              alignas(16384) unsigned char arena[32768]{};
               alignas(16) unsigned char memory[256]{};
               if (!kernel.RegisterMemoryRegion(
                       reinterpret_cast<uintptr_t>(memory), sizeof(memory),
-                      MaxPS4::Kernel::MemoryRead | MaxPS4::Kernel::MemoryWrite) ||
-                  !kernel.ContainsMemory(
-                      reinterpret_cast<uintptr_t>(memory) + 16, 32,
-                      MaxPS4::Kernel::MemoryRead | MaxPS4::Kernel::MemoryWrite)) {
-                  std::fprintf(stderr, "memory table invalid\n");
+                      MemoryRead | MemoryWrite) ||
+                  !kernel.ConfigureManagedArena(
+                      reinterpret_cast<uintptr_t>(arena), sizeof(arena))) {
+                  std::fprintf(stderr, "memory setup invalid\n");
                   return 2;
+              }
+
+              int error = 0;
+              const uintptr_t mapped =
+                  kernel.AllocateVirtualMemory(16384, MemoryRead | MemoryWrite, error);
+              if (!mapped ||
+                  !kernel.ContainsMemory(mapped, 64, MemoryRead | MemoryWrite) ||
+                  !kernel.ProtectVirtualMemory(mapped, 16384, MemoryRead, error) ||
+                  kernel.ContainsMemory(mapped, 64, MemoryWrite) ||
+                  !kernel.UnmapVirtualMemory(mapped, 16384, error)) {
+                  std::fprintf(stderr, "managed memory lifecycle invalid: %d\n", error);
+                  return 3;
+              }
+
+              int fd = kernel.OpenVirtualFile("/app0/kernel.txt", 0, error);
+              char buf[32]{};
+              size_t done = 0;
+              if (fd < 0 ||
+                  !kernel.ReadFile(fd, buf, sizeof(buf), done, error) ||
+                  done != 13 || std::memcmp(buf, "MaxPS4Kernel\n", 13) != 0 ||
+                  !kernel.CloseFile(fd, error)) {
+                  std::fprintf(stderr, "virtual app0 read invalid: %d\n", error);
+                  return 4;
+              }
+
+              fd = kernel.OpenVirtualFile("/savedata/state.bin", 2, error);
+              const char payload[] = "state-ok\n";
+              if (fd < 0 ||
+                  !kernel.WriteFile(fd, payload, sizeof(payload)-1, done, error) ||
+                  done != sizeof(payload)-1 ||
+                  !kernel.CloseFile(fd, error)) {
+                  std::fprintf(stderr, "virtual savedata write invalid: %d\n", error);
+                  return 5;
+              }
+
+              const uint32_t tid = kernel.CreateLogicalThread("worker", error);
+              int thread_code = 0;
+              if (tid < 2 ||
+                  !kernel.CompleteLogicalThread(tid, 17, error) ||
+                  !kernel.JoinLogicalThread(tid, thread_code, error) ||
+                  thread_code != 17) {
+                  std::fprintf(stderr, "logical thread lifecycle invalid: %d\n", error);
+                  return 6;
+              }
+
+              const uint32_t mutex = kernel.CreateMutex(error);
+              if (!mutex ||
+                  !kernel.LockMutex(mutex, kernel.CurrentTid(), error) ||
+                  !kernel.LockMutex(mutex, kernel.CurrentTid(), error) ||
+                  !kernel.UnlockMutex(mutex, kernel.CurrentTid(), error) ||
+                  !kernel.UnlockMutex(mutex, kernel.CurrentTid(), error) ||
+                  !kernel.DestroyMutex(mutex, error)) {
+                  std::fprintf(stderr, "logical mutex lifecycle invalid: %d\n", error);
+                  return 7;
               }
 
               std::array<uint64_t, 6> args{};
               auto pid = kernel.Dispatch(20, args);
               if (!pid.handled || pid.value != 1) {
                   std::fprintf(stderr, "getpid dispatch invalid\n");
-                  return 3;
+                  return 8;
               }
 
               args[0] = 7;
@@ -1350,10 +1417,10 @@ jobs:
               if (!exit_call.handled || !exit_call.request_exit ||
                   exit_call.exit_code != 7) {
                   std::fprintf(stderr, "exit dispatch invalid\n");
-                  return 4;
+                  return 9;
               }
 
-              std::puts("MaxPS4Kernel state smoke: OK");
+              std::puts("MaxPS4Kernel full service smoke: OK");
               return 0;
           }
           CPP
@@ -1380,6 +1447,7 @@ jobs:
           cp build/legal-userspace/guest_texture_upload_userspace.elf "$OUT/guest_texture_upload_userspace.elf"
           cp build/legal-userspace/guest_multi_texture_userspace.elf "$OUT/guest_multi_texture_userspace.elf"
           cp build/legal-userspace/guest_kernel_state_userspace.elf "$OUT/guest_kernel_state_userspace.elf"
+          cp build/legal-userspace/guest_kernel_services_userspace.elf "$OUT/guest_kernel_services_userspace.elf"
           cp build/legal-userspace/hello_stdio_plain.pkg "$OUT/hello_stdio_plain.pkg"
           cp MaxPS4-iOS/Tests/hello_stdio_userspace.S "$OUT/source-hello_stdio_userspace.S"
           cp MaxPS4-iOS/Tests/controller_snapshot_userspace.S "$OUT/source-controller_snapshot_userspace.S"
@@ -1391,6 +1459,7 @@ jobs:
           cp MaxPS4-iOS/Tests/guest_texture_upload_userspace.S "$OUT/source-guest_texture_upload_userspace.S"
           cp MaxPS4-iOS/Tests/guest_multi_texture_userspace.S "$OUT/source-guest_multi_texture_userspace.S"
           cp MaxPS4-iOS/Tests/guest_kernel_state_userspace.S "$OUT/source-guest_kernel_state_userspace.S"
+          cp MaxPS4-iOS/Tests/guest_kernel_services_userspace.S "$OUT/source-guest_kernel_services_userspace.S"
           cat > "$OUT/PROVENANCE.txt" <<'EOF'
           Purpose: legal/open-source userspace ELFs for validating MaxPS4's FEX userspace bridge.
           Sources:
@@ -1404,6 +1473,7 @@ jobs:
             - MaxPS4-iOS/Tests/guest_texture_upload_userspace.S
             - MaxPS4-iOS/Tests/guest_multi_texture_userspace.S
             - MaxPS4-iOS/Tests/guest_kernel_state_userspace.S
+            - MaxPS4-iOS/Tests/guest_kernel_services_userspace.S
           Architecture: x86-64 System V ELF
           Syscalls exercised:
             - write(4), read(3), exit(1)
@@ -1414,6 +1484,9 @@ jobs:
             - MaxPS4-private typed scene begin/primitive/present pseudo-syscalls 0x4d56/0x4d57/0x4d58
             - MaxPS4-private guest RGBA8 texture upload pseudo-syscall 0x4d59
             - MaxPS4-private guest-textured primitive v2 pseudo-syscall 0x4d5a
+            - MaxPS4Kernel logical thread pseudo-syscalls 0x4d60/0x4d61/0x4d62
+            - MaxPS4Kernel logical mutex pseudo-syscalls 0x4d63/0x4d64/0x4d65/0x4d66
+            - Sandbox file open/close/read/write (5/6/3/4), mmap/mprotect/munmap (477/74/73), thr_self (432)
           controller_snapshot_userspace.elf prints button mask, both stick axes, and both triggers.
           guest_metal_userspace.elf submits one square render command for the Metal view.
           guest_input_metal_loop_userspace.elf runs a paced ~10 second loop where the guest reads the controller and drives Metal position/color.
@@ -1423,10 +1496,11 @@ jobs:
           guest_texture_upload_userspace.elf uploads legal RGBA8 pixels from guest memory and renders the resulting Metal texture.
           guest_multi_texture_userspace.elf uploads two independent legal RGBA8 textures and renders both by texture_id in one scene.
           guest_kernel_state_userspace.elf validates MaxPS4Kernel process identity, stdio descriptor/memory checks, and exit dispatch from a real FEX guest.
+          guest_kernel_services_userspace.elf validates the sandbox VFS, managed memory lifecycle, logical thread objects, and logical recursive mutexes from a real FEX guest.
           hello_stdio_plain.pkg is a minimal MaxPS4 PKG importer smoke container: documented PKG magic/header/file-table fields plus the legal hello_stdio_userspace.elf stored directly, with no PFS or encryption.
           Contains no Sony game, firmware, keys, SDK, or proprietary PlayStation content.
           EOF
-          sha256sum "$OUT/hello_stdio_userspace.elf" "$OUT/controller_snapshot_userspace.elf" "$OUT/guest_metal_userspace.elf" "$OUT/guest_input_metal_loop_userspace.elf" "$OUT/guest_frame_queue_userspace.elf" "$OUT/guest_typed_scene_userspace.elf" "$OUT/guest_textured_quad_userspace.elf" "$OUT/guest_texture_upload_userspace.elf" "$OUT/guest_multi_texture_userspace.elf" "$OUT/guest_kernel_state_userspace.elf" "$OUT/hello_stdio_plain.pkg" > "$OUT/SHA256SUMS.txt"
+          sha256sum "$OUT/hello_stdio_userspace.elf" "$OUT/controller_snapshot_userspace.elf" "$OUT/guest_metal_userspace.elf" "$OUT/guest_input_metal_loop_userspace.elf" "$OUT/guest_frame_queue_userspace.elf" "$OUT/guest_typed_scene_userspace.elf" "$OUT/guest_textured_quad_userspace.elf" "$OUT/guest_texture_upload_userspace.elf" "$OUT/guest_multi_texture_userspace.elf" "$OUT/guest_kernel_state_userspace.elf" "$OUT/guest_kernel_services_userspace.elf" "$OUT/hello_stdio_plain.pkg" > "$OUT/SHA256SUMS.txt"
 
       - name: Upload legal userspace FEX smoke test
         uses: actions/upload-artifact@v4
