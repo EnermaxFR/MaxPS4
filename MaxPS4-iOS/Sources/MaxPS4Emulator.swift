@@ -15,6 +15,10 @@ struct MaxPS4LibraryGame: Identifiable, Codable, Hashable {
 final class MaxPS4Emulator: ObservableObject {
     @Published var status = "Prêt"
     @Published private(set) var libraryGames: [MaxPS4LibraryGame] = []
+    @Published private(set) var isRunning = false
+    @Published private(set) var currentGameName: String?
+    @Published private(set) var runtimeDiagnostic = ""
+    @Published private(set) var runtimeOutput = ""
 
     private let libraryDefaultsKey = "MaxPS4.LibraryGames.v1"
     private let libraryDirectoryName = "MaxPS4Library"
@@ -138,7 +142,13 @@ final class MaxPS4Emulator: ObservableObject {
         bootGeneration &+= 1
         let generation = bootGeneration
         bootInProgress = true
+        isRunning = true
+        currentGameName = game.name
+        runtimeDiagnostic = "Initialisation du guest…"
+        runtimeOutput = ""
         status = "\(game.name) • exécution FEX lancée en arrière-plan…"
+
+        startRuntimePolling(generation: generation)
 
         let path = executableURL.path
         let name = game.name
@@ -155,13 +165,18 @@ final class MaxPS4Emulator: ObservableObject {
                 switch result {
                 case MAXPS4_CORE_OK:
                     self.status = "Démarrage : \(name)"
+                    self.refreshRuntimeSnapshot()
                 case MAXPS4_CORE_JIT_UNAVAILABLE:
+                    self.isRunning = false
                     self.status = "JIT indisponible • \(diagnostic)"
                 case MAXPS4_CORE_NOT_READY:
+                    self.isRunning = false
                     self.status = "JIT OK • \(backendDiagnostic)"
                 case MAXPS4_CORE_INVALID_PATH:
+                    self.isRunning = false
                     self.status = "Exécutable PS4 invalide • \(backendDiagnostic)"
                 default:
+                    self.isRunning = false
                     self.status = "Échec du cœur MaxPS4 (\(result.rawValue))"
                 }
             }
@@ -219,9 +234,49 @@ final class MaxPS4Emulator: ObservableObject {
     }
 
     func stop() {
+        bootGeneration &+= 1
+        bootInProgress = false
         maxps4_backend_stop()
         maxps4_core_stop()
+        isRunning = false
+        currentGameName = nil
+        refreshRuntimeSnapshot()
         status = "Arrêté"
+    }
+
+    private func startRuntimePolling(generation: UInt) {
+        Task { [weak self] in
+            guard let self else { return }
+
+            while generation == self.bootGeneration && self.isRunning {
+                self.refreshRuntimeSnapshot()
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
+    }
+
+    private func refreshRuntimeSnapshot() {
+        var diagnostic = [CChar](repeating: 0, count: 1024)
+        diagnostic.withUnsafeMutableBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress else { return }
+            maxps4_backend_live_diagnostic(baseAddress, buffer.count)
+        }
+
+        var output = [CChar](repeating: 0, count: 4096)
+        output.withUnsafeMutableBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress else { return }
+            maxps4_backend_live_output(baseAddress, buffer.count)
+        }
+
+        runtimeDiagnostic = diagnostic.withUnsafeBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress else { return "" }
+            return String(cString: baseAddress)
+        }
+
+        runtimeOutput = output.withUnsafeBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress else { return "" }
+            return String(cString: baseAddress)
+        }
     }
 
     private func validateExecutable(at url: URL) -> (isValid: Bool, diagnostic: String) {

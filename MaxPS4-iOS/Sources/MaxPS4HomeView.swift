@@ -119,6 +119,10 @@ struct MaxPS4HomeView: View {
 
                 backendStatusCard
 
+                if emulator.isRunning || !emulator.runtimeDiagnostic.isEmpty {
+                    runtimeSessionCard
+                }
+
                 primaryAction(
                     icon: "square.and.arrow.down.fill",
                     title: "Importer un exécutable PS4",
@@ -715,6 +719,55 @@ struct MaxPS4HomeView: View {
                 .foregroundStyle(.white.opacity(0.60))
         }
         .padding(.top, 8)
+    }
+
+    private var runtimeSessionCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: emulator.isRunning ? "bolt.horizontal.circle.fill" : "terminal.fill")
+                    .foregroundStyle(emulator.isRunning ? .green : .cyan)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(emulator.currentGameName ?? "Session d’exécution")
+                        .font(.headline)
+                    Text(emulator.isRunning ? "Guest actif" : "Dernier état du guest")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+
+                Spacer()
+
+                if emulator.isRunning {
+                    ProgressView()
+                        .tint(.green)
+                }
+            }
+
+            if !emulator.runtimeDiagnostic.isEmpty {
+                Text(emulator.runtimeDiagnostic)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.white.opacity(0.75))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if !emulator.runtimeOutput.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Text(emulator.runtimeOutput)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.green.opacity(0.85))
+                        .textSelection(.enabled)
+                }
+                .frame(maxHeight: 120)
+                .padding(10)
+                .background(.black.opacity(0.32), in: RoundedRectangle(cornerRadius: 12))
+            }
+        }
+        .padding(16)
+        .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 20))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(.cyan.opacity(0.20), lineWidth: 1)
+        )
     }
 
     private var backendStatusCard: some View {
