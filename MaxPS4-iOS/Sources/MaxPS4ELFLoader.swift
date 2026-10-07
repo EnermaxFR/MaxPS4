@@ -168,6 +168,14 @@ enum MaxPS4ELFLoader {
             var cpu = MaxPS4CPUPrototype()
             try cpu.runLoadedTest(memory: result.memory, entry: result.entry, length: 2)
             guard cpu.rip == 2 else { return false }
+            // ELF PF_R|PF_X must allow instruction fetch but reject writes.
+            guard try result.memory.fetchInstructionBytes(at: 0x1000, count: 2) == Data([0x90, 0xC3]) else { return false }
+            var protectedMemory = result.memory
+            do {
+                try protectedMemory.write(Data([0x90]), at: 0x1000)
+                return false
+            } catch MaxPS4GuestMemory.MemoryError.accessDenied {}
+
 
             // End-to-end test: ELF file -> PT_LOAD -> guest CPU -> guest memory.
             // A synthetic MOV RAX,42 / MOV [0x1028],RAX / RET program.
