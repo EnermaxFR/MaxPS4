@@ -92,31 +92,11 @@ final class MaxPS4Emulator: ObservableObject {
     }
 
     func inspect(_ game: MaxPS4Game) {
-        let url = URL(fileURLWithPath: game.localPath)
-        guard let handle = try? FileHandle(forReadingFrom: url) else {
-            status = "Diagnostic impossible : fichier inaccessible"
-            return
+        do {
+            status = try MaxPS4ELFInspector.inspect(url: URL(fileURLWithPath: game.localPath))
+        } catch {
+            status = "Analyse impossible : \(error.localizedDescription)"
         }
-        defer { try? handle.close() }
-        guard let data = try? handle.read(upToCount: 64), data.count >= 64,
-              Array(data.prefix(4)) == [0x7F, 0x45, 0x4C, 0x46],
-              data[4] == 2, data[5] == 1 else {
-            status = "Diagnostic : fichier ELF64 little-endian invalide"
-            return
-        }
-        func uint16(_ offset: Int) -> UInt16 {
-            UInt16(data[offset]) | (UInt16(data[offset + 1]) << 8)
-        }
-        func uint64(_ offset: Int) -> UInt64 {
-            (0..<8).reduce(UInt64(0)) { value, index in
-                value | (UInt64(data[offset + index]) << (index * 8))
-            }
-        }
-        let machine = uint16(18)
-        let type = uint16(16)
-        let entry = uint64(24)
-        let size = (try? FileManager.default.attributesOfItem(atPath: game.localPath)[.size] as? NSNumber)?.int64Value ?? 0
-        status = "ELF64 • machine 0x\(String(machine, radix: 16)) • type 0x\(String(type, radix: 16)) • entrée 0x\(String(entry, radix: 16)) • \(ByteCountFormatter.string(fromByteCount: size, countStyle: .file)) • analyse uniquement"
     }
 
     func rename(_ game: MaxPS4Game, to proposedName: String) {
