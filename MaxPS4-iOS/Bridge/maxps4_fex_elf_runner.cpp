@@ -103,6 +103,11 @@ public:
                 gpr[FEXCore::X86State::REG_RAX] = 0;
                 return true;
             }
+            if (symbol == "strerror" && strerror_veneer != 0 && IsWritable(out_addr, sizeof(uintptr_t))) {
+                std::memcpy(reinterpret_cast<void*>(out_addr), &strerror_veneer, sizeof(strerror_veneer));
+                gpr[FEXCore::X86State::REG_RAX] = 0;
+                return true;
+            }
 
             last_syscall = op;
             return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, ENOSYS};
@@ -248,6 +253,25 @@ public:
                         " • trace=" + Trace());
             return true;
         }
+        if (op == 0x100000003ULL) {
+            if (strerror_buffer == 0 || strerror_buffer_size < 2) {
+                return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+            const int err = static_cast<int>(gpr[FEXCore::X86State::REG_RDI]);
+            const char *message = std::strerror(err);
+            if (!message) message = "Unknown error";
+            std::snprintf(reinterpret_cast<char*>(strerror_buffer),
+                          strerror_buffer_size,
+                          "%s",
+                          message);
+            gpr[FEXCore::X86State::REG_RAX] = strerror_buffer;
+            SetLiveDiag(std::string("guest HLE strerror • errno=") + std::to_string(err) +
+                        " • result=" + reinterpret_cast<const char*>(strerror_buffer) +
+                        " • dlsym=" + DlsymTrace() +
+                        " • trace=" + Trace());
+            return true;
+        }
+
         if (op == 4) {
             const int fd = static_cast<int>(gpr[FEXCore::X86State::REG_RDI]);
             const auto addr = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RSI]);
@@ -303,6 +327,11 @@ public:
     }
     void SetExitVeneer(uintptr_t address) { exit_veneer = address; }
     void SetSnprintfVeneer(uintptr_t address) { snprintf_veneer = address; }
+    void SetStrerrorVeneer(uintptr_t address) { strerror_veneer = address; }
+    void SetStrerrorBuffer(uintptr_t address, size_t size) {
+        strerror_buffer = address;
+        strerror_buffer_size = size;
+    }
     uint64_t LastSyscall() const { return last_syscall; }
     const std::string& Output() const { return output; }
 
@@ -399,6 +428,9 @@ private:
     size_t stack_size{};
     uintptr_t exit_veneer{};
     uintptr_t snprintf_veneer{};
+    uintptr_t strerror_veneer{};
+    uintptr_t strerror_buffer{};
+    size_t strerror_buffer_size{};
     std::vector<std::pair<uintptr_t, size_t>> writable_ranges;
     std::vector<std::string> dlsym_requests;
     uint64_t last_syscall{};
@@ -574,6 +606,7 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     if (!veneers.ok()) { g_run_diag = "HLE veneer mmap failed"; return 37; }
     constexpr uint64_t kExitOperation = 0x100000001ULL;
     constexpr uint64_t kSnprintfOperation = 0x100000002ULL;
+    constexpr uint64_t kStrerrorOperation = 0x100000003ULL;
     auto make_stub = [](uint64_t operation) {
         std::array<uint8_t, 16> stub = {
             0x49, 0x89, 0xca,             // mov r10, rcx
@@ -587,17 +620,25 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     };
     const auto exit_stub = make_stub(kExitOperation);
     const auto snprintf_stub = make_stub(kSnprintfOperation);
+    const auto strerror_stub = make_stub(kStrerrorOperation);
     auto* veneer_bytes = reinterpret_cast<uint8_t*>(veneers.ptr);
     std::memcpy(veneer_bytes, exit_stub.data(), exit_stub.size());
     std::memcpy(veneer_bytes + 32, snprintf_stub.data(), snprintf_stub.size());
+    std::memcpy(veneer_bytes + 64, strerror_stub.data(), strerror_stub.size());
     __builtin___clear_cache(reinterpret_cast<char*>(veneers.ptr),
-                            reinterpret_cast<char*>(veneers.ptr) + 48);
+                            reinterpret_cast<char*>(veneers.ptr) + 80);
     if (mprotect(veneers.ptr, veneers.size, PROT_READ) != 0) {
         g_run_diag = "HLE veneer mprotect failed";
         return 38;
     }
     const uintptr_t exit_veneer = reinterpret_cast<uintptr_t>(veneers.ptr);
     const uintptr_t snprintf_veneer = exit_veneer + 32;
+    const uintptr_t strerror_veneer = exit_veneer + 64;
+
+    HostMapping strerror_storage(static_cast<size_t>(page));
+    if (!strerror_storage.ok()) { g_run_diag = "HLE strerror buffer mmap failed"; return 39; }
+    const uintptr_t strerror_buffer = reinterpret_cast<uintptr_t>(strerror_storage.ptr);
+    std::memset(strerror_storage.ptr, 0, strerror_storage.size);
 
     HomebrewBridge bridge;
     bridge.SetImage(image_begin, image.size);
@@ -605,6 +646,8 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     bridge.SetWritableRanges(writable_ranges);
     bridge.SetExitVeneer(exit_veneer);
     bridge.SetSnprintfVeneer(snprintf_veneer);
+    bridge.SetStrerrorVeneer(strerror_veneer);
+    bridge.SetStrerrorBuffer(strerror_buffer, strerror_storage.size);
     auto backendResult = Core::FexGuestCpuBackend::Create(bridge);
     if (const auto* failure = std::get_if<Core::GuestExecutionFailure>(&backendResult)) {
         char buf[160]; snprintf(buf, sizeof(buf), "FEX create failed stage=%d errno=%d",
@@ -620,6 +663,7 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     request.MappedRanges = image_ranges;
     request.MappedRanges.push_back({stack_begin, stack.size, false, true});
     request.MappedRanges.push_back({exit_veneer, veneers.size, true, false});
+    request.MappedRanges.push_back({strerror_buffer, strerror_storage.size, false, true});
 
     {
         char live[220];
