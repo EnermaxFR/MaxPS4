@@ -92,6 +92,7 @@ public:
                         " • symbol=" + (symbol.empty() ? "<unreadable>" : symbol) +
                         " • out=0x" + Hex(out_addr) +
                         " • dlsym=" + DlsymTrace() +
+                        (last_sysctl.empty() ? "" : " • sysctl=" + last_sysctl) +
                         " • trace=" + Trace());
 
             if (symbol == "_exit" && exit_veneer != 0 && IsWritable(out_addr, sizeof(uintptr_t))) {
@@ -476,6 +477,31 @@ public:
             return true;
         }
 
+        if (op == 202) { // FreeBSD/Orbis __sysctl
+            const auto name_addr = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDI]);
+            const size_t namelen = static_cast<size_t>(gpr[FEXCore::X86State::REG_RSI]);
+            std::string mib;
+            const size_t count = std::min<size_t>(namelen, 8);
+            if (count != 0 && IsReadable(name_addr, count * sizeof(int))) {
+                for (size_t i = 0; i < count; ++i) {
+                    int part = 0;
+                    std::memcpy(&part,
+                                reinterpret_cast<const void*>(name_addr + i * sizeof(int)),
+                                sizeof(part));
+                    if (!mib.empty()) mib += ".";
+                    mib += std::to_string(part);
+                }
+            } else {
+                mib = "<unreadable>";
+            }
+            last_sysctl = mib;
+            SetLiveDiag(std::string("guest __sysctl • mib=") + mib +
+                        " • dlsym=" + DlsymTrace() +
+                        " • trace=" + Trace());
+            last_syscall = op;
+            return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, ENOSYS};
+        }
+
         // Harmless identity/query calls commonly reached by tiny libc startup paths.
         if (op == 20) { // getpid
             gpr[FEXCore::X86State::REG_RAX] = 1;
@@ -617,6 +643,7 @@ private:
     size_t errno_buffer_size{};
     std::vector<std::pair<uintptr_t, size_t>> writable_ranges;
     std::vector<std::string> dlsym_requests;
+    std::string last_sysctl;
     uint64_t last_syscall{};
     bool stdin_sent{};
     bool exit_requested{};
