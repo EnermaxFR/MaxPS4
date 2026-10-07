@@ -21,6 +21,7 @@ MaxPS4BackendState maxps4_backend_state(void);
 const char *maxps4_backend_name(void);
 const char *maxps4_backend_diagnostic(void);
 void maxps4_backend_live_diagnostic(char *out, size_t out_size);
+void maxps4_backend_live_output(char *out, size_t out_size);
 bool maxps4_backend_self_test(void);
 // Validates an imported PS4 SELF/ELF executable using the same structural
 // requirements as the locked shadPS4 loader before any runtime handoff.
