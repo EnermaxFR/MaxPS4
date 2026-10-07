@@ -42,6 +42,13 @@
 @property(nonatomic, strong) UILabel *libraryEmptyLabel;
 @property(nonatomic, strong) NSMutableArray<NSMutableDictionary *> *libraryGames;
 @property(nonatomic, strong) NSArray<NSMutableDictionary *> *visibleLibraryGames;
+- (void)loadLibrary;
+- (void)saveLibrary;
+- (void)refreshLibraryUI;
+- (NSURL *)persistImportedExecutable:(NSURL *)url;
+- (void)launchManagedExecutableAtPath:(NSString *)path
+                          displayName:(NSString *)displayName
+                            fileSize:(unsigned long long)fileSize;
 @end
 
 @implementation MaxPS4IntegratedViewController
@@ -848,6 +855,387 @@
     });
 }
 
+
+- (NSString *)libraryRootPath {
+    NSArray<NSString *> *paths =
+        NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,
+                                             NSUserDomainMask, YES);
+    NSString *base = paths.firstObject ?: NSTemporaryDirectory();
+    NSString *root = [base stringByAppendingPathComponent:@"MaxPS4Library"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:root
+                              withIntermediateDirectories:YES
+                                               attributes:nil
+                                                    error:nil];
+    return root;
+}
+
+- (void)loadLibrary {
+    NSArray *saved =
+        [[NSUserDefaults standardUserDefaults]
+            arrayForKey:@"MaxPS4.LibraryGames.Integrated.v1"];
+
+    self.libraryGames = [NSMutableArray array];
+    for (NSDictionary *entry in saved ?: @[]) {
+        NSMutableDictionary *game = [entry mutableCopy];
+        NSString *relative = game[@"relativePath"];
+        if (relative.length == 0) continue;
+
+        NSString *path = [[self libraryRootPath]
+            stringByAppendingPathComponent:relative];
+        if ([[NSFileManager defaultManager] fileExistsAtPath:path]) {
+            [self.libraryGames addObject:game];
+        }
+    }
+    [self saveLibrary];
+}
+
+- (void)saveLibrary {
+    [[NSUserDefaults standardUserDefaults]
+        setObject:self.libraryGames ?: @[]
+           forKey:@"MaxPS4.LibraryGames.Integrated.v1"];
+}
+
+- (NSArray<NSMutableDictionary *> *)filteredLibraryGames {
+    NSInteger category = self.libraryCategoryControl
+        ? self.libraryCategoryControl.selectedSegmentIndex
+        : 0;
+
+    NSPredicate *predicate = [NSPredicate predicateWithBlock:
+        ^BOOL(NSMutableDictionary *game, NSDictionary *bindings) {
+            (void)bindings;
+            if (category == 1) return [game[@"favorite"] boolValue];
+            if (category == 2) return [game[@"lastPlayedAt"] doubleValue] > 0.0;
+            if (category == 3) return [game[@"homebrew"] boolValue];
+            return YES;
+        }];
+
+    NSArray<NSMutableDictionary *> *filtered =
+        [self.libraryGames filteredArrayUsingPredicate:predicate];
+
+    return [filtered sortedArrayUsingComparator:
+        ^NSComparisonResult(NSMutableDictionary *a, NSMutableDictionary *b) {
+            double av = category == 2
+                ? [a[@"lastPlayedAt"] doubleValue]
+                : [a[@"importedAt"] doubleValue];
+            double bv = category == 2
+                ? [b[@"lastPlayedAt"] doubleValue]
+                : [b[@"importedAt"] doubleValue];
+            if (av > bv) return NSOrderedAscending;
+            if (av < bv) return NSOrderedDescending;
+            return NSOrderedSame;
+        }];
+}
+
+- (UIButton *)smallLibraryButtonWithTitle:(NSString *)title
+                                   action:(SEL)action
+                                      tag:(NSInteger)tag {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    [button setTitle:title forState:UIControlStateNormal];
+    [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    button.titleLabel.font =
+        [UIFont systemFontOfSize:13.0 weight:UIFontWeightSemibold];
+    button.contentEdgeInsets = UIEdgeInsetsMake(8.0, 11.0, 8.0, 11.0);
+    button.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.07];
+    button.layer.cornerRadius = 11.0;
+    button.tag = tag;
+    [button addTarget:self action:action
+     forControlEvents:UIControlEventTouchUpInside];
+    return button;
+}
+
+- (void)refreshLibraryUI {
+    if (!self.libraryStack) return;
+
+    for (UIView *view in self.libraryStack.arrangedSubviews.copy) {
+        [self.libraryStack removeArrangedSubview:view];
+        [view removeFromSuperview];
+    }
+
+    self.visibleLibraryGames = [self filteredLibraryGames];
+
+    if (self.visibleLibraryGames.count == 0) {
+        NSInteger category = self.libraryCategoryControl.selectedSegmentIndex;
+        NSArray<NSString *> *messages = @[
+            @"Aucun jeu importé. Utilise le bouton d’import ci-dessus.",
+            @"Aucun favori. Appuie sur ♡ sur un jeu pour l’ajouter.",
+            @"Aucun jeu récent. Les jeux lancés apparaîtront ici.",
+            @"Aucun homebrew. Appuie sur HB sur un jeu pour le classer ici."
+        ];
+        NSInteger safeIndex = MAX(0, MIN(category, (NSInteger)messages.count - 1));
+        self.libraryEmptyLabel.text = messages[(NSUInteger)safeIndex];
+        [self.libraryStack addArrangedSubview:self.libraryEmptyLabel];
+        return;
+    }
+
+    [self.visibleLibraryGames enumerateObjectsUsingBlock:
+        ^(NSMutableDictionary *game, NSUInteger idx, BOOL *stop) {
+            (void)stop;
+
+            UIView *rowCard = [[UIView alloc] init];
+            rowCard.translatesAutoresizingMaskIntoConstraints = NO;
+            rowCard.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.045];
+            rowCard.layer.cornerRadius = 16.0;
+            rowCard.layer.borderWidth = 1.0;
+            rowCard.layer.borderColor =
+                [UIColor colorWithWhite:1.0 alpha:0.08].CGColor;
+
+            UILabel *name = [[UILabel alloc] init];
+            name.numberOfLines = 2;
+            name.textColor = UIColor.whiteColor;
+            name.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold];
+
+            NSMutableArray<NSString *> *badges = [NSMutableArray array];
+            if ([game[@"favorite"] boolValue]) [badges addObject:@"Favori"];
+            if ([game[@"homebrew"] boolValue]) [badges addObject:@"Homebrew"];
+
+            NSString *baseName = game[@"name"] ?: @"Jeu PS4";
+            if (badges.count) {
+                name.text = [NSString stringWithFormat:@"%@\n%@",
+                             baseName,
+                             [badges componentsJoinedByString:@" • "]];
+            } else {
+                name.text = baseName;
+            }
+
+            UIButton *play =
+                [self smallLibraryButtonWithTitle:@"▶︎ Lancer"
+                                           action:@selector(launchLibraryGame:)
+                                              tag:(NSInteger)idx];
+
+            NSString *heart = [game[@"favorite"] boolValue] ? @"♥︎" : @"♡";
+            UIButton *favorite =
+                [self smallLibraryButtonWithTitle:heart
+                                           action:@selector(toggleLibraryFavorite:)
+                                              tag:(NSInteger)idx];
+
+            NSString *hb = [game[@"homebrew"] boolValue] ? @"HB ✓" : @"HB";
+            UIButton *homebrew =
+                [self smallLibraryButtonWithTitle:hb
+                                           action:@selector(toggleLibraryHomebrew:)
+                                              tag:(NSInteger)idx];
+
+            UIStackView *actions =
+                [[UIStackView alloc] initWithArrangedSubviews:@[
+                    play, favorite, homebrew
+                ]];
+            actions.axis = UILayoutConstraintAxisHorizontal;
+            actions.spacing = 8.0;
+            actions.distribution = UIStackViewDistributionFillProportionally;
+
+            UIStackView *content =
+                [[UIStackView alloc] initWithArrangedSubviews:@[name, actions]];
+            content.translatesAutoresizingMaskIntoConstraints = NO;
+            content.axis = UILayoutConstraintAxisVertical;
+            content.spacing = 10.0;
+
+            [rowCard addSubview:content];
+            [NSLayoutConstraint activateConstraints:@[
+                [content.leadingAnchor constraintEqualToAnchor:rowCard.leadingAnchor constant:13.0],
+                [content.trailingAnchor constraintEqualToAnchor:rowCard.trailingAnchor constant:-13.0],
+                [content.topAnchor constraintEqualToAnchor:rowCard.topAnchor constant:13.0],
+                [content.bottomAnchor constraintEqualToAnchor:rowCard.bottomAnchor constant:-13.0],
+            ]];
+
+            [self.libraryStack addArrangedSubview:rowCard];
+        }];
+}
+
+- (void)libraryCategoryChanged:(UISegmentedControl *)sender {
+    (void)sender;
+    [self refreshLibraryUI];
+}
+
+- (NSMutableDictionary *)visibleLibraryGameForButton:(UIButton *)button {
+    NSInteger index = button.tag;
+    if (index < 0 || index >= (NSInteger)self.visibleLibraryGames.count) {
+        return nil;
+    }
+    return self.visibleLibraryGames[(NSUInteger)index];
+}
+
+- (void)toggleLibraryFavorite:(UIButton *)sender {
+    NSMutableDictionary *game = [self visibleLibraryGameForButton:sender];
+    if (!game) return;
+    game[@"favorite"] = @(![game[@"favorite"] boolValue]);
+    [self saveLibrary];
+    [self refreshLibraryUI];
+}
+
+- (void)toggleLibraryHomebrew:(UIButton *)sender {
+    NSMutableDictionary *game = [self visibleLibraryGameForButton:sender];
+    if (!game) return;
+    game[@"homebrew"] = @(![game[@"homebrew"] boolValue]);
+    [self saveLibrary];
+    [self refreshLibraryUI];
+}
+
+- (NSURL *)persistImportedExecutable:(NSURL *)url {
+    if (!url) return nil;
+
+    NSString *uuid = NSUUID.UUID.UUIDString;
+    NSString *directory =
+        [[self libraryRootPath] stringByAppendingPathComponent:uuid];
+
+    NSError *error = nil;
+    if (![[NSFileManager defaultManager]
+            createDirectoryAtPath:directory
+      withIntermediateDirectories:YES
+                       attributes:nil
+                            error:&error]) {
+        [self setDiagnostic:[NSString stringWithFormat:
+            @"Import bibliothèque impossible : %@",
+            error.localizedDescription ?: @"erreur inconnue"]];
+        return nil;
+    }
+
+    NSString *destination =
+        [directory stringByAppendingPathComponent:url.lastPathComponent];
+
+    if (![[NSFileManager defaultManager] copyItemAtPath:url.path
+                                                 toPath:destination
+                                                  error:&error]) {
+        [[NSFileManager defaultManager] removeItemAtPath:directory error:nil];
+        [self setDiagnostic:[NSString stringWithFormat:
+            @"Copie dans la bibliothèque impossible : %@",
+            error.localizedDescription ?: @"erreur inconnue"]];
+        return nil;
+    }
+
+    NSString *displayName = url.lastPathComponent.stringByDeletingPathExtension;
+    if ([url.lastPathComponent.lowercaseString isEqualToString:@"eboot.bin"]) {
+        NSString *parent = url.URLByDeletingLastPathComponent.lastPathComponent;
+        if (parent.length) displayName = parent;
+    }
+    if (displayName.length == 0) displayName = url.lastPathComponent;
+
+    NSMutableDictionary *game = [@{
+        @"id": uuid,
+        @"name": displayName,
+        @"relativePath":
+            [uuid stringByAppendingPathComponent:url.lastPathComponent],
+        @"importedAt": @([NSDate date].timeIntervalSince1970),
+        @"lastPlayedAt": @0.0,
+        @"favorite": @NO,
+        @"homebrew": @NO
+    } mutableCopy];
+
+    [self.libraryGames insertObject:game atIndex:0];
+    [self saveLibrary];
+    [self refreshLibraryUI];
+
+    return [NSURL fileURLWithPath:destination];
+}
+
+- (void)launchLibraryGame:(UIButton *)sender {
+    NSMutableDictionary *game = [self visibleLibraryGameForButton:sender];
+    if (!game) return;
+
+    NSString *relative = game[@"relativePath"];
+    NSString *path =
+        [[self libraryRootPath] stringByAppendingPathComponent:relative ?: @""];
+
+    NSDictionary *attrs =
+        [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
+    unsigned long long size = [attrs[NSFileSize] unsignedLongLongValue];
+
+    game[@"lastPlayedAt"] = @([NSDate date].timeIntervalSince1970);
+    [self saveLibrary];
+    [self refreshLibraryUI];
+
+    [self launchManagedExecutableAtPath:path
+                           displayName:(game[@"name"] ?: @"Jeu PS4")
+                              fileSize:size];
+}
+
+- (void)launchManagedExecutableAtPath:(NSString *)path
+                          displayName:(NSString *)displayName
+                            fileSize:(unsigned long long)fileSize {
+    if (self.bootInProgress) {
+        [self setDiagnostic:
+            @"Un guest FEX est déjà en cours. Attends sa fin avant d’en lancer un autre."];
+        return;
+    }
+
+    if (path.length == 0 ||
+        ![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+        [self setDiagnostic:@"Le fichier du jeu n’existe plus dans la bibliothèque."];
+        [self loadLibrary];
+        [self refreshLibraryUI];
+        return;
+    }
+
+    if (!maxps4_backend_validate_executable(path.fileSystemRepresentation)) {
+        const char *detail = maxps4_backend_diagnostic();
+        [self setDiagnostic:[NSString stringWithFormat:
+            @"Fichier bibliothèque refusé : %@",
+            detail ? [NSString stringWithUTF8String:detail] : @"invalide"]];
+        return;
+    }
+
+    if (!maxps4_core_jit_available()) {
+        const char *jitDetail = maxps4_core_jit_diagnostic();
+        NSString *jitText = jitDetail
+            ? [NSString stringWithUTF8String:jitDetail]
+            : @"aucun diagnostic JIT";
+        self.stateValueLabel.text = @"JIT indisponible";
+        [self setDiagnostic:[NSString stringWithFormat:
+            @"%@ est prêt, mais le JIT est requis : %@",
+            displayName, jitText]];
+        return;
+    }
+
+    self.bootInProgress = YES;
+    self.bootGeneration += 1;
+    const NSUInteger generation = self.bootGeneration;
+    self.bootStartedAt = [NSDate date];
+    self.importButton.enabled = NO;
+    self.testButton.enabled = NO;
+    self.stateValueLabel.text = @"Validation OK";
+    self.fileValueLabel.text =
+        [NSString stringWithFormat:@"%@ • %llu o", displayName, fileSize];
+    self.guestOutputLabel.text = @"En attente de sortie…";
+
+    [self setDiagnostic:[NSString stringWithFormat:
+        @"Bibliothèque → loader → FEX : %@\nTaille : %llu octets",
+        displayName, fileSize]];
+
+    [self startDiagnosticPollingForGeneration:generation];
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        BOOL booted = maxps4_backend_boot(path.fileSystemRepresentation);
+        const char *bootDetail = maxps4_backend_diagnostic();
+        NSString *bootText = bootDetail
+            ? [NSString stringWithUTF8String:bootDetail]
+            : @"aucun détail";
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (generation != self.bootGeneration) return;
+
+            [self stopDiagnosticPolling];
+            self.bootInProgress = NO;
+            self.importButton.enabled = YES;
+            self.testButton.enabled = YES;
+
+            NSTimeInterval elapsed =
+                self.bootStartedAt ? -[self.bootStartedAt timeIntervalSinceNow] : 0;
+
+            char finalOutputBuf[4096] = {};
+            maxps4_backend_live_output(finalOutputBuf, sizeof(finalOutputBuf));
+            NSString *finalOutput =
+                [NSString stringWithUTF8String:finalOutputBuf] ?: @"";
+            self.guestOutputLabel.text =
+                finalOutput.length ? finalOutput : @"Aucune sortie produite.";
+
+            self.stateValueLabel.text = booted ? @"Terminé" : @"Handoff arrêté";
+            [self setDiagnostic:[NSString stringWithFormat:
+                @"%@\nDurée : %.2f s\n\n%@",
+                booted ? @"Exécution terminée" : @"Exécution arrêtée",
+                elapsed,
+                bootText]];
+        });
+    });
+}
+
 - (void)runBackendTest {
     if (self.bootInProgress) {
         [self setDiagnostic:@"Un guest FEX est en cours. Attends sa fin avant de lancer le self-test."];
@@ -959,6 +1347,17 @@
     NSString *launchPath = url.path;
     NSString *displayFile = url.lastPathComponent;
     BOOL scopedForBoot = scoped;
+
+    if (importKind == MAXPS4_IMPORT_EXECUTABLE) {
+        NSURL *managedURL = [self persistImportedExecutable:url];
+        if (managedURL) {
+            launchPath = managedURL.path;
+            if (scoped) {
+                [url stopAccessingSecurityScopedResource];
+                scopedForBoot = NO;
+            }
+        }
+    }
 
     if (importKind == MAXPS4_IMPORT_PKG) {
         self.stateValueLabel.text = @"PKG reconnu";
