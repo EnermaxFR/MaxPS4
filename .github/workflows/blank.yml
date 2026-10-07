@@ -1194,11 +1194,18 @@ jobs:
       - name: Checkout MaxPS4
         uses: actions/checkout@v4
 
-      - name: Install open-source toolchain prerequisites
+      - name: Verify preinstalled open-source toolchain
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y bash clang-18 lld-18 make git file
+          for tool in bash clang ld.lld make git file readelf python3; do
+            command -v "$tool" >/dev/null 2>&1 || {
+              echo "::error::Required preinstalled tool is missing: $tool"
+              exit 1
+            }
+          done
+          clang --version
+          ld.lld --version
+          echo "Preinstalled toolchain ready."
 
       - name: Fetch pinned GPLv3+ PS4 payload SDK
         run: |
@@ -1273,8 +1280,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/legal-userspace
-          clang-18 -c MaxPS4-iOS/Tests/hello_stdio_userspace.S -o build/legal-userspace/hello_stdio_userspace.o
-          clang-18 -nostdlib -fuse-ld=lld-18 -pie \
+          clang -c MaxPS4-iOS/Tests/hello_stdio_userspace.S -o build/legal-userspace/hello_stdio_userspace.o
+          clang -nostdlib -fuse-ld=lld -pie \
             -Wl,-e,_start \
             -Wl,-z,max-page-size=16384 \
             -Wl,-z,common-page-size=16384 \
@@ -1284,8 +1291,8 @@ jobs:
           readelf -h build/legal-userspace/hello_stdio_userspace.elf
           readelf -lW build/legal-userspace/hello_stdio_userspace.elf
 
-          clang-18 -c MaxPS4-iOS/Tests/controller_snapshot_userspace.S -o build/legal-userspace/controller_snapshot_userspace.o
-          clang-18 -nostdlib -fuse-ld=lld-18 -pie \
+          clang -c MaxPS4-iOS/Tests/controller_snapshot_userspace.S -o build/legal-userspace/controller_snapshot_userspace.o
+          clang -nostdlib -fuse-ld=lld -pie \
             -Wl,-e,_start \
             -Wl,-z,max-page-size=16384 \
             -Wl,-z,common-page-size=16384 \
@@ -1295,8 +1302,8 @@ jobs:
           readelf -h build/legal-userspace/controller_snapshot_userspace.elf
           readelf -lW build/legal-userspace/controller_snapshot_userspace.elf
 
-          clang-18 -c MaxPS4-iOS/Tests/guest_metal_userspace.S -o build/legal-userspace/guest_metal_userspace.o
-          clang-18 -nostdlib -fuse-ld=lld-18 -pie \
+          clang -c MaxPS4-iOS/Tests/guest_metal_userspace.S -o build/legal-userspace/guest_metal_userspace.o
+          clang -nostdlib -fuse-ld=lld -pie \
             -Wl,-e,_start \
             -Wl,-z,max-page-size=16384 \
             -Wl,-z,common-page-size=16384 \
@@ -1306,8 +1313,8 @@ jobs:
           readelf -h build/legal-userspace/guest_metal_userspace.elf
           readelf -lW build/legal-userspace/guest_metal_userspace.elf
 
-          clang-18 -c MaxPS4-iOS/Tests/guest_input_metal_loop_userspace.S -o build/legal-userspace/guest_input_metal_loop_userspace.o
-          clang-18 -nostdlib -fuse-ld=lld-18 -pie \
+          clang -c MaxPS4-iOS/Tests/guest_input_metal_loop_userspace.S -o build/legal-userspace/guest_input_metal_loop_userspace.o
+          clang -nostdlib -fuse-ld=lld -pie \
             -Wl,-e,_start \
             -Wl,-z,max-page-size=16384 \
             -Wl,-z,common-page-size=16384 \
@@ -1317,8 +1324,8 @@ jobs:
           readelf -h build/legal-userspace/guest_input_metal_loop_userspace.elf
           readelf -lW build/legal-userspace/guest_input_metal_loop_userspace.elf
 
-          clang-18 -c MaxPS4-iOS/Tests/guest_frame_queue_userspace.S -o build/legal-userspace/guest_frame_queue_userspace.o
-          clang-18 -nostdlib -fuse-ld=lld-18 -pie \
+          clang -c MaxPS4-iOS/Tests/guest_frame_queue_userspace.S -o build/legal-userspace/guest_frame_queue_userspace.o
+          clang -nostdlib -fuse-ld=lld -pie \
             -Wl,-e,_start \
             -Wl,-z,max-page-size=16384 \
             -Wl,-z,common-page-size=16384 \
@@ -1328,8 +1335,8 @@ jobs:
           readelf -h build/legal-userspace/guest_frame_queue_userspace.elf
           readelf -lW build/legal-userspace/guest_frame_queue_userspace.elf
 
-          clang-18 -c MaxPS4-iOS/Tests/guest_typed_scene_userspace.S -o build/legal-userspace/guest_typed_scene_userspace.o
-          clang-18 -nostdlib -fuse-ld=lld-18 -pie \
+          clang -c MaxPS4-iOS/Tests/guest_typed_scene_userspace.S -o build/legal-userspace/guest_typed_scene_userspace.o
+          clang -nostdlib -fuse-ld=lld -pie \
             -Wl,-e,_start \
             -Wl,-z,max-page-size=16384 \
             -Wl,-z,common-page-size=16384 \
@@ -1339,8 +1346,8 @@ jobs:
           readelf -h build/legal-userspace/guest_typed_scene_userspace.elf
           readelf -lW build/legal-userspace/guest_typed_scene_userspace.elf
 
-          clang-18 -c MaxPS4-iOS/Tests/guest_textured_quad_userspace.S -o build/legal-userspace/guest_textured_quad_userspace.o
-          clang-18 -nostdlib -fuse-ld=lld-18 -pie \
+          clang -c MaxPS4-iOS/Tests/guest_textured_quad_userspace.S -o build/legal-userspace/guest_textured_quad_userspace.o
+          clang -nostdlib -fuse-ld=lld -pie \
             -Wl,-e,_start \
             -Wl,-z,max-page-size=16384 \
             -Wl,-z,common-page-size=16384 \
@@ -1350,8 +1357,8 @@ jobs:
           readelf -h build/legal-userspace/guest_textured_quad_userspace.elf
           readelf -lW build/legal-userspace/guest_textured_quad_userspace.elf
 
-          clang-18 -c MaxPS4-iOS/Tests/guest_texture_upload_userspace.S -o build/legal-userspace/guest_texture_upload_userspace.o
-          clang-18 -nostdlib -fuse-ld=lld-18 -pie \
+          clang -c MaxPS4-iOS/Tests/guest_texture_upload_userspace.S -o build/legal-userspace/guest_texture_upload_userspace.o
+          clang -nostdlib -fuse-ld=lld -pie \
             -Wl,-e,_start \
             -Wl,-z,max-page-size=16384 \
             -Wl,-z,common-page-size=16384 \
@@ -1361,8 +1368,8 @@ jobs:
           readelf -h build/legal-userspace/guest_texture_upload_userspace.elf
           readelf -lW build/legal-userspace/guest_texture_upload_userspace.elf
 
-          clang-18 -c MaxPS4-iOS/Tests/guest_multi_texture_userspace.S -o build/legal-userspace/guest_multi_texture_userspace.o
-          clang-18 -nostdlib -fuse-ld=lld-18 -pie \
+          clang -c MaxPS4-iOS/Tests/guest_multi_texture_userspace.S -o build/legal-userspace/guest_multi_texture_userspace.o
+          clang -nostdlib -fuse-ld=lld -pie \
             -Wl,-e,_start \
             -Wl,-z,max-page-size=16384 \
             -Wl,-z,common-page-size=16384 \
@@ -1372,8 +1379,8 @@ jobs:
           readelf -h build/legal-userspace/guest_multi_texture_userspace.elf
           readelf -lW build/legal-userspace/guest_multi_texture_userspace.elf
 
-          clang-18 -c MaxPS4-iOS/Tests/guest_kernel_state_userspace.S -o build/legal-userspace/guest_kernel_state_userspace.o
-          clang-18 -nostdlib -fuse-ld=lld-18 -pie \
+          clang -c MaxPS4-iOS/Tests/guest_kernel_state_userspace.S -o build/legal-userspace/guest_kernel_state_userspace.o
+          clang -nostdlib -fuse-ld=lld -pie \
             -Wl,-e,_start \
             -Wl,-z,max-page-size=16384 \
             -Wl,-z,common-page-size=16384 \
@@ -1383,8 +1390,8 @@ jobs:
           readelf -h build/legal-userspace/guest_kernel_state_userspace.elf
           readelf -lW build/legal-userspace/guest_kernel_state_userspace.elf
 
-          clang-18 -c MaxPS4-iOS/Tests/guest_kernel_services_userspace.S -o build/legal-userspace/guest_kernel_services_userspace.o
-          clang-18 -nostdlib -fuse-ld=lld-18 -pie \
+          clang -c MaxPS4-iOS/Tests/guest_kernel_services_userspace.S -o build/legal-userspace/guest_kernel_services_userspace.o
+          clang -nostdlib -fuse-ld=lld -pie \
             -Wl,-e,_start \
             -Wl,-z,max-page-size=16384 \
             -Wl,-z,common-page-size=16384 \
