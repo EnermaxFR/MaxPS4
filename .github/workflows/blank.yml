@@ -1138,6 +1138,17 @@ jobs:
           readelf -h build/legal-userspace/controller_snapshot_userspace.elf
           readelf -lW build/legal-userspace/controller_snapshot_userspace.elf
 
+          clang-18 -c MaxPS4-iOS/Tests/guest_metal_userspace.S -o build/legal-userspace/guest_metal_userspace.o
+          clang-18 -nostdlib -fuse-ld=lld-18 -pie \
+            -Wl,-e,_start \
+            -Wl,-z,max-page-size=16384 \
+            -Wl,-z,common-page-size=16384 \
+            build/legal-userspace/guest_metal_userspace.o \
+            -o build/legal-userspace/guest_metal_userspace.elf
+          file build/legal-userspace/guest_metal_userspace.elf
+          readelf -h build/legal-userspace/guest_metal_userspace.elf
+          readelf -lW build/legal-userspace/guest_metal_userspace.elf
+
       - name: Package legal userspace FEX smoke test
         run: |
           set -euo pipefail
@@ -1145,21 +1156,26 @@ jobs:
           mkdir -p "$OUT"
           cp build/legal-userspace/hello_stdio_userspace.elf "$OUT/hello_stdio_userspace.elf"
           cp build/legal-userspace/controller_snapshot_userspace.elf "$OUT/controller_snapshot_userspace.elf"
+          cp build/legal-userspace/guest_metal_userspace.elf "$OUT/guest_metal_userspace.elf"
           cp MaxPS4-iOS/Tests/hello_stdio_userspace.S "$OUT/source-hello_stdio_userspace.S"
           cp MaxPS4-iOS/Tests/controller_snapshot_userspace.S "$OUT/source-controller_snapshot_userspace.S"
+          cp MaxPS4-iOS/Tests/guest_metal_userspace.S "$OUT/source-guest_metal_userspace.S"
           cat > "$OUT/PROVENANCE.txt" <<'EOF'
           Purpose: legal/open-source userspace ELFs for validating MaxPS4's FEX userspace bridge.
           Sources:
             - MaxPS4-iOS/Tests/hello_stdio_userspace.S
             - MaxPS4-iOS/Tests/controller_snapshot_userspace.S
+            - MaxPS4-iOS/Tests/guest_metal_userspace.S
           Architecture: x86-64 System V ELF
           Syscalls exercised:
             - write(4), read(3), exit(1)
             - MaxPS4-private controller snapshot pseudo-syscall 0x4d50
+            - MaxPS4-private guest render pseudo-syscall 0x4d51
           controller_snapshot_userspace.elf prints button mask, both stick axes, and both triggers.
+          guest_metal_userspace.elf submits one square render command for the Metal view.
           Contains no Sony game, firmware, keys, SDK, or proprietary PlayStation content.
           EOF
-          sha256sum "$OUT/hello_stdio_userspace.elf" "$OUT/controller_snapshot_userspace.elf" > "$OUT/SHA256SUMS.txt"
+          sha256sum "$OUT/hello_stdio_userspace.elf" "$OUT/controller_snapshot_userspace.elf" "$OUT/guest_metal_userspace.elf" > "$OUT/SHA256SUMS.txt"
 
       - name: Upload legal userspace FEX smoke test
         uses: actions/upload-artifact@v4
