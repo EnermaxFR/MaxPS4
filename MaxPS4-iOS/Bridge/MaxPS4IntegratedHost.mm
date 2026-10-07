@@ -16,6 +16,11 @@
 @property(nonatomic, strong) UILabel *controllerInputLabel;
 @property(nonatomic, strong) MTKView *metalProbeView;
 @property(nonatomic, strong) id<MTLCommandQueue> metalCommandQueue;
+@property(nonatomic, strong) id<MTLRenderPipelineState> metalProbePipeline;
+@property(nonatomic, assign) float probeX;
+@property(nonatomic, assign) float probeY;
+@property(nonatomic, assign) float probeScale;
+@property(nonatomic, assign) unsigned int probeButtons;
 @property(nonatomic, strong) UIButton *testButton;
 @property(nonatomic, strong) UIButton *importButton;
 @property(nonatomic, strong) UIButton *diagnosticCopyButton;
@@ -151,7 +156,34 @@
     self.metalProbeView.layer.cornerRadius = 14.0;
     self.metalProbeView.layer.masksToBounds = YES;
     self.metalCommandQueue = [probeDevice newCommandQueue];
-    [self.metalProbeView.heightAnchor constraintEqualToConstant:86.0].active = YES;
+    self.probeX = 0.0f;
+    self.probeY = 0.0f;
+    self.probeScale = 1.0f;
+    self.probeButtons = 0;
+
+    if (probeDevice) {
+        NSString *shaderSource =
+            @"#include <metal_stdlib>\n"
+             "using namespace metal;\n"
+             "struct VOut { float4 position [[position]]; };\n"
+             "vertex VOut maxps4_probe_vertex(const device float2 *v [[buffer(0)]], uint id [[vertex_id]]) {\n"
+             "  VOut o; o.position = float4(v[id], 0.0, 1.0); return o;\n"
+             "}\n"
+             "fragment float4 maxps4_probe_fragment() { return float4(0.15, 0.95, 1.0, 1.0); }\n";
+        NSError *libraryError = nil;
+        id<MTLLibrary> library = [probeDevice newLibraryWithSource:shaderSource options:nil error:&libraryError];
+        if (library) {
+            MTLRenderPipelineDescriptor *desc = [[MTLRenderPipelineDescriptor alloc] init];
+            desc.vertexFunction = [library newFunctionWithName:@"maxps4_probe_vertex"];
+            desc.fragmentFunction = [library newFunctionWithName:@"maxps4_probe_fragment"];
+            desc.colorAttachments[0].pixelFormat = self.metalProbeView.colorPixelFormat;
+            NSError *pipelineError = nil;
+            self.metalProbePipeline = [probeDevice newRenderPipelineStateWithDescriptor:desc error:&pipelineError];
+            (void)pipelineError;
+        }
+        (void)libraryError;
+    }
+    [self.metalProbeView.heightAnchor constraintEqualToConstant:110.0].active = YES;
 
     UIStackView *ioStack = [[UIStackView alloc] initWithArrangedSubviews:@[
         ioTitle, controllerRow, metalRow, self.controllerInputLabel, self.metalProbeView
@@ -341,6 +373,20 @@
     const float r2 = pad.rightTrigger.value;
 
     maxps4_backend_set_controller_state(buttons, lx, ly, rx, ry, l2, r2);
+
+    // Visible Metal probe: left stick moves the square; triggers change size.
+    // Face button A toggles the background pulse for an obvious button test.
+    self.probeX = lx * 0.78f;
+    self.probeY = ly * 0.70f;
+    self.probeScale = 0.65f + (r2 * 0.95f) - (l2 * 0.35f);
+    if (self.probeScale < 0.30f) self.probeScale = 0.30f;
+    if (self.probeScale > 1.60f) self.probeScale = 1.60f;
+    self.probeButtons = buttons;
+    self.metalProbeView.clearColor = (buttons & 1u)
+        ? MTLClearColorMake(0.18, 0.04, 0.32, 1.0)
+        : MTLClearColorMake(0.02, 0.24, 0.72, 1.0);
+    [self.metalProbeView setNeedsDisplay];
+
     self.controllerInputLabel.text =
         [NSString stringWithFormat:@"Guest input • btn=0x%03X • L %.2f/%.2f • R %.2f/%.2f • LT %.2f RT %.2f",
                                    buttons, lx, ly, rx, ry, l2, r2];
@@ -385,6 +431,23 @@
 
     id<MTLCommandBuffer> commandBuffer = [self.metalCommandQueue commandBuffer];
     id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:pass];
+
+    if (self.metalProbePipeline) {
+        const float halfW = 0.15f * self.probeScale;
+        const float halfH = 0.28f * self.probeScale;
+        const float cx = self.probeX;
+        const float cy = self.probeY;
+        const float vertices[8] = {
+            cx - halfW, cy - halfH,
+            cx + halfW, cy - halfH,
+            cx - halfW, cy + halfH,
+            cx + halfW, cy + halfH,
+        };
+        [encoder setRenderPipelineState:self.metalProbePipeline];
+        [encoder setVertexBytes:vertices length:sizeof(vertices) atIndex:0];
+        [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+    }
+
     [encoder endEncoding];
     [commandBuffer presentDrawable:drawable];
     [commandBuffer commit];
