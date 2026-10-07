@@ -127,6 +127,24 @@ enum MaxPS4ELFLoader {
                 _ = try load(url: url)
                 return false
             } catch MaxPS4GuestMemory.MemoryError.overlappingRegion {}
+
+            // An invalid program-header table must be rejected before reading entries.
+            setValue(UInt64.max, at: 32, width: 8)
+            try Data(overlapping).write(to: url, options: .atomic)
+            do {
+                _ = try load(url: url)
+                return false
+            } catch LoaderError.invalid {}
+
+            // Memory plans exceeding the prototype's budget must be rejected.
+            setValue(64, at: 32, width: 8)
+            setValue(1, at: 56, width: 2)
+            setValue(UInt64(MaxPS4GuestMemory.maximumBytes) + 1, at: 104, width: 8)
+            try Data(overlapping).write(to: url, options: .atomic)
+            do {
+                _ = try load(url: url)
+                return false
+            } catch LoaderError.invalid {}
             return true
         } catch { return false }
     }
