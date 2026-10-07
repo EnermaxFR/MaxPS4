@@ -453,9 +453,142 @@ public:
             return true;
         }
 
+        // Virtual filesystem open. Paths are resolved only inside
+        // MaxPS4Kernel (/app0 and /savedata); no iOS host path is opened.
+        if (op == 5) {
+            const auto path_addr =
+                static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDI]);
+            const int flags =
+                static_cast<int>(gpr[FEXCore::X86State::REG_RSI]);
+            const std::string path = ReadCString(path_addr, 127);
+            if (path.empty() || !IsReadable(path_addr, 1)) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+            int error = 0;
+            const int fd = kernel.OpenVirtualFile(path, flags, error);
+            if (fd < 0) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge,
+                    error ? error : ENOENT};
+            }
+            gpr[FEXCore::X86State::REG_RAX] =
+                static_cast<uint64_t>(fd);
+            SetLiveDiag(std::string("MaxPS4Kernel open • ") + path +
+                        " • fd=" + std::to_string(fd) +
+                        " • trace=" + Trace());
+            return true;
+        }
+
+        // FreeBSD thr_self writes the current logical kernel thread id.
+        if (op == 432) {
+            const auto out_addr =
+                static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDI]);
+            if (!kernel.ContainsMemory(out_addr, sizeof(uint64_t),
+                                       MaxPS4::Kernel::MemoryWrite) ||
+                !IsWritable(out_addr, sizeof(uint64_t))) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+            const uint64_t tid = kernel.CurrentTid();
+            std::memcpy(reinterpret_cast<void*>(out_addr), &tid, sizeof(tid));
+            gpr[FEXCore::X86State::REG_RAX] = 0;
+            return true;
+        }
+
+        // MaxPS4-private logical thread/synchronization ABI used by legal
+        // kernel smoke tests until parallel FEX guest scheduling is wired.
+        if (op == 0x4d60ULL) { // create logical thread
+            const auto name_addr =
+                static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDI]);
+            std::string name = name_addr ? ReadCString(name_addr, 31) : "guest";
+            if (name_addr && name.empty() && !IsReadable(name_addr, 1)) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+            int error = 0;
+            const uint32_t tid = kernel.CreateLogicalThread(name, error);
+            if (tid == 0) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge,
+                    error ? error : EAGAIN};
+            }
+            gpr[FEXCore::X86State::REG_RAX] = tid;
+            return true;
+        }
+
+        if (op == 0x4d61ULL) { // complete logical thread
+            int error = 0;
+            if (!kernel.CompleteLogicalThread(
+                    static_cast<uint32_t>(gpr[FEXCore::X86State::REG_RDI]),
+                    static_cast<int>(gpr[FEXCore::X86State::REG_RSI]), error)) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge,
+                    error ? error : ESRCH};
+            }
+            gpr[FEXCore::X86State::REG_RAX] = 0;
+            return true;
+        }
+
+        if (op == 0x4d62ULL) { // join logical thread
+            const uint32_t tid =
+                static_cast<uint32_t>(gpr[FEXCore::X86State::REG_RDI]);
+            const auto out_addr =
+                static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RSI]);
+            if (!kernel.ContainsMemory(out_addr, sizeof(int),
+                                       MaxPS4::Kernel::MemoryWrite) ||
+                !IsWritable(out_addr, sizeof(int))) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+            int code = 0;
+            int error = 0;
+            if (!kernel.JoinLogicalThread(tid, code, error)) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge,
+                    error ? error : ESRCH};
+            }
+            std::memcpy(reinterpret_cast<void*>(out_addr), &code, sizeof(code));
+            gpr[FEXCore::X86State::REG_RAX] = 0;
+            return true;
+        }
+
+        if (op == 0x4d63ULL) { // create mutex
+            int error = 0;
+            const uint32_t id = kernel.CreateMutex(error);
+            if (id == 0) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge,
+                    error ? error : ENOSPC};
+            }
+            gpr[FEXCore::X86State::REG_RAX] = id;
+            return true;
+        }
+
+        if (op == 0x4d64ULL || op == 0x4d65ULL || op == 0x4d66ULL) {
+            const uint32_t id =
+                static_cast<uint32_t>(gpr[FEXCore::X86State::REG_RDI]);
+            int error = 0;
+            bool ok = false;
+            if (op == 0x4d64ULL) {
+                ok = kernel.LockMutex(id, kernel.CurrentTid(), error);
+            } else if (op == 0x4d65ULL) {
+                ok = kernel.UnlockMutex(id, kernel.CurrentTid(), error);
+            } else {
+                ok = kernel.DestroyMutex(id, error);
+            }
+            if (!ok) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge,
+                    error ? error : EINVAL};
+            }
+            gpr[FEXCore::X86State::REG_RAX] = 0;
+            return true;
+        }
+
         // Small, non-proprietary compatibility shim used only by legal homebrew tests.
-        // FreeBSD/Orbis-style syscall numbers read=3 and write=4 are still
-        // migrated through the bridge for now.
+        // FreeBSD/Orbis-style read=3/write=4 plus a sandboxed open=5/close=6
+        // are progressively owned by MaxPS4Kernel.
         // PS4-specific dynlib_dlsym=591 is diagnosed explicitly so the next
         // missing HLE symbol can be identified without guessing.
         if (op == 591) {
@@ -1086,11 +1219,24 @@ public:
                     AetherPS4::Fex::EngineStage::Bridge, EFAULT};
             }
 
-            FILE* out = fd == 2 ? stderr : stdout;
-            const size_t done =
-                fwrite(reinterpret_cast<const void*>(addr), 1, len, out);
-            fflush(out);
-            Capture(reinterpret_cast<const char*>(addr), done);
+            if (fd == 1 || fd == 2) {
+                FILE* out = fd == 2 ? stderr : stdout;
+                const size_t done =
+                    fwrite(reinterpret_cast<const void*>(addr), 1, len, out);
+                fflush(out);
+                Capture(reinterpret_cast<const char*>(addr), done);
+                gpr[FEXCore::X86State::REG_RAX] = done;
+                return true;
+            }
+
+            size_t done = 0;
+            int error = 0;
+            if (!kernel.WriteFile(fd, reinterpret_cast<const void*>(addr),
+                                  len, done, error)) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge,
+                    error ? error : EIO};
+            }
             gpr[FEXCore::X86State::REG_RAX] = done;
             return true;
         }
@@ -1110,13 +1256,26 @@ public:
                     AetherPS4::Fex::EngineStage::Bridge, EFAULT};
             }
 
-            // Deterministic stdin for legal stdio homebrew: one short line, then EOF.
-            static constexpr char kInput[] = "MaxPS4\n";
-            const size_t available = stdin_sent ? 0 : sizeof(kInput) - 1;
-            const size_t done = std::min(len, available);
-            if (done != 0) {
-                memcpy(reinterpret_cast<void*>(addr), kInput, done);
-                stdin_sent = true;
+            if (fd == 0) {
+                // Deterministic stdin for legal stdio homebrew: one short line, then EOF.
+                static constexpr char kInput[] = "MaxPS4\n";
+                const size_t available = stdin_sent ? 0 : sizeof(kInput) - 1;
+                const size_t done = std::min(len, available);
+                if (done != 0) {
+                    memcpy(reinterpret_cast<void*>(addr), kInput, done);
+                    stdin_sent = true;
+                }
+                gpr[FEXCore::X86State::REG_RAX] = done;
+                return true;
+            }
+
+            size_t done = 0;
+            int error = 0;
+            if (!kernel.ReadFile(fd, reinterpret_cast<void*>(addr),
+                                 len, done, error)) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge,
+                    error ? error : EIO};
             }
             gpr[FEXCore::X86State::REG_RAX] = done;
             return true;
@@ -1222,6 +1381,10 @@ public:
         return AetherPS4::Fex::EngineFailure{AetherPS4::Fex::EngineStage::Bridge, ENOSYS};
     }
 
+    bool ConfigureKernelArena(uintptr_t begin, size_t size) {
+        return kernel.ConfigureManagedArena(begin, size);
+    }
+
     void SetImage(uintptr_t begin, size_t size) {
         image_begin = begin;
         image_size = size;
@@ -1321,6 +1484,7 @@ private:
     }
 
     bool IsReadable(uintptr_t addr, size_t size) const {
+        if (kernel.ContainsMemory(addr, size, MaxPS4::Kernel::MemoryRead)) return true;
         if (Contains(image_begin, image_size, addr, size) ||
             Contains(stack_begin, stack_size, addr, size) ||
             Contains(strerror_buffer, strerror_buffer_size, addr, size) ||
@@ -1335,6 +1499,7 @@ private:
     }
 
     bool IsWritable(uintptr_t addr, size_t size) const {
+        if (kernel.ContainsMemory(addr, size, MaxPS4::Kernel::MemoryWrite)) return true;
         if (Contains(stack_begin, stack_size, addr, size) ||
             Contains(strerror_buffer, strerror_buffer_size, addr, size) ||
             Contains(errno_buffer, errno_buffer_size, addr, size)) return true;
@@ -1731,6 +1896,14 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     std::memset(errno_storage.ptr, 0, errno_storage.size);
     const uintptr_t errno_buffer = reinterpret_cast<uintptr_t>(errno_storage.ptr);
 
+    // Reserve a fixed guest-visible arena up front so mmap/munmap can be
+    // managed by MaxPS4Kernel without mutating FEX mapped ranges mid-run.
+    HostMapping kernel_arena(static_cast<size_t>(page * 64));
+    if (!kernel_arena.ok()) { g_run_diag = "MaxPS4Kernel mmap arena failed"; return 41; }
+    std::memset(kernel_arena.ptr, 0, kernel_arena.size);
+    const uintptr_t kernel_arena_begin =
+        reinterpret_cast<uintptr_t>(kernel_arena.ptr);
+
     HomebrewBridge bridge;
     bridge.SetImage(image_begin, image.size);
     bridge.SetStack(stack_begin, stack.size);
@@ -1742,6 +1915,10 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     bridge.SetErrorVeneer(error_veneer);
     bridge.SetStrerrorBuffer(strerror_buffer, strerror_storage.size);
     bridge.SetErrnoBuffer(errno_buffer, errno_storage.size);
+    if (!bridge.ConfigureKernelArena(kernel_arena_begin, kernel_arena.size)) {
+        g_run_diag = "MaxPS4Kernel arena configure failed";
+        return 42;
+    }
     auto backendResult = Core::FexGuestCpuBackend::Create(bridge);
     if (const auto* failure = std::get_if<Core::GuestExecutionFailure>(&backendResult)) {
         char buf[160]; snprintf(buf, sizeof(buf), "FEX create failed stage=%d errno=%d",
@@ -1759,6 +1936,7 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     request.MappedRanges.push_back({exit_veneer, veneers.size, true, false});
     request.MappedRanges.push_back({strerror_buffer, strerror_storage.size, false, true});
     request.MappedRanges.push_back({errno_buffer, errno_storage.size, false, true});
+    request.MappedRanges.push_back({kernel_arena_begin, kernel_arena.size, true, true});
 
     {
         char live[220];
