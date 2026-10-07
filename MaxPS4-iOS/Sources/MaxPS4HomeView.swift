@@ -17,6 +17,7 @@ struct MaxPS4HomeView: View {
     @State private var gameFilter = 0
     @State private var gameToRename: MaxPS4Game?
     @State private var gameToDelete: MaxPS4Game?
+    @State private var showingDuplicates = false
     @State private var renamedGameTitle = ""
     @State private var inspectionReport: String?
     @State private var selectedGameDetails: MaxPS4Game?
@@ -86,6 +87,45 @@ struct MaxPS4HomeView: View {
             Button("Fermer") { inspectionReport = nil }
         } message: {
             Text(inspectionReport ?? "")
+        }
+        .sheet(isPresented: $showingDuplicates) {
+            NavigationStack {
+                List {
+                    if emulator.duplicateGroups.isEmpty {
+                        Text("Aucun doublon probable dans la bibliothèque.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(Array(emulator.duplicateGroups.enumerated()), id: \.offset) { _, group in
+                            Section(group.first?.name ?? "Copies possibles") {
+                                ForEach(group) { game in
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(game.fileName).font(.subheadline)
+                                            Text(game.importedAt.formatted(date: .abbreviated, time: .shortened))
+                                                .font(.caption).foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        Button(role: .destructive) {
+                                            gameToDelete = game
+                                        } label: {
+                                            Image(systemName: "trash")
+                                        }
+                                        .buttonStyle(.borderless)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Text("Doublons probables selon le nom du fichier. Aucune suppression automatique.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                .navigationTitle("Copies détectées")
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Fermer") { showingDuplicates = false }
+                    }
+                }
+            }
         }
         .sheet(item: $selectedGameDetails, onDismiss: { detailsReport = nil }) { game in
             NavigationStack {
@@ -238,10 +278,9 @@ struct MaxPS4HomeView: View {
                 .tint(.cyan)
 
                 Button {
-                    emulator.inspectDuplicates()
-                    inspectionReport = emulator.status
+                    showingDuplicates = true
                 } label: {
-                    Label("Rechercher les doublons", systemImage: "square.on.square")
+                    Label("Gérer les doublons", systemImage: "square.on.square")
                         .font(.subheadline.weight(.medium))
                 }
                 .tint(.cyan)
