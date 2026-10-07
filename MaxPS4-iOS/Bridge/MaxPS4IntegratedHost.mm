@@ -117,9 +117,11 @@
     self.bootGeneration += 1;
     const NSUInteger generation = self.bootGeneration;
     self.importButton.enabled = NO;
+    NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:url.path error:nil];
+    unsigned long long fileSize = [attrs[NSFileSize] unsignedLongLongValue];
     self.statusLabel.text = [NSString stringWithFormat:
-        @"%@ validé.\nExécution FEX lancée en arrière-plan…",
-        url.lastPathComponent];
+        @"Fichier sélectionné : %@\nTaille : %llu octets\n%@\nExécution FEX lancée en arrière-plan…",
+        url.lastPathComponent, fileSize, detailText];
 
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         BOOL booted = maxps4_backend_boot(url.fileSystemRepresentation);
@@ -132,11 +134,11 @@
             self.bootInProgress = NO;
             self.importButton.enabled = YES;
             if (booted) {
-                self.statusLabel.text = [NSString stringWithFormat:@"Démarrage demandé : %@\n%@", url.lastPathComponent, bootText];
+                self.statusLabel.text = [NSString stringWithFormat:@"Démarrage demandé : %@\nTaille : %llu octets\n%@", url.lastPathComponent, fileSize, bootText];
             } else {
                 self.statusLabel.text = [NSString stringWithFormat:
-                    @"%@ validé.\n%@\n\nLe handoff loader → FEX a été tenté. Cette build de test n’implémente pas encore tous les services/HLE PS4 nécessaires.",
-                    url.lastPathComponent, bootText];
+                    @"%@ validé.\nTaille : %llu octets\n%@\n\nLe handoff loader → FEX a été tenté. Cette build de test n’implémente pas encore tous les services/HLE PS4 nécessaires.",
+                    url.lastPathComponent, fileSize, bootText];
             }
         });
     });
