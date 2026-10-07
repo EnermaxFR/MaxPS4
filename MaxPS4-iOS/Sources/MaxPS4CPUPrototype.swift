@@ -14,6 +14,8 @@ struct MaxPS4CPUPrototype {
     private(set) var registers = [UInt64](repeating: 0, count: 8)
     private(set) var rip = 0
     private(set) var zeroFlag = false
+    private(set) var executedInstructions = 0
+    private(set) var recentInstructionOffsets: [Int] = []
     var rax: UInt64 { registers[0] }
     private(set) var guestMemory = MaxPS4GuestMemory()
 
@@ -51,9 +53,14 @@ struct MaxPS4CPUPrototype {
 
     mutating func run(_ program: [UInt8], limit: Int = 256) throws {
         var steps = 0
+        executedInstructions = 0
+        recentInstructionOffsets = []
         while rip < program.count {
             guard steps < limit else { throw CPUError.instructionLimit }
             steps += 1
+            executedInstructions += 1
+            recentInstructionOffsets.append(rip)
+            if recentInstructionOffsets.count > 16 { recentInstructionOffsets.removeFirst() }
             let opcode = program[rip]
             if opcode == 0x90 { // NOP
                 rip += 1
