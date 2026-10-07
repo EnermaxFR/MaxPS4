@@ -386,6 +386,17 @@ struct MaxPS4CPUPrototype {
                   processManager.scheduleNext() == thirdPID,
                   processManager.terminate(pid: thirdPID),
                   processManager.scheduleNext() == nil else { return false }
+            var guests = MaxPS4VirtualProcessManager()
+            let guestA = try guests.create()
+            let guestB = try guests.create()
+            guard guests.scheduleNext() == guestA else { return false }
+            try guests.runCurrent([0x48, 0xB8, 0x2A, 0, 0, 0, 0, 0, 0, 0, 0xC3])
+            guard guests.scheduleNext() == guestB else { return false }
+            try guests.runCurrent([0x48, 0xB8, 0x07, 0, 0, 0, 0, 0, 0, 0, 0xC3])
+            guard guests.process(pid: guestA)?.cpu.rax == 42,
+                  guests.process(pid: guestB)?.cpu.rax == 7,
+                  guests.process(pid: guestA)?.cpu.guestMemory.allocatedBytes == 0,
+                  guests.process(pid: guestB)?.cpu.guestMemory.allocatedBytes == 0 else { return false }
             var invalidAccess = Self()
             do {
                 try invalidAccess.run([0x48, 0xA1, 0, 0, 0, 0, 0, 0, 0, 0])
@@ -440,6 +451,7 @@ struct MaxPS4VirtualProcess {
 struct MaxPS4VirtualProcessManager {
     enum ProcessError: Error {
         case capacityReached
+        case noRunningProcess
     }
 
     private var processes: [UInt32: MaxPS4VirtualProcess] = [:]
@@ -473,6 +485,16 @@ struct MaxPS4VirtualProcessManager {
         nextPID += 1
         processes[pid] = MaxPS4VirtualProcess(pid: pid)
         return pid
+    }
+
+    /// Runs a bounded toy bytecode program only for the scheduled guest.
+    /// Each process retains its own CPU registers and simulated memory.
+    mutating func runCurrent(_ program: [UInt8]) throws {
+        guard let pid = runningPID, var process = processes[pid] else {
+            throw ProcessError.noRunningProcess
+        }
+        try process.cpu.run(program, limit: 256)
+        processes[pid] = process
     }
 
     func process(pid: UInt32) -> MaxPS4VirtualProcess? {
