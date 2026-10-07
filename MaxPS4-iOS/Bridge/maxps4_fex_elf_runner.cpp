@@ -2211,7 +2211,10 @@ extern "C" int maxps4_fex_guest_run_elf(const char* path) {
     request.MappedRanges.push_back({exit_veneer, veneers.size, true, false});
     request.MappedRanges.push_back({strerror_buffer, strerror_storage.size, false, true});
     request.MappedRanges.push_back({errno_buffer, errno_storage.size, false, true});
-    request.MappedRanges.push_back({kernel_arena_begin, kernel_arena.size, true, true});
+    // The managed arena is guest data/stack memory at startup. Marking it
+    // executable while it is host-writable makes FEX's iOS mapping validator
+    // correctly reject it as RWX (EACCES) before the first guest syscall.
+    request.MappedRanges.push_back({kernel_arena_begin, kernel_arena.size, false, true});
 
     std::mutex worker_list_mutex;
     std::vector<std::thread> worker_threads;
