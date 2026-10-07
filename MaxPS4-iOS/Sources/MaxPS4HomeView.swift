@@ -104,6 +104,8 @@ struct MaxPS4HomeView: View {
                                     var groups: [String: [String]] = [:]
                                     var errors: [String] = []
                                     var details: [String] = []
+                                    var titleGroups: [String: [String]] = [:]
+                                    var contentGroups: [String: [String]] = [:]
                                     for game in files {
                                         do {
                                             let fingerprint = try MaxPS4PKGHash.digest(url: URL(fileURLWithPath: game.localPath))
@@ -119,6 +121,12 @@ struct MaxPS4HomeView: View {
                                                 contentID = String(bytes: field.prefix(while: { $0 != 0 }), encoding: .ascii) ?? "indisponible"
                                             }
                                             let titleID = contentID.range(of: "CUSA[0-9]{5}", options: .regularExpression).map { String(contentID[$0]) } ?? "indisponible"
+                                            if titleID != "indisponible" {
+                                                titleGroups[titleID, default: []].append(game.fileName)
+                                            }
+                                            if contentID != "indisponible" {
+                                                contentGroups[contentID, default: []].append(game.fileName)
+                                            }
                                             details.append(game.fileName + "\nTaille : " + String(length) + " octets\nContent ID : " + contentID + "\nTitle ID : " + titleID + "\nSHA-256 : " + fingerprint)
                                         } catch { errors.append(game.fileName + " : " + error.localizedDescription) }
                                     }
@@ -126,6 +134,15 @@ struct MaxPS4HomeView: View {
                                     var message = "PKG présents : " + String(files.count) + " • comparés : " + String(files.count - errors.count) + " • erreurs : " + String(errors.count) + "\n"
                                     message += duplicates.isEmpty ? "Aucun PKG strictement identique détecté." :
                                         duplicates.map { "Copies identiques : " + $0.sorted().joined(separator: " / ") }.joined(separator: "\n")
+                                    let sameTitle = titleGroups.filter { $0.value.count > 1 }
+                                    let sameContent = contentGroups.filter { $0.value.count > 1 }
+                                    for (id, names) in sameTitle.sorted(by: { $0.key < $1.key }) {
+                                        message += "\nMême Title ID " + id + " : " + names.sorted().joined(separator: " / ")
+                                    }
+                                    for (id, names) in sameContent.sorted(by: { $0.key < $1.key }) {
+                                        message += "\nMême Content ID " + id + " : " + names.sorted().joined(separator: " / ")
+                                    }
+                                    message += "\nVersion du jeu : non déterminée par cet en-tête. Même identifiant ne signifie pas même version."
                                     if files.count < 2 { message += "\nIl faut au moins deux PKG présents pour comparer des copies." }
                                     if !errors.isEmpty { message += "\nFichiers non comparés : " + errors.joined(separator: " / ") }
                                     return message + "\n\nDétails des fichiers :\n" + details.joined(separator: "\n\n") + "\nAucune suppression automatique."
