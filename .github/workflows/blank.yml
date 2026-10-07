@@ -575,6 +575,7 @@ jobs:
             add_executable(maxps4-integrated
               "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/MaxPS4IntegratedHost.mm"
               "${CMAKE_SOURCE_DIR}/MaxPS4FEXGuestHost.cpp"
+              "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_core.cpp"
               "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_backend.cpp"
               "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_ps4_loader.cpp"
               "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_fex_elf_runner.cpp"
