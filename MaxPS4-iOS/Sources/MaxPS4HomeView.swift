@@ -560,6 +560,11 @@ struct MaxPS4HomeView: View {
                     } label: {
                         Label("Renommer", systemImage: "pencil")
                     }
+                    Button {
+                        emulator.inspect(game)
+                    } label: {
+                        Label("Analyser l’exécutable", systemImage: "doc.text.magnifyingglass")
+                    }
                     Button(role: .destructive) {
                         emulator.remove(game)
                     } label: {
