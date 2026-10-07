@@ -89,6 +89,35 @@ MaxPS4GuestFrameSnapshot g_guest_frame_visible;
 bool g_guest_frame_pending_active = false;
 bool g_guest_frame_visible_active = false;
 
+struct MaxPS4GuestPrimitiveSnapshot {
+    uint32_t type{};
+    float x{};
+    float y{};
+    float width{0.3f};
+    float height{0.3f};
+    float rotation{};
+    float red{1.0f};
+    float green{1.0f};
+    float blue{1.0f};
+    float alpha{1.0f};
+};
+
+struct MaxPS4GuestSceneFrameSnapshot {
+    uint32_t sequence{};
+    uint32_t primitive_count{};
+    float clear_red{};
+    float clear_green{};
+    float clear_blue{};
+    float clear_alpha{1.0f};
+    std::array<MaxPS4GuestPrimitiveSnapshot, MAXPS4_GUEST_SCENE_MAX_PRIMITIVES> primitives{};
+};
+
+std::mutex g_guest_scene_mutex;
+MaxPS4GuestSceneFrameSnapshot g_guest_scene_pending;
+MaxPS4GuestSceneFrameSnapshot g_guest_scene_visible;
+bool g_guest_scene_pending_active = false;
+bool g_guest_scene_visible_active = false;
+
 void SetLiveDiag(const std::string& value) {
     std::lock_guard<std::mutex> lock(g_live_diag_mutex);
     g_live_diag = value;
@@ -168,6 +197,56 @@ bool GetGuestFrame(MaxPS4GuestFrameSnapshot& out) {
     std::lock_guard<std::mutex> lock(g_guest_frame_mutex);
     if (!g_guest_frame_visible_active) return false;
     out = g_guest_frame_visible;
+    return true;
+}
+
+void BeginGuestScene(const MaxPS4GuestFrameBegin& begin) {
+    std::lock_guard<std::mutex> lock(g_guest_scene_mutex);
+    g_guest_scene_pending = {};
+    g_guest_scene_pending.sequence = begin.sequence;
+    g_guest_scene_pending.clear_red = std::clamp(begin.clear_red, 0.0f, 1.0f);
+    g_guest_scene_pending.clear_green = std::clamp(begin.clear_green, 0.0f, 1.0f);
+    g_guest_scene_pending.clear_blue = std::clamp(begin.clear_blue, 0.0f, 1.0f);
+    g_guest_scene_pending.clear_alpha = std::clamp(begin.clear_alpha, 0.0f, 1.0f);
+    g_guest_scene_pending_active = true;
+}
+
+bool AppendGuestPrimitive(MaxPS4GuestPrimitiveSnapshot primitive) {
+    std::lock_guard<std::mutex> lock(g_guest_scene_mutex);
+    if (!g_guest_scene_pending_active ||
+        g_guest_scene_pending.primitive_count >= MAXPS4_GUEST_SCENE_MAX_PRIMITIVES) {
+        return false;
+    }
+    if (primitive.type != MAXPS4_GUEST_PRIMITIVE_RECT &&
+        primitive.type != MAXPS4_GUEST_PRIMITIVE_TRIANGLE) {
+        return false;
+    }
+    primitive.x = std::clamp(primitive.x, -1.2f, 1.2f);
+    primitive.y = std::clamp(primitive.y, -1.2f, 1.2f);
+    primitive.width = std::clamp(primitive.width, 0.02f, 1.8f);
+    primitive.height = std::clamp(primitive.height, 0.02f, 1.8f);
+    primitive.rotation = std::clamp(primitive.rotation, -1000.0f, 1000.0f);
+    primitive.red = std::clamp(primitive.red, 0.0f, 1.0f);
+    primitive.green = std::clamp(primitive.green, 0.0f, 1.0f);
+    primitive.blue = std::clamp(primitive.blue, 0.0f, 1.0f);
+    primitive.alpha = std::clamp(primitive.alpha, 0.0f, 1.0f);
+    g_guest_scene_pending.primitives[g_guest_scene_pending.primitive_count++] = primitive;
+    return true;
+}
+
+bool PresentGuestScene() {
+    std::lock_guard<std::mutex> lock(g_guest_scene_mutex);
+    if (!g_guest_scene_pending_active) return false;
+    g_guest_scene_visible = g_guest_scene_pending;
+    g_guest_scene_visible_active = true;
+    g_guest_scene_pending_active = false;
+    return true;
+}
+
+bool GetGuestScene(MaxPS4GuestSceneFrameSnapshot& out) {
+    std::lock_guard<std::mutex> lock(g_guest_scene_mutex);
+    if (!g_guest_scene_visible_active) return false;
+    out = g_guest_scene_visible;
     return true;
 }
 
@@ -684,6 +763,53 @@ public:
             return true;
         }
 
+        // MaxPS4-private typed scene command buffer ABI.
+        // 0x4d56 begins a scene frame, 0x4d57 appends a typed primitive,
+        // and 0x4d58 atomically presents the completed scene.
+        if (op == 0x4d56ULL) {
+            const auto src = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDI]);
+            const size_t size = static_cast<size_t>(gpr[FEXCore::X86State::REG_RSI]);
+            if (size < sizeof(MaxPS4GuestFrameBegin) ||
+                !IsReadable(src, sizeof(MaxPS4GuestFrameBegin))) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+            MaxPS4GuestFrameBegin begin{};
+            std::memcpy(&begin, reinterpret_cast<const void*>(src), sizeof(begin));
+            BeginGuestScene(begin);
+            gpr[FEXCore::X86State::REG_RAX] = 0;
+            return true;
+        }
+
+        if (op == 0x4d57ULL) {
+            const auto src = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDI]);
+            const size_t size = static_cast<size_t>(gpr[FEXCore::X86State::REG_RSI]);
+            if (size < sizeof(MaxPS4GuestPrimitiveSnapshot) ||
+                !IsReadable(src, sizeof(MaxPS4GuestPrimitiveSnapshot))) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+            MaxPS4GuestPrimitiveSnapshot primitive{};
+            std::memcpy(&primitive, reinterpret_cast<const void*>(src), sizeof(primitive));
+            if (!AppendGuestPrimitive(primitive)) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EINVAL};
+            }
+            gpr[FEXCore::X86State::REG_RAX] = 0;
+            return true;
+        }
+
+        if (op == 0x4d58ULL) {
+            if (!PresentGuestScene()) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EINVAL};
+            }
+            gpr[FEXCore::X86State::REG_RAX] = 0;
+            SetLiveDiag(std::string("guest typed scene presented") +
+                        " • trace=" + Trace());
+            return true;
+        }
+
         // MaxPS4-private frame pacing ABI for legal realtime guest tests.
         // The guest supplies a microsecond delay; clamp it to a safe range so
         // one test cannot accidentally spin or sleep for an excessive period.
@@ -1062,6 +1188,32 @@ extern "C" bool maxps4_fex_get_guest_frame(MaxPS4GuestFrame* out) {
         out->rects[i].green = snapshot.rects[i].green;
         out->rects[i].blue = snapshot.rects[i].blue;
         out->rects[i].alpha = snapshot.rects[i].alpha;
+    }
+    return true;
+}
+
+extern "C" bool maxps4_fex_get_guest_scene_frame(MaxPS4GuestSceneFrame* out) {
+    if (!out) return false;
+    MaxPS4GuestSceneFrameSnapshot snapshot{};
+    if (!GetGuestScene(snapshot)) return false;
+    out->sequence = snapshot.sequence;
+    out->primitive_count = snapshot.primitive_count;
+    out->clear_red = snapshot.clear_red;
+    out->clear_green = snapshot.clear_green;
+    out->clear_blue = snapshot.clear_blue;
+    out->clear_alpha = snapshot.clear_alpha;
+    for (uint32_t i = 0; i < snapshot.primitive_count &&
+                         i < MAXPS4_GUEST_SCENE_MAX_PRIMITIVES; ++i) {
+        out->primitives[i].type = snapshot.primitives[i].type;
+        out->primitives[i].x = snapshot.primitives[i].x;
+        out->primitives[i].y = snapshot.primitives[i].y;
+        out->primitives[i].width = snapshot.primitives[i].width;
+        out->primitives[i].height = snapshot.primitives[i].height;
+        out->primitives[i].rotation = snapshot.primitives[i].rotation;
+        out->primitives[i].red = snapshot.primitives[i].red;
+        out->primitives[i].green = snapshot.primitives[i].green;
+        out->primitives[i].blue = snapshot.primitives[i].blue;
+        out->primitives[i].alpha = snapshot.primitives[i].alpha;
     }
     return true;
 }
