@@ -34,6 +34,16 @@ struct MaxPS4CPUPrototype {
     }
 
 
+    /// Execute only a bounded test program copied from simulated guest memory.
+    /// This is not an ELF/PS4 execution environment.
+    mutating func runLoadedTest(memory: MaxPS4GuestMemory, entry: UInt64, length: Int) throws {
+        guard length > 0, length <= 256 else { throw CPUError.instructionLimit }
+        let bytes = try memory.read(at: entry, count: length)
+        guestMemory = memory
+        rip = 0
+        try run(Array(bytes), limit: 256)
+    }
+
     mutating func prepareTestStack(address: UInt64, size: Int) throws {
         try guestMemory.mapZeroFilled(at: address, size: size)
         registers[4] = address + UInt64(size)
