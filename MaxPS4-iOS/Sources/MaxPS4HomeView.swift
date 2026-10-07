@@ -16,6 +16,7 @@ struct MaxPS4HomeView: View {
     @State private var gameSearch = ""
     @State private var gameFilter = 0
     @State private var gameToRename: MaxPS4Game?
+    @State private var gameToDelete: MaxPS4Game?
     @State private var renamedGameTitle = ""
     @State private var inspectionReport: String?
     @State private var selectedGameDetails: MaxPS4Game?
@@ -50,6 +51,18 @@ struct MaxPS4HomeView: View {
         .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) {
             tabBar
+        }
+        .alert("Supprimer ce fichier ?", isPresented: Binding(
+            get: { gameToDelete != nil },
+            set: { if !$0 { gameToDelete = nil } }
+        )) {
+            Button("Annuler", role: .cancel) { gameToDelete = nil }
+            Button("Supprimer définitivement", role: .destructive) {
+                if let game = gameToDelete { emulator.remove(game) }
+                gameToDelete = nil
+            }
+        } message: {
+            Text("La copie locale sera supprimée : " + (gameToDelete?.fileName ?? "") + ". Action irréversible.")
         }
         .alert("Renommer le jeu", isPresented: Binding(
             get: { gameToRename != nil },
@@ -642,9 +655,9 @@ struct MaxPS4HomeView: View {
                         Label(game.fileName.lowercased().hasSuffix(".pkg") ? "Analyser le PKG" : "Analyser l’exécutable", systemImage: "doc.text.magnifyingglass")
                     }
                     Button(role: .destructive) {
-                        emulator.remove(game)
+                        gameToDelete = game
                     } label: {
-                        Label("Supprimer", systemImage: "trash")
+                        Label("Supprimer…", systemImage: "trash")
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
