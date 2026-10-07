@@ -551,6 +551,7 @@ jobs:
               "${CMAKE_SOURCE_DIR}/MaxPS4FEXGuestHost.mm"
               "${CMAKE_SOURCE_DIR}/MaxPS4FEXGuestHost.cpp"
               "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_backend.cpp"
+              "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_kernel.cpp"
               "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_ps4_loader.cpp"
               "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_fex_elf_runner.cpp"
               "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_fex_elf_runner.cpp"
@@ -577,6 +578,7 @@ jobs:
               "${CMAKE_SOURCE_DIR}/MaxPS4FEXGuestHost.cpp"
               "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_core.cpp"
               "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_backend.cpp"
+              "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_kernel.cpp"
               "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_ps4_loader.cpp"
               "${MAXPS4_PROJECT_ROOT}/MaxPS4-iOS/Bridge/maxps4_fex_elf_runner.cpp"
               "${FEXCORE_PROJECT_SOURCE_DIR}/core/fex/fex_guest_engine.cpp"
@@ -1297,6 +1299,60 @@ jobs:
           cmp build/legal-userspace/hello_stdio_userspace.elf \
               build/legal-userspace/pkg_extracted.elf
           echo "Legal plain PKG importer smoke: OK"
+
+          cat > build/legal-userspace/kernel_state_smoke.cpp <<'CPP'
+          #include "maxps4_kernel.h"
+          #include <array>
+          #include <cstdint>
+          #include <cstdio>
+
+          int main() {
+              MaxPS4::Kernel::KernelState kernel;
+
+              if (!kernel.HasFileDescriptor(0, true, false) ||
+                  !kernel.HasFileDescriptor(1, false, true) ||
+                  !kernel.HasFileDescriptor(2, false, true)) {
+                  std::fprintf(stderr, "stdio descriptor table invalid\n");
+                  return 1;
+              }
+
+              alignas(16) unsigned char memory[256]{};
+              if (!kernel.RegisterMemoryRegion(
+                      reinterpret_cast<uintptr_t>(memory), sizeof(memory),
+                      MaxPS4::Kernel::MemoryRead | MaxPS4::Kernel::MemoryWrite) ||
+                  !kernel.ContainsMemory(
+                      reinterpret_cast<uintptr_t>(memory) + 16, 32,
+                      MaxPS4::Kernel::MemoryRead | MaxPS4::Kernel::MemoryWrite)) {
+                  std::fprintf(stderr, "memory table invalid\n");
+                  return 2;
+              }
+
+              std::array<uint64_t, 6> args{};
+              auto pid = kernel.Dispatch(20, args);
+              if (!pid.handled || pid.value != 1) {
+                  std::fprintf(stderr, "getpid dispatch invalid\n");
+                  return 3;
+              }
+
+              args[0] = 7;
+              auto exit_call = kernel.Dispatch(1, args);
+              if (!exit_call.handled || !exit_call.request_exit ||
+                  exit_call.exit_code != 7) {
+                  std::fprintf(stderr, "exit dispatch invalid\n");
+                  return 4;
+              }
+
+              std::puts("MaxPS4Kernel state smoke: OK");
+              return 0;
+          }
+          CPP
+
+          g++ -std=c++20 -O2 \
+            -IMaxPS4-iOS/Bridge \
+            build/legal-userspace/kernel_state_smoke.cpp \
+            MaxPS4-iOS/Bridge/maxps4_kernel.cpp \
+            -o build/legal-userspace/kernel_state_smoke
+          build/legal-userspace/kernel_state_smoke
 
       - name: Package legal userspace FEX smoke test
         run: |
