@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -89,6 +90,19 @@ MaxPS4GuestFrameSnapshot g_guest_frame_visible;
 bool g_guest_frame_pending_active = false;
 bool g_guest_frame_visible_active = false;
 
+struct MaxPS4GuestPrimitiveV1Snapshot {
+    uint32_t type{};
+    float x{};
+    float y{};
+    float width{0.3f};
+    float height{0.3f};
+    float rotation{};
+    float red{1.0f};
+    float green{1.0f};
+    float blue{1.0f};
+    float alpha{1.0f};
+};
+
 struct MaxPS4GuestPrimitiveSnapshot {
     uint32_t type{};
     float x{};
@@ -100,6 +114,7 @@ struct MaxPS4GuestPrimitiveSnapshot {
     float green{1.0f};
     float blue{1.0f};
     float alpha{1.0f};
+    uint32_t texture_id{};
 };
 
 struct MaxPS4GuestSceneFrameSnapshot {
@@ -117,6 +132,20 @@ MaxPS4GuestSceneFrameSnapshot g_guest_scene_pending;
 MaxPS4GuestSceneFrameSnapshot g_guest_scene_visible;
 bool g_guest_scene_pending_active = false;
 bool g_guest_scene_visible_active = false;
+
+struct MaxPS4GuestTextureSnapshot {
+    uint32_t sequence{};
+    uint32_t texture_id{};
+    uint32_t width{};
+    uint32_t height{};
+    uint32_t byte_count{};
+    std::array<uint8_t, MAXPS4_GUEST_TEXTURE_MAX_BYTES> rgba{};
+};
+
+std::mutex g_guest_texture_mutex;
+MaxPS4GuestTextureSnapshot g_guest_texture;
+bool g_guest_texture_active = false;
+uint32_t g_guest_texture_sequence = 0;
 
 void SetLiveDiag(const std::string& value) {
     std::lock_guard<std::mutex> lock(g_live_diag_mutex);
@@ -251,6 +280,44 @@ bool GetGuestScene(MaxPS4GuestSceneFrameSnapshot& out) {
     return true;
 }
 
+bool UploadGuestTexture(uint32_t texture_id,
+                        uint32_t width,
+                        uint32_t height,
+                        uintptr_t src,
+                        size_t byte_count,
+                        const std::function<bool(uintptr_t, size_t)>& readable) {
+    if (texture_id == 0 || width == 0 || height == 0 ||
+        width > 32 || height > 32) {
+        return false;
+    }
+    const uint64_t expected =
+        static_cast<uint64_t>(width) * static_cast<uint64_t>(height) * 4ULL;
+    if (expected == 0 || expected > MAXPS4_GUEST_TEXTURE_MAX_BYTES ||
+        byte_count != expected || !readable(src, byte_count)) {
+        return false;
+    }
+
+    MaxPS4GuestTextureSnapshot next{};
+    next.sequence = ++g_guest_texture_sequence;
+    next.texture_id = texture_id;
+    next.width = width;
+    next.height = height;
+    next.byte_count = static_cast<uint32_t>(byte_count);
+    std::memcpy(next.rgba.data(), reinterpret_cast<const void*>(src), byte_count);
+
+    std::lock_guard<std::mutex> lock(g_guest_texture_mutex);
+    g_guest_texture = next;
+    g_guest_texture_active = true;
+    return true;
+}
+
+bool GetGuestTexture(MaxPS4GuestTextureSnapshot& out) {
+    std::lock_guard<std::mutex> lock(g_guest_texture_mutex);
+    if (!g_guest_texture_active) return false;
+    out = g_guest_texture;
+    return true;
+}
+
 void ResetGuestGraphicsState() {
     {
         std::lock_guard<std::mutex> lock(g_guest_render_mutex);
@@ -270,6 +337,12 @@ void ResetGuestGraphicsState() {
         g_guest_scene_visible = {};
         g_guest_scene_pending_active = false;
         g_guest_scene_visible_active = false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_guest_texture_mutex);
+        g_guest_texture = {};
+        g_guest_texture_active = false;
+        g_guest_texture_sequence = 0;
     }
 }
 
@@ -807,6 +880,74 @@ public:
         if (op == 0x4d57ULL) {
             const auto src = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDI]);
             const size_t size = static_cast<size_t>(gpr[FEXCore::X86State::REG_RSI]);
+            if (size < sizeof(MaxPS4GuestPrimitiveV1Snapshot) ||
+                !IsReadable(src, sizeof(MaxPS4GuestPrimitiveV1Snapshot))) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EFAULT};
+            }
+            MaxPS4GuestPrimitiveV1Snapshot v1{};
+            std::memcpy(&v1, reinterpret_cast<const void*>(src), sizeof(v1));
+            MaxPS4GuestPrimitiveSnapshot primitive{};
+            primitive.type = v1.type;
+            primitive.x = v1.x;
+            primitive.y = v1.y;
+            primitive.width = v1.width;
+            primitive.height = v1.height;
+            primitive.rotation = v1.rotation;
+            primitive.red = v1.red;
+            primitive.green = v1.green;
+            primitive.blue = v1.blue;
+            primitive.alpha = v1.alpha;
+            primitive.texture_id = 0;
+            if (!AppendGuestPrimitive(primitive)) {
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EINVAL};
+            }
+            gpr[FEXCore::X86State::REG_RAX] = 0;
+            return true;
+        }
+
+        // 0x4d59 uploads a small guest-owned RGBA8 texture resource directly
+        // from x86-64 memory. Args: id,width,height,pixels,byte_count.
+        if (op == 0x4d59ULL) {
+            const uint32_t texture_id =
+                static_cast<uint32_t>(gpr[FEXCore::X86State::REG_RDI]);
+            const uint32_t width =
+                static_cast<uint32_t>(gpr[FEXCore::X86State::REG_RSI]);
+            const uint32_t height =
+                static_cast<uint32_t>(gpr[FEXCore::X86State::REG_RDX]);
+            const auto src =
+                static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_R10]);
+            const size_t byte_count =
+                static_cast<size_t>(gpr[FEXCore::X86State::REG_R8]);
+
+            const bool ok = UploadGuestTexture(
+                texture_id, width, height, src, byte_count,
+                [this](uintptr_t addr, size_t count) {
+                    return IsReadable(addr, count);
+                });
+            if (!ok) {
+                SetLiveDiag(std::string("guest texture upload rejected") +
+                            " • id=" + std::to_string(texture_id) +
+                            " • size=" + std::to_string(width) + "x" + std::to_string(height) +
+                            " • bytes=" + std::to_string(byte_count) +
+                            " • trace=" + Trace());
+                return AetherPS4::Fex::EngineFailure{
+                    AetherPS4::Fex::EngineStage::Bridge, EINVAL};
+            }
+
+            gpr[FEXCore::X86State::REG_RAX] = 0;
+            SetLiveDiag(std::string("guest texture uploaded") +
+                        " • id=" + std::to_string(texture_id) +
+                        " • size=" + std::to_string(width) + "x" + std::to_string(height) +
+                        " • trace=" + Trace());
+            return true;
+        }
+
+        // 0x4d5a appends a v2 typed primitive carrying a texture resource id.
+        if (op == 0x4d5aULL) {
+            const auto src = static_cast<uintptr_t>(gpr[FEXCore::X86State::REG_RDI]);
+            const size_t size = static_cast<size_t>(gpr[FEXCore::X86State::REG_RSI]);
             if (size < sizeof(MaxPS4GuestPrimitiveSnapshot) ||
                 !IsReadable(src, sizeof(MaxPS4GuestPrimitiveSnapshot))) {
                 return AetherPS4::Fex::EngineFailure{
@@ -814,7 +955,9 @@ public:
             }
             MaxPS4GuestPrimitiveSnapshot primitive{};
             std::memcpy(&primitive, reinterpret_cast<const void*>(src), sizeof(primitive));
-            if (!AppendGuestPrimitive(primitive)) {
+            if (primitive.type != MAXPS4_GUEST_PRIMITIVE_GUEST_TEXTURED_QUAD ||
+                primitive.texture_id == 0 ||
+                !AppendGuestPrimitive(primitive)) {
                 return AetherPS4::Fex::EngineFailure{
                     AetherPS4::Fex::EngineStage::Bridge, EINVAL};
             }
@@ -1237,6 +1380,22 @@ extern "C" bool maxps4_fex_get_guest_scene_frame(MaxPS4GuestSceneFrame* out) {
         out->primitives[i].green = snapshot.primitives[i].green;
         out->primitives[i].blue = snapshot.primitives[i].blue;
         out->primitives[i].alpha = snapshot.primitives[i].alpha;
+        out->primitives[i].texture_id = snapshot.primitives[i].texture_id;
+    }
+    return true;
+}
+
+extern "C" bool maxps4_fex_get_guest_texture(MaxPS4GuestTexture* out) {
+    if (!out) return false;
+    MaxPS4GuestTextureSnapshot snapshot{};
+    if (!GetGuestTexture(snapshot)) return false;
+    out->sequence = snapshot.sequence;
+    out->texture_id = snapshot.texture_id;
+    out->width = snapshot.width;
+    out->height = snapshot.height;
+    out->byte_count = snapshot.byte_count;
+    if (snapshot.byte_count != 0) {
+        std::memcpy(out->rgba, snapshot.rgba.data(), snapshot.byte_count);
     }
     return true;
 }
