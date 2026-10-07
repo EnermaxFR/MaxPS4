@@ -15,6 +15,7 @@ extern "C" void maxps4_fex_set_controller_state(unsigned int buttons,
                                                   float right_x, float right_y,
                                                   float left_trigger, float right_trigger);
 extern "C" bool maxps4_fex_get_guest_render_state(MaxPS4GuestRenderState* out);
+extern "C" bool maxps4_fex_get_guest_frame(MaxPS4GuestFrame* out);
 #endif
 
 static char g_backend_diagnostic[256] =
@@ -81,6 +82,16 @@ bool maxps4_backend_guest_render_state(MaxPS4GuestRenderState *out) {
     if (!out) return false;
 #if defined(MAXPS4_HAS_SHADPS4_FEX)
     return maxps4_fex_get_guest_render_state(out);
+#else
+    *out = {};
+    return false;
+#endif
+}
+
+bool maxps4_backend_guest_frame(MaxPS4GuestFrame *out) {
+    if (!out) return false;
+#if defined(MAXPS4_HAS_SHADPS4_FEX)
+    return maxps4_fex_get_guest_frame(out);
 #else
     *out = {};
     return false;
