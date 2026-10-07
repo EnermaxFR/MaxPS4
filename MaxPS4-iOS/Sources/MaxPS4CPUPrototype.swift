@@ -374,6 +374,18 @@ struct MaxPS4CPUPrototype {
                   !processManager.terminate(pid: firstPID),
                   processManager.count == 1,
                   processManager.process(pid: secondPID) != nil else { return false }
+            guard processManager.scheduleNext() == secondPID,
+                  processManager.currentPID == secondPID,
+                  processManager.process(pid: secondPID)?.state == .running else { return false }
+            let thirdPID = try processManager.create()
+            guard processManager.scheduleNext() == thirdPID,
+                  processManager.process(pid: secondPID)?.state == .ready,
+                  processManager.scheduleNext() == secondPID else { return false }
+            guard processManager.terminate(pid: secondPID),
+                  processManager.currentPID == nil,
+                  processManager.scheduleNext() == thirdPID,
+                  processManager.terminate(pid: thirdPID),
+                  processManager.scheduleNext() == nil else { return false }
             var invalidAccess = Self()
             do {
                 try invalidAccess.run([0x48, 0xA1, 0, 0, 0, 0, 0, 0, 0, 0])
@@ -415,6 +427,8 @@ struct MaxPS4CPUPrototype {
 struct MaxPS4VirtualProcess {
     let pid: UInt32
     var cpu = MaxPS4CPUPrototype()
+    enum State { case ready, running, stopped }
+    var state: State = .ready
 
     init(pid: UInt32) {
         self.pid = pid
@@ -431,8 +445,27 @@ struct MaxPS4VirtualProcessManager {
     private var processes: [UInt32: MaxPS4VirtualProcess] = [:]
     private var nextPID: UInt32 = 100
     private let maximumProcesses = 16
+    private var runningPID: UInt32?
 
     var count: Int { processes.count }
+    var currentPID: UInt32? { runningPID }
+
+    /// Deterministic round-robin state switch; executes no guest instructions.
+    @discardableResult
+    mutating func scheduleNext() -> UInt32? {
+        let ready = processes.keys.sorted()
+        guard !ready.isEmpty else { runningPID = nil; return nil }
+        let next = ready.first(where: { $0 > (runningPID ?? 0) }) ?? ready[0]
+        if let old = runningPID, var previous = processes[old] {
+            previous.state = .ready
+            processes[old] = previous
+        }
+        var selected = processes[next]!
+        selected.state = .running
+        processes[next] = selected
+        runningPID = next
+        return next
+    }
 
     mutating func create() throws -> UInt32 {
         guard processes.count < maximumProcesses else { throw ProcessError.capacityReached }
@@ -448,6 +481,7 @@ struct MaxPS4VirtualProcessManager {
 
     @discardableResult
     mutating func terminate(pid: UInt32) -> Bool {
-        processes.removeValue(forKey: pid) != nil
+        if runningPID == pid { runningPID = nil }
+        return processes.removeValue(forKey: pid) != nil
     }
 }
