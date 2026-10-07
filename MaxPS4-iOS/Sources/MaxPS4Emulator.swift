@@ -148,6 +148,12 @@ final class MaxPS4Emulator: ObservableObject {
         return "iOS \(process.operatingSystemVersionString) • \(process.processorCount) cœurs logiques • \(String(format: "%.1f", memoryGB)) Go RAM"
     }
 
+    func testGuestMemory() {
+        status = MaxPS4GuestMemory.selfTest()
+            ? "Mémoire invitée : auto-test réussi (prototype, 16 Mio maximum)"
+            : "Mémoire invitée : échec de l’auto-test"
+    }
+
     func testBackend() {
         status = backendReady
             ? "Backend shadPS4/FEX prêt"
