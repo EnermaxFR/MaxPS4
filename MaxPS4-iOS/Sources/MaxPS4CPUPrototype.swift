@@ -96,6 +96,14 @@ struct MaxPS4CPUPrototype {
             var limit = Self()
             do { try limit.run([0x90, 0x90], limit: 1); return false }
             catch CPUError.instructionLimit {}
+            var memoryCPU = Self()
+            try memoryCPU.prepareGuestMemory(address: 0x1000, size: 4096)
+            try memoryCPU.run([0x48, 0xB8, 0x2A, 0, 0, 0, 0, 0, 0, 0, 0xC3])
+            try memoryCPU.storeRAX(address: 0x1010)
+            var receiver = memoryCPU
+            try receiver.run([0x48, 0xB8, 0, 0, 0, 0, 0, 0, 0, 0, 0xC3])
+            try receiver.loadRAX(address: 0x1010)
+            guard receiver.rax == 42 else { return false }
             return true
         } catch { return false }
     }
