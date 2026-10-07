@@ -148,6 +148,16 @@ final class MaxPS4Emulator: ObservableObject {
         return "iOS \(process.operatingSystemVersionString) • \(process.processorCount) cœurs logiques • \(String(format: "%.1f", memoryGB)) Go RAM"
     }
 
+    func traceCPUPrototype() {
+        do {
+            var cpu = MaxPS4CPUPrototype()
+            try cpu.run([0x90, 0x90, 0xC3])
+            status = "Trace CPU : \(cpu.executedInstructions) instructions • RIP \(cpu.rip) • offsets \(cpu.recentInstructionOffsets)"
+        } catch {
+            status = "Erreur trace CPU : \(error)"
+        }
+    }
+
     func testCPUPrototype() {
         status = MaxPS4CPUPrototype.selfTest()
             ? "CPU x86-64 : tests registres, mémoire, pile et branchements réussis"
