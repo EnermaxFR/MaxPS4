@@ -397,6 +397,23 @@ struct MaxPS4CPUPrototype {
                   guests.process(pid: guestB)?.cpu.rax == 7,
                   guests.process(pid: guestA)?.cpu.guestMemory.allocatedBytes == 0,
                   guests.process(pid: guestB)?.cpu.guestMemory.allocatedBytes == 0 else { return false }
+            var memoryGuests = MaxPS4VirtualProcessManager()
+            let memoryA = try memoryGuests.create()
+            let memoryB = try memoryGuests.create()
+            guard memoryGuests.scheduleNext() == memoryA else { return false }
+            let codeA: [UInt8] = [0x48, 0xB8, 0x2A, 0, 0, 0, 0, 0, 0, 0, 0xC3]
+            let codeB: [UInt8] = [0x48, 0xB8, 0x07, 0, 0, 0, 0, 0, 0, 0xC3]
+            try memoryGuests.loadCurrent(codeA, at: 0x4000)
+            try memoryGuests.runLoadedCurrent(at: 0x4000, length: codeA.count)
+            guard memoryGuests.scheduleNext() == memoryB else { return false }
+            do {
+                try memoryGuests.runLoadedCurrent(at: 0x4000, length: codeA.count)
+                return false
+            } catch MaxPS4GuestMemory.MemoryError.outOfBounds {}
+            try memoryGuests.loadCurrent(codeB, at: 0x4000)
+            try memoryGuests.runLoadedCurrent(at: 0x4000, length: codeB.count)
+            guard memoryGuests.process(pid: memoryA)?.cpu.rax == 42,
+                  memoryGuests.process(pid: memoryB)?.cpu.rax == 7 else { return false }
             var invalidAccess = Self()
             do {
                 try invalidAccess.run([0x48, 0xA1, 0, 0, 0, 0, 0, 0, 0, 0])
@@ -494,6 +511,31 @@ struct MaxPS4VirtualProcessManager {
             throw ProcessError.noRunningProcess
         }
         try process.cpu.run(program, limit: 256)
+        processes[pid] = process
+    }
+
+    /// Maps a bounded test program into the scheduled process only.
+    mutating func loadCurrent(_ program: [UInt8], at address: UInt64) throws {
+        guard let pid = runningPID, var process = processes[pid] else {
+            throw ProcessError.noRunningProcess
+        }
+        guard !program.isEmpty && program.count <= 256 else {
+            throw MaxPS4CPUPrototype.CPUError.instructionLimit
+        }
+        try process.cpu.guestMemory.mapZeroFilled(at: address, size: program.count)
+        try process.cpu.guestMemory.write(Data(program), at: address)
+        try process.cpu.guestMemory.protect(
+            at: address, size: program.count, permissions: [.read, .execute]
+        )
+        processes[pid] = process
+    }
+
+    /// Execute only bytes fetched from this process's executable guest region.
+    mutating func runLoadedCurrent(at address: UInt64, length: Int) throws {
+        guard let pid = runningPID, var process = processes[pid] else {
+            throw ProcessError.noRunningProcess
+        }
+        try process.cpu.runLoadedTest(memory: process.cpu.guestMemory, entry: address, length: length)
         processes[pid] = process
     }
 
