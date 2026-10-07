@@ -178,6 +178,7 @@ enum MaxPS4ELFLoader {
                 0xC3
             ]
             integrated.replaceSubrange(120..<(120 + instructions.count), with: instructions)
+            integrated[68] = 7 // Synthetic writable code/data region for integration test
             for index in 0..<8 {
                 integrated[96 + index] = UInt8(truncatingIfNeeded: UInt64(instructions.count) >> (index * 8))
                 integrated[104 + index] = UInt8(truncatingIfNeeded: UInt64(64) >> (index * 8))
