@@ -430,38 +430,68 @@
     id<CAMetalDrawable> drawable = view.currentDrawable;
     if (!pass || !drawable || !self.metalCommandQueue) return;
 
-    float cx = self.probeX;
-    float cy = self.probeY;
-    float scale = self.probeScale;
-    float color[4] = {0.15f, 0.95f, 1.0f, 1.0f};
-
-    MaxPS4GuestRenderState guest{};
-    if (maxps4_backend_guest_render_state(&guest)) {
-        cx = guest.x;
-        cy = guest.y;
-        scale = guest.scale;
-        color[0] = guest.red;
-        color[1] = guest.green;
-        color[2] = guest.blue;
-        color[3] = guest.alpha;
+    MaxPS4GuestFrame frame{};
+    const BOOL hasGuestFrame = maxps4_backend_guest_frame(&frame);
+    if (hasGuestFrame) {
+        pass.colorAttachments[0].clearColor =
+            MTLClearColorMake(frame.clear_red, frame.clear_green,
+                              frame.clear_blue, frame.clear_alpha);
     }
 
     id<MTLCommandBuffer> commandBuffer = [self.metalCommandQueue commandBuffer];
     id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:pass];
 
     if (self.metalProbePipeline) {
-        const float halfW = 0.15f * scale;
-        const float halfH = 0.28f * scale;
-        const float vertices[8] = {
-            cx - halfW, cy - halfH,
-            cx + halfW, cy - halfH,
-            cx - halfW, cy + halfH,
-            cx + halfW, cy + halfH,
-        };
         [encoder setRenderPipelineState:self.metalProbePipeline];
-        [encoder setVertexBytes:vertices length:sizeof(vertices) atIndex:0];
-        [encoder setFragmentBytes:color length:sizeof(color) atIndex:0];
-        [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+
+        if (hasGuestFrame) {
+            const unsigned int count = MIN(frame.rect_count, (unsigned int)MAXPS4_GUEST_FRAME_MAX_RECTS);
+            for (unsigned int i = 0; i < count; ++i) {
+                const MaxPS4GuestRect rect = frame.rects[i];
+                const float halfW = 0.15f * rect.scale;
+                const float halfH = 0.28f * rect.scale;
+                const float vertices[8] = {
+                    rect.x - halfW, rect.y - halfH,
+                    rect.x + halfW, rect.y - halfH,
+                    rect.x - halfW, rect.y + halfH,
+                    rect.x + halfW, rect.y + halfH,
+                };
+                const float color[4] = {
+                    rect.red, rect.green, rect.blue, rect.alpha
+                };
+                [encoder setVertexBytes:vertices length:sizeof(vertices) atIndex:0];
+                [encoder setFragmentBytes:color length:sizeof(color) atIndex:0];
+                [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+            }
+        } else {
+            float cx = self.probeX;
+            float cy = self.probeY;
+            float scale = self.probeScale;
+            float color[4] = {0.15f, 0.95f, 1.0f, 1.0f};
+
+            MaxPS4GuestRenderState guest{};
+            if (maxps4_backend_guest_render_state(&guest)) {
+                cx = guest.x;
+                cy = guest.y;
+                scale = guest.scale;
+                color[0] = guest.red;
+                color[1] = guest.green;
+                color[2] = guest.blue;
+                color[3] = guest.alpha;
+            }
+
+            const float halfW = 0.15f * scale;
+            const float halfH = 0.28f * scale;
+            const float vertices[8] = {
+                cx - halfW, cy - halfH,
+                cx + halfW, cy - halfH,
+                cx - halfW, cy + halfH,
+                cx + halfW, cy + halfH,
+            };
+            [encoder setVertexBytes:vertices length:sizeof(vertices) atIndex:0];
+            [encoder setFragmentBytes:color length:sizeof(color) atIndex:0];
+            [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+        }
     }
 
     [encoder endEncoding];
