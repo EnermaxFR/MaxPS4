@@ -96,6 +96,16 @@ jobs:
         working-directory: build
         run: zip -qry MaxPS4-unsigned.ipa Payload
 
+      - name: Verify IPA archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          unzip -t build/MaxPS4-unsigned.ipa
+          unzip -Z1 build/MaxPS4-unsigned.ipa | grep -Fx 'Payload/MaxPS4.app/Info.plist'
+          unzip -Z1 build/MaxPS4-unsigned.ipa | grep -Fx 'Payload/MaxPS4.app/MaxPS4'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' build/Payload/MaxPS4.app/Info.plist
+          xcrun lipo -info build/Payload/MaxPS4.app/MaxPS4
+
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
