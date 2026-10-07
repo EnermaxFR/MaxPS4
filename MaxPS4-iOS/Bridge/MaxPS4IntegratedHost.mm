@@ -20,6 +20,9 @@
 @property(nonatomic, strong) id<MTLRenderPipelineState> metalProbePipeline;
 @property(nonatomic, strong) id<MTLRenderPipelineState> metalTexturePipeline;
 @property(nonatomic, strong) id<MTLTexture> metalProbeTexture;
+@property(nonatomic, strong) id<MTLTexture> guestUploadedTexture;
+@property(nonatomic, assign) unsigned int guestUploadedTextureSequence;
+@property(nonatomic, assign) unsigned int guestUploadedTextureID;
 @property(nonatomic, assign) float probeX;
 @property(nonatomic, assign) float probeY;
 @property(nonatomic, assign) float probeScale;
@@ -164,6 +167,8 @@
     self.probeY = 0.0f;
     self.probeScale = 1.0f;
     self.probeButtons = 0;
+    self.guestUploadedTextureSequence = 0;
+    self.guestUploadedTextureID = 0;
 
     if (probeDevice) {
         NSString *shaderSource =
@@ -479,6 +484,31 @@
     id<CAMetalDrawable> drawable = view.currentDrawable;
     if (!pass || !drawable || !self.metalCommandQueue) return;
 
+    // Pull the latest small guest-owned RGBA8 texture only when its sequence
+    // changes. This avoids copying/recreating the resource every Metal frame.
+    MaxPS4GuestTexture guestTexture{};
+    if (maxps4_backend_guest_texture(&guestTexture) &&
+        guestTexture.sequence != self.guestUploadedTextureSequence &&
+        guestTexture.width > 0 && guestTexture.height > 0 &&
+        guestTexture.byte_count == guestTexture.width * guestTexture.height * 4u) {
+        MTLTextureDescriptor *desc =
+            [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                                               width:guestTexture.width
+                                                              height:guestTexture.height
+                                                           mipmapped:NO];
+        desc.usage = MTLTextureUsageShaderRead;
+        id<MTLTexture> texture = [view.device newTextureWithDescriptor:desc];
+        if (texture) {
+            [texture replaceRegion:MTLRegionMake2D(0, 0, guestTexture.width, guestTexture.height)
+                       mipmapLevel:0
+                         withBytes:guestTexture.rgba
+                       bytesPerRow:guestTexture.width * 4u];
+            self.guestUploadedTexture = texture;
+            self.guestUploadedTextureSequence = guestTexture.sequence;
+            self.guestUploadedTextureID = guestTexture.texture_id;
+        }
+    }
+
     MaxPS4GuestSceneFrame scene{};
     const BOOL hasScene = maxps4_backend_guest_scene_frame(&scene);
 
@@ -511,8 +541,16 @@
                 const float hx = primitive.width * 0.5f;
                 const float hy = primitive.height * 0.5f;
 
-                if (primitive.type == MAXPS4_GUEST_PRIMITIVE_TEXTURED_QUAD &&
-                    self.metalTexturePipeline && self.metalProbeTexture) {
+                id<MTLTexture> sceneTexture = nil;
+                if (primitive.type == MAXPS4_GUEST_PRIMITIVE_TEXTURED_QUAD) {
+                    sceneTexture = self.metalProbeTexture;
+                } else if (primitive.type == MAXPS4_GUEST_PRIMITIVE_GUEST_TEXTURED_QUAD &&
+                           primitive.texture_id != 0 &&
+                           primitive.texture_id == self.guestUploadedTextureID) {
+                    sceneTexture = self.guestUploadedTexture;
+                }
+
+                if (sceneTexture && self.metalTexturePipeline) {
                     const float local[8] = {
                         -hx, -hy,
                          hx, -hy,
@@ -538,7 +576,7 @@
                     }
                     [encoder setRenderPipelineState:self.metalTexturePipeline];
                     [encoder setVertexBytes:vertices length:sizeof(vertices) atIndex:0];
-                    [encoder setFragmentTexture:self.metalProbeTexture atIndex:0];
+                    [encoder setFragmentTexture:sceneTexture atIndex:0];
                     [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
                     continue;
                 }
