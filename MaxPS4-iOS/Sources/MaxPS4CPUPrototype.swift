@@ -414,6 +414,19 @@ struct MaxPS4CPUPrototype {
             try memoryGuests.runLoadedCurrent(at: 0x4000, length: codeB.count)
             guard memoryGuests.process(pid: memoryA)?.cpu.rax == 42,
                   memoryGuests.process(pid: memoryB)?.cpu.rax == 7 else { return false }
+            var batch = MaxPS4VirtualProcessManager()
+            let batchA = try batch.create()
+            guard batch.scheduleNext() == batchA else { return false }
+            try batch.loadCurrent(codeA, at: 0x4000)
+            let batchB = try batch.create()
+            guard batch.scheduleNext() == batchB else { return false }
+            try batch.loadCurrent(codeB, at: 0x4000)
+            let completed = try batch.runRoundRobinLoaded(
+                at: 0x4000, lengths: [batchA: codeA.count, batchB: codeB.count]
+            )
+            guard completed == [batchA, batchB],
+                  batch.process(pid: batchA)?.cpu.rax == 42,
+                  batch.process(pid: batchB)?.cpu.rax == 7 else { return false }
             var invalidAccess = Self()
             do {
                 try invalidAccess.run([0x48, 0xA1, 0, 0, 0, 0, 0, 0, 0, 0])
@@ -537,6 +550,24 @@ struct MaxPS4VirtualProcessManager {
         }
         try process.cpu.runLoadedTest(memory: process.cpu.guestMemory, entry: address, length: length)
         processes[pid] = process
+    }
+
+    /// Run one bounded, preloaded test program per process in PID order.
+    /// This is cooperative batch scheduling, not preemptive CPU emulation.
+    mutating func runRoundRobinLoaded(at address: UInt64, lengths: [UInt32: Int]) throws -> [UInt32] {
+        let ids = processes.keys.sorted()
+        guard !ids.isEmpty else { return [] }
+        guard ids.allSatisfy({ lengths[$0] != nil }) else {
+            throw ProcessError.noRunningProcess
+        }
+        var completed: [UInt32] = []
+        for pid in ids {
+            guard let current = scheduleNext(), current == pid,
+                  let length = lengths[pid] else { throw ProcessError.noRunningProcess }
+            try runLoadedCurrent(at: address, length: length)
+            completed.append(pid)
+        }
+        return completed
     }
 
     func process(pid: UInt32) -> MaxPS4VirtualProcess? {
