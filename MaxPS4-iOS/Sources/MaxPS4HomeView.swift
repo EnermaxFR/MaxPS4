@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 private enum MaxPS4Section: Hashable {
@@ -748,6 +749,32 @@ struct MaxPS4HomeView: View {
                     .font(.caption.monospaced())
                     .foregroundStyle(.white.opacity(0.75))
                     .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    UIPasteboard.general.string = [
+                        emulator.status,
+                        emulator.runtimeDiagnostic,
+                        emulator.runtimeOutput
+                    ].filter { !$0.isEmpty }.joined(separator: "\n\n")
+                } label: {
+                    Label("Copier le diagnostic", systemImage: "doc.on.doc")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .tint(.cyan)
+
+                if emulator.isRunning {
+                    Button {
+                        emulator.stop()
+                    } label: {
+                        Label("Arrêter la session", systemImage: "stop.fill")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.orange)
+                }
             }
 
             if !emulator.runtimeOutput.isEmpty {
