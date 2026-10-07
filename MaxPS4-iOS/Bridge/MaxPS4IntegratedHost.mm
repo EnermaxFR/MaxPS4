@@ -381,7 +381,7 @@
             return;
         }
 
-        char liveBuf[1024] = {};
+        char liveBuf[4096] = {};
         maxps4_backend_live_diagnostic(liveBuf, sizeof(liveBuf));
         NSString *live = [NSString stringWithUTF8String:liveBuf] ?: @"aucun diagnostic live";
         NSTimeInterval elapsed = self.bootStartedAt ? -[self.bootStartedAt timeIntervalSinceNow] : 0;
