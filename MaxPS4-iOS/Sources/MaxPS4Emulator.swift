@@ -273,19 +273,18 @@ final class MaxPS4Emulator: ObservableObject {
             let declaredSize = be64(0x18)
             // Header offsets are displayed as diagnostics only; layout is not
             // trusted as an authenticated or decrypted PKG index.
-            let entryTableOffset = UInt64(be32(0x00 + 0x18 + 0x08))
-            let tableCheck = count > 0 && count <= 100_000
-                && entryTableOffset <= size
-                ? "index potentiel dans le fichier (non vérifié)"
-                : "index non validé"
+            let rawField20 = be32(0x20)
+            let countCheck = count > 0 && count <= 100_000 && secondCount <= count
+                ? "compteurs plausibles, contenu non vérifié"
+                : "compteurs à vérifier"
             let message = [
                 "Structure PKG • lecture seule",
                 "Taille réelle : \(size) octets",
                 "Taille déclarée : \(declaredSize == 0 ? "absente" : String(declaredSize))",
                 "Entrées déclarées : \(count)",
                 "Compteur secondaire : \(secondCount)",
-                "Décalage d'index candidat : 0x\(String(entryTableOffset, radix: 16))",
-                "Contrôle : \(tableCheck)",
+                "Champ brut 0x20 : 0x\(String(rawField20, radix: 16)) (non interprété)",
+                "Contrôle : \(countCheck)",
                 "Entrées internes : non listées, potentiellement protégées",
                 "Déchiffrement et exécution : non disponibles"
             ]
