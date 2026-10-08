@@ -26,7 +26,8 @@ struct PrototypeSmokeTest {
             ("Relocalisation relative x86-64", MaxPS4ELFLoader.relativeRelocationSelfTest()),
             ("Relocalisations groupées atomiques", MaxPS4ELFLoader.relocationBatchSelfTest()),
             ("Inventaire des relocalisations", MaxPS4ELFLoader.relocationSelfTest()),
-            ("Intégration ELF-CPU-mémoire", MaxPS4ELFLoader.integrationTest())
+            ("Intégration ELF-CPU-mémoire", MaxPS4ELFLoader.integrationTest()),
+            ("ELF-CPU : branchement conditionnel et écriture mémoire", MaxPS4ELFLoader.controlFlowIntegrationTest())
         ]
         for (name, passed) in checks {
             print("\(passed ? "PASS" : "FAIL") — \(name)")
