@@ -268,6 +268,30 @@ struct MaxPS4CPUPrototype {
                 let value = UInt32(truncatingIfNeeded: registers[Int(modrm & 7)])
                 zeroFlag = (value & immediate) == 0
                 rip += 6
+            } else if opcode == 0xC1 { // SHL/SHR/SAR r/m32, imm8 (register only)
+                guard program.count - rip >= 3 else { throw CPUError.truncatedInstruction }
+                let modrm = program[rip + 1]
+                guard modrm & 0xC0 == 0xC0 else { throw CPUError.unsupportedOpcode }
+                let operation = (modrm >> 3) & 7
+                guard operation == 4 || operation == 5 || operation == 7 else {
+                    throw CPUError.unsupportedOpcode
+                }
+                let index = Int(modrm & 7)
+                let shift = Int(program[rip + 2] & 31)
+                if shift > 0 {
+                    let value = UInt32(truncatingIfNeeded: registers[index])
+                    let result: UInt32
+                    if operation == 4 {
+                        result = value << shift
+                    } else if operation == 5 {
+                        result = value >> shift
+                    } else {
+                        result = UInt32(bitPattern: Int32(bitPattern: value) >> shift)
+                    }
+                    registers[index] = UInt64(result)
+                    zeroFlag = result == 0
+                }
+                rip += 3
             } else if opcode == 0x85 { // TEST r/m32, r32 (register-only)
                 guard rip + 2 <= program.count else { throw CPUError.truncatedInstruction }
                 let modrm = program[rip + 1]
@@ -1206,6 +1230,30 @@ extension MaxPS4CPUPrototype {
     }
 
     /// Exercise bounded backward jumps and deterministic instruction limits.
+    static func shiftRegisterSelfTest() -> Bool {
+        do {
+            var left = Self()
+            try left.run([0xB8, 21, 0, 0, 0, 0xC1, 0xE0, 1, 0xC3])
+            guard left.rax == 42, !left.zeroFlag else { return false }
+            var right = Self()
+            try right.run([0xB9, 84, 0, 0, 0, 0xC1, 0xE9, 1, 0xC3])
+            guard right.registers[1] == 42 else { return false }
+            var signed = Self()
+            try signed.run([0xB8, 0x00, 0x00, 0x00, 0x80, 0xC1, 0xF8, 1, 0xC3])
+            guard signed.rax == 0xC0000000 else { return false }
+            var zeroShift = Self()
+            try zeroShift.run([0xB8, 0, 0, 0, 0, 0xC1, 0xE0, 0, 0xC3])
+            guard zeroShift.rax == 0, !zeroShift.zeroFlag else { return false }
+            var invalid = Self()
+            do { try invalid.run([0xC1, 0xC0, 1]); return false }
+            catch CPUError.unsupportedOpcode {}
+            var truncated = Self()
+            do { try truncated.run([0xC1, 0xE0]); return false }
+            catch CPUError.truncatedInstruction {}
+            return true
+        } catch { return false }
+    }
+
     static func extendedTestOpcodeSelfTest() -> Bool {
         do {
             var bytes = Self()
