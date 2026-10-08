@@ -229,6 +229,27 @@ enum MaxPS4ELFLoader {
             return try rejects(64 + 32, 0xFF)
                 && rejects(64 + 4, 0xFF)
                 && rejects(64 + 9, 0xFF)
+                && {
+                    // Point d'entrée placé dans la zone BSS, hors du code ELF.
+                    var corrupted = original
+                    let segmentAddress = (0..<8).reduce(UInt64(0)) {
+                        $0 | (UInt64(original[64 + 16 + $1]) << (8 * $1))
+                    }
+                    let fileBytes = (0..<8).reduce(UInt64(0)) {
+                        $0 | (UInt64(original[64 + 32 + $1]) << (8 * $1))
+                    }
+                    let memoryBytes = (0..<8).reduce(UInt64(0)) {
+                        $0 | (UInt64(original[64 + 40 + $1]) << (8 * $1))
+                    }
+                    guard fileBytes < memoryBytes else { return false }
+                    let entry = segmentAddress + fileBytes
+                    for index in 0..<8 {
+                        corrupted[24 + index] = UInt8(truncatingIfNeeded: entry >> (8 * index))
+                    }
+                    try corrupted.write(to: url, options: .atomic)
+                    do { _ = try load(url: url); return false }
+                    catch LoaderError.invalid { return true }
+                }()
         } catch { return false }
     }
 
@@ -363,7 +384,8 @@ enum MaxPS4ELFLoader {
                   source <= UInt64(file.count),
                   fileSize <= UInt64(file.count) - source else { throw LoaderError.invalid }
             if memorySize == 0 { continue }
-            if flags & 1 != 0 && entry >= address && entry < address + memorySize {
+            // The entry must point to executable file-backed bytes, never zero-filled BSS.
+            if flags & 1 != 0 && entry >= address && entry < address + fileSize {
                 entryCovered = true
             }
             try memory.mapZeroFilled(at: address, size: Int(memorySize))
