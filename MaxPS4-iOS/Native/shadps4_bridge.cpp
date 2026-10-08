@@ -37,3 +37,21 @@ extern "C" int maxps4_native_elf_entry_point(const std::uint8_t* data,
     *entry = value;
     return 1;
 }
+
+// PS4 SELF header layout adapted from shadPS4 src/core/loader/elf.h,
+// Copyright 2024 shadPS4 Emulator Project, GPL-2.0-or-later.
+// Metadata-only inspection; does not decrypt, extract or execute a SELF.
+extern "C" int maxps4_native_self_segment_count(const std::uint8_t* data,
+                                                   std::size_t count,
+                                                   std::uint16_t* segment_count) noexcept {
+    if (!segment_count || !data || count < 32 ||
+        maxps4_native_executable_signature(data, count) != 2) return 0;
+    if (data[6] != 1) return 0; // little-endian SELF
+    const std::uint16_t segments = std::uint16_t(data[24]) |
+                                   (std::uint16_t(data[25]) << 8);
+    if (segments == 0 || segments > 256) return 0;
+    // SELF segment headers are 32 bytes each; reject incomplete tables.
+    if (std::size_t(segments) > (count - 32) / 32) return 0;
+    *segment_count = segments;
+    return 1;
+}

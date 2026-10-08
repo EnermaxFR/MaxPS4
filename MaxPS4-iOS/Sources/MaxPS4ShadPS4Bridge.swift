@@ -98,3 +98,36 @@ extension MaxPS4NativeLinkCheck {
             nativeELFEntryPoint(Data([0x4f, 0x15, 0x3d, 0x1d])) == nil
     }
 }
+
+@_silgen_name("maxps4_native_self_segment_count")
+private func maxps4_native_self_segment_count(
+    _ bytes: UnsafePointer<UInt8>?, _ count: Int, _ segments: UnsafeMutablePointer<UInt16>?
+) -> Int32
+
+extension MaxPS4NativeLinkCheck {
+    static func nativeSELFSegmentCount(_ data: Data) -> UInt16? {
+        var segments: UInt16 = 0
+        let accepted = data.withUnsafeBytes { raw in
+            maxps4_native_self_segment_count(
+                raw.bindMemory(to: UInt8.self).baseAddress, data.count, &segments
+            )
+        }
+        return accepted == 1 ? segments : nil
+    }
+
+    static var nativeSELFHeaderSelfTest: Bool {
+        var sample = Data(repeating: 0, count: 64)
+        sample.replaceSubrange(0..<4, with: [0x4F, 0x15, 0x3D, 0x1D])
+        sample[6] = 1
+        sample[24] = 1
+        guard nativeSELFSegmentCount(sample) == 1 else { return false }
+        guard nativeSELFSegmentCount(Data(sample.prefix(63))) == nil else { return false }
+        sample[24] = 2
+        guard nativeSELFSegmentCount(sample) == nil else { return false }
+        sample[24] = 0
+        guard nativeSELFSegmentCount(sample) == nil else { return false }
+        sample[24] = 1
+        sample[6] = 2
+        return nativeSELFSegmentCount(sample) == nil
+    }
+}
