@@ -111,6 +111,31 @@ enum MaxPS4ELFLoader {
         }
     }
 
+    static func relocationSelfTest() -> Bool {
+        do {
+            let url = try createImportDemo()
+            defer { try? FileManager.default.removeItem(at: url) }
+            var bytes = [UInt8](try Data(contentsOf: url))
+            bytes += [UInt8](repeating: 0, count: 0x100)
+            func put(_ value: UInt64, _ offset: Int, _ width: Int) {
+                for i in 0..<width { bytes[offset + i] = UInt8(truncatingIfNeeded: value >> (i * 8)) }
+            }
+            put(4, 60, 2) // four section headers
+            put(4, 0x240 + 4, 4) // SHT_RELA
+            put(0x280, 0x240 + 24, 8)
+            put(24, 0x240 + 32, 8)
+            put(24, 0x240 + 56, 8)
+            try Data(bytes).write(to: url, options: .atomic)
+            guard try inspectImports(url: url).contains("1 entrées de relocalisation") else { return false }
+            put(7, 0x240 + 56, 8) // invalid record stride must be rejected
+            try Data(bytes).write(to: url, options: .atomic)
+            do { _ = try inspectImports(url: url); return false }
+            catch LoaderError.invalid { return true }
+        } catch {
+            return false
+        }
+    }
+
     /// Bounds-checked ELF64 section-table import inventory (SHT_DYNSYM).
     /// Diagnostic only: no relocation application, SELF extraction or execution.
     static func inspectImports(url: URL) throws -> String {
@@ -140,8 +165,11 @@ enum MaxPS4ELFLoader {
         for i in 0..<Int(count) {
             let sec = section(i)
             if sec.type == 4 || sec.type == 9 {
-                guard valid(sec.offset, sec.size) else { throw LoaderError.invalid }
-                relocations += 1
+                let requiredStride: UInt64 = sec.type == 4 ? 24 : 16
+                guard valid(sec.offset, sec.size), sec.stride == requiredStride,
+                      sec.size % requiredStride == 0,
+                      sec.size / requiredStride <= 4096 else { throw LoaderError.invalid }
+                relocations += Int(sec.size / requiredStride)
             }
             guard sec.type == 11 else { continue } // ELF SHT_DYNSYM
             guard sec.link < count, sec.stride == 24, valid(sec.offset, sec.size),
@@ -163,7 +191,7 @@ enum MaxPS4ELFLoader {
             }
         }
         let shown = symbols.prefix(12).joined(separator: ", ")
-        return "ELF64 : \(symbols.count) importations non définies • \(relocations) sections de relocalisation • " +
+        return "ELF64 : \(symbols.count) importations non définies • \(relocations) entrées de relocalisation • " +
                (shown.isEmpty ? "aucun nom disponible" : shown) +
                " • inventaire uniquement, résolution et application des relocalisations non implémentées"
     }
