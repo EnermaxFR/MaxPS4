@@ -223,7 +223,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo '## MaxPS4 NOVA — IPA générée'
+            echo '## MaxPS4 — IPA générée'
             echo ''
             echo "- Commit : ${GITHUB_SHA}"
             echo "- Build : ${GITHUB_RUN_NUMBER}"
@@ -236,7 +236,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo '## MaxPS4 NOVA — Échec du build'
+            echo '## MaxPS4 — Échec du build'
             echo ''
             echo '- Lire la première étape en erreur.'
             echo '- Télécharger **MaxPS4-build-diagnostics** si disponible.'
