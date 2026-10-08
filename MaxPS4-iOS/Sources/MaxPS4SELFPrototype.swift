@@ -76,7 +76,7 @@ enum MaxPS4SELFPrototype {
             overlapping.replaceSubrange(0..<4, with: [0x4f, 0x15, 0x3d, 0x1d])
             overlapping[6] = 1
             overlapping[24] = 2
-            overlapping[59] = 0x11 // first segment memory size = 0x110000
+            overlapping[58] = 0x11 // first segment memory size = 0x110000
             overlapping[88] = 8    // second segment memory size = 8
             do { _ = try mapPlainSegments(overlapping); return false }
             catch LoadError.invalid {}
