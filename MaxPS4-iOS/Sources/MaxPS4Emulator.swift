@@ -172,29 +172,25 @@ final class MaxPS4Emulator: ObservableObject {
                         (value << 8) | UInt64(header[offset + i])
                     }
                 }
-                let declaredSize = bigEndian64(0x18)
+                // PS4 PKG: 0x18 is the 32-bit entry-table offset, not package length.
+                let tableOffset = (0..<4).reduce(UInt32(0)) { ($0 << 8) | UInt32(header[0x18 + $1]) }
+                let declaredBodySize = bigEndian64(0x28)
                 let sizeCheck: String
-                if declaredSize == 0 {
-                    sizeCheck = "taille déclarée absente"
-                } else if declaredSize == UInt64(byteCount) {
-                    sizeCheck = "taille déclarée cohérente"
-                } else {
-                    sizeCheck = "taille déclarée différente du fichier (vérification recommandée)"
-                }
+                sizeCheck = declaredBodySize <= UInt64(byteCount)
+                    ? "taille du corps plausible (champ 0x28, non équivalente au fichier entier)"
+                    : "taille du corps supérieure à la taille réelle"
                 // The PKG header holds a big-endian entry count at offset 0x10.
                 // Report it only as a diagnostic: no extraction or trust decision.
                 let entryCount = (0..<4).reduce(UInt32(0)) { value, i in
                     (value << 8) | UInt32(header[0x10 + i])
                 }
-                let secondaryCount = (0..<4).reduce(UInt32(0)) { value, i in
-                    (value << 8) | UInt32(header[0x14 + i])
-                }
+                let secondaryCount = UInt32(header[0x16]) << 8 | UInt32(header[0x17])
                 let tableCheck: String
                 if entryCount == 0 {
                     tableCheck = "aucune entrée déclarée ; table non vérifiée"
                 } else if entryCount > 100_000 {
                     tableCheck = "nombre d’entrées inhabituellement élevé ; table non vérifiée"
-                } else if secondaryCount > entryCount {
+                } else if secondaryCount != entryCount {
                     tableCheck = "compteur secondaire supérieur au total ; en-tête suspect"
                 } else {
                     tableCheck = "compteurs plausibles ; positions et contenu de la table non vérifiés"
@@ -224,6 +220,7 @@ final class MaxPS4Emulator: ObservableObject {
                     "Taille : " + size,
                     "Contrôle en-tête : " + sizeCheck,
                     "Table des entrées : " + entryCheck,
+                    "Décalage table : 0x" + String(tableOffset, radix: 16),
                     "Cohérence compteurs : " + tableCheck,
                     "Content ID : " + (validID ?? "indisponible"),
                     "Title ID : " + (titleID ?? "indisponible"),
@@ -269,23 +266,29 @@ final class MaxPS4Emulator: ObservableObject {
                 (0..<8).reduce(UInt64(0)) { ($0 << 8) | UInt64(header[offset + $1]) }
             }
             let count = UInt64(be32(0x10))
-            let secondCount = UInt64(be32(0x14))
-            let declaredSize = be64(0x18)
+            let scEntryCount = UInt64(UInt16(header[0x14]) << 8 | UInt16(header[0x15]))
+            let secondCount = UInt64(UInt16(header[0x16]) << 8 | UInt16(header[0x17]))
+            let tableOffset = UInt64(be32(0x18))
+            let bodyOffset = be64(0x20)
+            let bodySize = be64(0x28)
+            let entryBytes = count * 32
+            let tableValid = count > 0 && count <= 100_000 && tableOffset <= size && entryBytes <= size - tableOffset
             // Header offsets are displayed as diagnostics only; layout is not
             // trusted as an authenticated or decrypted PKG index.
-            let rawField20 = be32(0x20)
-            let countCheck = count > 0 && count <= 100_000 && secondCount <= count
-                ? "compteurs plausibles, contenu non vérifié"
+            let countCheck = secondCount == count && scEntryCount <= count
+                ? "compteurs cohérents"
                 : "compteurs à vérifier"
             let message = [
                 "Structure PKG • lecture seule",
                 "Taille réelle : \(size) octets",
-                "Taille déclarée : \(declaredSize == 0 ? "absente" : String(declaredSize))",
+                "Corps PKG : offset \(bodyOffset), taille \(bodySize) octets",
                 "Entrées déclarées : \(count)",
+                "Compteur sécurisé : \(scEntryCount)",
                 "Compteur secondaire : \(secondCount)",
-                "Champ brut 0x20 : 0x\(String(rawField20, radix: 16)) (non interprété)",
+                "Offset table : 0x\(String(tableOffset, radix: 16))",
+                "Table (\(entryBytes) octets) : \(tableValid ? "bornes valides" : "bornes invalides")",
                 "Contrôle : \(countCheck)",
-                "Entrées internes : non listées, potentiellement protégées",
+                "Entrées internes : non déchiffrées ni extraites",
                 "Déchiffrement et exécution : non disponibles"
             ]
             status = message.joined(separator: "\n")
