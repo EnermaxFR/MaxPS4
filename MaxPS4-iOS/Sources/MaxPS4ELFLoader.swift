@@ -352,6 +352,55 @@ enum MaxPS4ELFLoader {
     }
 
     /// Dedicated end-to-end diagnostic using only a small synthetic ELF64 image.
+    /// End-to-end ELF64 fixture with arithmetic, conditional jump and guest-memory write.
+    /// This uses only synthetic x86-64 instructions, not a PS4 game executable.
+    static func controlFlowIntegrationTest() -> Bool {
+        var bytes = [UInt8](repeating: 0, count: 160)
+        func put(_ value: UInt64, _ offset: Int, _ width: Int) {
+            for i in 0..<width {
+                bytes[offset + i] = UInt8(truncatingIfNeeded: value >> (i * 8))
+            }
+        }
+        bytes[0...6] = [0x7F, 0x45, 0x4C, 0x46, 2, 1, 1]
+        put(2, 16, 2)
+        put(62, 18, 2)
+        put(1, 20, 4)
+        put(0x1000, 24, 8)
+        put(64, 32, 8)
+        put(56, 54, 2)
+        put(1, 56, 2)
+        put(1, 64, 4)
+        put(7, 68, 4)
+        put(120, 72, 8)
+        put(29, 96, 8)
+        put(64, 104, 8)
+        let program: [UInt8] = [
+            0xB8, 40, 0, 0, 0,       // MOV EAX,40
+            0x83, 0xC0, 2,          // ADD EAX,2
+            0x83, 0xF8, 42,         // CMP EAX,42
+            0x74, 5,                // JZ: skip bad MOV
+            0xB8, 1, 0, 0, 0,       // MOV EAX,1 (must not execute)
+            0x48, 0xA3, 0x28, 0x10, 0, 0, 0, 0, 0, 0, // store RAX
+            0xC3
+        ]
+        guard program.count == 29 else { return false }
+        bytes.replaceSubrange(120..<149, with: program)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        do {
+            try Data(bytes).write(to: url)
+            let loaded = try load(url: url)
+            var cpu = MaxPS4CPUPrototype()
+            try cpu.runLoadedTest(memory: loaded.memory, entry: loaded.entry, length: program.count)
+            let output = try cpu.guestMemory.read(at: 0x1028, count: 8)
+            return loaded.segments == 1 && cpu.rax == 42 &&
+                cpu.executedInstructions == 6 &&
+                output == Data([42, 0, 0, 0, 0, 0, 0, 0])
+        } catch {
+            return false
+        }
+    }
+
     static func integrationTest() -> Bool {
         var bytes = [UInt8](repeating: 0, count: 160)
         func put(_ value: UInt64, _ offset: Int, _ width: Int) {
