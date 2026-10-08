@@ -1183,6 +1183,24 @@ extension MaxPS4CPUPrototype {
         } catch { return false }
     }
 
+    /// Exercise bounded backward jumps and deterministic instruction limits.
+    static func backwardLoopAndLimitSelfTest() -> Bool {
+        do {
+            var loop = Self()
+            // MOV EAX,3; SUB EAX,1; JNZ -5; RET
+            try loop.run([0xB8, 3, 0, 0, 0, 0x83, 0xE8, 1, 0x75, 0xFB, 0xC3])
+            guard loop.rax == 0, loop.zeroFlag,
+                  loop.executedInstructions == 8 else { return false }
+            var runaway = Self()
+            do {
+                try runaway.run([0xEB, 0xFE], limit: 12)
+                return false
+            } catch CPUError.instructionLimit {
+                return runaway.executedInstructions == 12
+            }
+        } catch { return false }
+    }
+
     static func nearConditionalBranchSelfTest() -> Bool {
         do {
             // XOR EAX,EAX -> ZF=1, JZ skips the first MOV.
