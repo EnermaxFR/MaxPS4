@@ -768,6 +768,7 @@ enum MaxPS4VirtualRuntime {
             ("ELF invalide", MaxPS4ELFLoader.malformedImportSelfTest() ? "ELF invalide refusé" : "ELF invalide accepté", "ELF invalide refusé"),
             ("Relocalisations", MaxPS4ELFLoader.relocationSelfTest() ? "Relocalisations OK" : "Relocalisations ÉCHEC", "Relocalisations OK"),
             ("Relocalisation mémoire", MaxPS4ELFLoader.relativeRelocationSelfTest() ? "Relocalisation mémoire OK" : "Relocalisation mémoire ÉCHEC", "Relocalisation mémoire OK"),
+            ("Relocalisations groupées", MaxPS4ELFLoader.relocationBatchSelfTest() ? "Relocalisations groupées OK" : "Relocalisations groupées ÉCHEC", "Relocalisations groupées OK"),
             ("Bibliothèques", testPS4LibraryResolver(), "Bibliothèques système OK"),
             ("Mémoire", testPS4VirtualMemoryService(), "Mémoire virtuelle OK"),
             ("Processus", testProcessMemoryIsolation(), "Processus + mémoire OK"),
