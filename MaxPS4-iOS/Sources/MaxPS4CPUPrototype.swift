@@ -135,6 +135,14 @@ struct MaxPS4CPUPrototype {
             let opcode = program[rip]
             if opcode == 0x90 { // NOP
                 rip += 1
+            } else if opcode == 0x98 { // CWDE: sign-extend AX into EAX
+                let value = Int16(bitPattern: UInt16(truncatingIfNeeded: registers[0]))
+                registers[0] = UInt64(UInt32(bitPattern: Int32(value)))
+                rip += 1
+            } else if opcode == 0x99 { // CDQ: sign-extend EAX into EDX:EAX
+                let eax = Int32(bitPattern: UInt32(truncatingIfNeeded: registers[0]))
+                registers[2] = eax < 0 ? UInt64(UInt32.max) : 0
+                rip += 1
             } else if opcode == 0x0F { // Two-byte opcode: isolated synthetic SYSCALL
                 guard rip + 2 <= program.count else { throw CPUError.truncatedInstruction }
                 let second = program[rip + 1]
@@ -1273,6 +1281,22 @@ extension MaxPS4CPUPrototype {
                   try guessNumber(target: 20, guess: 20) else { return false }
             do { _ = try guessNumber(target: 21, guess: 7); return false }
             catch CPUError.unsupportedOpcode { return true }
+        } catch { return false }
+    }
+
+    static func signExtensionSelfTest() -> Bool {
+        do {
+            var negative = Self()
+            // MOV EAX,0x8001; CWDE -> EAX=0xffff8001; CDQ -> EDX=0xffffffff.
+            try negative.run([0xB8, 0x01, 0x80, 0, 0, 0x98, 0x99, 0xC3])
+            guard negative.rax == 0xffff8001,
+                  negative.registers[2] == 0xffffffff else { return false }
+            var positive = Self()
+            try positive.run([0xB8, 0x2A, 0, 0, 0, 0x98, 0x99, 0xC3])
+            guard positive.rax == 42, positive.registers[2] == 0 else { return false }
+            var zero = Self()
+            try zero.run([0xB8, 0, 0, 0, 0x98, 0x99, 0xC3])
+            return zero.rax == 0 && zero.registers[2] == 0
         } catch { return false }
     }
 
