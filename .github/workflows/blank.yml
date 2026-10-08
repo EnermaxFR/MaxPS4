@@ -38,6 +38,7 @@ jobs:
             MaxPS4-iOS/Sources/MaxPS4GuestMemory.swift \
             MaxPS4-iOS/Sources/MaxPS4CPUPrototype.swift \
             MaxPS4-iOS/Sources/MaxPS4ELFLoader.swift \
+            MaxPS4-iOS/Sources/MaxPS4SELFPrototype.swift \
             MaxPS4-iOS/Tests/PrototypeSmokeTest.swift \
             -o /tmp/maxps4-prototype-tests 2>&1 | tee build/diagnostics/smoke-compile.log
           /tmp/maxps4-prototype-tests 2>&1 | tee build/diagnostics/smoke-results.log
