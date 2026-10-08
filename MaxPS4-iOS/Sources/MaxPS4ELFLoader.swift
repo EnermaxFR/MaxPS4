@@ -228,7 +228,7 @@ enum MaxPS4ELFLoader {
             // Filesz exceeds memsz; unsupported permissions; input beyond EOF.
             return try rejects(64 + 32, 0xFF)
                 && rejects(64 + 4, 0xFF)
-                && rejects(64 + 8, 0xFF)
+                && rejects(64 + 9, 0xFF)
         } catch { return false }
     }
 
