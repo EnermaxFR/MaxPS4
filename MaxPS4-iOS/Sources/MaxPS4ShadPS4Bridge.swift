@@ -42,3 +42,29 @@ enum MaxPS4NativeLinkCheck {
         maxps4_shadps4_utility_probe() == 1
     }
 }
+
+@_silgen_name("maxps4_native_executable_signature")
+private func maxps4_native_executable_signature(
+    _ bytes: UnsafePointer<UInt8>?, _ count: Int
+) -> Int32
+
+extension MaxPS4NativeLinkCheck {
+    static func executableSignature(_ data: Data) -> Int32 {
+        data.withUnsafeBytes { raw in
+            maxps4_native_executable_signature(
+                raw.bindMemory(to: UInt8.self).baseAddress, data.count
+            )
+        }
+    }
+
+    static var executableSignatureSelfTest: Bool {
+        var elf = Data(repeating: 0, count: 20)
+        elf.replaceSubrange(0..<6, with: [0x7f, 0x45, 0x4c, 0x46, 2, 1])
+        elf[18] = 0x3e
+        let selfHeader = Data([0x4f, 0x15, 0x3d, 0x1d])
+        return executableSignature(elf) == 1 &&
+            executableSignature(selfHeader) == 2 &&
+            executableSignature(Data([0x7f, 0x45])) == 0 &&
+            executableSignature(Data()) == 0
+    }
+}
