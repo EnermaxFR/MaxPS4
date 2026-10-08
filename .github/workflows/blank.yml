@@ -42,6 +42,21 @@ jobs:
             -o /tmp/maxps4-prototype-tests 2>&1 | tee build/diagnostics/smoke-compile.log
           /tmp/maxps4-prototype-tests 2>&1 | tee build/diagnostics/smoke-results.log
 
+      - name: Compile upstream shadPS4 C++ utility for iOS arm64
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          xcrun --sdk iphoneos clang++ \
+            -std=c++23 \
+            -target arm64-apple-ios16.0 \
+            -isysroot "$SDK" \
+            -I MaxPS4-iOS/Native/shadps4 \
+            -c MaxPS4-iOS/Native/shadps4/common/string_util.cpp \
+            -o build/diagnostics/shadps4-string-util-ios-arm64.o
+          file build/diagnostics/shadps4-string-util-ios-arm64.o
+          xcrun lipo -archs build/diagnostics/shadps4-string-util-ios-arm64.o | grep -w arm64
+
       - name: Swift source typecheck
         shell: bash
         run: |
