@@ -233,3 +233,50 @@ extern "C" int maxps4_native_guest_run_with_backend(
 extern "C" int maxps4_native_arm64_jit_ready() noexcept {
     return 0;
 }
+
+// Offline x86->AArch64 code emission prototype. Generated instruction words are
+// DATA ONLY: never mapped executable or jumped into. No iOS JIT entitlement implied.
+// Subset: MOV EAX,imm32; ADD EAX,imm12; NOP; RET. Refuse other instructions.
+extern "C" int maxps4_arm64_translate_preview(
+    const std::uint8_t* guest, std::size_t count,
+    std::uint32_t* output, std::size_t capacity,
+    std::size_t* emitted) noexcept {
+    if (!guest || !output || !emitted || count == 0 || count > 4096 ||
+        capacity == 0 || capacity > 4096) return 0;
+    std::size_t pc = 0, n = 0;
+    bool terminated = false;
+    auto put = [&](std::uint32_t instruction) noexcept -> bool {
+        if (n >= capacity) return false;
+        output[n++] = instruction;
+        return true;
+    };
+    while (pc < count) {
+        const std::uint8_t opcode = guest[pc++];
+        if (opcode == 0xB8) {
+            if (count - pc < 4) return 0;
+            std::uint32_t imm = 0;
+            for (unsigned i = 0; i < 4; ++i)
+                imm |= std::uint32_t(guest[pc+i]) << (i*8);
+            pc += 4;
+            // MOVZ W0,#lo16; MOVK W0,#hi16,LSL#16
+            if (!put(0x52800000u | ((imm & 0xffffu) << 5)) ||
+                !put(0x72A00000u | (((imm >> 16) & 0xffffu) << 5))) return 0;
+        } else if (opcode == 0x05) {
+            if (count - pc < 4) return 0;
+            std::uint32_t imm = 0;
+            for (unsigned i = 0; i < 4; ++i)
+                imm |= std::uint32_t(guest[pc+i]) << (i*8);
+            pc += 4;
+            if (imm > 4095 || !put(0x11000000u | (imm << 10))) return 0;
+        } else if (opcode == 0x90) {
+            if (!put(0xD503201Fu)) return 0; // ARM64 NOP
+        } else if (opcode == 0xC3) {
+            if (pc != count || !put(0xD65F03C0u)) return 0; // ARM64 RET
+            terminated = true;
+            break;
+        } else return 0;
+    }
+    if (!terminated) return 0;
+    *emitted = n;
+    return 1;
+}

@@ -361,3 +361,40 @@ extension MaxPS4NativeLinkCheck {
         return output.result == 42 && !output.usedJIT && !isARM64JITReady
     }
 }
+
+@_silgen_name("maxps4_arm64_translate_preview")
+private func maxps4_arm64_translate_preview(
+    _ guest: UnsafePointer<UInt8>?, _ count: Int,
+    _ words: UnsafeMutablePointer<UInt32>?, _ capacity: Int,
+    _ emitted: UnsafeMutablePointer<Int>?
+) -> Int32
+
+extension MaxPS4NativeLinkCheck {
+    /// Disassembles a tiny x86 subset into ARM64 machine words as inert data.
+    /// These bytes are never executed and do not make the backend JIT-ready.
+    static func arm64TranslationPreview(_ guest: Data) -> [UInt32]? {
+        var words = [UInt32](repeating: 0, count: 128)
+        var emitted = 0
+        let accepted = guest.withUnsafeBytes { raw in
+            words.withUnsafeMutableBufferPointer { buffer in
+                maxps4_arm64_translate_preview(
+                    raw.bindMemory(to: UInt8.self).baseAddress, guest.count,
+                    buffer.baseAddress, buffer.count, &emitted
+                )
+            }
+        }
+        guard accepted == 1, emitted > 0, emitted <= words.count else { return nil }
+        return Array(words.prefix(emitted))
+    }
+
+    static var arm64TranslationPreviewSelfTest: Bool {
+        let program = Data([0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3])
+        guard arm64TranslationPreview(program) == [
+            0x52800500, 0x72A00000, 0x11000800, 0xD65F03C0
+        ] else { return false }
+        return arm64TranslationPreview(Data([0x0F, 0x05])) == nil &&
+            arm64TranslationPreview(Data([0xB8, 1])) == nil &&
+            arm64TranslationPreview(Data([0x90])) == nil &&
+            arm64TranslationPreview(Data([0xC3, 0x90])) == nil
+    }
+}
