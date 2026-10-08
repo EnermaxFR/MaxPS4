@@ -13,6 +13,7 @@ struct PrototypeSmokeTest {
             ("AND bit-à-bit et drapeau zéro", MaxPS4CPUPrototype.bitwiseAndSelfTest()),
             ("OR bit-à-bit et drapeau zéro", MaxPS4CPUPrototype.bitwiseOrSelfTest()),
             ("CMP registres et drapeau zéro", MaxPS4CPUPrototype.compareRegistersSelfTest()),
+            ("XOR inverse et validation", MaxPS4CPUPrototype.xorRegisterSelfTest()),
             ("Chargeur ELF64", MaxPS4ELFLoader.selfTest()),
             ("Importations ELF64 synthétiques", MaxPS4ELFLoader.importDemoSelfTest()),
             ("Relocalisation relative x86-64", MaxPS4ELFLoader.relativeRelocationSelfTest()),
