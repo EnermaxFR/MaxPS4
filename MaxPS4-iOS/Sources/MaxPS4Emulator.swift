@@ -239,6 +239,60 @@ final class MaxPS4Emulator: ObservableObject {
 
     /// Inspect only the public PKG header and the declared entry-table bounds.
     /// Entries may be encrypted; no content is extracted or executed.
+    /// Reads PKG entry descriptors only. Does not extract, decrypt or execute contents.
+    private func pkgEntryReport(_ url: URL) throws -> String {
+        let attributes = try fileManager.attributesOfItem(atPath: url.path)
+        let fileSize = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
+        guard fileSize >= 128 else { return "Table PKG : en-tête incomplet" }
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let header = try handle.read(upToCount: 128) ?? Data()
+        guard header.count == 128,
+              Array(header.prefix(4)) == [0x7F, 0x43, 0x4E, 0x54] else {
+            return "Table PKG : signature incorrecte"
+        }
+        func number(_ data: Data, _ at: Int) -> UInt64 {
+            (0..<4).reduce(UInt64(0)) { ($0 << 8) | UInt64(data[at + $1]) }
+        }
+        let count = number(header, 0x10)
+        let offset = number(header, 0x18)
+        guard count > 0, count <= 4096, offset <= fileSize,
+              count <= (fileSize - offset) / 32 else {
+            return "Table PKG : limites invalides ou trop d'entrées"
+        }
+        try handle.seek(toOffset: offset)
+        let table = try handle.read(upToCount: Int(count * 32)) ?? Data()
+        guard table.count == Int(count * 32) else { return "Table PKG : lecture incomplète" }
+        var lines = ["Table PKG : \(count) entrées (descripteurs, lecture seule)"]
+        var valid = 0
+        for index in 0..<Int(count) {
+            let start = index * 32
+            let id = number(table, start)
+            let entryOffset = number(table, start + 16)
+            let entrySize = number(table, start + 20)
+            let within = entryOffset <= fileSize && entrySize <= fileSize - entryOffset
+            if within { valid += 1 }
+            if index < 40 {
+                lines.append("#\(index + 1) id=0x\(String(id, radix: 16)) offset=\(entryOffset) taille=\(entrySize) " + (within ? "✅" : "❌"))
+            }
+        }
+        lines.append("Contrôle des plages : \(valid)/\(count) entrées dans le fichier")
+        lines.append("Noms internes et code exécutable : non accessibles par cette analyse")
+        return lines.joined(separator: "\n")
+    }
+
+    func inspectPKGEntries(_ game: MaxPS4Game) {
+        guard game.fileName.lowercased().hasSuffix(".pkg") else {
+            status = "Analyse des entrées : choisissez un PKG"
+            return
+        }
+        do {
+            status = try pkgEntryReport(URL(fileURLWithPath: game.localPath))
+        } catch {
+            status = "Analyse des entrées : \(error.localizedDescription)"
+        }
+    }
+
     func inspectPKGStructure(_ game: MaxPS4Game) {
         guard game.fileName.lowercased().hasSuffix(".pkg") else {
             status = "Structure PKG : sélectionnez un fichier .pkg"
@@ -504,7 +558,7 @@ final class MaxPS4Emulator: ObservableObject {
                     "5/5 ⛔ Aucun noyau, GPU ou runtime PS4 opérationnel",
                     "Résultat : aucun code du jeu exécuté. Diagnostic terminé."
                 ]
-                status = details.joined(separator: "\n")
+                status = details.joined(separator: "\n") + "\n\n" + (try pkgEntryReport(url))
             } else if name.hasSuffix(".elf") || name == "eboot.bin" || name.hasSuffix(".self") {
                 let handle = try FileHandle(forReadingFrom: url)
                 defer { try? handle.close() }
