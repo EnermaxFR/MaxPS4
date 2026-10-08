@@ -37,6 +37,13 @@ final class MaxPS4Emulator: ObservableObject {
         nativeEngine?.isReady == true
     }
 
+    func testShadPS4NativeUtility() {
+        let linked = MaxPS4NativeLinkCheck.isUpstreamUtilityLinked
+        status = linked
+            ? "shadPS4 C++ : liaison native vérifiée sur cet appareil. Le moteur PS4 reste incomplet."
+            : "shadPS4 C++ : test de liaison échoué. Aucun jeu ne peut être lancé."
+    }
+
     func importGame(from url: URL) {
         let access = url.startAccessingSecurityScopedResource()
         defer {
