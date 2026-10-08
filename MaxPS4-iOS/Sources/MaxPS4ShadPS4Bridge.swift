@@ -288,7 +288,7 @@ extension MaxPS4NativeLinkCheck {
         var elf = Data(repeating: 0, count: 64)
         elf.replaceSubrange(0..<7, with: [0x7F, 0x45, 0x4C, 0x46, 2, 1, 1])
         elf[18] = 0x3E
-        for type: UInt16 in [0xFE00, 0xFE0C, 0xFE10, 0xFE18] {
+        for type in [UInt16(0xFE00), 0xFE0C, 0xFE10, 0xFE18] {
             elf[16] = UInt8(truncatingIfNeeded: type)
             elf[17] = UInt8(truncatingIfNeeded: type >> 8)
             guard nativePS4ELFType(elf) == type else { return false }
