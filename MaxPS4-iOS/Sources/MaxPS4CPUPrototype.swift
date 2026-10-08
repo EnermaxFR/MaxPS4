@@ -313,6 +313,25 @@ struct MaxPS4CPUPrototype {
                         try storeRAX(address: address)
                     }
                     rip += 10
+                } else if next == 0x81 { // ADD/SUB/CMP r64, sign-extended imm32
+                    guard program.count - rip >= 7 else { throw CPUError.truncatedInstruction }
+                    let modrm = program[rip + 2]
+                    guard modrm & 0xC0 == 0xC0 else { throw CPUError.unsupportedOpcode }
+                    let operation = (modrm >> 3) & 7
+                    guard operation == 0 || operation == 5 || operation == 7 else {
+                        throw CPUError.unsupportedOpcode
+                    }
+                    let index = Int(modrm & 7)
+                    let raw = (0..<4).reduce(UInt32(0)) {
+                        $0 | (UInt32(program[rip + 3 + $1]) << ($1 * 8))
+                    }
+                    let immediate = UInt64(bitPattern: Int64(Int32(bitPattern: raw)))
+                    let result = operation == 0
+                        ? registers[index] &+ immediate
+                        : registers[index] &- immediate
+                    if operation != 7 { registers[index] = result }
+                    zeroFlag = result == 0
+                    rip += 7
                 } else if next == 0x83 { // ADD/SUB/CMP r64, sign-extended imm8
                     guard rip + 4 <= program.count else { throw CPUError.truncatedInstruction }
                     let modrm = program[rip + 2]
@@ -1108,6 +1127,35 @@ enum MaxPS4VirtualRuntime {
 }
 
 extension MaxPS4CPUPrototype {
+    static func immediate32AndControlFlowSelfTest() -> Bool {
+        do {
+            var cpu = Self()
+            // MOV RAX,42; CMP RAX,42; JNZ over RET (not taken);
+            // SUB RAX,2; ADD RAX,2; RET.
+            try cpu.run([
+                0x48, 0xB8, 42, 0, 0, 0, 0, 0, 0, 0,
+                0x48, 0x81, 0xF8, 42, 0, 0, 0,
+                0x75, 0x01, 0x90,
+                0x48, 0x81, 0xE8, 2, 0, 0, 0,
+                0x48, 0x81, 0xC0, 2, 0, 0, 0, 0xC3
+            ])
+            guard cpu.rax == 42, !cpu.zeroFlag else { return false }
+            var negative = Self()
+            try negative.run([
+                0x48, 0xB8, 41, 0, 0, 0, 0, 0, 0, 0,
+                0x48, 0x81, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF, 0xC3
+            ])
+            guard negative.rax == 40 else { return false }
+            var invalid = Self()
+            do { try invalid.run([0x48, 0x81, 0x08, 0, 0, 0, 0]); return false }
+            catch CPUError.unsupportedOpcode {}
+            var truncated = Self()
+            do { try truncated.run([0x48, 0x81, 0xC0, 1]); return false }
+            catch CPUError.truncatedInstruction {}
+            return true
+        } catch { return false }
+    }
+
     static func xorRegisterSelfTest() -> Bool {
         do {
             var cpu = Self()
