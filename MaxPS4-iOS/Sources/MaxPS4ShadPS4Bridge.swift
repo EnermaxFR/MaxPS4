@@ -68,3 +68,33 @@ extension MaxPS4NativeLinkCheck {
             executableSignature(Data()) == 0
     }
 }
+
+@_silgen_name("maxps4_native_elf_entry_point")
+private func maxps4_native_elf_entry_point(
+    _ bytes: UnsafePointer<UInt8>?, _ count: Int, _ entry: UnsafeMutablePointer<UInt64>?
+) -> Int32
+
+extension MaxPS4NativeLinkCheck {
+    static func nativeELFEntryPoint(_ data: Data) -> UInt64? {
+        var entry: UInt64 = 0
+        let valid = data.withUnsafeBytes { raw in
+            maxps4_native_elf_entry_point(
+                raw.bindMemory(to: UInt8.self).baseAddress, data.count, &entry
+            )
+        }
+        return valid == 1 ? entry : nil
+    }
+
+    static var nativeELFEntryPointSelfTest: Bool {
+        var elf = Data(repeating: 0, count: 64)
+        elf.replaceSubrange(0..<7, with: [0x7f, 0x45, 0x4c, 0x46, 2, 1, 1])
+        elf[18] = 0x3e
+        elf[24] = 0x78
+        elf[25] = 0x56
+        elf[26] = 0x34
+        elf[27] = 0x12
+        return nativeELFEntryPoint(elf) == 0x12345678 &&
+            nativeELFEntryPoint(Data(elf.prefix(63))) == nil &&
+            nativeELFEntryPoint(Data([0x4f, 0x15, 0x3d, 0x1d])) == nil
+    }
+}

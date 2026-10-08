@@ -39,7 +39,8 @@ final class MaxPS4Emulator: ObservableObject {
 
     func testShadPS4NativeUtility() {
         let linked = MaxPS4NativeLinkCheck.isUpstreamUtilityLinked &&
-            MaxPS4NativeLinkCheck.executableSignatureSelfTest
+            MaxPS4NativeLinkCheck.executableSignatureSelfTest &&
+            MaxPS4NativeLinkCheck.nativeELFEntryPointSelfTest
         status = linked
             ? "shadPS4 C++ : liaison native vérifiée sur cet appareil. Le moteur PS4 reste incomplet."
             : "shadPS4 C++ : test de liaison échoué. Aucun jeu ne peut être lancé."

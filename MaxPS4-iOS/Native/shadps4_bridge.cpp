@@ -22,3 +22,18 @@ extern "C" int maxps4_native_executable_signature(const std::uint8_t* data,
         return 2;
     return 0;
 }
+
+// Read an ELF64 little-endian entry point without trusting unbounded input.
+// Returns 1 only for a complete x86-64 ELF header (minimum 64 bytes).
+extern "C" int maxps4_native_elf_entry_point(const std::uint8_t* data,
+                                                std::size_t count,
+                                                std::uint64_t* entry) noexcept {
+    if (!entry || !data || count < 64 || maxps4_native_executable_signature(data, count) != 1 ||
+        data[6] != 1) return 0;
+    std::uint64_t value = 0;
+    for (unsigned i = 0; i < 8; ++i) {
+        value |= static_cast<std::uint64_t>(data[24 + i]) << (8 * i);
+    }
+    *entry = value;
+    return 1;
+}
