@@ -197,6 +197,16 @@ struct MaxPS4CPUPrototype {
                 registers[4] = stack + 8
                 registers[index] = value
                 rip += 1
+            } else if opcode >= 0xB8 && opcode <= 0xBF {
+                // MOV r32, imm32. In 64-bit mode, writing a 32-bit register
+                // clears its upper 32 bits (unlike an 8/16-bit write).
+                guard program.count - rip >= 5 else { throw CPUError.truncatedInstruction }
+                var value: UInt32 = 0
+                for index in 0..<4 {
+                    value |= UInt32(program[rip + 1 + index]) << (index * 8)
+                }
+                registers[Int(opcode - 0xB8)] = UInt64(value)
+                rip += 5
             } else if opcode == 0x48 {
                 guard rip + 2 <= program.count else { throw CPUError.truncatedInstruction }
                 let next = program[rip + 1]
@@ -252,6 +262,19 @@ struct MaxPS4CPUPrototype {
                          0x48, 0x83, 0xFB, 0x08,
                          0x48, 0x83, 0xEB, 0x02, 0xC3])
             guard cpu.rax == 8, cpu.registers[3] == 6, !cpu.zeroFlag else { return false }
+            // MOV EAX,imm32 must zero-extend into RAX; truncated immediates
+            // must fail without reading past the end of guest test bytes.
+            var mov32CPU = Self()
+            try mov32CPU.run([
+                0x48, 0xB8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                0xB8, 0x78, 0x56, 0x34, 0x12, 0xC3
+            ])
+            guard mov32CPU.rax == 0x12345678 else { return false }
+            var incompleteMov32 = Self()
+            do {
+                try incompleteMov32.run([0xBB, 0x01, 0x02])
+                return false
+            } catch CPUError.truncatedInstruction {}
             var xorCPU = Self()
             try xorCPU.run([0x48, 0xB8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                             0x31, 0xC0, 0x74, 0x02, 0x0F, 0x0F, 0xC3])
