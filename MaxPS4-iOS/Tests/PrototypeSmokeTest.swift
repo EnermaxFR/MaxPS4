@@ -20,6 +20,7 @@ struct PrototypeSmokeTest {
             ("TEST EAX immédiat et branchement", MaxPS4CPUPrototype.testImmediateAndBranchSelfTest()),
             ("TEST AL et TEST registre immédiat", MaxPS4CPUPrototype.extendedTestOpcodeSelfTest()),
             ("Décalages SHL SHR SAR x86-64", MaxPS4CPUPrototype.shiftRegisterSelfTest()),
+            ("Mini-jeu de devinette sur CPU x86-64", MaxPS4CPUPrototype.guessingGameSelfTest()),
             ("Arithmétique immédiate 8 bits et branchements", MaxPS4CPUPrototype.immediate8AndBranchesSelfTest()),
             ("Chargeur ELF64", MaxPS4ELFLoader.selfTest()),
             ("Validation des segments ELF64", MaxPS4ELFLoader.segmentPreflightSelfTest()),

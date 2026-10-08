@@ -14,6 +14,7 @@ struct MaxPS4HomeView: View {
     @State private var selectedTab: MaxPS4Tab = .home
     @State private var importingGame = false
     @State private var gameSearch = ""
+    @State private var guessingNumber = 7
     @State private var gameFilter = 0
     @State private var gameToRename: MaxPS4Game?
     @State private var gameToDelete: MaxPS4Game?
@@ -1000,6 +1001,30 @@ struct MaxPS4HomeView: View {
                 secondaryAction(icon: "point.3.connected.trianglepath.dotted", title: "Tester l’intégration complète", subtitle: "ELF64 → CPU → mémoire • programme synthétique") {
                     emulator.testIntegration()
                 }
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("MINI-JEU x86-64 · DÉMONSTRATION")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.cyan)
+                    Text("Devine le nombre de 1 à 20")
+                        .font(.headline)
+                    HStack(spacing: 16) {
+                        Button("−") { guessingNumber = max(1, guessingNumber - 1) }
+                            .font(.title2.bold())
+                        Text("\(guessingNumber)")
+                            .font(.title2.monospacedDigit().bold())
+                            .frame(minWidth: 52)
+                        Button("+") { guessingNumber = min(20, guessingNumber + 1) }
+                            .font(.title2.bold())
+                        Spacer()
+                        Button("Tester") { emulator.playGuessingDemo(guess: guessingNumber) }
+                            .font(.headline)
+                    }
+                    Text("Programme de test exécuté par le prototype CPU. Ce n'est pas un jeu PS4.")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                .padding(14)
+                .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 15))
                 Text("PROTOTYPES CPU, MÉMOIRE ET SERVICES")
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .tracking(1.1)

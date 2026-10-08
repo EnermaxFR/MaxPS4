@@ -1230,6 +1230,34 @@ extension MaxPS4CPUPrototype {
     }
 
     /// Exercise bounded backward jumps and deterministic instruction limits.
+    /// Play one round of a synthetic x86-64 guessing game, not PS4 software.
+    static func guessNumber(target: Int, guess: Int) throws -> Bool {
+        guard (1...20).contains(target), (1...20).contains(guess) else {
+            throw CPUError.unsupportedOpcode
+        }
+        // MOV EAX,target; CMP EAX,guess; JZ win; MOV EAX,0; RET; win: MOV EAX,1; RET.
+        let code: [UInt8] = [
+            0xB8, UInt8(target), 0, 0, 0,
+            0x83, 0xF8, UInt8(guess),
+            0x74, 0x06,
+            0xB8, 0, 0, 0, 0, 0xC3,
+            0xB8, 1, 0, 0, 0, 0xC3
+        ]
+        var cpu = Self()
+        try cpu.run(code)
+        return cpu.rax == 1
+    }
+
+    static func guessingGameSelfTest() -> Bool {
+        do {
+            guard try guessNumber(target: 7, guess: 7),
+                  !(try guessNumber(target: 7, guess: 6)),
+                  try guessNumber(target: 20, guess: 20) else { return false }
+            do { _ = try guessNumber(target: 21, guess: 7); return false }
+            catch CPUError.unsupportedOpcode { return true }
+        } catch { return false }
+    }
+
     static func shiftRegisterSelfTest() -> Bool {
         do {
             var left = Self()
