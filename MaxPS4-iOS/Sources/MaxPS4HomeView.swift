@@ -946,26 +946,41 @@ struct MaxPS4HomeView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
 
+                Text("JEUX ET STOCKAGE")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .tracking(1.1)
+                    .foregroundStyle(.cyan)
+                    .padding(.top, 8)
+                primaryAction(icon: "square.and.arrow.down.fill", title: "Importer un jeu", subtitle: "Sélectionner un fichier local") {
+                    importingGame = true
+                }
+                secondaryAction(icon: "internaldrive", title: "Gestion du stockage", subtitle: "\(emulator.games.count) fichiers enregistrés localement") {
+                    selectedTab = .games
+                }
+                Text("ÉTAT DU MOTEUR")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .tracking(1.1)
+                    .foregroundStyle(.cyan)
+                    .padding(.top, 8)
                 secondaryAction(icon: "checkmark.shield", title: "Tester le pont C++ shadPS4", subtitle: "Vérifier le composant natif sur iPhone • pas de jeu") {
                     emulator.testShadPS4NativeUtility()
                 }
                 secondaryAction(icon: "cpu", title: "Diagnostic du moteur", subtitle: "Tester la connexion native") {
                     emulator.testBackend()
                 }
-                primaryAction(icon: "square.and.arrow.down.fill", title: "Importer un jeu", subtitle: "Sélectionner un fichier local") {
-                    importingGame = true
-                }
-                secondaryAction(icon: "waveform.path.ecg", title: "Tracer le CPU", subtitle: "3 instructions synthétiques • historique limité") {
-                    emulator.traceCPUPrototype()
-                }
-                secondaryAction(icon: "cpu", title: "Tester le CPU x86-64", subtitle: "Instructions expérimentales • sans jeu PS4") {
-                    emulator.testCPUPrototype()
-                }
-                secondaryAction(icon: "memorychip", title: "Banc de test ELF64 + CPU", subtitle: "Exécuter un ELF synthétique en mémoire invitée") {
-                    emulator.runELFCPUBench()
-                }
                 secondaryAction(icon: "check-check", title: "Diagnostic complet (11 tests)", subtitle: "ELF, imports, mémoire, processus, services et bibliothèques") {
                     emulator.runBatchDiagnostics()
+                }
+                secondaryAction(icon: "doc.text", title: "État du système", subtitle: "Afficher les informations de diagnostic") {
+                    emulator.testBackend()
+                }
+                Text("CHARGEUR ET EXÉCUTION")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .tracking(1.1)
+                    .foregroundStyle(.cyan)
+                    .padding(.top, 8)
+                secondaryAction(icon: "doc.zipper", title: "Tester le chargeur ELF64", subtitle: "Segments simulés • sans exécution PS4") {
+                    emulator.testELFLoader()
                 }
                 secondaryAction(icon: "file-plus", title: "Créer ELF64 de démonstration", subtitle: "Générer un fichier test avec un import libkernel") {
                     emulator.createELFImportDemo()
@@ -973,23 +988,11 @@ struct MaxPS4HomeView: View {
                 secondaryAction(icon: "link", title: "Tester ELF64 + bibliothèques", subtitle: "Chargeur ELF64 et import libkernel simulé") {
                     emulator.testELFLibraryIntegration()
                 }
-                secondaryAction(icon: "library", title: "Tester bibliothèques système PS4", subtitle: "Résolution des symboles libkernel simulés") {
-                    emulator.testPS4LibraryResolver()
-                }
-                secondaryAction(icon: "layers", title: "Tester mémoire et processus isolés", subtitle: "Deux processus, allocations indépendantes et libération") {
-                    emulator.testProcessMemoryIsolation()
-                }
-                secondaryAction(icon: "memory-stick", title: "Tester mémoire virtuelle PS4 (prototype)", subtitle: "Allocation, lecture, protection et libération simulées") {
-                    emulator.testPS4VirtualMemoryService()
-                }
-                secondaryAction(icon: "shield-check", title: "Tester compatibilité PS4 (base)", subtitle: "Symboles système et refus des appels non implémentés") {
-                    emulator.testPS4CompatibilityScaffold()
-                }
-                secondaryAction(icon: "cpu", title: "Tester les services système simulés", subtitle: "Appels virtuels, mémoire et refus des appels inconnus") {
-                    emulator.testSimulatedKernelServices()
-                }
                 secondaryAction(icon: "shippingbox", title: "Tester chargement ELF64 → CPU", subtitle: "Segment, mémoire virtuelle, exécution d’un fichier de test") {
                     emulator.testELFGuestRuntime()
+                }
+                secondaryAction(icon: "memorychip", title: "Banc de test ELF64 + CPU", subtitle: "Exécuter un ELF synthétique en mémoire invitée") {
+                    emulator.runELFCPUBench()
                 }
                 secondaryAction(icon: "play.rectangle.on.rectangle", title: "Démarrer l’environnement virtuel", subtitle: "CPU x86-64, mémoire et processus • programme de test") {
                     emulator.testVirtualRuntime()
@@ -997,8 +1000,16 @@ struct MaxPS4HomeView: View {
                 secondaryAction(icon: "point.3.connected.trianglepath.dotted", title: "Tester l’intégration complète", subtitle: "ELF64 → CPU → mémoire • programme synthétique") {
                     emulator.testIntegration()
                 }
-                secondaryAction(icon: "doc.zipper", title: "Tester le chargeur ELF64", subtitle: "Segments simulés • sans exécution PS4") {
-                    emulator.testELFLoader()
+                Text("PROTOTYPES CPU, MÉMOIRE ET SERVICES")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .tracking(1.1)
+                    .foregroundStyle(.cyan)
+                    .padding(.top, 8)
+                secondaryAction(icon: "cpu", title: "Tester le CPU x86-64", subtitle: "Instructions expérimentales • sans jeu PS4") {
+                    emulator.testCPUPrototype()
+                }
+                secondaryAction(icon: "waveform.path.ecg", title: "Tracer le CPU", subtitle: "3 instructions synthétiques • historique limité") {
+                    emulator.traceCPUPrototype()
                 }
                 secondaryAction(icon: "square.stack.3d.up", title: "Carte mémoire invitée", subtitle: "Régions et permissions • simulation") {
                     emulator.showGuestMemoryMap()
@@ -1006,11 +1017,20 @@ struct MaxPS4HomeView: View {
                 secondaryAction(icon: "memorychip", title: "Tester la mémoire invitée", subtitle: "Prototype isolé • sans exécution PS4") {
                     emulator.testGuestMemory()
                 }
-                secondaryAction(icon: "internaldrive", title: "Gestion du stockage", subtitle: "\(emulator.games.count) fichiers enregistrés localement") {
-                    selectedTab = .games
+                secondaryAction(icon: "memory-stick", title: "Tester mémoire virtuelle PS4 (prototype)", subtitle: "Allocation, lecture, protection et libération simulées") {
+                    emulator.testPS4VirtualMemoryService()
                 }
-                secondaryAction(icon: "doc.text", title: "État du système", subtitle: "Afficher les informations de diagnostic") {
-                    emulator.testBackend()
+                secondaryAction(icon: "layers", title: "Tester mémoire et processus isolés", subtitle: "Deux processus, allocations indépendantes et libération") {
+                    emulator.testProcessMemoryIsolation()
+                }
+                secondaryAction(icon: "library", title: "Tester bibliothèques système PS4", subtitle: "Résolution des symboles libkernel simulés") {
+                    emulator.testPS4LibraryResolver()
+                }
+                secondaryAction(icon: "shield-check", title: "Tester compatibilité PS4 (base)", subtitle: "Symboles système et refus des appels non implémentés") {
+                    emulator.testPS4CompatibilityScaffold()
+                }
+                secondaryAction(icon: "cpu", title: "Tester les services système simulés", subtitle: "Appels virtuels, mémoire et refus des appels inconnus") {
+                    emulator.testSimulatedKernelServices()
                 }
                 statusCard
             }
