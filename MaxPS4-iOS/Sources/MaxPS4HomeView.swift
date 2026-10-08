@@ -807,6 +807,20 @@ struct MaxPS4HomeView: View {
                     } label: {
                         Label(game.fileName.lowercased().hasSuffix(".pkg") ? "Analyser le PKG" : "Analyser l’exécutable", systemImage: "doc.text.magnifyingglass")
                     }
+                    if game.fileName.lowercased().hasSuffix(".pkg") {
+                        Button {
+                            emulator.inspectPKGEntries(game)
+                            inspectionReport = emulator.status
+                        } label: {
+                            Label("Examiner les entrées du PKG", systemImage: "list.bullet.rectangle")
+                        }
+                        Button {
+                            emulator.inspectPKGStructure(game)
+                            inspectionReport = emulator.status
+                        } label: {
+                            Label("Vérifier la structure PKG", systemImage: "checkmark.shield")
+                        }
+                    }
                     Button(role: .destructive) {
                         gameToDelete = game
                     } label: {
