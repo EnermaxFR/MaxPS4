@@ -53,6 +53,7 @@ struct MaxPS4CPUPrototype {
     private(set) var zeroFlag = false
     private(set) var executedInstructions = 0
     private(set) var recentInstructionOffsets: [Int] = []
+    private var returnOffsets: [Int] = []
     var rax: UInt64 { registers[0] }
     private(set) var guestMemory = MaxPS4GuestMemory()
 
@@ -194,9 +195,24 @@ struct MaxPS4CPUPrototype {
                     UInt32(truncatingIfNeeded: registers[rhs])
                 zeroFlag = value == 0 // TEST does not change either register
                 rip += 2
-            } else if opcode == 0xC3 { // RET ends the isolated test
-                rip += 1
-                return
+            } else if opcode == 0xC3 { // RET to bounded synthetic call frame, or exit
+                if let destination = returnOffsets.popLast() {
+                    rip = destination
+                } else {
+                    rip += 1
+                    return
+                }
+            } else if opcode == 0xE8 { // CALL rel32; private test return frames
+                guard program.count - rip >= 5 else { throw CPUError.truncatedInstruction }
+                let displacement = UInt32(program[rip + 1])
+                    | (UInt32(program[rip + 2]) << 8)
+                    | (UInt32(program[rip + 3]) << 16)
+                    | (UInt32(program[rip + 4]) << 24)
+                let destination = Int64(rip) + 5 + Int64(Int32(bitPattern: displacement))
+                guard destination >= 0 && destination < Int64(program.count),
+                      returnOffsets.count < 32 else { throw CPUError.invalidBranch }
+                returnOffsets.append(rip + 5)
+                rip = Int(destination)
             } else if opcode == 0xEB || opcode == 0x74 || opcode == 0x75 {
                 // JMP rel8, JZ rel8, JNZ rel8. Jumps are confined to the test program.
                 guard rip + 2 <= program.count else { throw CPUError.truncatedInstruction }
@@ -1016,6 +1032,28 @@ enum MaxPS4VirtualRuntime {
             }
         } catch {
             return "Services virtuels : erreur \(error.localizedDescription)"
+        }
+    }
+
+    static func callAndBranchSelfTest() -> Bool {
+        do {
+            var cpu = MaxPS4CPUPrototype()
+            // CALL +1, RET (main), MOV EAX,42, RET (callee)
+            try cpu.run([0xE8, 0x01, 0, 0, 0, 0xC3, 0xB8, 42, 0, 0, 0, 0xC3])
+            guard cpu.rax == 42, cpu.executedInstructions == 4, cpu.rip == 6 else { return false }
+            var branch = MaxPS4CPUPrototype()
+            // XOR EAX,EAX; JZ +5; MOV EAX,1 (skipped); MOV EAX,42; RET
+            try branch.run([0x31, 0xC0, 0x74, 0x05, 0xB8, 1, 0, 0, 0, 0xB8, 42, 0, 0, 0, 0xC3])
+            guard branch.rax == 42 else { return false }
+            var invalid = MaxPS4CPUPrototype()
+            do {
+                try invalid.run([0xE8, 0x7F, 0, 0, 0])
+                return false
+            } catch CPUError.invalidBranch {
+                return true
+            }
+        } catch {
+            return false
         }
     }
 
