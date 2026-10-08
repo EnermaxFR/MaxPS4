@@ -533,6 +533,18 @@ extension MaxPS4NativeLinkCheck {
                 0x72A00001, 0x6A01001F, 0x54FFFFA1, 0xD65F03C0
               ] else { return false }
         guard arm64TranslationPreview(Data([0xA9, 1])) == nil else { return false }
+        // x86 MOV leaves ZF unchanged; a branch after MOV must retain CMP flags.
+        // In ARM64 the MOVZ/MOVK pair must also preserve NZCV.
+        let flagsAcrossMOV = Data([0xB8, 42, 0, 0, 0,
+                                   0x3D, 42, 0, 0, 0,
+                                   0xB8, 99, 0, 0, 0,
+                                   0x74, 0, 0xC3])
+        guard runNativeSyntheticX86(flagsAcrossMOV) == 99,
+              arm64TranslationPreview(flagsAcrossMOV) == [
+                0x52800540, 0x72A00000, 0x52800541, 0x72A00001,
+                0x6B01001F, 0x52800C60, 0x72A00000,
+                0x54000020, 0xD65F03C0
+              ] else { return false }
         // Invalid instruction targets and loops without fresh CMP are rejected.
         let badTarget = Data([0xB8, 42, 0, 0, 0, 0x3D, 42, 0, 0, 0,
                               0x74, 1, 0xB8, 99, 0, 0, 0, 0xC3])
