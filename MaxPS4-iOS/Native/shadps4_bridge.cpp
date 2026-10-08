@@ -241,6 +241,16 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
             pc += 4;
             break;
         }
+        case 0xA9: { // TEST EAX, imm32: only ZF currently consumed by JZ/JNZ
+            if (size - pc < 4) return 0;
+            std::uint32_t imm = 0;
+            for (unsigned i = 0; i < 4; ++i)
+                imm |= std::uint32_t(code[pc + i]) << (8 * i);
+            zero_flag = (static_cast<std::uint32_t>(rax) & imm) == 0;
+            flags_valid = true;
+            pc += 4;
+            break;
+        }
         case 0x3D: { // CMP EAX, imm32: update zero comparison state
             if (size - pc < 4) return 0;
             std::uint32_t imm = 0;
@@ -356,7 +366,7 @@ extern "C" int maxps4_native_arm64_jit_ready() noexcept {
 
 // Offline x86->AArch64 code emission prototype. Generated instruction words are
 // DATA ONLY: never mapped executable or jumped into. No iOS JIT entitlement implied.
-// Subset: MOV EAX,imm32; ADD/SUB/XOR/AND/CMP EAX,imm32; bounded forward/backward JZ/JNZ rel8; NOP; RET. Refuse other instructions.
+// Subset: MOV EAX,imm32; ADD/SUB/XOR/AND/CMP/TEST EAX,imm32; bounded forward/backward JZ/JNZ rel8; NOP; RET. Refuse other instructions.
 extern "C" int maxps4_arm64_translate_preview(
     const std::uint8_t* guest, std::size_t count,
     std::uint32_t* output, std::size_t capacity,
@@ -419,18 +429,17 @@ extern "C" int maxps4_arm64_translate_preview(
             if (!put(0x52800001u | ((imm & 0xffffu) << 5)) ||
                 !put(0x72A00001u | (((imm >> 16) & 0xffffu) << 5)) ||
                 !put(opcode == 0x35 ? 0x4A010000u : 0x0A010000u)) return 0;
-        } else if (opcode == 0x3D) {
+        } else if (opcode == 0x3D || opcode == 0xA9) {
             cmp_ready = true;
             if (count - pc < 4) return 0;
             std::uint32_t imm = 0;
             for (unsigned i = 0; i < 4; ++i)
                 imm |= std::uint32_t(guest[pc + i]) << (8 * i);
             pc += 4;
-            // Materialize comparison operand in W1, set ARM64 NZCV.
-            // x86 condition flags are not yet mapped to a guest branch.
+            // Materialize operand in W1 and set ZF-equivalent ARM64 NZCV.
             if (!put(0x52800001u | ((imm & 0xffffu) << 5)) ||
                 !put(0x72A00001u | (((imm >> 16) & 0xffffu) << 5)) ||
-                !put(0x6B01001Fu)) return 0; // CMP W0,W1 (SUBS WZR,W0,W1)
+                !put(opcode == 0x3D ? 0x6B01001Fu : 0x6A01001Fu)) return 0; // CMP or TST W0,W1
         } else if (opcode == 0x74 || opcode == 0x75) {
             if (pc >= count || !cmp_ready) return 0;
             const std::int8_t offset = static_cast<std::int8_t>(guest[pc++]);
@@ -440,7 +449,7 @@ extern "C" int maxps4_arm64_translate_preview(
             // For back edges only, demand a fresh CMP at the target.
             // This keeps NZCV well-defined on each visit to the branch.
             if (target < static_cast<std::int64_t>(pc) &&
-                (guest[target] != 0x3D || target >= static_cast<std::int64_t>(pc - 2)))
+                ((guest[target] != 0x3D && guest[target] != 0xA9) || target >= static_cast<std::int64_t>(pc - 2)))
                 return 0;
             fixups[fixup_count++] = { n, static_cast<std::size_t>(target),
                                        opcode == 0x74 ? 0u : 1u };
