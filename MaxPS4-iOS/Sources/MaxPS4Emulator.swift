@@ -370,6 +370,10 @@ final class MaxPS4Emulator: ObservableObject {
         status = MaxPS4VirtualRuntime.testPS4VirtualMemoryService()
     }
 
+    func testPS4LibraryResolver() {
+        status = MaxPS4VirtualRuntime.testPS4LibraryResolver()
+    }
+
     func testPS4CompatibilityScaffold() {
         status = MaxPS4VirtualRuntime.testPS4CompatibilityScaffold()
     }
