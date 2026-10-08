@@ -227,7 +227,8 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
             for (unsigned i = 0; i < 4; ++i)
                 imm |= std::uint32_t(code[pc + i]) << (8 * i);
             rax = static_cast<std::uint32_t>(rax) ^ imm;
-            flags_valid = false;
+            zero_flag = static_cast<std::uint32_t>(rax) == 0;
+            flags_valid = true;
             pc += 4;
             break;
         }
@@ -237,7 +238,8 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
             for (unsigned i = 0; i < 4; ++i)
                 imm |= std::uint32_t(code[pc + i]) << (8 * i);
             rax = static_cast<std::uint32_t>(rax) & imm;
-            flags_valid = false;
+            zero_flag = static_cast<std::uint32_t>(rax) == 0;
+            flags_valid = true;
             pc += 4;
             break;
         }
@@ -430,7 +432,7 @@ extern "C" int maxps4_arm64_translate_preview(
                     !put(opcode == 0x05 ? 0x0B010000u : 0x4B010000u)) return 0;
             }
         } else if (opcode == 0x35 || opcode == 0x25 || opcode == 0x0D) {
-            cmp_ready = opcode == 0x0D; // OR updates ZF; other logical ops pending
+            cmp_ready = true; // XOR/AND/OR all define x86 ZF
             if (count - pc < 4) return 0;
             std::uint32_t imm = 0;
             for (unsigned i = 0; i < 4; ++i)
@@ -440,7 +442,7 @@ extern "C" int maxps4_arm64_translate_preview(
             if (!put(0x52800001u | ((imm & 0xffffu) << 5)) ||
                 !put(0x72A00001u | (((imm >> 16) & 0xffffu) << 5)) ||
                 !put(opcode == 0x35 ? 0x4A010000u : (opcode == 0x25 ? 0x0A010000u : 0x2A010000u))) return 0;
-            if (opcode == 0x0D && !put(0x6A00001Fu)) return 0; // TST W0,W0 sets NZCV.Z
+            if (!put(0x6A00001Fu)) return 0; // TST W0,W0 sets NZCV.Z for XOR/AND/OR
         } else if (opcode == 0x3D || opcode == 0xA9) {
             cmp_ready = true;
             if (count - pc < 4) return 0;
