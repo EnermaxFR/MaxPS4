@@ -1295,7 +1295,7 @@ extension MaxPS4CPUPrototype {
                 return false
             }
             var zero = Self()
-            try zero.run([0xB8, 0, 0, 0, 0x98, 0x99, 0xC3])
+            try zero.run([0xB8, 0, 0, 0, 0, 0x98, 0x99, 0xC3])
             guard zero.rax == 0 && zero.registers[2] == 0 else {
                 print("CWDE/CDQ zero mismatch: RAX=\(zero.rax), RDX=\(zero.registers[2])")
                 return false
