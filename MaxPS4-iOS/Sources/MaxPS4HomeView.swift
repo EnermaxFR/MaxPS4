@@ -820,6 +820,12 @@ struct MaxPS4HomeView: View {
                         } label: {
                             Label("Vérifier la structure PKG", systemImage: "checkmark.shield")
                         }
+                        Button {
+                            emulator.diagnosePKGBoot(game)
+                            inspectionReport = emulator.status
+                        } label: {
+                            Label("Diagnostiquer le démarrage", systemImage: "stethoscope")
+                        }
                     }
                     Button(role: .destructive) {
                         gameToDelete = game
