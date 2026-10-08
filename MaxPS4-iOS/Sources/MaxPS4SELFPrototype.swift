@@ -30,8 +30,12 @@ enum MaxPS4SELFPrototype {
             else { throw LoadError.invalid }
             allocated += Int(size)
             // Diagnostic synthetic addresses; real SELF mapping is not implemented.
-            descriptions.append((Int(offset), Int(fileSize), Int(size),
-                                 0x1000 + UInt64(i) * 0x100000))
+            let address = UInt64(0x1000) + UInt64(i) * 0x100000
+            let end = address + size
+            guard descriptions.allSatisfy({
+                end <= $0.address || address >= $0.address + UInt64($0.size)
+            }) else { throw LoadError.invalid }
+            descriptions.append((Int(offset), Int(fileSize), Int(size), address))
         }
         var memory = MaxPS4GuestMemory()
         for segment in descriptions {
@@ -66,6 +70,15 @@ enum MaxPS4SELFPrototype {
             example[32] = 0
             example[48] = 10
             do { _ = try mapPlainSegments(example); return false }
+            catch LoadError.invalid {}
+            // Second synthetic mapping starts at 0x101000. First must not cross it.
+            var overlapping = Data(repeating: 0, count: 96)
+            overlapping.replaceSubrange(0..<4, with: [0x4f, 0x15, 0x3d, 0x1d])
+            overlapping[6] = 1
+            overlapping[24] = 2
+            overlapping[59] = 0x11 // first segment memory size = 0x110000
+            overlapping[88] = 8    // second segment memory size = 8
+            do { _ = try mapPlainSegments(overlapping); return false }
             catch LoadError.invalid {}
             return true
         } catch { return false }
