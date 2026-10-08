@@ -477,6 +477,24 @@ extension MaxPS4NativeLinkCheck {
                 0x52800540, 0x72A00000, 0x52800541,
                 0x72A00001, 0x6B01001F, 0xD65F03C0
               ] else { return false }
+        // JZ/JNZ rel8=0: conditional fallthrough after CMP, encoded as B.cond.
+        let jz = Data([0xB8, 42, 0, 0, 0, 0x3D, 42, 0, 0, 0,
+                       0x74, 0, 0xC3])
+        guard runNativeSyntheticX86(jz) == 42,
+              arm64TranslationPreview(jz) == [
+                0x52800540, 0x72A00000, 0x52800541,
+                0x72A00001, 0x6B01001F, 0x54000020, 0xD65F03C0
+              ] else { return false }
+        let jnz = Data([0xB8, 42, 0, 0, 0, 0x3D, 41, 0, 0, 0,
+                        0x75, 0, 0xC3])
+        guard runNativeSyntheticX86(jnz) == 42,
+              arm64TranslationPreview(jnz) == [
+                0x52800540, 0x72A00000, 0x52800521,
+                0x72A00001, 0x6B01001F, 0x54000021, 0xD65F03C0
+              ] else { return false }
+        // The ARM64 preview refuses other offsets and branches without CMP.
+        guard arm64TranslationPreview(Data([0x74, 0, 0xC3])) == nil,
+              arm64TranslationPreview(Data([0x75, 1, 0xC3])) == nil else { return false }
         guard arm64TranslationPreview(Data([0x3D, 1])) == nil else { return false }
         guard arm64TranslationPreview(Data([0x25, 1])) == nil else { return false }
         guard arm64TranslationPreview(Data([0x35, 1])) == nil else { return false }
