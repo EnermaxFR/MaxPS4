@@ -362,6 +362,10 @@ final class MaxPS4Emulator: ObservableObject {
             : "CPU x86-64 : échec de l’auto-test"
     }
 
+    func testELFGuestRuntime() {
+        status = MaxPS4VirtualRuntime.bootELFIntegrationTest()
+    }
+
     func testVirtualRuntime() {
         status = MaxPS4VirtualRuntime.bootSelfTest()
     }
