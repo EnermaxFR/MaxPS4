@@ -418,6 +418,20 @@ extension MaxPS4NativeLinkCheck {
                 0x52800020, 0x72A00000, 0x529FFFE1,
                 0x72BFFFE1, 0x0B010000, 0xD65F03C0
               ] else { return false }
+        // SUB immediate has the same 32-bit wraparound as x86 EAX.
+        let subSmall = Data([0xB8, 2, 0, 0, 0, 0x2D, 3, 0, 0, 0, 0xC3])
+        guard runNativeSyntheticX86(subSmall) == 0xFFFF_FFFF,
+              arm64TranslationPreview(subSmall) == [
+                0x52800040, 0x72A00000, 0x51000C00, 0xD65F03C0
+              ] else { return false }
+        let subWide = Data([0xB8, 0, 0, 0, 0, 0x2D,
+                            0x78, 0x56, 0x34, 0x12, 0xC3])
+        guard runNativeSyntheticX86(subWide) == 0xEDCB_A988,
+              arm64TranslationPreview(subWide) == [
+                0x52800000, 0x72A00000, 0x528ACF01,
+                0x72A24681, 0x4B010000, 0xD65F03C0
+              ] else { return false }
+        guard arm64TranslationPreview(Data([0x2D, 1])) == nil else { return false }
         return arm64TranslationPreview(Data([0x0F, 0x05])) == nil &&
             arm64TranslationPreview(Data([0xB8, 1])) == nil &&
             arm64TranslationPreview(Data([0x90])) == nil &&
