@@ -225,3 +225,35 @@ extension MaxPS4NativeLinkCheck {
         return !nativeSELFMemorySizesValid(header)
     }
 }
+
+@_silgen_name("maxps4_native_self_embedded_elf_entry")
+private func maxps4_native_self_embedded_elf_entry(
+    _ bytes: UnsafePointer<UInt8>?, _ count: Int, _ entry: UnsafeMutablePointer<UInt64>?
+) -> Int32
+
+extension MaxPS4NativeLinkCheck {
+    static func nativeSELFEmbeddedELFEntry(_ data: Data) -> UInt64? {
+        var entry: UInt64 = 0
+        let ok = data.withUnsafeBytes { raw in
+            maxps4_native_self_embedded_elf_entry(
+                raw.bindMemory(to: UInt8.self).baseAddress, data.count, &entry
+            )
+        }
+        return ok == 1 ? entry : nil
+    }
+
+    static var nativeSELFEmbeddedELFSelfTest: Bool {
+        var sample = Data(repeating: 0, count: 128)
+        sample.replaceSubrange(0..<4, with: [0x4F, 0x15, 0x3D, 0x1D])
+        sample[6] = 1
+        sample[24] = 1
+        sample.replaceSubrange(64..<71, with: [0x7F, 0x45, 0x4C, 0x46, 2, 1, 1])
+        sample[64 + 18] = 0x3E
+        sample[64 + 24] = 0x78
+        sample[64 + 25] = 0x56
+        guard nativeSELFEmbeddedELFEntry(sample) == 0x5678 else { return false }
+        guard nativeSELFEmbeddedELFEntry(Data(sample.prefix(127))) == nil else { return false }
+        sample[64] = 0
+        return nativeSELFEmbeddedELFEntry(sample) == nil
+    }
+}

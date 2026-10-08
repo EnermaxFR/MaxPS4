@@ -127,3 +127,17 @@ extern "C" int maxps4_native_self_memory_sizes_valid(const std::uint8_t* data,
     }
     return 1;
 }
+
+// Based on shadPS4 Core::Loader::Elf::Open: SELF segment headers are
+// immediately followed by an embedded ELF64 header (GPL-2.0-or-later).
+// Returns embedded ELF entry point only; no SELF decryption or execution.
+extern "C" int maxps4_native_self_embedded_elf_entry(const std::uint8_t* data,
+                                                      std::size_t count,
+                                                      std::uint64_t* entry) noexcept {
+    if (!entry) return 0;
+    std::uint16_t segments = 0;
+    if (!maxps4_native_self_segment_count(data, count, &segments)) return 0;
+    const std::size_t elf_offset = 32 + std::size_t(segments) * 32;
+    if (elf_offset > count || count - elf_offset < 64) return 0;
+    return maxps4_native_elf_entry_point(data + elf_offset, count - elf_offset, entry);
+}
