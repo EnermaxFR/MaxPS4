@@ -229,6 +229,8 @@ enum MaxPS4ELFLoader {
             return try rejects(64 + 32, 0xFF)
                 && rejects(64 + 4, 0xFF)
                 && rejects(64 + 9, 0xFF)
+                && rejects(56, 0) // Reject an ELF with no program headers.
+                && rejects(64 + 48, 3) // Reject non-power-of-two segment alignment.
                 && {
                     // Point d'entrée placé dans la zone BSS, hors du code ELF.
                     var corrupted = original
@@ -334,7 +336,7 @@ enum MaxPS4ELFLoader {
         let table = number(32, 8)
         let size = number(54, 2)
         let count = number(56, 2)
-        guard size == 56, count <= 64, table <= UInt64(file.count),
+        guard size == 56, count > 0, count <= 64, table <= UInt64(file.count),
               count <= (UInt64(file.count) - table) / size else { throw LoaderError.invalid }
 
         // Preflight every loadable segment before allocating guest memory.
@@ -348,7 +350,9 @@ enum MaxPS4ELFLoader {
             let source = number(offset + 8, 8)
             let segmentFileSize = number(offset + 32, 8)
             let flags = number(offset + 4, 4)
-            guard segmentFileSize <= segmentMemory,
+            let alignment = number(offset + 48, 8)
+            guard (alignment <= 1 || (alignment & (alignment - 1)) == 0),
+                  segmentFileSize <= segmentMemory,
                   source <= UInt64(file.count),
                   segmentFileSize <= UInt64(file.count) - source,
                   flags & ~UInt64(7) == 0,
