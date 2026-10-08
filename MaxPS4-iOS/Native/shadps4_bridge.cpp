@@ -225,6 +225,12 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
     return -1;
 }
 
+// Data-only translation entry used for the optional JIT preflight.
+extern "C" int maxps4_arm64_translate_preview(
+    const std::uint8_t* guest, std::size_t count,
+    std::uint32_t* output, std::size_t capacity,
+    std::size_t* emitted) noexcept;
+
 // Execution backend selection point for an eventual ARM64 dynamic recompiler.
 // iOS code-signing/JIT entitlements must be validated before enabling JIT.
 // No RWX memory allocation or code generation is attempted here.
@@ -233,7 +239,16 @@ extern "C" int maxps4_native_guest_run_with_backend(
     const std::uint8_t* code, std::size_t size, std::uint32_t budget,
     int requested_mode, int* used_mode, std::uint64_t* result) noexcept {
     if (!used_mode || (requested_mode != 0 && requested_mode != 1)) return 0;
-    *used_mode = 0; // Explicit fallback: no executable ARM64 translator yet.
+    *used_mode = 0; // Never claim JIT execution on iOS without executable-code support.
+    if (requested_mode == 1 && code && size > 0 && size <= 4096) {
+        // Exercise the real ARM64 emitter on the requested JIT path.
+        // The output remains inert DATA; no executable allocation or invocation.
+        std::uint32_t translated[4096] = {};
+        std::size_t emitted = 0;
+        (void)maxps4_arm64_translate_preview(
+            code, size, translated, 4096, &emitted);
+        // Unsupported / oversized programs still use the interpreter.
+    }
     return maxps4_native_guest_x86_run(code, size, budget, result);
 }
 
@@ -283,7 +298,7 @@ extern "C" int maxps4_arm64_translate_preview(
                 // This preserves x86 32-bit wrapping semantics.
                 if (!put(0x52800001u | ((imm & 0xffffu) << 5)) ||
                     !put(0x72A00001u | (((imm >> 16) & 0xffffu) << 5)) ||
-                    !put(0x0B010000u)) return 0;
+                    !put(opcode == 0x05 ? 0x0B010000u : 0x4B010000u)) return 0;
             }
         } else if (opcode == 0x90) {
             if (!put(0xD503201Fu)) return 0; // ARM64 NOP
