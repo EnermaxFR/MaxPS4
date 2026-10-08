@@ -232,6 +232,13 @@ struct MaxPS4HomeView: View {
                             detailsReport = emulator.status
                         }
                         .buttonStyle(.borderedProminent)
+                        if game.fileName.lowercased().hasSuffix(".elf") || game.fileName.lowercased() == "eboot.bin" {
+                            Button("Inspecter les imports ELF64") {
+                                emulator.inspectELFImports(game)
+                                detailsReport = emulator.status
+                            }
+                            .buttonStyle(.bordered)
+                        }
                         if game.fileName.lowercased().hasSuffix(".pkg") {
                             Button("Analyser la structure du PKG") {
                                 emulator.inspectPKGStructure(game)
