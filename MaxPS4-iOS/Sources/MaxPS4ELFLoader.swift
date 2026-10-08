@@ -111,6 +111,40 @@ enum MaxPS4ELFLoader {
         }
     }
 
+    /// Apply only R_X86_64_RELATIVE (type 8) to writable guest memory.
+    /// This is a bounded synthetic test, not a PS4 dynamic linker.
+    static func applyRelativeRelocation(memory: inout MaxPS4GuestMemory,
+                                        target: UInt64, base: UInt64,
+                                        addend: UInt64, type: UInt32) throws {
+        guard type == 8, base <= UInt64.max - addend,
+              target <= UInt64.max - 8 else { throw LoaderError.invalid }
+        let result = base + addend
+        let encoded = Data((0..<8).map { UInt8(truncatingIfNeeded: result >> ($0 * 8)) })
+        try memory.write(encoded, at: target)
+    }
+
+    static func relativeRelocationSelfTest() -> Bool {
+        do {
+            var memory = MaxPS4GuestMemory()
+            try memory.mapZeroFilled(at: 0x5000, size: 64)
+            try applyRelativeRelocation(memory: &memory, target: 0x5008,
+                                        base: 0x1000, addend: 0x234, type: 8)
+            let expected = Data([0x34, 0x12, 0, 0, 0, 0, 0, 0])
+            guard try memory.read(at: 0x5008, count: 8) == expected else { return false }
+            do {
+                try applyRelativeRelocation(memory: &memory, target: 0x5008,
+                                            base: 0x1000, addend: 1, type: 7)
+                return false
+            } catch LoaderError.invalid {}
+            do {
+                try applyRelativeRelocation(memory: &memory, target: 0xFFFF,
+                                            base: 0x1000, addend: 1, type: 8)
+                return false
+            } catch MaxPS4GuestMemory.MemoryError.outOfBounds {}
+            return true
+        } catch { return false }
+    }
+
     static func relocationSelfTest() -> Bool {
         do {
             let url = try createImportDemo()
