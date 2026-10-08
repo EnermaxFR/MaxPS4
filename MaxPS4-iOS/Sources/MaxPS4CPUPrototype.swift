@@ -317,7 +317,7 @@ struct MaxPS4CPUPrototype {
                   registerMoveCPU.registers[1] == 42 else { return false }
             var unsupportedMemoryMove = Self()
             do {
-                try unsupportedMemoryMove.run([0x8B, 0x00])
+                try unsupportedMemoryMove.run([0x8B, 0x04])
                 return false
             } catch CPUError.unsupportedOpcode {}
             var memoryMoveCPU = Self()
