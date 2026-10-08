@@ -356,7 +356,7 @@ extern "C" int maxps4_native_arm64_jit_ready() noexcept {
 
 // Offline x86->AArch64 code emission prototype. Generated instruction words are
 // DATA ONLY: never mapped executable or jumped into. No iOS JIT entitlement implied.
-// Subset: MOV EAX,imm32; ADD/SUB/XOR/AND/CMP EAX,imm32; forward JZ/JNZ rel8; NOP; RET. Refuse other instructions.
+// Subset: MOV EAX,imm32; ADD/SUB/XOR/AND/CMP EAX,imm32; bounded forward/backward JZ/JNZ rel8; NOP; RET. Refuse other instructions.
 extern "C" int maxps4_arm64_translate_preview(
     const std::uint8_t* guest, std::size_t count,
     std::uint32_t* output, std::size_t capacity,
@@ -366,8 +366,8 @@ extern "C" int maxps4_arm64_translate_preview(
     std::size_t pc = 0, n = 0;
     bool terminated = false;
     bool cmp_ready = false;
-    // Translate in two passes: record x86 instruction boundaries and resolve
-    // forward conditional targets only after ARM64 instruction sizes are known.
+    // Record x86 instruction boundaries and resolve conditional targets
+    // only after ARM64 instruction sizes are known.
     std::size_t arm_at_guest[4097] = {};
     bool boundary[4097] = {};
     struct Fixup { std::size_t arm_index, guest_target; std::uint32_t condition; };
@@ -435,10 +435,13 @@ extern "C" int maxps4_arm64_translate_preview(
             if (pc >= count || !cmp_ready) return 0;
             const std::int8_t offset = static_cast<std::int8_t>(guest[pc++]);
             const std::int64_t target = static_cast<std::int64_t>(pc) + offset;
-            // Back edges require control-flow flag liveness analysis; reject for now.
-            if (target < static_cast<std::int64_t>(pc) ||
-                target >= static_cast<std::int64_t>(count) ||
+            if (target < 0 || target >= static_cast<std::int64_t>(count) ||
                 fixup_count >= 4096) return 0;
+            // For back edges only, demand a fresh CMP at the target.
+            // This keeps NZCV well-defined on each visit to the branch.
+            if (target < static_cast<std::int64_t>(pc) &&
+                (guest[target] != 0x3D || target >= static_cast<std::int64_t>(pc - 2)))
+                return 0;
             fixups[fixup_count++] = { n, static_cast<std::size_t>(target),
                                        opcode == 0x74 ? 0u : 1u };
             if (!put(0)) return 0;
@@ -455,11 +458,13 @@ extern "C" int maxps4_arm64_translate_preview(
         const auto& fixup = fixups[i];
         if (!boundary[fixup.guest_target]) return 0;
         const std::size_t dest = arm_at_guest[fixup.guest_target];
-        if (dest <= fixup.arm_index || dest - fixup.arm_index >= (1u << 18))
-            return 0;
-        output[fixup.arm_index] = 0x54000000u |
-            (static_cast<std::uint32_t>(dest - fixup.arm_index) << 5) |
-            fixup.condition;
+        const std::int64_t delta = static_cast<std::int64_t>(dest) -
+                                   static_cast<std::int64_t>(fixup.arm_index);
+        if (delta < -(1 << 18) || delta >= (1 << 18)) return 0;
+        // B.cond immediate is a signed 19-bit count of ARM64 instructions.
+        const std::uint32_t encoded = static_cast<std::uint32_t>(delta) & 0x7ffffu;
+        output[fixup.arm_index] = 0x54000000u | (encoded << 5) |
+                                  fixup.condition;
     }
     *emitted = n;
     return 1;
