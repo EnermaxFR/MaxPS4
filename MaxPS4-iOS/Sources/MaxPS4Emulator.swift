@@ -535,6 +535,7 @@ final class MaxPS4Emulator: ObservableObject {
         let bitwiseOrOK = MaxPS4CPUPrototype.bitwiseOrSelfTest()
         let compareOK = MaxPS4CPUPrototype.compareRegistersSelfTest()
         let xorOK = MaxPS4CPUPrototype.xorRegisterSelfTest()
+        let immediate32OK = MaxPS4CPUPrototype.immediate32AndControlFlowSelfTest()
         status = [
             "Banc de test ELF64 / CPU x86-64",
             "Chargeur ELF et permissions mémoire : " + (loaderOK ? "OK ✅" : "ÉCHEC ❌"),
@@ -547,6 +548,7 @@ final class MaxPS4Emulator: ObservableObject {
             "OR bit-à-bit et drapeau zéro : " + (bitwiseOrOK ? "OK ✅" : "ÉCHEC ❌"),
             "CMP registres et drapeau zéro : " + (compareOK ? "OK ✅" : "ÉCHEC ❌"),
             "XOR inverse et validation : " + (xorOK ? "OK ✅" : "ÉCHEC ❌"),
+            "Arithmétique 64 bits et branchements : " + (immediate32OK ? "OK ✅" : "ÉCHEC ❌"),
             "Résultat attendu du programme synthétique : RAX=42, stockage mémoire=42.",
             "Ce test n'exécute pas Sonic Mania ni du code PS4.",
             "Exécution réelle PS4 : indisponible."
