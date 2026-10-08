@@ -21,6 +21,7 @@ enum MaxPS4SELFPrototype {
             let base = 32 + i * 32
             let flags = word(bytes, base)
             guard flags & 0x0e == 0 else { throw LoadError.protectedSegment }
+            guard flags == 0 else { throw LoadError.invalid } // Unknown SELF segment layouts must not be staged.
             let offset = word(bytes, base + 8)
             let fileSize = word(bytes, base + 16)
             let size = word(bytes, base + 24)
@@ -30,6 +31,14 @@ enum MaxPS4SELFPrototype {
                   fileSize <= UInt64(bytes.count) - offset,
                   size > 0, size <= UInt64(MaxPS4GuestMemory.maximumBytes - allocated)
             else { throw LoadError.invalid }
+            // Prevent overlapping file-backed ranges before allocating guest memory.
+            if fileSize > 0 {
+                guard descriptions.allSatisfy({ previous in
+                    previous.fileSize == 0 ||
+                    offset + fileSize <= UInt64(previous.offset) ||
+                    offset >= UInt64(previous.offset + previous.fileSize)
+                }) else { throw LoadError.invalid }
+            }
             allocated += Int(size)
             // Diagnostic synthetic addresses; real SELF mapping is not implemented.
             let address = UInt64(0x1000) + UInt64(i) * 0x100000
@@ -88,6 +97,35 @@ enum MaxPS4SELFPrototype {
             overlapping[88] = 8    // second segment memory size = 8
             do { _ = try mapPlainSegments(overlapping); return false }
             catch LoadError.invalid {}
+            return true
+        } catch { return false }
+    }
+
+    static func segmentValidationSelfTest() -> Bool {
+        do {
+            var data = Data(repeating: 0, count: 104)
+            data.replaceSubrange(0..<4, with: [0x4f, 0x15, 0x3d, 0x1d])
+            data[6] = 1
+            data[24] = 2
+            data[40] = 96
+            data[48] = 4
+            data[56] = 8
+            data[72] = 100
+            data[80] = 4
+            data[88] = 8
+            let memory = try mapPlainSegments(data)
+            guard memory.regionCount == 2 else { return false }
+            data[72] = 98 // overlap on-disk segment ranges
+            do { _ = try mapPlainSegments(data); return false }
+            catch LoadError.invalid {}
+            data[72] = 100
+            data[32] = 0x10 // unsupported SELF flags
+            do { _ = try mapPlainSegments(data); return false }
+            catch LoadError.invalid {}
+            data[32] = 0
+            data[80] = 0
+            data[72] = 0 // zero-sized file-backed portion is allowed
+            guard try mapPlainSegments(data).regionCount == 2 else { return false }
             return true
         } catch { return false }
     }
