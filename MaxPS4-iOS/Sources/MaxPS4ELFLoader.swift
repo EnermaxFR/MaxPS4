@@ -123,6 +123,44 @@ enum MaxPS4ELFLoader {
         try memory.write(encoded, at: target)
     }
 
+    /// Validate every target before modifying guest memory, so bad records
+    /// cannot result in a partially patched image.
+    static func applyRelativeBatch(memory: inout MaxPS4GuestMemory,
+                                   records: [(target: UInt64, addend: UInt64, type: UInt32)],
+                                   base: UInt64) throws {
+        guard records.count <= 4096 else { throw LoaderError.invalid }
+        var seen = Set<UInt64>()
+        for record in records {
+            guard record.type == 8, base <= UInt64.max - record.addend,
+                  record.target <= UInt64.max - 8,
+                  seen.insert(record.target).inserted else { throw LoaderError.invalid }
+            _ = try memory.read(at: record.target, count: 8)
+        }
+        for record in records {
+            try applyRelativeRelocation(memory: &memory, target: record.target,
+                                        base: base, addend: record.addend, type: record.type)
+        }
+    }
+
+    static func relocationBatchSelfTest() -> Bool {
+        do {
+            var memory = MaxPS4GuestMemory()
+            try memory.mapZeroFilled(at: 0x6000, size: 32)
+            try applyRelativeBatch(memory: &memory,
+                                   records: [(0x6000, 0x10, 8), (0x6008, 0x20, 8)],
+                                   base: 0x1000)
+            guard try memory.read(at: 0x6000, count: 2) == Data([0x10, 0x10]),
+                  memory.read(at: 0x6008, count: 2) == Data([0x20, 0x10]) else { return false }
+            do {
+                try applyRelativeBatch(memory: &memory,
+                                       records: [(0x6010, 0x30, 8), (0xFFFF, 0, 8)],
+                                       base: 0x1000)
+                return false
+            } catch MaxPS4GuestMemory.MemoryError.outOfBounds {}
+            return try memory.read(at: 0x6010, count: 8) == Data(repeating: 0, count: 8)
+        } catch { return false }
+    }
+
     static func relativeRelocationSelfTest() -> Bool {
         do {
             var memory = MaxPS4GuestMemory()
