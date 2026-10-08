@@ -549,6 +549,8 @@ final class MaxPS4Emulator: ObservableObject {
             var emptyEntries = 0
             var checked = 0
             var readableELF = 0
+            var incompatibleELF = 0
+            var truncatedHeaders = 0
             var possibleSELF = 0
             var invalid = 0
             for i in 0..<Int(count) {
@@ -565,9 +567,16 @@ final class MaxPS4Emulator: ObservableObject {
                 if length == 0 { emptyEntries += 1 }
                 if length < 4 { continue }
                 try handle.seek(toOffset: start)
-                let prefix = try handle.read(upToCount: 5) ?? Data()
-                if prefix.count >= 5 && Array(prefix.prefix(5)) == [0x7F, 0x45, 0x4C, 0x46, 2] {
-                    readableELF += 1
+                let prefix = try handle.read(upToCount: Int(min(length, 64))) ?? Data()
+                if prefix.count >= 4 && Array(prefix.prefix(4)) == [0x7F, 0x45, 0x4C, 0x46] {
+                    // Distinguish ELF magic from an actual x86-64 executable header.
+                    guard prefix.count >= 20 else { truncatedHeaders += 1; continue }
+                    if prefix[4] == 2 && prefix[5] == 1 && prefix[6] == 1 &&
+                        prefix[18] == 0x3E && prefix[19] == 0 {
+                        readableELF += 1
+                    } else {
+                        incompatibleELF += 1
+                    }
                 } else if prefix.count >= 4 && Array(prefix.prefix(4)) == [0x4F, 0x15, 0x3D, 0x1D] {
                     possibleSELF += 1
                 }
@@ -581,8 +590,10 @@ final class MaxPS4Emulator: ObservableObject {
                 "Entrées vides : \(emptyEntries)",
                 "Types d’entrées PKG (identifiants bruts) :",
                 inventory.joined(separator: "\n"),
-                "Signatures ELF64 aux débuts des entrées : \(readableELF)",
+                "En-têtes ELF64 x86-64 aux débuts des entrées : \(readableELF)",
                 "Signatures SELF possibles aux débuts des entrées : \(possibleSELF)",
+                "ELF incompatibles : \(incompatibleELF) ; en-têtes incomplets : \(truncatedHeaders)",
+                "Compatibilité Sonic Mania PS4 : bloquée (SELF/ELF exploitable, exécution ARM64, services PS4 et graphismes manquants).",
                 "Ce relevé ne déchiffre pas les entrées et ne détecte pas les exécutables imbriqués.",
                 "Un PKG valide n'est pas un binaire exécutable.",
                 "Démarrage : bloqué tant qu'un SELF/ELF exploitable et les services PS4 sont absents."
