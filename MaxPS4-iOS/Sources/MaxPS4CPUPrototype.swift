@@ -137,12 +137,31 @@ struct MaxPS4CPUPrototype {
                 rip += 1
             } else if opcode == 0x0F { // Two-byte opcode: isolated synthetic SYSCALL
                 guard rip + 2 <= program.count else { throw CPUError.truncatedInstruction }
-                guard program[rip + 1] == 0x05 else { throw CPUError.unsupportedOpcode }
-                // Isolated test services; never forwarded to the host OS.
-                registers[0] = try SimulatedServices.dispatch(
-                    number: registers[0], address: registers[1], size: registers[2], flags: registers[3], memory: &guestMemory
-                )
-                rip += 2
+                let second = program[rip + 1]
+                if second == 0x05 {
+                    // Isolated test services; never forwarded to the host OS.
+                    registers[0] = try SimulatedServices.dispatch(
+                        number: registers[0], address: registers[1], size: registers[2], flags: registers[3], memory: &guestMemory
+                    )
+                    rip += 2
+                } else if second == 0x84 || second == 0x85 { // JZ/JNZ rel32
+                    guard program.count - rip >= 6 else { throw CPUError.truncatedInstruction }
+                    let disp = (0..<4).reduce(UInt32(0)) {
+                        $0 | (UInt32(program[rip + 2 + $1]) << ($1 * 8))
+                    }
+                    let taken = second == 0x84 ? zeroFlag : !zeroFlag
+                    if taken {
+                        let destination = Int64(rip) + 6 + Int64(Int32(bitPattern: disp))
+                        guard destination >= 0 && destination < Int64(program.count) else {
+                            throw CPUError.invalidBranch
+                        }
+                        rip = Int(destination)
+                    } else {
+                        rip += 6
+                    }
+                } else {
+                    throw CPUError.unsupportedOpcode
+                }
             } else if opcode == 0x31 { // XOR r/m32, r32 (register-only)
                 guard rip + 2 <= program.count else { throw CPUError.truncatedInstruction }
                 let modrm = program[rip + 1]
@@ -1127,6 +1146,45 @@ enum MaxPS4VirtualRuntime {
 }
 
 extension MaxPS4CPUPrototype {
+    static func nearConditionalBranchSelfTest() -> Bool {
+        do {
+            // XOR EAX,EAX -> ZF=1, JZ skips the first MOV.
+            var taken = Self()
+            try taken.run([
+                0x31, 0xC0, 0x0F, 0x84, 5, 0, 0, 0,
+                0xB8, 1, 0, 0, 0,
+                0xB8, 42, 0, 0, 0, 0xC3
+            ])
+            guard taken.rax == 42, taken.executedInstructions == 4 else { return false }
+            // JNZ not taken when ZF=1, so the MOV executes normally.
+            var notTaken = Self()
+            try notTaken.run([
+                0x31, 0xC0, 0x0F, 0x85, 5, 0, 0, 0,
+                0xB8, 42, 0, 0, 0, 0xC3
+            ])
+            guard notTaken.rax == 42 else { return false }
+            // ZF=0 after XOR 42,1; JNZ is taken.
+            var nonzero = Self()
+            try nonzero.run([
+                0xB8, 42, 0, 0, 0, 0xB9, 1, 0, 0, 0,
+                0x31, 0xC8, 0x0F, 0x85, 5, 0, 0, 0,
+                0xB8, 1, 0, 0, 0, 0xC3
+            ])
+            guard nonzero.rax == 43 else { return false }
+            var invalid = Self()
+            do {
+                try invalid.run([0x31, 0xC0, 0x0F, 0x84, 0x7F, 0, 0, 0])
+                return false
+            } catch CPUError.invalidBranch {}
+            var truncated = Self()
+            do {
+                try truncated.run([0x0F, 0x84, 1])
+                return false
+            } catch CPUError.truncatedInstruction {}
+            return true
+        } catch { return false }
+    }
+
     static func immediate32AndControlFlowSelfTest() -> Bool {
         do {
             var cpu = Self()
