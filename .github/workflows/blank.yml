@@ -111,8 +111,9 @@ jobs:
           ICON="MaxPS4-iOS/Resources/AppIcon.jpg"
           APP="build/Payload/MaxPS4.app"
           test -s "$ICON"
-          python3 -m pip install --quiet pillow
-          python3 - <<'PY'
+          python3 -m venv build/icon-venv
+          build/icon-venv/bin/python -m pip install --quiet pillow
+          build/icon-venv/bin/python - <<'PY'
           from PIL import Image, ImageFile
           # The supplied JPEG may be truncated; recover readable pixels as before.
           ImageFile.LOAD_TRUNCATED_IMAGES = True
