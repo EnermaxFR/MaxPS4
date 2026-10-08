@@ -292,6 +292,18 @@ struct MaxPS4CPUPrototype {
                     zeroFlag = result == 0
                 }
                 rip += 3
+            } else if opcode == 0xFF { // INC/DEC r/m32, register-only
+                guard program.count - rip >= 2 else { throw CPUError.truncatedInstruction }
+                let modrm = program[rip + 1]
+                guard modrm & 0xC0 == 0xC0 else { throw CPUError.unsupportedOpcode }
+                let operation = (modrm >> 3) & 7
+                guard operation == 0 || operation == 1 else { throw CPUError.unsupportedOpcode }
+                let index = Int(modrm & 7)
+                let value = UInt32(truncatingIfNeeded: registers[index])
+                let result = operation == 0 ? value &+ 1 : value &- 1
+                registers[index] = UInt64(result)
+                zeroFlag = result == 0
+                rip += 2
             } else if opcode == 0x85 { // TEST r/m32, r32 (register-only)
                 guard rip + 2 <= program.count else { throw CPUError.truncatedInstruction }
                 let modrm = program[rip + 1]
@@ -1255,6 +1267,24 @@ extension MaxPS4CPUPrototype {
                   try guessNumber(target: 20, guess: 20) else { return false }
             do { _ = try guessNumber(target: 21, guess: 7); return false }
             catch CPUError.unsupportedOpcode { return true }
+        } catch { return false }
+    }
+
+    static func incrementDecrementSelfTest() -> Bool {
+        do {
+            var cpu = Self()
+            try cpu.run([0xB8, 41, 0, 0, 0, 0xFF, 0xC0, 0xFF, 0xC8, 0xC3])
+            guard cpu.rax == 41, !cpu.zeroFlag else { return false }
+            var wrap = Self()
+            try wrap.run([0xB8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC0, 0xC3])
+            guard wrap.rax == 0, wrap.zeroFlag else { return false }
+            var invalid = Self()
+            do { try invalid.run([0xFF, 0xD0]); return false }
+            catch CPUError.unsupportedOpcode {}
+            var truncated = Self()
+            do { try truncated.run([0xFF]); return false }
+            catch CPUError.truncatedInstruction {}
+            return true
         } catch { return false }
     }
 
