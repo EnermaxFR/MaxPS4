@@ -115,11 +115,22 @@ jobs:
           build/icon-venv/bin/python -m pip install --quiet pillow
           build/icon-venv/bin/python - <<'PY'
           from PIL import Image, ImageFile
-          # The supplied JPEG may be truncated; recover readable pixels as before.
+          # Prefer the original logo, but do not block IPA builds on a damaged JPEG.
+          from PIL import ImageDraw, ImageFont, UnidentifiedImageError
           ImageFile.LOAD_TRUNCATED_IMAGES = True
-          icon = Image.open("MaxPS4-iOS/Resources/AppIcon.jpg").convert("RGB")
-          if min(icon.size) < 180:
-              raise ValueError(f"App icon source too small: {icon.size}")
+          try:
+              icon = Image.open("MaxPS4-iOS/Resources/AppIcon.jpg").convert("RGB")
+              icon.load()
+              if min(icon.size) < 180:
+                  raise ValueError(f"Source logo is too small: {icon.size}")
+              print("ICON_SOURCE=original")
+          except (UnidentifiedImageError, OSError, ValueError) as error:
+              print(f"::warning::Original AppIcon.jpg cannot be decoded ({error}); using temporary MaxPS4 icon")
+              icon = Image.new("RGB", (1024, 1024), (15, 20, 40))
+              draw = ImageDraw.Draw(icon)
+              draw.rounded_rectangle((64, 64, 960, 960), radius=180, outline=(0, 210, 245), width=24)
+              draw.text((512, 512), "MaxPS4", fill="white", anchor="mm", font=ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial Bold.ttf", 130))
+              print("ICON_SOURCE=fallback")
           app = "build/Payload/MaxPS4.app/"
           for name, size in [
               ("AppIcon60x60@2x.png", 120),
