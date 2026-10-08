@@ -20,6 +20,7 @@ struct PrototypeSmokeTest {
             ("TEST EAX immédiat et branchement", MaxPS4CPUPrototype.testImmediateAndBranchSelfTest()),
             ("TEST AL et TEST registre immédiat", MaxPS4CPUPrototype.extendedTestOpcodeSelfTest()),
             ("Décalages SHL SHR SAR x86-64", MaxPS4CPUPrototype.shiftRegisterSelfTest()),
+            ("Extension de signe CDQ EAX vers EDX", MaxPS4CPUPrototype.cdqSelfTest()),
             ("Incrémentation et décrémentation x86-64", MaxPS4CPUPrototype.incrementDecrementSelfTest()),
             ("Mini-jeu de devinette sur CPU x86-64", MaxPS4CPUPrototype.guessingGameSelfTest()),
             ("Arithmétique immédiate 8 bits et branchements", MaxPS4CPUPrototype.immediate8AndBranchesSelfTest()),
