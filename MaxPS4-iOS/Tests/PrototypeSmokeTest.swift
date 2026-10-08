@@ -11,6 +11,7 @@ struct PrototypeSmokeTest {
             ("Sauts JMP rel32 bornés", MaxPS4CPUPrototype.nearJumpSelfTest()),
             ("ADD/SUB et pile invitée", MaxPS4CPUPrototype.arithmeticAndStackSelfTest()),
             ("AND bit-à-bit et drapeau zéro", MaxPS4CPUPrototype.bitwiseAndSelfTest()),
+            ("OR bit-à-bit et drapeau zéro", MaxPS4CPUPrototype.bitwiseOrSelfTest()),
             ("Chargeur ELF64", MaxPS4ELFLoader.selfTest()),
             ("Importations ELF64 synthétiques", MaxPS4ELFLoader.importDemoSelfTest()),
             ("Relocalisation relative x86-64", MaxPS4ELFLoader.relativeRelocationSelfTest()),
