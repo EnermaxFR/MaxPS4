@@ -330,7 +330,7 @@ struct MaxPS4CPUPrototype {
                 0xC3
             ])
             guard memoryMoveCPU.registers[1] == 0x12345678,
-                  memoryMoveCPU.guestMemory.read(at: 0x2000, count: 4) ==
+                  try memoryMoveCPU.guestMemory.read(at: 0x2000, count: 4) ==
                     Data([0x78, 0x56, 0x34, 0x12]) else { return false }
             var unmappedMemoryMove = Self()
             do {
