@@ -459,7 +459,7 @@ extension MaxPS4NativeLinkCheck {
         guard runNativeSyntheticX86(xorProgram) == 0x12345687,
               arm64TranslationPreview(xorProgram) == [
                 0x528ACF00, 0x72A24680, 0x52801FE1,
-                0x72A00001, 0x4A010000, 0xD65F03C0
+                0x72A00001, 0x4A010000, 0x6A00001F, 0xD65F03C0
               ] else { return false }
         // AND EAX, imm32: native result and ARM64 AND W0,W0,W1 encoding.
         let andProgram = Data([0xB8, 0x78, 0x56, 0x34, 0x12,
@@ -467,7 +467,7 @@ extension MaxPS4NativeLinkCheck {
         guard runNativeSyntheticX86(andProgram) == 0x78,
               arm64TranslationPreview(andProgram) == [
                 0x528ACF00, 0x72A24680, 0x52801FE1,
-                0x72A00001, 0x0A010000, 0xD65F03C0
+                0x72A00001, 0x0A010000, 0x6A00001F, 0xD65F03C0
               ] else { return false }
         // OR EAX, imm32: materialize operand then ORR W0,W0,W1.
         let orProgram = Data([0xB8, 0x78, 0x56, 0x34, 0x12,
@@ -487,6 +487,23 @@ extension MaxPS4NativeLinkCheck {
                 0x52800C60, 0x72A00000, 0xD65F03C0
               ] else { return false }
         guard arm64TranslationPreview(Data([0x0D, 1])) == nil else { return false }
+        // XOR EAX,EAX-style zeroing via XOR immediate drives JZ.
+        let xorZeroJZ = Data([0xB8, 1, 0, 0, 0, 0x35, 1, 0, 0, 0,
+                              0x74, 5, 0xB8, 99, 0, 0, 0, 0xC3])
+        guard runNativeSyntheticX86(xorZeroJZ) == 0,
+              arm64TranslationPreview(xorZeroJZ) == [
+                0x52800020, 0x72A00000, 0x52800021, 0x72A00001,
+                0x4A010000, 0x6A00001F, 0x54000060,
+                0x52800C60, 0x72A00000, 0xD65F03C0
+              ] else { return false }
+        let andZeroJZ = Data([0xB8, 42, 0, 0, 0, 0x25, 0, 0, 0, 0,
+                              0x74, 5, 0xB8, 99, 0, 0, 0, 0xC3])
+        guard runNativeSyntheticX86(andZeroJZ) == 0,
+              arm64TranslationPreview(andZeroJZ) == [
+                0x52800540, 0x72A00000, 0x52800001, 0x72A00001,
+                0x0A010000, 0x6A00001F, 0x54000060,
+                0x52800C60, 0x72A00000, 0xD65F03C0
+              ] else { return false }
         // CMP EAX, imm32 does not overwrite EAX; its ARM64 form sets NZCV.
         let compare = Data([0xB8, 0x2A, 0, 0, 0,
                             0x3D, 0x2A, 0, 0, 0, 0xC3])
