@@ -694,3 +694,34 @@ struct MaxPS4VirtualProcessManager {
         return processes.removeValue(forKey: pid) != nil
     }
 }
+
+
+/// A tiny, isolated guest execution environment for synthetic x86-64 tests.
+/// This is NOT the PlayStation 4 OS, kernel, graphics or system-library runtime.
+enum MaxPS4VirtualRuntime {
+    static func bootSelfTest() -> String {
+        do {
+            var manager = MaxPS4VirtualProcessManager()
+            let pid = try manager.create()
+            guard manager.scheduleNext() == pid else { return "Environnement virtuel : ordonnanceur indisponible" }
+            let code: [UInt8] = [
+                0x48, 0xB8, 0x2A, 0, 0, 0, 0, 0, 0, 0,
+                0xC3
+            ]
+            try manager.loadCurrent(code, at: 0x4000)
+            try manager.runLoadedCurrent(at: 0x4000, length: code.count)
+            guard let process = manager.process(pid: pid),
+                  process.cpu.rax == 42,
+                  process.cpu.executedInstructions == 2,
+                  process.cpu.guestMemory.allocatedBytes == code.count else {
+                return "Environnement virtuel : échec de l'exécution du programme de test"
+            }
+            guard manager.terminate(pid: pid), manager.count == 0 else {
+                return "Environnement virtuel : échec de fermeture du processus"
+            }
+            return "Environnement virtuel OK : processus \(pid), mémoire isolée, CPU x86-64 de test, programme exécuté (RAX=42), processus arrêté • aucun jeu PS4 lancé"
+        } catch {
+            return "Environnement virtuel : \(error.localizedDescription)"
+        }
+    }
+}
