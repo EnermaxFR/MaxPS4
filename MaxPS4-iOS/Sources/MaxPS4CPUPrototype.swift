@@ -157,12 +157,31 @@ struct MaxPS4CPUPrototype {
                 // MOV r/m32,r32 and MOV r32,r/m32; register operands only.
                 guard program.count - rip >= 2 else { throw CPUError.truncatedInstruction }
                 let modrm = program[rip + 1]
-                guard modrm & 0xC0 == 0xC0 else { throw CPUError.unsupportedOpcode }
+                let mode = modrm >> 6
                 let reg = Int((modrm >> 3) & 7)
                 let rm = Int(modrm & 7)
-                let destination = opcode == 0x89 ? rm : reg
-                let source = opcode == 0x89 ? reg : rm
-                registers[destination] = UInt64(UInt32(truncatingIfNeeded: registers[source]))
+                if mode == 0x03 {
+                    let destination = opcode == 0x89 ? rm : reg
+                    let source = opcode == 0x89 ? reg : rm
+                    registers[destination] = UInt64(UInt32(truncatingIfNeeded: registers[source]))
+                } else if mode == 0 && rm != 4 && rm != 5 {
+                    // Base-register indirect [r64], no displacement or SIB.
+                    // GuestMemory enforces bounds and page permissions.
+                    let address = registers[rm]
+                    if opcode == 0x89 {
+                        let value = UInt32(truncatingIfNeeded: registers[reg])
+                        let bytes = Data((0..<4).map { UInt8(truncatingIfNeeded: value >> ($0 * 8)) })
+                        try guestMemory.write(bytes, at: address)
+                    } else {
+                        let bytes = try guestMemory.read(at: address, count: 4)
+                        let value = (0..<4).reduce(UInt32(0)) {
+                            $0 | (UInt32(bytes[$1]) << ($1 * 8))
+                        }
+                        registers[reg] = UInt64(value)
+                    }
+                } else {
+                    throw CPUError.unsupportedOpcode
+                }
                 // MOV does not update flags.
                 rip += 2
             } else if opcode == 0x85 { // TEST r/m32, r32 (register-only)
@@ -301,6 +320,23 @@ struct MaxPS4CPUPrototype {
                 try unsupportedMemoryMove.run([0x8B, 0x00])
                 return false
             } catch CPUError.unsupportedOpcode {}
+            var memoryMoveCPU = Self()
+            try memoryMoveCPU.prepareGuestMemory(address: 0x2000, size: 16)
+            try memoryMoveCPU.run([
+                0x48, 0xBB, 0x00, 0x20, 0, 0, 0, 0, 0, 0, // MOV RBX,0x2000
+                0xB8, 0x78, 0x56, 0x34, 0x12,          // MOV EAX,0x12345678
+                0x89, 0x03,                            // MOV [RBX],EAX
+                0x8B, 0x0B,                            // MOV ECX,[RBX]
+                0xC3
+            ])
+            guard memoryMoveCPU.registers[1] == 0x12345678,
+                  memoryMoveCPU.guestMemory.read(at: 0x2000, count: 4) ==
+                    Data([0x78, 0x56, 0x34, 0x12]) else { return false }
+            var unmappedMemoryMove = Self()
+            do {
+                try unmappedMemoryMove.run([0x8B, 0x03])
+                return false
+            } catch MaxPS4GuestMemory.MemoryError.outOfBounds {}
             var truncatedRegisterMove = Self()
             do {
                 try truncatedRegisterMove.run([0x89])
