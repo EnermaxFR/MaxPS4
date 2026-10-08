@@ -185,7 +185,7 @@ struct MaxPS4CPUPrototype {
                 }
                 // MOV does not update flags.
                 rip += 2
-            } else if opcode == 0x01 || opcode == 0x21 || opcode == 0x29 { // ADD/AND/SUB r/m32, r32
+            } else if opcode == 0x01 || opcode == 0x09 || opcode == 0x21 || opcode == 0x29 { // ADD/OR/AND/SUB r/m32, r32
                 guard program.count - rip >= 2 else { throw CPUError.truncatedInstruction }
                 let modrm = program[rip + 1]
                 guard modrm & 0xC0 == 0xC0 else { throw CPUError.unsupportedOpcode }
@@ -195,6 +195,7 @@ struct MaxPS4CPUPrototype {
                 let rhs = UInt32(truncatingIfNeeded: registers[src])
                 let result: UInt32
                 if opcode == 0x01 { result = lhs &+ rhs }
+                else if opcode == 0x09 { result = lhs | rhs }
                 else if opcode == 0x21 { result = lhs & rhs }
                 else { result = lhs &- rhs }
                 registers[dest] = UInt64(result)
@@ -1096,6 +1097,24 @@ enum MaxPS4VirtualRuntime {
 }
 
 extension MaxPS4CPUPrototype {
+    static func bitwiseOrSelfTest() -> Bool {
+        do {
+            var cpu = Self()
+            try cpu.run([0xB8, 0x20, 0, 0, 0, 0xB9, 0x0A, 0, 0, 0, 0x09, 0xC8, 0xC3])
+            guard cpu.rax == 42, !cpu.zeroFlag else { return false }
+            var zero = Self()
+            try zero.run([0xB8, 0, 0, 0, 0, 0xB9, 0, 0, 0, 0, 0x09, 0xC8, 0xC3])
+            guard zero.rax == 0, zero.zeroFlag else { return false }
+            var invalid = Self()
+            do { try invalid.run([0x09, 0x08]); return false }
+            catch CPUError.unsupportedOpcode {}
+            var short = Self()
+            do { try short.run([0x09]); return false }
+            catch CPUError.truncatedInstruction {}
+            return true
+        } catch { return false }
+    }
+
     static func bitwiseAndSelfTest() -> Bool {
         do {
             var cpu = Self()
