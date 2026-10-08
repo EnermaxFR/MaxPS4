@@ -31,3 +31,14 @@ struct MaxPS4NativeCapabilities: Equatable {
 protocol MaxPS4ShadPS4Backend: MaxPS4NativeEngine {
     var capabilities: MaxPS4NativeCapabilities { get }
 }
+
+// Linked native C ABI smoke probe. Only demonstrates the shadPS4 utility's
+// C++ code is present; this is NOT an emulator readiness or game launch test.
+@_silgen_name("maxps4_shadps4_utility_probe")
+private func maxps4_shadps4_utility_probe() -> Int32
+
+enum MaxPS4NativeLinkCheck {
+    static var isUpstreamUtilityLinked: Bool {
+        maxps4_shadps4_utility_probe() == 1
+    }
+}
