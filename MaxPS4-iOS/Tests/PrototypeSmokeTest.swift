@@ -6,6 +6,7 @@ struct PrototypeSmokeTest {
     static func main() {
         let checks: [(String, Bool)] = [
             ("Mémoire invitée", MaxPS4GuestMemory.selfTest()),
+            ("Accès mémoire 64 bits et permissions", MaxPS4GuestMemory.wordAccessSelfTest()),
             ("CPU x86-64", MaxPS4CPUPrototype.selfTest()),
             ("Appels CALL/RET et branchements", MaxPS4CPUPrototype.callAndBranchSelfTest()),
             ("Sauts JMP rel32 bornés", MaxPS4CPUPrototype.nearJumpSelfTest()),

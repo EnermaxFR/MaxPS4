@@ -118,6 +118,41 @@ struct MaxPS4GuestMemory {
         return regions.firstIndex { address >= $0.base && end <= $0.end }
     }
 
+    /// Read a little-endian 64-bit value entirely within a permitted guest region.
+    func readUInt64(at address: UInt64) throws -> UInt64 {
+        let bytes = try read(at: address, count: 8)
+        return bytes.enumerated().reduce(UInt64(0)) { result, element in
+            result | (UInt64(element.element) << (element.offset * 8))
+        }
+    }
+
+    /// Write a little-endian 64-bit value entirely within a permitted guest region.
+    mutating func writeUInt64(_ value: UInt64, at address: UInt64) throws {
+        let bytes = Data((0..<8).map { UInt8(truncatingIfNeeded: value >> ($0 * 8)) })
+        try write(bytes, at: address)
+    }
+
+    static func wordAccessSelfTest() -> Bool {
+        do {
+            var memory = Self()
+            try memory.mapZeroFilled(at: 0x4000, size: 16)
+            try memory.writeUInt64(0x0123_4567_89AB_CDEF, at: 0x4008)
+            guard try memory.readUInt64(at: 0x4008) == 0x0123_4567_89AB_CDEF,
+                  memory.allocatedBytes == 16,
+                  try memory.read(at: 0x4008, count: 8) ==
+                    Data([0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01]) else { return false }
+            do { _ = try memory.readUInt64(at: 0x4009); return false }
+            catch MemoryError.outOfBounds {}
+            do { try memory.writeUInt64(1, at: UInt64.max); return false }
+            catch MemoryError.outOfBounds {}
+            try memory.protect(at: 0x4000, size: 16, permissions: [.read])
+            do { try memory.writeUInt64(0, at: 0x4000); return false }
+            catch MemoryError.accessDenied {}
+            guard try memory.readUInt64(at: 0x4008) == 0x0123_4567_89AB_CDEF else { return false }
+            return true
+        } catch { return false }
+    }
+
     static func selfTest() -> Bool {
         do {
             var memory = Self()
