@@ -453,6 +453,15 @@ extension MaxPS4NativeLinkCheck {
                 0x52800000, 0x72A00000, 0x528ACF01,
                 0x72A24681, 0x4B010000, 0xD65F03C0
               ] else { return false }
+        // XOR EAX, imm32: compare native interpreter with inert ARM64 EOR emission.
+        let xorProgram = Data([0xB8, 0x78, 0x56, 0x34, 0x12,
+                               0x35, 0xFF, 0, 0, 0, 0xC3])
+        guard runNativeSyntheticX86(xorProgram) == 0x12345687,
+              arm64TranslationPreview(xorProgram) == [
+                0x528ACF00, 0x72A24680, 0x52801FE1,
+                0x72A00001, 0x4A010000, 0xD65F03C0
+              ] else { return false }
+        guard arm64TranslationPreview(Data([0x35, 1])) == nil else { return false }
         guard arm64TranslationPreview(Data([0x2D, 1])) == nil else { return false }
         return arm64TranslationPreview(Data([0x0F, 0x05])) == nil &&
             arm64TranslationPreview(Data([0xB8, 1])) == nil &&
