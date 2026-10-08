@@ -551,6 +551,8 @@ final class MaxPS4Emulator: ObservableObject {
             var readableELF = 0
             var incompatibleELF = 0
             var truncatedHeaders = 0
+            var completeELFHeaders = 0
+            var elfWithoutProgramTable = 0
             var possibleSELF = 0
             var invalid = 0
             for i in 0..<Int(count) {
@@ -573,7 +575,30 @@ final class MaxPS4Emulator: ObservableObject {
                     guard prefix.count >= 20 else { truncatedHeaders += 1; continue }
                     if prefix[4] == 2 && prefix[5] == 1 && prefix[6] == 1 &&
                         prefix[18] == 0x3E && prefix[19] == 0 {
-                        readableELF += 1
+                        if prefix.count < 64 {
+                            truncatedHeaders += 1
+                            continue
+                        }
+                        let elfType = UInt16(prefix[16]) | (UInt16(prefix[17]) << 8)
+                        let elfVersion = (20..<24).reduce(UInt32(0)) {
+                            $0 | (UInt32(prefix[$1]) << (($1 - 20) * 8))
+                        }
+                        let programHeaderOffset = (32..<40).reduce(UInt64(0)) {
+                            $0 | (UInt64(prefix[$1]) << (($1 - 32) * 8))
+                        }
+                        let programHeaderStride = UInt16(prefix[54]) | (UInt16(prefix[55]) << 8)
+                        let programHeaderCount = UInt16(prefix[56]) | (UInt16(prefix[57]) << 8)
+                        if (elfType == 2 || elfType == 3) && elfVersion == 1 {
+                            readableELF += 1
+                            if programHeaderOffset > 0 && programHeaderStride == 56 &&
+                                programHeaderCount > 0 && programHeaderCount <= 64 {
+                                completeELFHeaders += 1
+                            } else {
+                                elfWithoutProgramTable += 1
+                            }
+                        } else {
+                            incompatibleELF += 1
+                        }
                     } else {
                         incompatibleELF += 1
                     }
@@ -593,6 +618,8 @@ final class MaxPS4Emulator: ObservableObject {
                 "En-têtes ELF64 x86-64 aux débuts des entrées : \(readableELF)",
                 "Signatures SELF possibles aux débuts des entrées : \(possibleSELF)",
                 "ELF incompatibles : \(incompatibleELF) ; en-têtes incomplets : \(truncatedHeaders)",
+                "ELF avec table de segments déclarée : \(completeELFHeaders) ; sans table exploitable : \(elfWithoutProgramTable)",
+                "Une table déclarée ne prouve ni son accessibilité ni la possibilité de démarrer le jeu.",
                 "Compatibilité Sonic Mania PS4 : bloquée (SELF/ELF exploitable, exécution ARM64, services PS4 et graphismes manquants).",
                 "Ce relevé ne déchiffre pas les entrées et ne détecte pas les exécutables imbriqués.",
                 "Un PKG valide n'est pas un binaire exécutable.",
