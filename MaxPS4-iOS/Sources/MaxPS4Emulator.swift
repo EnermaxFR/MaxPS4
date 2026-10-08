@@ -287,6 +287,32 @@ final class MaxPS4Emulator: ObservableObject {
                              (within ? "✅" : "❌"))
             }
         }
+        // Scan only small, bounded metadata descriptors for literal names.
+        // A found string is only a clue, never proof that SELF is extractable.
+        let needle = Array("eboot.bin".utf8)
+        var inspected = 0
+        var matches: [String] = []
+        for index in 0..<Int(count) {
+            let start = index * 32
+            let entryOffset = number(table, start + 16)
+            let entrySize = number(table, start + 20)
+            guard entrySize >= UInt64(needle.count), entrySize <= 65_536,
+                  entryOffset <= fileSize, entrySize <= fileSize - entryOffset,
+                  inspected + Int(entrySize) <= 262_144 else { continue }
+            try handle.seek(toOffset: entryOffset)
+            let data = try handle.read(upToCount: Int(entrySize)) ?? Data()
+            inspected += data.count
+            guard data.count >= needle.count else { continue }
+            let bytes = Array(data)
+            if (0...(bytes.count - needle.count)).contains(where: {
+                Array(bytes[$0..<($0 + needle.count)]).map { $0 | 0x20 } == needle
+            }) {
+                matches.append("#\(index + 1)")
+            }
+        }
+        lines.append("Recherche eboot.bin dans \(inspected) octets de petites entrées : " +
+                     (matches.isEmpty ? "aucune chaîne visible" : "indice texte dans " + matches.joined(separator: ", ")))
+        lines.append("La recherche ne parcourt pas le contenu chiffré ni les grands blocs.")
         lines.append("Contrôle des plages : \(valid)/\(count) entrées dans le fichier")
         lines.append("Démarrage expérimental : lecture de la table OK, mais aucun exécutable PS4 chargeable")
         lines.append("Étape bloquante : extraction/déchiffrement du programme, puis environnement PS4 absent")
