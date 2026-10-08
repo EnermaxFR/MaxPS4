@@ -85,6 +85,32 @@ enum MaxPS4ELFLoader {
         }
     }
 
+    /// Tests that malformed ELF section metadata is rejected without executing it.
+    static func malformedImportSelfTest() -> Bool {
+        do {
+            let url = try createImportDemo()
+            defer { try? FileManager.default.removeItem(at: url) }
+            let original = try Data(contentsOf: url)
+            func rejected(_ offset: Int, _ value: UInt8) throws -> Bool {
+                var copy = original
+                copy[offset] = value
+                try copy.write(to: url, options: .atomic)
+                do {
+                    _ = try inspectImports(url: url)
+                    return false
+                } catch LoaderError.invalid {
+                    return true
+                }
+            }
+            // Missing linked section, illegal entry stride and truncated section table.
+            return try rejected(0x1C0 + 40, 0xFF)
+                && rejected(0x1C0 + 56, 0)
+                && rejected(40, 0xFF)
+        } catch {
+            return false
+        }
+    }
+
     /// Bounds-checked ELF64 section-table import inventory (SHT_DYNSYM).
     /// Diagnostic only: no relocation application, SELF extraction or execution.
     static func inspectImports(url: URL) throws -> String {
