@@ -510,12 +510,16 @@ final class MaxPS4Emulator: ObservableObject {
             func be32(_ at: Int) -> UInt64 {
                 (0..<4).reduce(UInt64(0)) { ($0 << 8) | UInt64(table[at + $1]) }
             }
+            var typeCounts: [UInt32: Int] = [:]
+            var emptyEntries = 0
             var checked = 0
             var readableELF = 0
             var possibleSELF = 0
             var invalid = 0
             for i in 0..<Int(count) {
                 let base = i * 32
+                let entryType = UInt32(be32(base))
+                typeCounts[entryType, default: 0] += 1
                 let start = be32(base + 16)
                 let length = be32(base + 20)
                 guard start <= size, length <= size - start else {
@@ -523,6 +527,7 @@ final class MaxPS4Emulator: ObservableObject {
                     continue
                 }
                 checked += 1
+                if length == 0 { emptyEntries += 1 }
                 if length < 4 { continue }
                 try handle.seek(toOffset: start)
                 let prefix = try handle.read(upToCount: 5) ?? Data()
@@ -532,9 +537,15 @@ final class MaxPS4Emulator: ObservableObject {
                     possibleSELF += 1
                 }
             }
+            let inventory = typeCounts.sorted { $0.key < $1.key }.prefix(20).map {
+                "Type 0x\(String($0.key, radix: 16)) : \($0.value) entrée(s)"
+            }
             status = [
                 "Sonic Mania • état du chargeur PS4",
                 "Index PKG : \(checked)/\(count) entrées dans les bornes ; invalides : \(invalid)",
+                "Entrées vides : \(emptyEntries)",
+                "Types d’entrées PKG (identifiants bruts) :",
+                inventory.joined(separator: "\n"),
                 "Signatures ELF64 aux débuts des entrées : \(readableELF)",
                 "Signatures SELF possibles aux débuts des entrées : \(possibleSELF)",
                 "Ce relevé ne déchiffre pas les entrées et ne détecte pas les exécutables imbriqués.",
