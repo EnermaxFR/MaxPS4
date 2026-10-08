@@ -237,6 +237,7 @@ enum MaxPS4ELFLoader {
                 && rejects(64 + 4, 4) // Entry requires an executable segment.
                 && rejects(56, 0) // Reject an ELF with no program headers.
                 && rejects(64 + 48, 3) // Reject non-power-of-two segment alignment.
+                && rejects(64 + 48, 16) // Misaligned offset / virtual address.
                 && {
                     // Point d'entrée placé dans la zone BSS, hors du code ELF.
                     var corrupted = original
@@ -359,6 +360,7 @@ enum MaxPS4ELFLoader {
             let alignment = number(offset + 48, 8)
             guard (alignment <= 1 || (alignment & (alignment - 1)) == 0),
                   segmentFileSize <= segmentMemory,
+                  (alignment <= 1 || (start % alignment == source % alignment)),
                   source <= UInt64(file.count),
                   segmentFileSize <= UInt64(file.count) - source,
                   flags & ~UInt64(7) == 0,

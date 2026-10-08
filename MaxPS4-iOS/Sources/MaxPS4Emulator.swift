@@ -37,18 +37,6 @@ final class MaxPS4Emulator: ObservableObject {
         nativeEngine?.isReady == true
     }
 
-    func playGuessingDemo(guess: Int) {
-        do {
-            // Deterministic demo target; the x86-64 prototype makes the decision.
-            let winner = try MaxPS4CPUPrototype.guessNumber(target: 7, guess: guess)
-            status = winner
-                ? "Mini-jeu x86-64 : gagné ! Le nombre est 7. Programme de démonstration exécuté."
-                : "Mini-jeu x86-64 : perdu pour \(guess). Essaie un autre nombre entre 1 et 20."
-        } catch {
-            status = "Mini-jeu x86-64 : \(error.localizedDescription)"
-        }
-    }
-
     func testShadPS4NativeUtility() {
         let linked = MaxPS4NativeLinkCheck.isUpstreamUtilityLinked &&
             MaxPS4NativeLinkCheck.executableSignatureSelfTest &&
