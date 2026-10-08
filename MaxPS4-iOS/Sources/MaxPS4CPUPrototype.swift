@@ -1035,28 +1035,6 @@ enum MaxPS4VirtualRuntime {
         }
     }
 
-    static func callAndBranchSelfTest() -> Bool {
-        do {
-            var cpu = MaxPS4CPUPrototype()
-            // CALL +1, RET (main), MOV EAX,42, RET (callee)
-            try cpu.run([0xE8, 0x01, 0, 0, 0, 0xC3, 0xB8, 42, 0, 0, 0, 0xC3])
-            guard cpu.rax == 42, cpu.executedInstructions == 4, cpu.rip == 6 else { return false }
-            var branch = MaxPS4CPUPrototype()
-            // XOR EAX,EAX; JZ +5; MOV EAX,1 (skipped); MOV EAX,42; RET
-            try branch.run([0x31, 0xC0, 0x74, 0x05, 0xB8, 1, 0, 0, 0, 0xB8, 42, 0, 0, 0, 0xC3])
-            guard branch.rax == 42 else { return false }
-            var invalid = MaxPS4CPUPrototype()
-            do {
-                try invalid.run([0xE8, 0x7F, 0, 0, 0])
-                return false
-            } catch MaxPS4CPUPrototype.CPUError.invalidBranch {
-                return true
-            }
-        } catch {
-            return false
-        }
-    }
-
     static func bootELFIntegrationTest() -> String {
         // The integration test builds an independent synthetic ELF64 fixture,
         // maps its PT_LOAD segment and runs its entry point in guest memory.
@@ -1091,4 +1069,29 @@ enum MaxPS4VirtualRuntime {
             return "Environnement virtuel : \(error.localizedDescription)"
         }
     }
+}
+
+extension MaxPS4CPUPrototype {
+    static func callAndBranchSelfTest() -> Bool {
+        do {
+            var cpu = MaxPS4CPUPrototype()
+            // CALL +1, RET (main), MOV EAX,42, RET (callee)
+            try cpu.run([0xE8, 0x01, 0, 0, 0, 0xC3, 0xB8, 42, 0, 0, 0, 0xC3])
+            guard cpu.rax == 42, cpu.executedInstructions == 4, cpu.rip == 6 else { return false }
+            var branch = MaxPS4CPUPrototype()
+            // XOR EAX,EAX; JZ +5; MOV EAX,1 (skipped); MOV EAX,42; RET
+            try branch.run([0x31, 0xC0, 0x74, 0x05, 0xB8, 1, 0, 0, 0, 0xB8, 42, 0, 0, 0, 0xC3])
+            guard branch.rax == 42 else { return false }
+            var invalid = MaxPS4CPUPrototype()
+            do {
+                try invalid.run([0xE8, 0x7F, 0, 0, 0])
+                return false
+            } catch MaxPS4CPUPrototype.CPUError.invalidBranch {
+                return true
+            }
+        } catch {
+            return false
+        }
+    }
+
 }
