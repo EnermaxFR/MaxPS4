@@ -403,6 +403,76 @@ final class MaxPS4Emulator: ObservableObject {
         }
     }
 
+    /// Read-only readiness report: verifies package header and descriptor bounds.
+    /// Does not imply PS4 decryption, extraction or executable compatibility.
+    func diagnosePKGBoot(_ game: MaxPS4Game) {
+        guard game.fileName.lowercased().hasSuffix(".pkg") else {
+            status = "Diagnostic démarrage : sélectionnez un PKG PS4"
+            return
+        }
+        do {
+            let url = URL(fileURLWithPath: game.localPath)
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let attributes = try fileManager.attributesOfItem(atPath: url.path)
+            let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
+            let header = try handle.read(upToCount: 128) ?? Data()
+            guard size >= 128, header.count == 128,
+                  Array(header.prefix(4)) == [0x7F, 0x43, 0x4E, 0x54] else {
+                status = "Diagnostic démarrage : en-tête PKG invalide"
+                return
+            }
+            func be32(_ at: Int) -> UInt64 {
+                (0..<4).reduce(UInt64(0)) { ($0 << 8) | UInt64(header[at + $1]) }
+            }
+            let count = be32(0x10)
+            let offset = be32(0x18)
+            guard count > 0, count <= 4096, offset <= size,
+                  count <= (size - offset) / 32 else {
+                status = "Diagnostic démarrage : table PKG hors limites"
+                return
+            }
+            try handle.seek(toOffset: offset)
+            let table = try handle.read(upToCount: Int(count * 32)) ?? Data()
+            guard table.count == Int(count * 32) else {
+                status = "Diagnostic démarrage : table incomplète"
+                return
+            }
+            func word(_ at: Int) -> UInt64 {
+                (0..<4).reduce(UInt64(0)) { ($0 << 8) | UInt64(table[at + $1]) }
+            }
+            var valid = 0
+            var invalidEntries: [String] = []
+            for i in 0..<Int(count) {
+                let base = i * 32
+                let start = word(base + 16)
+                let length = word(base + 20)
+                if start <= size && length <= size - start {
+                    valid += 1
+                } else {
+                    invalidEntries.append(String(i + 1))
+                }
+            }
+            let descriptorState = invalidEntries.isEmpty
+                ? "OK (\(valid)/\(count) plages dans le fichier)"
+                : "ERREUR (\(valid)/\(count)) : " + invalidEntries.prefix(12).joined(separator: ", ")
+            status = [
+                "Diagnostic de démarrage PS4 — lecture seule",
+                "En-tête PKG : valide (signature seulement)",
+                "Table des entrées : \(descriptorState)",
+                "Contenu du jeu : non extrait",
+                "Protection et chiffrement : non analysés",
+                "Exécutable SELF/ELF : non disponible pour le moteur",
+                "Services système PS4 : non implémentés",
+                "Rendu graphique du jeu : non implémenté",
+                "Verdict : démarrage PS4 indisponible",
+                "Prochaine étape : analyse du format PKG et tests avec des ELF de démonstration non chiffrés."
+            ].joined(separator: "\n")
+        } catch {
+            status = "Diagnostic de démarrage impossible : \(error.localizedDescription)"
+        }
+    }
+
     func rename(_ game: MaxPS4Game, to proposedName: String) {
         let name = proposedName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
