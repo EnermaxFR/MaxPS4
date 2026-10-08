@@ -509,7 +509,15 @@ extension MaxPS4NativeLinkCheck {
                 0x6B01001F, 0x54000061, 0x52800C60, 0x72A00000,
                 0xD65F03C0
               ] else { return false }
-        // Jumping into the middle of an immediate or backward is unsupported.
+        // Backward JNZ returns to CMP, refreshing NZCV each iteration.
+        let backwardToCMP = Data([0xB8, 42, 0, 0, 0, 0x3D, 42, 0, 0, 0,
+                                  0x75, 0xF9, 0xC3])
+        guard runNativeSyntheticX86(backwardToCMP) == 42,
+              arm64TranslationPreview(backwardToCMP) == [
+                0x52800540, 0x72A00000, 0x52800541,
+                0x72A00001, 0x6B01001F, 0x54FFFFA1, 0xD65F03C0
+              ] else { return false }
+        // Invalid instruction targets and loops without fresh CMP are rejected.
         let badTarget = Data([0xB8, 42, 0, 0, 0, 0x3D, 42, 0, 0, 0,
                               0x74, 1, 0xB8, 99, 0, 0, 0, 0xC3])
         let backward = Data([0xB8, 42, 0, 0, 0, 0x3D, 42, 0, 0, 0,
