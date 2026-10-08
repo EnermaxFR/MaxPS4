@@ -55,3 +55,27 @@ extern "C" int maxps4_native_self_segment_count(const std::uint8_t* data,
     *segment_count = segments;
     return 1;
 }
+
+// Segment flag interpretation follows shadPS4 src/core/loader/elf.h
+// (GPL-2.0-or-later). This only inventories metadata, never decrypts segments.
+// Returns 1 on success; incomplete SELF segment tables are rejected.
+extern "C" int maxps4_native_self_segment_flags(const std::uint8_t* data,
+                                                   std::size_t count,
+                                                   std::uint16_t* encrypted,
+                                                   std::uint16_t* compressed) noexcept {
+    if (!encrypted || !compressed || !data) return 0;
+    std::uint16_t segments = 0;
+    if (!maxps4_native_self_segment_count(data, count, &segments)) return 0;
+    std::uint16_t encrypted_total = 0;
+    std::uint16_t compressed_total = 0;
+    for (std::size_t i = 0; i < segments; ++i) {
+        const std::size_t offset = 32 + i * 32;
+        // flags are little-endian u64; only low-byte bits 1 and 3 matter.
+        const std::uint8_t flags = data[offset];
+        if (flags & 0x02) ++encrypted_total;
+        if (flags & 0x08) ++compressed_total;
+    }
+    *encrypted = encrypted_total;
+    *compressed = compressed_total;
+    return 1;
+}

@@ -131,3 +131,36 @@ extension MaxPS4NativeLinkCheck {
         return nativeSELFSegmentCount(sample) == nil
     }
 }
+
+@_silgen_name("maxps4_native_self_segment_flags")
+private func maxps4_native_self_segment_flags(
+    _ bytes: UnsafePointer<UInt8>?, _ count: Int,
+    _ encrypted: UnsafeMutablePointer<UInt16>?,
+    _ compressed: UnsafeMutablePointer<UInt16>?
+) -> Int32
+
+extension MaxPS4NativeLinkCheck {
+    static func nativeSELFSegmentFlags(_ data: Data) -> (encrypted: UInt16, compressed: UInt16)? {
+        var encrypted: UInt16 = 0
+        var compressed: UInt16 = 0
+        let accepted = data.withUnsafeBytes { raw in
+            maxps4_native_self_segment_flags(
+                raw.bindMemory(to: UInt8.self).baseAddress, data.count,
+                &encrypted, &compressed
+            )
+        }
+        return accepted == 1 ? (encrypted, compressed) : nil
+    }
+
+    static var nativeSELFSegmentFlagsSelfTest: Bool {
+        var header = Data(repeating: 0, count: 96)
+        header.replaceSubrange(0..<4, with: [0x4F, 0x15, 0x3D, 0x1D])
+        header[6] = 1
+        header[24] = 2
+        header[32] = 0x02 // encrypted first segment
+        header[64] = 0x0A // encrypted and compressed second segment
+        guard let flags = nativeSELFSegmentFlags(header),
+              flags.encrypted == 2, flags.compressed == 1 else { return false }
+        return nativeSELFSegmentFlags(Data(header.prefix(95))) == nil
+    }
+}

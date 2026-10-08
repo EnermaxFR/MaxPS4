@@ -53,7 +53,8 @@ final class MaxPS4Emulator: ObservableObject {
         let linked = MaxPS4NativeLinkCheck.isUpstreamUtilityLinked &&
             MaxPS4NativeLinkCheck.executableSignatureSelfTest &&
             MaxPS4NativeLinkCheck.nativeELFEntryPointSelfTest &&
-            MaxPS4NativeLinkCheck.nativeSELFHeaderSelfTest
+            MaxPS4NativeLinkCheck.nativeSELFHeaderSelfTest &&
+            MaxPS4NativeLinkCheck.nativeSELFSegmentFlagsSelfTest
         guard linked else {
             status = "Pont C++ : contrôle natif échoué. Aucun jeu ne peut être lancé."
             return
