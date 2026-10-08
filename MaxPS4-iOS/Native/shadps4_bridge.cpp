@@ -356,7 +356,7 @@ extern "C" int maxps4_native_arm64_jit_ready() noexcept {
 
 // Offline x86->AArch64 code emission prototype. Generated instruction words are
 // DATA ONLY: never mapped executable or jumped into. No iOS JIT entitlement implied.
-// Subset: MOV EAX,imm32; ADD/SUB/XOR/AND/CMP EAX,imm32; JZ/JNZ rel8=0; NOP; RET. Refuse other instructions.
+// Subset: MOV EAX,imm32; ADD/SUB/XOR/AND/CMP EAX,imm32; forward JZ/JNZ rel8; NOP; RET. Refuse other instructions.
 extern "C" int maxps4_arm64_translate_preview(
     const std::uint8_t* guest, std::size_t count,
     std::uint32_t* output, std::size_t capacity,
@@ -366,12 +366,21 @@ extern "C" int maxps4_arm64_translate_preview(
     std::size_t pc = 0, n = 0;
     bool terminated = false;
     bool cmp_ready = false;
+    // Translate in two passes: record x86 instruction boundaries and resolve
+    // forward conditional targets only after ARM64 instruction sizes are known.
+    std::size_t arm_at_guest[4097] = {};
+    bool boundary[4097] = {};
+    struct Fixup { std::size_t arm_index, guest_target; std::uint32_t condition; };
+    Fixup fixups[4096] = {};
+    std::size_t fixup_count = 0;
     auto put = [&](std::uint32_t instruction) noexcept -> bool {
         if (n >= capacity) return false;
         output[n++] = instruction;
         return true;
     };
     while (pc < count) {
+        boundary[pc] = true;
+        arm_at_guest[pc] = n;
         const std::uint8_t opcode = guest[pc++];
         if (opcode == 0xB8) {
             cmp_ready = false;
@@ -423,11 +432,16 @@ extern "C" int maxps4_arm64_translate_preview(
                 !put(0x72A00001u | (((imm >> 16) & 0xffffu) << 5)) ||
                 !put(0x6B01001Fu)) return 0; // CMP W0,W1 (SUBS WZR,W0,W1)
         } else if (opcode == 0x74 || opcode == 0x75) {
-            // First bounded conditional branch form: rel8=0 (fallthrough).
-            // Emitting B.cond +1 preserves execution order without guest relocation.
-            // Nonzero offsets require instruction-boundary mapping (future work).
-            if (pc >= count || !cmp_ready || guest[pc++] != 0) return 0;
-            if (!put(0x54000020u | (opcode == 0x74 ? 0u : 1u))) return 0;
+            if (pc >= count || !cmp_ready) return 0;
+            const std::int8_t offset = static_cast<std::int8_t>(guest[pc++]);
+            const std::int64_t target = static_cast<std::int64_t>(pc) + offset;
+            // Back edges require control-flow flag liveness analysis; reject for now.
+            if (target < static_cast<std::int64_t>(pc) ||
+                target >= static_cast<std::int64_t>(count) ||
+                fixup_count >= 4096) return 0;
+            fixups[fixup_count++] = { n, static_cast<std::size_t>(target),
+                                       opcode == 0x74 ? 0u : 1u };
+            if (!put(0)) return 0;
         } else if (opcode == 0x90) {
             if (!put(0xD503201Fu)) return 0; // ARM64 NOP
         } else if (opcode == 0xC3) {
@@ -437,6 +451,16 @@ extern "C" int maxps4_arm64_translate_preview(
         } else return 0;
     }
     if (!terminated) return 0;
+    for (std::size_t i = 0; i < fixup_count; ++i) {
+        const auto& fixup = fixups[i];
+        if (!boundary[fixup.guest_target]) return 0;
+        const std::size_t dest = arm_at_guest[fixup.guest_target];
+        if (dest <= fixup.arm_index || dest - fixup.arm_index >= (1u << 18))
+            return 0;
+        output[fixup.arm_index] = 0x54000000u |
+            (static_cast<std::uint32_t>(dest - fixup.arm_index) << 5) |
+            fixup.condition;
+    }
     *emitted = n;
     return 1;
 }
