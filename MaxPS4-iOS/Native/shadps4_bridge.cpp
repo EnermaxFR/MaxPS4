@@ -231,6 +231,60 @@ extern "C" int maxps4_arm64_translate_preview(
     std::uint32_t* output, std::size_t capacity,
     std::size_t* emitted) noexcept;
 
+// Per-thread, data-only translation cache. No executable memory, shared state,
+// or external guest pointers are retained. Exact bytes are compared to avoid
+// hash collisions; a bounded four-entry ring prevents unbounded memory growth.
+namespace {
+struct ARM64PreviewCacheEntry {
+    std::uint8_t guest[4096] = {};
+    std::uint32_t words[4096] = {};
+    std::size_t guest_size = 0;
+    std::size_t word_count = 0;
+    bool valid = false;
+};
+struct ARM64PreviewCache {
+    ARM64PreviewCacheEntry entries[4] = {};
+    std::size_t next = 0;
+    std::uint64_t hits = 0;
+    std::uint64_t misses = 0;
+};
+thread_local ARM64PreviewCache preview_cache;
+
+bool translate_or_reuse(const std::uint8_t* guest, std::size_t size) noexcept {
+    if (!guest || size == 0 || size > 4096) return false;
+    for (auto& entry : preview_cache.entries) {
+        if (entry.valid && entry.guest_size == size) {
+            bool same = true;
+            for (std::size_t i = 0; i < size; ++i)
+                if (entry.guest[i] != guest[i]) { same = false; break; }
+            if (same) {
+                ++preview_cache.hits;
+                return true;
+            }
+        }
+    }
+    ++preview_cache.misses;
+    auto& entry = preview_cache.entries[preview_cache.next];
+    preview_cache.next = (preview_cache.next + 1) % 4;
+    entry.valid = false;
+    std::size_t emitted = 0;
+    if (maxps4_arm64_translate_preview(guest, size, entry.words, 4096, &emitted) != 1)
+        return false;
+    for (std::size_t i = 0; i < size; ++i) entry.guest[i] = guest[i];
+    entry.guest_size = size;
+    entry.word_count = emitted;
+    entry.valid = true;
+    return true;
+}
+} // namespace
+
+// Diagnostic only: reports translation cache activity, never JIT execution.
+extern "C" void maxps4_arm64_preview_cache_stats(
+    std::uint64_t* hits, std::uint64_t* misses) noexcept {
+    if (hits) *hits = preview_cache.hits;
+    if (misses) *misses = preview_cache.misses;
+}
+
 // Execution backend selection point for an eventual ARM64 dynamic recompiler.
 // iOS code-signing/JIT entitlements must be validated before enabling JIT.
 // No RWX memory allocation or code generation is attempted here.
@@ -241,13 +295,8 @@ extern "C" int maxps4_native_guest_run_with_backend(
     if (!used_mode || (requested_mode != 0 && requested_mode != 1)) return 0;
     *used_mode = 0; // Never claim JIT execution on iOS without executable-code support.
     if (requested_mode == 1 && code && size > 0 && size <= 4096) {
-        // Exercise the real ARM64 emitter on the requested JIT path.
-        // The output remains inert DATA; no executable allocation or invocation.
-        std::uint32_t translated[4096] = {};
-        std::size_t emitted = 0;
-        (void)maxps4_arm64_translate_preview(
-            code, size, translated, 4096, &emitted);
-        // Unsupported / oversized programs still use the interpreter.
+        // Cache exact translated blocks as DATA; execution still uses interpreter.
+        (void)translate_or_reuse(code, size);
     }
     return maxps4_native_guest_x86_run(code, size, budget, result);
 }
