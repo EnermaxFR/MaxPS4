@@ -761,6 +761,21 @@ enum MaxPS4VirtualRuntime {
 
     /// A test import is resolved only after validating a synthetic ELF64 image.
     /// This does not parse ELF dynamic relocations or load PS4 shared libraries.
+    static func runBatchDiagnostics() -> String {
+        let checks: [(String, String, String)] = [
+            ("ELF + CPU", testELFLibraryIntegration(), "ELF64 + bibliothèques OK"),
+            ("Bibliothèques", testPS4LibraryResolver(), "Bibliothèques système OK"),
+            ("Mémoire", testPS4VirtualMemoryService(), "Mémoire virtuelle OK"),
+            ("Processus", testProcessMemoryIsolation(), "Processus + mémoire OK"),
+            ("Services", testSimulatedKernelServices(), "Services virtuels OK"),
+            ("Compatibilité", testPS4CompatibilityScaffold(), "Compatibilité PS4 (base) OK")
+        ]
+        let passed = checks.filter { $0.1.contains($0.2) }.count
+        let report = checks.map { ($0.1.contains($0.2) ? "✅ " : "❌ ") + $0.0 }
+        return (["Diagnostic global : \\(passed)/\\(checks.count) tests validés"] + report +
+                ["Exécution réelle de jeux PS4 : non prise en charge"]).joined(separator: "\\n")
+    }
+
     static func testELFLibraryIntegration() -> String {
         guard MaxPS4ELFLoader.integrationTest() else {
             return "ELF64 + bibliothèques : échec du chargement ELF de test"
