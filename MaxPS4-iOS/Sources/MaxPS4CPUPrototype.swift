@@ -94,6 +94,20 @@ struct MaxPS4CPUPrototype {
         try run(Array(bytes), limit: 256)
     }
 
+    /// Guest-only allocation using the prototype syscall dispatcher.
+    /// Does not call the host OS or implement the PS4 kernel ABI.
+    mutating func simulateMemoryAllocate(at address: UInt64, size: Int) throws {
+        guard size > 0 else { throw MaxPS4GuestMemory.MemoryError.invalidRange }
+        _ = try SimulatedServices.dispatch(number: 2, address: address,
+                                           size: UInt64(size), flags: 0, memory: &guestMemory)
+    }
+
+    mutating func simulateMemoryFree(at address: UInt64, size: Int) throws {
+        guard size > 0 else { throw MaxPS4GuestMemory.MemoryError.invalidRange }
+        _ = try SimulatedServices.dispatch(number: 3, address: address,
+                                           size: UInt64(size), flags: 0, memory: &guestMemory)
+    }
+
     mutating func prepareTestStack(address: UInt64, size: Int) throws {
         try guestMemory.mapZeroFilled(at: address, size: size)
         registers[4] = address + UInt64(size)
@@ -625,6 +639,23 @@ struct MaxPS4VirtualProcessManager {
         processes[pid] = process
     }
 
+    /// Map or release guest memory within the selected virtual process.
+    mutating func allocateCurrentMemory(at address: UInt64, size: Int) throws {
+        guard let pid = runningPID, var process = processes[pid] else {
+            throw ProcessError.noRunningProcess
+        }
+        try process.cpu.simulateMemoryAllocate(at: address, size: size)
+        processes[pid] = process
+    }
+
+    mutating func freeCurrentMemory(at address: UInt64, size: Int) throws {
+        guard let pid = runningPID, var process = processes[pid] else {
+            throw ProcessError.noRunningProcess
+        }
+        try process.cpu.simulateMemoryFree(at: address, size: size)
+        processes[pid] = process
+    }
+
     /// Maps a bounded test program into the scheduled process only.
     mutating func loadCurrent(_ program: [UInt8], at address: UInt64) throws {
         guard let pid = runningPID, var process = processes[pid] else {
@@ -733,6 +764,38 @@ enum MaxPS4VirtualRuntime {
             return "Compatibilité PS4 (base) OK ✅ • sceKernelGetProcessTime simulé (1200 → 1250 µs) • 2 fonctions absentes et appel inconnu refusés • aucun noyau PS4 exécuté"
         } catch {
             return "Compatibilité PS4 : échec du service de temps virtuel"
+        }
+    }
+
+    static func testProcessMemoryIsolation() -> String {
+        do {
+            var manager = MaxPS4VirtualProcessManager()
+            let a = try manager.create()
+            let b = try manager.create()
+            guard manager.scheduleNext() == a else { return "Isolation : ordonnanceur A indisponible" }
+            try manager.allocateCurrentMemory(at: 0x9000, size: 4096)
+            guard manager.process(pid: a)?.cpu.guestMemory.allocatedBytes == 4096 else {
+                return "Isolation : allocation A échouée"
+            }
+            guard manager.scheduleNext() == b else { return "Isolation : ordonnanceur B indisponible" }
+            guard manager.process(pid: b)?.cpu.guestMemory.allocatedBytes == 0 else {
+                return "Isolation : fuite mémoire entre processus"
+            }
+            try manager.allocateCurrentMemory(at: 0x9000, size: 2048)
+            guard manager.process(pid: a)?.cpu.guestMemory.allocatedBytes == 4096,
+                  manager.process(pid: b)?.cpu.guestMemory.allocatedBytes == 2048 else {
+                return "Isolation : espaces mémoire non indépendants"
+            }
+            try manager.freeCurrentMemory(at: 0x9000, size: 2048)
+            guard manager.scheduleNext() == a else { return "Isolation : retour au processus A impossible" }
+            try manager.freeCurrentMemory(at: 0x9000, size: 4096)
+            guard manager.process(pid: a)?.cpu.guestMemory.allocatedBytes == 0,
+                  manager.process(pid: b)?.cpu.guestMemory.allocatedBytes == 0,
+                  manager.terminate(pid: a), manager.terminate(pid: b),
+                  manager.count == 0 else { return "Isolation : nettoyage incomplet" }
+            return "Processus + mémoire OK ✅ • 2 processus isolés • allocations virtuelles 4096/2048 octets • adresses identiques sans partage • libération et fermeture validées • simulation, pas de noyau PS4"
+        } catch {
+            return "Processus + mémoire : échec • \\(error.localizedDescription)"
         }
     }
 
