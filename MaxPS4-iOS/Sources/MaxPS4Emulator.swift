@@ -292,6 +292,8 @@ final class MaxPS4Emulator: ObservableObject {
         let needle = Array("eboot.bin".utf8)
         var inspected = 0
         var matches: [String] = []
+        var elfSignatures: [String] = []
+        var selfSignatures: [String] = []
         for index in 0..<Int(count) {
             let start = index * 32
             let entryOffset = number(table, start + 16)
@@ -304,6 +306,12 @@ final class MaxPS4Emulator: ObservableObject {
             inspected += data.count
             guard data.count >= needle.count else { continue }
             let bytes = Array(data)
+            if bytes.starts(with: [0x7F, 0x45, 0x4C, 0x46]) {
+                elfSignatures.append("#\(index + 1)")
+            }
+            if bytes.starts(with: [0x4F, 0x15, 0x3D, 0x1D]) {
+                selfSignatures.append("#\(index + 1)")
+            }
             if (0...(bytes.count - needle.count)).contains(where: {
                 Array(bytes[$0..<($0 + needle.count)]).map { $0 | 0x20 } == needle
             }) {
@@ -312,6 +320,11 @@ final class MaxPS4Emulator: ObservableObject {
         }
         lines.append("Recherche eboot.bin dans \(inspected) octets de petites entrées : " +
                      (matches.isEmpty ? "aucune chaîne visible" : "indice texte dans " + matches.joined(separator: ", ")))
+        lines.append("Signature ELF64 visible : " +
+                     (elfSignatures.isEmpty ? "non" : elfSignatures.joined(separator: ", ")))
+        lines.append("Signature SELF visible : " +
+                     (selfSignatures.isEmpty ? "non" : selfSignatures.joined(separator: ", ")))
+        lines.append("Attention : seules les petites entrées sont inspectées ; aucune signature détectée ne garantit un exécutable utilisable.")
         lines.append("La recherche ne parcourt pas le contenu chiffré ni les grands blocs.")
         lines.append("Contrôle des plages : \(valid)/\(count) entrées dans le fichier")
         lines.append("Démarrage expérimental : lecture de la table OK, mais aucun exécutable PS4 chargeable")
