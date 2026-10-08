@@ -34,7 +34,7 @@ enum MaxPS4ELFLoader {
         put(0x1000, at: 80, width: 8)
         put(2, at: 96, width: 8)
         put(16, at: 104, width: 8)
-        put(0x1000, at: 112, width: 8)
+        put(1, at: 112, width: 8) // Synthetic segment is byte-aligned.
         bytes[0x100] = 0x90 // NOP
         bytes[0x101] = 0xC3 // RET
         // Two ELF64 dynsym entries: null and undefined import.
@@ -237,7 +237,16 @@ enum MaxPS4ELFLoader {
                 && rejects(64 + 4, 4) // Entry requires an executable segment.
                 && rejects(56, 0) // Reject an ELF with no program headers.
                 && rejects(64 + 48, 3) // Reject non-power-of-two segment alignment.
-                && rejects(64 + 48, 16) // Misaligned offset / virtual address.
+                && {
+                    var corrupted = original
+                    // PT_LOAD p_align=512; p_offset=0x100 and p_vaddr=0x1000
+                    // no longer share the same remainder modulo 512.
+                    corrupted[64 + 48] = 0
+                    corrupted[64 + 49] = 2
+                    try corrupted.write(to: url, options: .atomic)
+                    do { _ = try load(url: url); return false }
+                    catch LoaderError.invalid { return true }
+                }()
                 && {
                     // Point d'entrée placé dans la zone BSS, hors du code ELF.
                     var corrupted = original
