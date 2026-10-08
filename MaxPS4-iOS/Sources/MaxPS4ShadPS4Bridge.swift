@@ -335,6 +335,12 @@ private func maxps4_native_guest_run_with_backend(
     _ output: UnsafeMutablePointer<UInt64>?
 ) -> Int32
 
+@_silgen_name("maxps4_arm64_preview_cache_stats")
+private func maxps4_arm64_preview_cache_stats(
+    _ hits: UnsafeMutablePointer<UInt64>?,
+    _ misses: UnsafeMutablePointer<UInt64>?
+)
+
 @_silgen_name("maxps4_native_arm64_jit_ready")
 private func maxps4_native_arm64_jit_ready() -> Int32
 
@@ -353,6 +359,22 @@ extension MaxPS4NativeLinkCheck {
             )
         }
         return accepted == 1 ? (output, usedMode == 1) : nil
+    }
+
+    static var arm64CacheSelfTest: Bool {
+        let program = Data([0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3])
+        var hitsBefore: UInt64 = 0
+        var missesBefore: UInt64 = 0
+        maxps4_arm64_preview_cache_stats(&hitsBefore, &missesBefore)
+        guard let first = runSyntheticX86PreferJIT(program), first.result == 42,
+              let second = runSyntheticX86PreferJIT(program), second.result == 42,
+              !first.usedJIT, !second.usedJIT else { return false }
+        var hitsAfter: UInt64 = 0
+        var missesAfter: UInt64 = 0
+        maxps4_arm64_preview_cache_stats(&hitsAfter, &missesAfter)
+        return hitsAfter >= hitsBefore + 1 &&
+               missesAfter >= missesBefore &&
+               !isARM64JITReady
     }
 
     static var executionBackendSelfTest: Bool {
