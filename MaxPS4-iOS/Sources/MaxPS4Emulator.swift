@@ -273,10 +273,23 @@ final class MaxPS4Emulator: ObservableObject {
             let within = entryOffset <= fileSize && entrySize <= fileSize - entryOffset
             if within { valid += 1 }
             if index < 40 {
-                lines.append("#\(index + 1) id=0x\(String(id, radix: 16)) offset=\(entryOffset) taille=\(entrySize) " + (within ? "✅" : "❌"))
+                let family: String
+                switch id {
+                case 0x0001: family = "métadonnées PKG"
+                case 0x0010, 0x0020, 0x0080, 0x0100, 0x0200:
+                    family = "entrée de contrôle / métadonnées"
+                case 0x0400...0x04FF: family = "entrée de métadonnées système"
+                case 0x1000...0x1FFF: family = "entrée de contenu PKG (type à confirmer)"
+                default: family = "type non identifié"
+                }
+                lines.append("#\(index + 1) id=0x\(String(id, radix: 16)) [" + family +
+                             "] offset=\(entryOffset) taille=\(entrySize) " +
+                             (within ? "✅" : "❌"))
             }
         }
         lines.append("Contrôle des plages : \(valid)/\(count) entrées dans le fichier")
+        lines.append("Démarrage expérimental : lecture de la table OK, mais aucun exécutable PS4 chargeable")
+        lines.append("Étape bloquante : extraction/déchiffrement du programme, puis environnement PS4 absent")
         lines.append("Noms internes et code exécutable : non accessibles par cette analyse")
         return lines.joined(separator: "\n")
     }
