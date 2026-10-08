@@ -375,30 +375,30 @@ final class MaxPS4Emulator: ObservableObject {
             ]
             var matches: [String: [UInt64]] = [:]
             var scanned: UInt64 = 0
-            var overlap = [UInt8]()
+            var overlap = Data()
             let chunkSize = 256 * 1024
             while scanned < size {
                 let amount = Int(min(UInt64(chunkSize), size - scanned))
                 guard let data = try handle.read(upToCount: amount), !data.isEmpty else { break }
-                let current = [UInt8](data)
-                let bytes = overlap + current
+                var bytes = overlap
+                bytes.append(data)
                 let base = scanned - UInt64(overlap.count)
                 for (name, needle) in patterns {
-                    if bytes.count >= needle.count {
-                        for i in 0...(bytes.count - needle.count) {
-                            if bytes[i] == needle[0] && bytes[i..<(i + needle.count)].elementsEqual(needle) {
-                                let address = base + UInt64(i)
-                                var locations = matches[name, default: []]
-                                if locations.count < 8 && !locations.contains(address) {
-                                    locations.append(address)
-                                    matches[name] = locations
-                                }
-                            }
+                    let signature = Data(needle)
+                    var cursor = 0
+                    while cursor + signature.count <= bytes.count {
+                        guard let range = bytes.range(of: signature, in: cursor..<bytes.count) else { break }
+                        let address = base + UInt64(range.lowerBound)
+                        var locations = matches[name, default: []]
+                        if locations.count < 8 && !locations.contains(address) {
+                            locations.append(address)
+                            matches[name] = locations
                         }
+                        cursor = range.lowerBound + 1
                     }
                 }
-                scanned += UInt64(current.count)
-                overlap = Array(bytes.suffix(8))
+                scanned += UInt64(data.count)
+                overlap = Data(bytes.suffix(8))
             }
             var lines = [
                 "Sonic Mania — diagnostic de ressources PKG",
@@ -412,7 +412,7 @@ final class MaxPS4Emulator: ObservableObject {
             }
             lines.append("Les signatures ne prouvent pas qu'un fichier complet est exploitable.")
             lines.append("Data.rsdk requis pour envisager un port natif ; contenu chiffré non pris en charge.")
-            status = lines.joined(separator: "\\n")
+            status = lines.joined(separator: "\n")
         } catch {
             status = "Analyse des ressources PKG impossible : \(error.localizedDescription)"
         }
