@@ -28,6 +28,9 @@ struct MaxPS4MazeGame: View {
     @State private var moves = 0
     @State private var lost = false
     @State private var won = false
+    @State private var powerTurns = 0
+    @State private var bestScore = 0
+    private static let powerCells: Set<Cell> = [Cell(row: 1, column: 7), Cell(row: 7, column: 1)]
 
     private var finished: Bool { lost || won }
 
@@ -38,7 +41,7 @@ struct MaxPS4MazeGame: View {
                     .font(.system(size: 16, weight: .black, design: .rounded))
                     .foregroundStyle(.cyan)
                 Spacer()
-                Text("Score : \(score)")
+                Text("Score : \(score) • Record : \(bestScore)")
                     .font(.subheadline.monospacedDigit().bold())
             }
 
@@ -56,6 +59,12 @@ struct MaxPS4MazeGame: View {
                 }
             }
             .frame(maxWidth: .infinity)
+
+            if powerTurns > 0 && !finished {
+                Text("SUPER PASTILLE : fantôme ralenti (\(powerTurns) tours)")
+                    .foregroundStyle(.cyan)
+                    .font(.caption.bold())
+            }
 
             if won {
                 Text("Victoire ! Toutes les pastilles sont ramassées.")
@@ -103,13 +112,14 @@ struct MaxPS4MazeGame: View {
             if player == cell {
                 Circle().fill(.yellow).padding(4)
             } else if ghost == cell {
-                Circle().fill(.purple).padding(4)
+                Circle().fill(powerTurns > 0 ? .gray : .purple).padding(4)
                 HStack(spacing: 3) {
                     Circle().fill(.white).frame(width: 4, height: 4)
                     Circle().fill(.white).frame(width: 4, height: 4)
                 }
             } else if pellets.contains(cell) {
-                Circle().fill(.yellow.opacity(0.8)).frame(width: 5, height: 5)
+                Circle().fill(Self.powerCells.contains(cell) ? .cyan : .yellow.opacity(0.8))
+                    .frame(width: Self.powerCells.contains(cell) ? 12 : 5, height: Self.powerCells.contains(cell) ? 12 : 5)
             }
         }
         .frame(width: 27, height: 27)
@@ -144,6 +154,7 @@ struct MaxPS4MazeGame: View {
             }
         })
         score = 0
+        powerTurns = 0
         moves = 0
         lost = false
         won = false
@@ -155,11 +166,21 @@ struct MaxPS4MazeGame: View {
         guard !isWall(next) else { return }
         player = next
         moves += 1
-        if pellets.remove(next) != nil { score += 10 }
+        if pellets.remove(next) != nil {
+            if Self.powerCells.contains(next) {
+                powerTurns = 5
+                score += 50
+            } else {
+                score += 10
+            }
+            bestScore = max(bestScore, score)
+        }
         if next == ghost { lost = true; return }
         if pellets.isEmpty { won = true; return }
         // Ghost advances every third move so the maze is actually playable.
-        if moves % 3 == 0 {
+        if powerTurns > 0 {
+            powerTurns -= 1
+        } else if moves % 3 == 0 {
             let candidates = [
                 Cell(row: ghost.row - 1, column: ghost.column),
                 Cell(row: ghost.row + 1, column: ghost.column),
