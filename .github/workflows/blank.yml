@@ -113,9 +113,12 @@ jobs:
           test -s "$ICON"
           python3 -m pip install --quiet pillow
           python3 - <<'PY'
-          from PIL import Image, ImageFile
-          ImageFile.LOAD_TRUNCATED_IMAGES = True
+          from PIL import Image
+          source = Image.open("MaxPS4-iOS/Resources/AppIcon.jpg")
+          source.verify()  # Reject damaged or truncated JPEGs
           icon = Image.open("MaxPS4-iOS/Resources/AppIcon.jpg").convert("RGB")
+          if min(icon.size) < 180:
+              raise ValueError(f"App icon source too small: {icon.size}")
           app = "build/Payload/MaxPS4.app/"
           for name, size in [
               ("AppIcon60x60@2x.png", 120),
@@ -156,6 +159,44 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' build/Payload/MaxPS4.app/Info.plist | grep -Ex '[0-9]+'
           xcrun lipo -archs build/Payload/MaxPS4.app/MaxPS4 | grep -w arm64
 
+
+      - name: Validate embedded icon files and IPA metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import plistlib
+          import struct
+          import zipfile
+
+          archive = "build/MaxPS4-unsigned.ipa"
+          prefix = "Payload/MaxPS4.app/"
+          expected = {
+              "AppIcon60x60@2x.png": 120,
+              "AppIcon60x60@3x.png": 180,
+              "AppIcon76x76@2x.png": 152,
+              "AppIcon83.5x83.5@2x.png": 167,
+          }
+          with zipfile.ZipFile(archive) as ipa:
+              bad = ipa.testzip()
+              if bad is not None:
+                  raise ValueError(f"Invalid IPA ZIP member: {bad}")
+              plist = plistlib.loads(ipa.read(prefix + "Info.plist"))
+              assert plist["CFBundleIdentifier"] == "com.enermaxfr.maxps4"
+              assert plist["CFBundleExecutable"] == "MaxPS4"
+              primary = plist["CFBundleIcons"]["CFBundlePrimaryIcon"]
+              assert primary["CFBundleIconName"] == "AppIcon"
+              assert "AppIcon60x60" in primary["CFBundleIconFiles"]
+              for filename, dimension in expected.items():
+                  data = ipa.read(prefix + filename)
+                  if data[:8] != b"\\x89PNG\\r\\n\\x1a\\n":
+                      raise ValueError(f"Invalid PNG signature: {filename}")
+                  width, height = struct.unpack(">II", data[16:24])
+                  if (width, height) != (dimension, dimension):
+                      raise ValueError(f"Wrong size for {filename}: {width}x{height}")
+                  print(f"PASS icon in IPA: {filename} ({dimension}x{dimension})")
+              print("PASS IPA icon and metadata validation")
+          PY
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
