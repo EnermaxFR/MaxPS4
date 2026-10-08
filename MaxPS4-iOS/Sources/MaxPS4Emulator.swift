@@ -557,6 +557,74 @@ final class MaxPS4Emulator: ObservableObject {
         }
     }
 
+    /// Read-only search for executable signatures in bounded PKG entry prefixes.
+    func inspectPS4EntryPrefixes(_ game: MaxPS4Game) {
+        guard game.fileName.lowercased().hasSuffix(".pkg") else {
+            status = "Recherche SELF : choisir un PKG"
+            return
+        }
+        do {
+            let url = URL(fileURLWithPath: game.localPath)
+            let size = ((try fileManager.attributesOfItem(atPath: url.path))[.size] as? NSNumber)?.uint64Value ?? 0
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let header = try handle.read(upToCount: 32) ?? Data()
+            guard header.count == 32, Array(header.prefix(4)) == [0x7F, 0x43, 0x4E, 0x54] else {
+                status = "Recherche SELF : en-tête PKG invalide"
+                return
+            }
+            func word(_ bytes: Data, _ at: Int) -> UInt64 {
+                (0..<4).reduce(UInt64(0)) { ($0 << 8) | UInt64(bytes[at + $1]) }
+            }
+            let count = word(header, 0x10), tableOffset = word(header, 0x18)
+            guard count > 0, count <= 4096, tableOffset <= size,
+                  count <= (size - tableOffset) / 32 else {
+                status = "Recherche SELF : table hors limites"
+                return
+            }
+            try handle.seek(toOffset: tableOffset)
+            guard let table = try handle.read(upToCount: Int(count * 32)),
+                  table.count == Int(count * 32) else {
+                status = "Recherche SELF : table incomplète"
+                return
+            }
+            let signatures: [(String, Data)] = [
+                ("ELF64", Data([0x7F, 0x45, 0x4C, 0x46, 0x02])),
+                ("SELF possible", Data([0x4F, 0x15, 0x3D, 0x1D]))
+            ]
+            var findings: [String] = []
+            var totalRead: UInt64 = 0
+            var valid = 0
+            for index in 0..<Int(count) {
+                let base = index * 32
+                let start = word(table, base + 16), length = word(table, base + 20)
+                guard start <= size, length <= size - start else { continue }
+                valid += 1
+                let probe = Int(min(length, 4096))
+                guard probe >= 4 else { continue }
+                try handle.seek(toOffset: start)
+                let data = try handle.read(upToCount: probe) ?? Data()
+                totalRead += UInt64(data.count)
+                for (name, pattern) in signatures {
+                    if let found = data.range(of: pattern) {
+                        findings.append("Entrée \(index + 1) • \(name) • offset +0x\(String(found.lowerBound, radix: 16))")
+                    }
+                }
+            }
+            status = ([
+                "Sonic Mania • inspection des préfixes PKG",
+                "Entrées valides : \(valid)/\(count)",
+                "Lecture maximale : 4096 octets par entrée ; total \(totalRead) octets",
+                "Signatures possibles : \(findings.count)"
+            ] + (findings.isEmpty ? ["Aucune signature ELF64/SELF détectée dans les préfixes."] : findings.prefix(20).map { $0 }) + [
+                "Les signatures ne prouvent ni le déchiffrement ni l'exécutabilité.",
+                "Lancement PS4 toujours indisponible."
+            ]).joined(separator: "\n")
+        } catch {
+            status = "Recherche SELF : \(error.localizedDescription)"
+        }
+    }
+
     func diagnosePKGBoot(_ game: MaxPS4Game) {
         guard game.fileName.lowercased().hasSuffix(".pkg") else {
             status = "Diagnostic démarrage : sélectionnez un PKG PS4"
