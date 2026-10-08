@@ -241,6 +241,16 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
             pc += 4;
             break;
         }
+        case 0x0D: { // OR EAX, imm32, wraps to 32 bits
+            if (size - pc < 4) return 0;
+            std::uint32_t imm = 0;
+            for (unsigned i = 0; i < 4; ++i)
+                imm |= std::uint32_t(code[pc + i]) << (8 * i);
+            rax = static_cast<std::uint32_t>(rax) | imm;
+            flags_valid = false; // logical ZF propagation pending
+            pc += 4;
+            break;
+        }
         case 0xA9: { // TEST EAX, imm32: only ZF currently consumed by JZ/JNZ
             if (size - pc < 4) return 0;
             std::uint32_t imm = 0;
@@ -366,7 +376,7 @@ extern "C" int maxps4_native_arm64_jit_ready() noexcept {
 
 // Offline x86->AArch64 code emission prototype. Generated instruction words are
 // DATA ONLY: never mapped executable or jumped into. No iOS JIT entitlement implied.
-// Subset: MOV EAX,imm32; ADD/SUB/XOR/AND/CMP/TEST EAX,imm32; bounded forward/backward JZ/JNZ rel8; NOP; RET. Refuse other instructions.
+// Subset: MOV EAX,imm32; ADD/SUB/XOR/AND/OR/CMP/TEST EAX,imm32; bounded forward/backward JZ/JNZ rel8; NOP; RET. Refuse other instructions.
 extern "C" int maxps4_arm64_translate_preview(
     const std::uint8_t* guest, std::size_t count,
     std::uint32_t* output, std::size_t capacity,
@@ -418,17 +428,17 @@ extern "C" int maxps4_arm64_translate_preview(
                     !put(0x72A00001u | (((imm >> 16) & 0xffffu) << 5)) ||
                     !put(opcode == 0x05 ? 0x0B010000u : 0x4B010000u)) return 0;
             }
-        } else if (opcode == 0x35 || opcode == 0x25) {
+        } else if (opcode == 0x35 || opcode == 0x25 || opcode == 0x0D) {
             cmp_ready = false;
             if (count - pc < 4) return 0;
             std::uint32_t imm = 0;
             for (unsigned i = 0; i < 4; ++i)
                 imm |= std::uint32_t(guest[pc + i]) << (8 * i);
             pc += 4;
-            // MOVZ/MOVK W1,#imm32; EOR or AND W0,W0,W1.
+            // MOVZ/MOVK W1,#imm32; EOR, AND, or ORR W0,W0,W1.
             if (!put(0x52800001u | ((imm & 0xffffu) << 5)) ||
                 !put(0x72A00001u | (((imm >> 16) & 0xffffu) << 5)) ||
-                !put(opcode == 0x35 ? 0x4A010000u : 0x0A010000u)) return 0;
+                !put(opcode == 0x35 ? 0x4A010000u : (opcode == 0x25 ? 0x0A010000u : 0x2A010000u))) return 0;
         } else if (opcode == 0x3D || opcode == 0xA9) {
             cmp_ready = true;
             if (count - pc < 4) return 0;
