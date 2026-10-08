@@ -236,6 +236,8 @@ enum MaxPS4ELFLoader {
                 && rejects(54, 0) // Invalid program-header stride.
                 && rejects(32, 0) // Program-header table may not overlap ELF header.
                 && rejects(20, 0) // Invalid ELF header version.
+                && rejects(16, 0) // ELF type must be executable or shared object.
+                && rejects(24, 0) // Entry point must be within executable file-backed bytes.
                 && rejects(64 + 4, 4) // Entry requires an executable segment.
                 && rejects(56, 0) // Reject an ELF with no program headers.
                 && rejects(64 + 48, 3) // Reject non-power-of-two segment alignment.
