@@ -396,6 +396,10 @@ final class MaxPS4Emulator: ObservableObject {
         }
     }
 
+    func runBatchDiagnostics() {
+        status = MaxPS4VirtualRuntime.runBatchDiagnostics()
+    }
+
     func testELFLibraryIntegration() {
         status = MaxPS4VirtualRuntime.testELFLibraryIntegration()
     }
