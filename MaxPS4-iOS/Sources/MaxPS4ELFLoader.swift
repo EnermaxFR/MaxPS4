@@ -52,7 +52,7 @@ enum MaxPS4ELFLoader {
         put(0x150, at: 0x200 + 24, width: 8)
         put(UInt64(name.count + 2), at: 0x200 + 32, width: 8)
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("MaxPS4_Demo_Imports_\\(UUID().uuidString).elf")
+            .appendingPathComponent("MaxPS4_Demo_Imports.elf")
         try Data(bytes).write(to: url, options: .atomic)
         return url
     }
