@@ -528,6 +528,7 @@ final class MaxPS4Emulator: ObservableObject {
         let loaderOK = MaxPS4ELFLoader.selfTest()
         let cpuOK = MaxPS4CPUPrototype.selfTest()
         let integrationOK = MaxPS4ELFLoader.integrationTest()
+        let controlFlowIntegrationOK = MaxPS4ELFLoader.controlFlowIntegrationTest()
         let controlFlowOK = MaxPS4CPUPrototype.callAndBranchSelfTest()
         let nearJumpOK = MaxPS4CPUPrototype.nearJumpSelfTest()
         let stackArithmeticOK = MaxPS4CPUPrototype.arithmeticAndStackSelfTest()
@@ -543,6 +544,7 @@ final class MaxPS4Emulator: ObservableObject {
             "Chargeur ELF et permissions mémoire : " + (loaderOK ? "OK ✅" : "ÉCHEC ❌"),
             "Interpréteur CPU synthétique : " + (cpuOK ? "OK ✅" : "ÉCHEC ❌"),
             "Chaîne ELF → mémoire → CPU : " + (integrationOK ? "OK ✅" : "ÉCHEC ❌"),
+            "ELF avec calculs, sauts et écriture mémoire : " + (controlFlowIntegrationOK ? "OK ✅" : "ÉCHEC ❌"),
             "CALL/RET et branchements contrôlés : " + (controlFlowOK ? "OK ✅" : "ÉCHEC ❌"),
             "JMP rel32 et rejets hors limites : " + (nearJumpOK ? "OK ✅" : "ÉCHEC ❌"),
             "ADD/SUB, PUSH/POP et pile virtuelle : " + (stackArithmeticOK ? "OK ✅" : "ÉCHEC ❌"),
