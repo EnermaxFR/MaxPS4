@@ -8,6 +8,10 @@ struct PrototypeSmokeTest {
             ("Mémoire invitée", MaxPS4GuestMemory.selfTest()),
             ("CPU x86-64", MaxPS4CPUPrototype.selfTest()),
             ("Chargeur ELF64", MaxPS4ELFLoader.selfTest()),
+            ("Importations ELF64 synthétiques", MaxPS4ELFLoader.importDemoSelfTest()),
+            ("Relocalisation relative x86-64", MaxPS4ELFLoader.relativeRelocationSelfTest()),
+            ("Relocalisations groupées atomiques", MaxPS4ELFLoader.relocationBatchSelfTest()),
+            ("Inventaire des relocalisations", MaxPS4ELFLoader.relocationSelfTest()),
             ("Intégration ELF-CPU-mémoire", MaxPS4ELFLoader.integrationTest())
         ]
         for (name, passed) in checks {
