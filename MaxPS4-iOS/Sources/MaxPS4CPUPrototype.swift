@@ -699,6 +699,15 @@ struct MaxPS4VirtualProcessManager {
 /// A tiny, isolated guest execution environment for synthetic x86-64 tests.
 /// This is NOT the PlayStation 4 OS, kernel, graphics or system-library runtime.
 enum MaxPS4VirtualRuntime {
+    static func bootELFIntegrationTest() -> String {
+        // The integration test builds an independent synthetic ELF64 fixture,
+        // maps its PT_LOAD segment and runs its entry point in guest memory.
+        if MaxPS4ELFLoader.integrationTest() {
+            return "ELF64 → mémoire virtuelle → CPU : OK ✅ • segment chargé, point d’entrée exécuté, écriture mémoire contrôlée • aucun code PS4 réel exécuté"
+        }
+        return "ELF64 → mémoire virtuelle → CPU : ÉCHEC • vérifier le chargeur et l’interpréteur"
+    }
+
     static func bootSelfTest() -> String {
         do {
             var manager = MaxPS4VirtualProcessManager()
