@@ -403,6 +403,7 @@ enum MaxPS4ELFLoader {
         put(1, 64, 4)
         put(7, 68, 4)
         put(120, 72, 8)
+        put(0x1000, 80, 8) // Map PT_LOAD at the ELF entry address.
         put(29, 96, 8)
         put(64, 104, 8)
         let program: [UInt8] = [
