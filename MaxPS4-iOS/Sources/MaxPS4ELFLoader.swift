@@ -7,6 +7,56 @@ enum MaxPS4ELFLoader {
         var errorDescription: String? { "Fichier ELF64 incompatible avec le prototype" }
     }
 
+    /// Creates an entirely synthetic ELF64 sample with one undefined symbol.
+    /// It is not extracted from a PlayStation game.
+    static func createImportDemo() throws -> URL {
+        var bytes = [UInt8](repeating: 0, count: 0x240)
+        func put(_ value: UInt64, at offset: Int, width: Int) {
+            for i in 0..<width {
+                bytes[offset + i] = UInt8(truncatingIfNeeded: value >> (i * 8))
+            }
+        }
+        bytes[0...6] = [0x7F, 0x45, 0x4C, 0x46, 2, 1, 1]
+        put(2, at: 16, width: 2) // ET_EXEC, x86-64
+        put(62, at: 18, width: 2)
+        put(1, at: 20, width: 4)
+        put(0x1000, at: 24, width: 8)
+        put(64, at: 32, width: 8) // program headers
+        put(0x180, at: 40, width: 8) // section headers
+        put(64, at: 52, width: 2)
+        put(56, at: 54, width: 2)
+        put(1, at: 56, width: 2)
+        put(64, at: 58, width: 2)
+        put(3, at: 60, width: 2)
+        put(1, at: 64, width: 4) // PT_LOAD
+        put(5, at: 68, width: 4) // read + execute
+        put(0x100, at: 72, width: 8)
+        put(0x1000, at: 80, width: 8)
+        put(2, at: 96, width: 8)
+        put(16, at: 104, width: 8)
+        put(0x1000, at: 112, width: 8)
+        bytes[0x100] = 0x90 // NOP
+        bytes[0x101] = 0xC3 // RET
+        // Two ELF64 dynsym entries: null and undefined import.
+        put(1, at: 0x120 + 24, width: 4) // st_name in linked string table
+        let name = [UInt8]("sceKernelGetProcessTime".utf8)
+        bytes[0x150] = 0
+        for (i, byte) in name.enumerated() { bytes[0x151 + i] = byte }
+        // SHT_DYNSYM (index 1), linked to SHT_STRTAB (index 2).
+        put(11, at: 0x1C0 + 4, width: 4)
+        put(0x120, at: 0x1C0 + 24, width: 8)
+        put(48, at: 0x1C0 + 32, width: 8)
+        put(2, at: 0x1C0 + 40, width: 4)
+        put(24, at: 0x1C0 + 56, width: 8)
+        put(3, at: 0x200 + 4, width: 4)
+        put(0x150, at: 0x200 + 24, width: 8)
+        put(UInt64(name.count + 2), at: 0x200 + 32, width: 8)
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MaxPS4_Demo_Imports_\\(UUID().uuidString).elf")
+        try Data(bytes).write(to: url, options: .atomic)
+        return url
+    }
+
     /// Bounds-checked ELF64 section-table import inventory (SHT_DYNSYM).
     /// Diagnostic only: no relocation application, SELF extraction or execution.
     static func inspectImports(url: URL) throws -> String {
