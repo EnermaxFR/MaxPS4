@@ -24,7 +24,9 @@ enum MaxPS4SELFPrototype {
             let offset = word(bytes, base + 8)
             let fileSize = word(bytes, base + 16)
             let size = word(bytes, base + 24)
-            guard fileSize <= size, offset <= UInt64(bytes.count),
+            guard fileSize <= size,
+                  (fileSize == 0 || offset >= UInt64(32 + count * 32)),
+                  offset <= UInt64(bytes.count),
                   fileSize <= UInt64(bytes.count) - offset,
                   size > 0, size <= UInt64(MaxPS4GuestMemory.maximumBytes - allocated)
             else { throw LoadError.invalid }
@@ -70,6 +72,12 @@ enum MaxPS4SELFPrototype {
             example[32] = 0
             example[48] = 10
             do { _ = try mapPlainSegments(example); return false }
+            catch LoadError.invalid {}
+            // A file-backed segment cannot point into the SELF header table.
+            var headerOverlap = example
+            headerOverlap[48] = 4
+            headerOverlap[40] = 32
+            do { _ = try mapPlainSegments(headerOverlap); return false }
             catch LoadError.invalid {}
             // Second synthetic mapping starts at 0x101000. First must not cross it.
             var overlapping = Data(repeating: 0, count: 96)
