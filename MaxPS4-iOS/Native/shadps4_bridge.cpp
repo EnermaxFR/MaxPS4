@@ -182,6 +182,8 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
     if (!code || !result || size == 0 || size > 4096 || budget == 0 || budget > 4096) return 0;
     std::uint64_t rax = 0;
     std::size_t pc = 0;
+    bool zero_flag = false;
+    bool flags_valid = false;
     for (std::uint32_t step = 0; step < budget; ++step) {
         if (pc >= size) return 0;
         const std::uint8_t op = code[pc++];
@@ -194,6 +196,7 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
             for (unsigned i = 0; i < 4; ++i)
                 imm |= std::uint32_t(code[pc + i]) << (8 * i);
             rax = imm;
+            flags_valid = false;
             pc += 4;
             break;
         }
@@ -204,6 +207,7 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
                 imm |= std::uint32_t(code[pc + i]) << (8 * i);
             rax = std::uint32_t(rax) + imm;
             rax &= 0xFFFF'FFFFull;
+            flags_valid = false;
             pc += 4;
             break;
         }
@@ -213,6 +217,7 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
             for (unsigned i = 0; i < 4; ++i)
                 imm |= std::uint32_t(code[pc + i]) << (8 * i);
             rax = static_cast<std::uint32_t>(static_cast<std::uint32_t>(rax) - imm);
+            flags_valid = false;
             pc += 4;
             break;
         }
@@ -222,6 +227,7 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
             for (unsigned i = 0; i < 4; ++i)
                 imm |= std::uint32_t(code[pc + i]) << (8 * i);
             rax = static_cast<std::uint32_t>(rax) ^ imm;
+            flags_valid = false;
             pc += 4;
             break;
         }
@@ -231,6 +237,7 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
             for (unsigned i = 0; i < 4; ++i)
                 imm |= std::uint32_t(code[pc + i]) << (8 * i);
             rax = static_cast<std::uint32_t>(rax) & imm;
+            flags_valid = false;
             pc += 4;
             break;
         }
@@ -239,10 +246,21 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
             std::uint32_t imm = 0;
             for (unsigned i = 0; i < 4; ++i)
                 imm |= std::uint32_t(code[pc + i]) << (8 * i);
-            // No branch instruction consumes flags in this bounded subset yet.
-            const bool zero = static_cast<std::uint32_t>(rax) == imm;
-            (void)zero;
+            zero_flag = static_cast<std::uint32_t>(rax) == imm;
+            flags_valid = true;
             pc += 4;
+            break;
+        }
+        case 0x74: // JZ rel8
+        case 0x75: { // JNZ rel8
+            if (pc >= size || !flags_valid) return 0;
+            const std::int8_t displacement = static_cast<std::int8_t>(code[pc++]);
+            const bool taken = op == 0x74 ? zero_flag : !zero_flag;
+            if (taken) {
+                const std::int64_t target = static_cast<std::int64_t>(pc) + displacement;
+                if (target < 0 || target >= static_cast<std::int64_t>(size)) return 0;
+                pc = static_cast<std::size_t>(target);
+            }
             break;
         }
         case 0xC3: // Termination only (no guest call stack yet)
@@ -338,7 +356,7 @@ extern "C" int maxps4_native_arm64_jit_ready() noexcept {
 
 // Offline x86->AArch64 code emission prototype. Generated instruction words are
 // DATA ONLY: never mapped executable or jumped into. No iOS JIT entitlement implied.
-// Subset: MOV EAX,imm32; ADD/SUB/XOR/AND/CMP EAX,imm32; NOP; RET. Refuse other instructions.
+// Subset: MOV EAX,imm32; ADD/SUB/XOR/AND/CMP EAX,imm32; JZ/JNZ rel8=0; NOP; RET. Refuse other instructions.
 extern "C" int maxps4_arm64_translate_preview(
     const std::uint8_t* guest, std::size_t count,
     std::uint32_t* output, std::size_t capacity,
@@ -347,6 +365,7 @@ extern "C" int maxps4_arm64_translate_preview(
         capacity == 0 || capacity > 4096) return 0;
     std::size_t pc = 0, n = 0;
     bool terminated = false;
+    bool cmp_ready = false;
     auto put = [&](std::uint32_t instruction) noexcept -> bool {
         if (n >= capacity) return false;
         output[n++] = instruction;
@@ -355,6 +374,7 @@ extern "C" int maxps4_arm64_translate_preview(
     while (pc < count) {
         const std::uint8_t opcode = guest[pc++];
         if (opcode == 0xB8) {
+            cmp_ready = false;
             if (count - pc < 4) return 0;
             std::uint32_t imm = 0;
             for (unsigned i = 0; i < 4; ++i)
@@ -364,6 +384,7 @@ extern "C" int maxps4_arm64_translate_preview(
             if (!put(0x52800000u | ((imm & 0xffffu) << 5)) ||
                 !put(0x72A00000u | (((imm >> 16) & 0xffffu) << 5))) return 0;
         } else if (opcode == 0x05 || opcode == 0x2D) {
+            cmp_ready = false;
             if (count - pc < 4) return 0;
             std::uint32_t imm = 0;
             for (unsigned i = 0; i < 4; ++i)
@@ -379,6 +400,7 @@ extern "C" int maxps4_arm64_translate_preview(
                     !put(opcode == 0x05 ? 0x0B010000u : 0x4B010000u)) return 0;
             }
         } else if (opcode == 0x35 || opcode == 0x25) {
+            cmp_ready = false;
             if (count - pc < 4) return 0;
             std::uint32_t imm = 0;
             for (unsigned i = 0; i < 4; ++i)
@@ -389,6 +411,7 @@ extern "C" int maxps4_arm64_translate_preview(
                 !put(0x72A00001u | (((imm >> 16) & 0xffffu) << 5)) ||
                 !put(opcode == 0x35 ? 0x4A010000u : 0x0A010000u)) return 0;
         } else if (opcode == 0x3D) {
+            cmp_ready = true;
             if (count - pc < 4) return 0;
             std::uint32_t imm = 0;
             for (unsigned i = 0; i < 4; ++i)
@@ -399,6 +422,12 @@ extern "C" int maxps4_arm64_translate_preview(
             if (!put(0x52800001u | ((imm & 0xffffu) << 5)) ||
                 !put(0x72A00001u | (((imm >> 16) & 0xffffu) << 5)) ||
                 !put(0x6B01001Fu)) return 0; // CMP W0,W1 (SUBS WZR,W0,W1)
+        } else if (opcode == 0x74 || opcode == 0x75) {
+            // First bounded conditional branch form: rel8=0 (fallthrough).
+            // Emitting B.cond +1 preserves execution order without guest relocation.
+            // Nonzero offsets require instruction-boundary mapping (future work).
+            if (pc >= count || !cmp_ready || guest[pc++] != 0) return 0;
+            if (!put(0x54000020u | (opcode == 0x74 ? 0u : 1u))) return 0;
         } else if (opcode == 0x90) {
             if (!put(0xD503201Fu)) return 0; // ARM64 NOP
         } else if (opcode == 0xC3) {
