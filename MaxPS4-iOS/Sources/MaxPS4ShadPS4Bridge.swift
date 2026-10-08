@@ -327,3 +327,37 @@ extension MaxPS4NativeLinkCheck {
             runNativeSyntheticX86(Data([0x90]), budget: 1) == nil
     }
 }
+
+@_silgen_name("maxps4_native_guest_run_with_backend")
+private func maxps4_native_guest_run_with_backend(
+    _ code: UnsafePointer<UInt8>?, _ count: Int, _ budget: UInt32,
+    _ requestedMode: Int32, _ usedMode: UnsafeMutablePointer<Int32>?,
+    _ output: UnsafeMutablePointer<UInt64>?
+) -> Int32
+
+@_silgen_name("maxps4_native_arm64_jit_ready")
+private func maxps4_native_arm64_jit_ready() -> Int32
+
+extension MaxPS4NativeLinkCheck {
+    static var isARM64JITReady: Bool { maxps4_native_arm64_jit_ready() == 1 }
+
+    /// Requests JIT; the native dispatcher reports whether it actually used it.
+    /// Fallback always remains available for synthetic tests.
+    static func runSyntheticX86PreferJIT(_ code: Data) -> (result: UInt64, usedJIT: Bool)? {
+        var output: UInt64 = 0
+        var usedMode: Int32 = -1
+        let accepted = code.withUnsafeBytes { raw in
+            maxps4_native_guest_run_with_backend(
+                raw.bindMemory(to: UInt8.self).baseAddress, code.count, 64,
+                1, &usedMode, &output
+            )
+        }
+        return accepted == 1 ? (output, usedMode == 1) : nil
+    }
+
+    static var executionBackendSelfTest: Bool {
+        let program = Data([0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3])
+        guard let output = runSyntheticX86PreferJIT(program) else { return false }
+        return output.result == 42 && !output.usedJIT && !isARM64JITReady
+    }
+}

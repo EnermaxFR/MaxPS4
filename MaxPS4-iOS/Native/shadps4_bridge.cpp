@@ -215,3 +215,21 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
     }
     return -1;
 }
+
+// Execution backend selection point for an eventual ARM64 dynamic recompiler.
+// iOS code-signing/JIT entitlements must be validated before enabling JIT.
+// No RWX memory allocation or code generation is attempted here.
+// requested_mode: 0 = interpreter, 1 = request JIT; used_mode reports reality.
+extern "C" int maxps4_native_guest_run_with_backend(
+    const std::uint8_t* code, std::size_t size, std::uint32_t budget,
+    int requested_mode, int* used_mode, std::uint64_t* result) noexcept {
+    if (!used_mode || (requested_mode != 0 && requested_mode != 1)) return 0;
+    *used_mode = 0; // Explicit fallback: no executable ARM64 translator yet.
+    return maxps4_native_guest_x86_run(code, size, budget, result);
+}
+
+// 0: ARM64 dynamic recompiler unavailable; 1: fully implemented and permitted.
+// Never equate ARM64 compilation support with a functional JIT entitlement.
+extern "C" int maxps4_native_arm64_jit_ready() noexcept {
+    return 0;
+}
