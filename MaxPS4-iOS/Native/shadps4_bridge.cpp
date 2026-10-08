@@ -207,6 +207,15 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
             pc += 4;
             break;
         }
+        case 0x2D: { // SUB EAX, imm32 (wrap at 32 bits)
+            if (size - pc < 4) return 0;
+            std::uint32_t imm = 0;
+            for (unsigned i = 0; i < 4; ++i)
+                imm |= std::uint32_t(code[pc + i]) << (8 * i);
+            rax = static_cast<std::uint32_t>(static_cast<std::uint32_t>(rax) - imm);
+            pc += 4;
+            break;
+        }
         case 0xC3: // Termination only (no guest call stack yet)
             *result = rax;
             return 1;
@@ -236,7 +245,7 @@ extern "C" int maxps4_native_arm64_jit_ready() noexcept {
 
 // Offline x86->AArch64 code emission prototype. Generated instruction words are
 // DATA ONLY: never mapped executable or jumped into. No iOS JIT entitlement implied.
-// Subset: MOV EAX,imm32; ADD EAX,imm12; NOP; RET. Refuse other instructions.
+// Subset: MOV EAX,imm32; ADD/SUB EAX,imm32; NOP; RET. Refuse other instructions.
 extern "C" int maxps4_arm64_translate_preview(
     const std::uint8_t* guest, std::size_t count,
     std::uint32_t* output, std::size_t capacity,
@@ -261,14 +270,14 @@ extern "C" int maxps4_arm64_translate_preview(
             // MOVZ W0,#lo16; MOVK W0,#hi16,LSL#16
             if (!put(0x52800000u | ((imm & 0xffffu) << 5)) ||
                 !put(0x72A00000u | (((imm >> 16) & 0xffffu) << 5))) return 0;
-        } else if (opcode == 0x05) {
+        } else if (opcode == 0x05 || opcode == 0x2D) {
             if (count - pc < 4) return 0;
             std::uint32_t imm = 0;
             for (unsigned i = 0; i < 4; ++i)
                 imm |= std::uint32_t(guest[pc+i]) << (i*8);
             pc += 4;
             if (imm <= 4095) {
-                if (!put(0x11000000u | (imm << 10))) return 0; // ADD W0,W0,#imm12
+                if (!put((opcode == 0x05 ? 0x11000000u : 0x51000000u) | (imm << 10))) return 0; // ADD/SUB W0,W0,#imm12
             } else {
                 // Materialize full 32-bit immediate into W1 then ADD W0,W0,W1.
                 // This preserves x86 32-bit wrapping semantics.
