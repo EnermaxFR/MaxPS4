@@ -246,6 +246,13 @@ struct MaxPS4CPUPrototype {
                 if operation != 7 { registers[index] = UInt64(result) }
                 zeroFlag = result == 0
                 rip += 3
+            } else if opcode == 0xA9 { // TEST EAX, imm32; flags only
+                guard program.count - rip >= 5 else { throw CPUError.truncatedInstruction }
+                let immediate = (0..<4).reduce(UInt32(0)) {
+                    $0 | (UInt32(program[rip + 1 + $1]) << ($1 * 8))
+                }
+                zeroFlag = (UInt32(truncatingIfNeeded: registers[0]) & immediate) == 0
+                rip += 5
             } else if opcode == 0x85 { // TEST r/m32, r32 (register-only)
                 guard rip + 2 <= program.count else { throw CPUError.truncatedInstruction }
                 let modrm = program[rip + 1]
@@ -1184,6 +1191,26 @@ extension MaxPS4CPUPrototype {
     }
 
     /// Exercise bounded backward jumps and deterministic instruction limits.
+    static func testImmediateAndBranchSelfTest() -> Bool {
+        do {
+            var cpu = Self()
+            // MOV EAX,0x10; TEST EAX,0x10; JZ +5 (not taken); MOV EAX,42; RET
+            try cpu.run([0xB8, 0x10, 0, 0, 0,
+                         0xA9, 0x10, 0, 0, 0,
+                         0x74, 5, 0xB8, 42, 0, 0, 0, 0xC3])
+            guard cpu.rax == 42, !cpu.zeroFlag else { return false }
+            var zero = Self()
+            try zero.run([0xB8, 0x10, 0, 0, 0, 0xA9, 0x02, 0, 0, 0, 0xC3])
+            guard zero.rax == 0x10, zero.zeroFlag else { return false }
+            var truncated = Self()
+            do {
+                try truncated.run([0xA9, 1, 0])
+                return false
+            } catch CPUError.truncatedInstruction {}
+            return true
+        } catch { return false }
+    }
+
     static func backwardLoopAndLimitSelfTest() -> Bool {
         do {
             var loop = Self()
