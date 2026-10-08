@@ -233,6 +233,11 @@ struct MaxPS4HomeView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         if game.fileName.lowercased().hasSuffix(".pkg") {
+                            Button("Analyser la structure du PKG") {
+                                emulator.inspectPKGStructure(game)
+                                detailsReport = emulator.status
+                            }
+                            .buttonStyle(.bordered)
                             Button("Calculer SHA-256 du PKG") {
                                 detailsReport = "Calcul de l’empreinte SHA-256 en cours…"
                                 Task {
