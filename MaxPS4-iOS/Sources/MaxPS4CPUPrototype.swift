@@ -701,36 +701,39 @@ struct MaxPS4VirtualProcessManager {
 enum MaxPS4VirtualRuntime {
     /// Compatibility scaffold. Explicitly not a verified PS4 syscall ABI.
     /// No iOS host calls, kernel forwarding or arbitrary guest execution.
-    static func testPS4CompatibilityScaffold() -> String {
-        enum CompatibilityError: Error { case unsupportedCall }
-        struct Call {
-            let symbol: String
-            let supported: Bool
-        }
-        let table: [String: Call] = [
-            "sceKernelGetProcessTime": Call(symbol: "sceKernelGetProcessTime", supported: false),
-            "sceKernelAllocateDirectMemory": Call(symbol: "sceKernelAllocateDirectMemory", supported: false),
-            "sceKernelCreateEqueue": Call(symbol: "sceKernelCreateEqueue", supported: false)
-        ]
-        func resolve(_ symbol: String) throws -> Call {
-            guard let entry = table[symbol], entry.supported else {
-                throw CompatibilityError.unsupportedCall
+    /// Standalone compatibility shim for *synthetic* symbol calls only.
+    /// This does not implement the real PS4 ABI or forward anything to iOS.
+    private enum PS4CompatibilityShim {
+        enum ShimError: Error { case unsupported }
+        static func invoke(_ symbol: String, virtualTicks: UInt64) throws -> UInt64 {
+            switch symbol {
+            case "sceKernelGetProcessTime":
+                return virtualTicks // deterministic virtual microseconds for tests
+            default:
+                throw ShimError.unsupported
             }
-            return entry
         }
-        let requested = ["sceKernelGetProcessTime", "sceKernelAllocateDirectMemory", "sceKernelCreateEqueue"]
-        let rejected = requested.allSatisfy { symbol in
-            do { _ = try resolve(symbol); return false }
-            catch CompatibilityError.unsupportedCall { return true }
-            catch { return false }
+    }
+
+    static func testPS4CompatibilityScaffold() -> String {
+        do {
+            let first = try PS4CompatibilityShim.invoke("sceKernelGetProcessTime", virtualTicks: 1200)
+            let second = try PS4CompatibilityShim.invoke("sceKernelGetProcessTime", virtualTicks: 1250)
+            guard first == 1200, second == 1250, second - first == 50 else {
+                return "Compatibilité PS4 : horloge virtuelle incohérente"
+            }
+            for symbol in ["sceKernelAllocateDirectMemory", "sceKernelCreateEqueue", "sceKernelUnknownSymbol"] {
+                do {
+                    _ = try PS4CompatibilityShim.invoke(symbol, virtualTicks: 1250)
+                    return "Compatibilité PS4 : fonction non implémentée acceptée"
+                } catch PS4CompatibilityShim.ShimError.unsupported {
+                    continue
+                }
+            }
+            return "Compatibilité PS4 (base) OK ✅ • sceKernelGetProcessTime simulé (1200 → 1250 µs) • 2 fonctions absentes et appel inconnu refusés • aucun noyau PS4 exécuté"
+        } catch {
+            return "Compatibilité PS4 : échec du service de temps virtuel"
         }
-        let unknownRejected: Bool
-        do { _ = try resolve("sceKernelUnknownSymbol"); unknownRejected = false }
-        catch { unknownRejected = true }
-        guard rejected && unknownRejected && table.count == requested.count else {
-            return "Compatibilité PS4 : échec de la validation des appels non implémentés"
-        }
-        return "Compatibilité PS4 (base) OK ✅ • 3 symboles système identifiés • 3 non implémentés et refusés • appel inconnu refusé • aucun appel noyau PS4 exécuté"
     }
 
     static func testSimulatedKernelServices() -> String {
