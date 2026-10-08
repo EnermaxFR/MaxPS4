@@ -41,9 +41,28 @@ final class MaxPS4Emulator: ObservableObject {
         let linked = MaxPS4NativeLinkCheck.isUpstreamUtilityLinked &&
             MaxPS4NativeLinkCheck.executableSignatureSelfTest &&
             MaxPS4NativeLinkCheck.nativeELFEntryPointSelfTest
-        status = linked
-            ? "shadPS4 C++ : liaison native vérifiée sur cet appareil. Le moteur PS4 reste incomplet."
-            : "shadPS4 C++ : test de liaison échoué. Aucun jeu ne peut être lancé."
+        guard linked else {
+            status = "Pont C++ : contrôle natif échoué. Aucun jeu ne peut être lancé."
+            return
+        }
+        // Cross-check native ELF header parsing against the bounded Swift loader.
+        // Only a generated test ELF is used; no PS4 game is executed.
+        do {
+            let url = try MaxPS4ELFLoader.createImportDemo()
+            defer { try? FileManager.default.removeItem(at: url) }
+            let file = try Data(contentsOf: url)
+            let nativeEntry = MaxPS4NativeLinkCheck.nativeELFEntryPoint(file)
+            let loaded = try MaxPS4ELFLoader.load(url: url)
+            guard nativeEntry == loaded.entry else {
+                status = "Pont C++ / chargeur Swift : points d'entrée ELF incohérents."
+                return
+            }
+            status = "Pont C++ et chargeur Swift : en-tête ELF de test cohérent (entrée 0x" +
+                String(loaded.entry, radix: 16) +
+                "). Le moteur PS4 reste incomplet."
+        } catch {
+            status = "Diagnostic ELF natif/Swift échoué : \(error.localizedDescription)"
+        }
     }
 
     func importGame(from url: URL) {
