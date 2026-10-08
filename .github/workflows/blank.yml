@@ -111,10 +111,20 @@ jobs:
           ICON="MaxPS4-iOS/Resources/AppIcon.jpg"
           APP="build/Payload/MaxPS4.app"
           test -s "$ICON"
-          sips -s format png -z 120 120 "$ICON" --out "$APP/AppIcon60x60@2x.png" >/dev/null
-          sips -s format png -z 180 180 "$ICON" --out "$APP/AppIcon60x60@3x.png" >/dev/null
-          sips -s format png -z 152 152 "$ICON" --out "$APP/AppIcon76x76@2x.png" >/dev/null
-          sips -s format png -z 167 167 "$ICON" --out "$APP/AppIcon83.5x83.5@2x.png" >/dev/null
+          python3 -m pip install --quiet pillow
+          python3 - <<'PY'
+          from PIL import Image, ImageFile
+          ImageFile.LOAD_TRUNCATED_IMAGES = True
+          icon = Image.open("MaxPS4-iOS/Resources/AppIcon.jpg").convert("RGB")
+          app = "build/Payload/MaxPS4.app/"
+          for name, size in [
+              ("AppIcon60x60@2x.png", 120),
+              ("AppIcon60x60@3x.png", 180),
+              ("AppIcon76x76@2x.png", 152),
+              ("AppIcon83.5x83.5@2x.png", 167),
+          ]:
+              icon.resize((size, size), Image.Resampling.LANCZOS).save(app + name)
+          PY
           /usr/libexec/PlistBuddy -c 'Add :CFBundleIcons dict' "$APP/Info.plist"
           /usr/libexec/PlistBuddy -c 'Add :CFBundleIcons:CFBundlePrimaryIcon dict' "$APP/Info.plist"
           /usr/libexec/PlistBuddy -c 'Add :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconFiles array' "$APP/Info.plist"
