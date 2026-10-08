@@ -32,6 +32,7 @@ struct PrototypeSmokeTest {
             ("Mini-jeu de devinette sur CPU x86-64", MaxPS4CPUPrototype.guessingGameSelfTest()),
             ("Arithmétique immédiate 8 bits et branchements", MaxPS4CPUPrototype.immediate8AndBranchesSelfTest()),
             ("Chargeur ELF64", MaxPS4ELFLoader.selfTest()),
+            ("Chargeur ELF64 : types SCE PS4", MaxPS4ELFLoader.sceExecutableTypeSelfTest()),
             ("Validation des segments ELF64", MaxPS4ELFLoader.segmentPreflightSelfTest()),
             ("Importations ELF64 synthétiques", MaxPS4ELFLoader.importDemoSelfTest()),
             ("Relocalisation relative x86-64", MaxPS4ELFLoader.relativeRelocationSelfTest()),

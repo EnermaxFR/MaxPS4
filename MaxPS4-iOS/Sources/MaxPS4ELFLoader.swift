@@ -209,6 +209,33 @@ enum MaxPS4ELFLoader {
     }
 
     /// Corrupted ELF64 segments must fail before guest memory is allocated.
+    /// Verify PS4-specific SCE ELF object types using a generated, unencrypted fixture.
+    /// This does not provide an encrypted SELF loader or PS4 runtime.
+    static func sceExecutableTypeSelfTest() -> Bool {
+        do {
+            let url = try createImportDemo()
+            defer { try? FileManager.default.removeItem(at: url) }
+            let original = try Data(contentsOf: url)
+            for type in [UInt16(0xFE00), 0xFE0C, 0xFE10, 0xFE18] {
+                var file = original
+                file[16] = UInt8(truncatingIfNeeded: type)
+                file[17] = UInt8(truncatingIfNeeded: type >> 8)
+                try file.write(to: url, options: .atomic)
+                let loaded = try load(url: url)
+                guard loaded.entry == 0x1000,
+                      try loaded.memory.fetchInstructionBytes(at: 0x1000, count: 2) == Data([0x90, 0xC3])
+                else { return false }
+            }
+            var invalid = original
+            invalid[16] = 0xFF
+            invalid[17] = 0xFF
+            try invalid.write(to: url, options: .atomic)
+            do { _ = try load(url: url); return false }
+            catch LoaderError.invalid {}
+            return true
+        } catch { return false }
+    }
+
     static func segmentPreflightSelfTest() -> Bool {
         do {
             let url = try createImportDemo()
@@ -349,7 +376,7 @@ enum MaxPS4ELFLoader {
         }
         guard file.count >= 64, Array(file.prefix(4)) == [0x7F, 0x45, 0x4C, 0x46],
               file[4] == 2, file[5] == 1, file[6] == 1,
-              (number(16, 2) == 2 || number(16, 2) == 3),
+              ([UInt64(2), 3, 0xFE00, 0xFE0C, 0xFE10, 0xFE18].contains(number(16, 2))),
               number(18, 2) == 62, number(20, 4) == 1 else {
             throw LoaderError.invalid
         }
