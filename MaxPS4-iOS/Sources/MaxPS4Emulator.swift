@@ -370,6 +370,19 @@ final class MaxPS4Emulator: ObservableObject {
         status = MaxPS4VirtualRuntime.testPS4VirtualMemoryService()
     }
 
+    func inspectELFImports(_ game: MaxPS4Game) {
+        let name = game.fileName.lowercased()
+        guard name.hasSuffix(".elf") || name == "eboot.bin" else {
+            status = "Importations ELF64 : sélectionnez un fichier .elf ou eboot.bin non chiffré"
+            return
+        }
+        do {
+            status = try MaxPS4ELFLoader.inspectImports(url: URL(fileURLWithPath: game.localPath))
+        } catch {
+            status = "Importations ELF64 : \(error.localizedDescription)"
+        }
+    }
+
     func testELFLibraryIntegration() {
         status = MaxPS4VirtualRuntime.testELFLibraryIntegration()
     }
