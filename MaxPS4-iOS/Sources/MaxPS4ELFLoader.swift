@@ -229,6 +229,12 @@ enum MaxPS4ELFLoader {
             return try rejects(64 + 32, 0xFF)
                 && rejects(64 + 4, 0xFF)
                 && rejects(64 + 9, 0xFF)
+                && rejects(4, 1) // ELF32 unsupported.
+                && rejects(5, 2) // Big-endian unsupported.
+                && rejects(6, 0) // Invalid ELF identification version.
+                && rejects(18, 0) // Incorrect CPU architecture.
+                && rejects(54, 0) // Invalid program-header stride.
+                && rejects(64 + 4, 4) // Entry requires an executable segment.
                 && rejects(56, 0) // Reject an ELF with no program headers.
                 && rejects(64 + 48, 3) // Reject non-power-of-two segment alignment.
                 && {
