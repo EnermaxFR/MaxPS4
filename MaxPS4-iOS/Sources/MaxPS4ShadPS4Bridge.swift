@@ -475,7 +475,16 @@ extension MaxPS4NativeLinkCheck {
         guard runNativeSyntheticX86(orProgram) == 0x123456F8,
               arm64TranslationPreview(orProgram) == [
                 0x528ACF00, 0x72A24680, 0x52801001,
-                0x72A00001, 0x2A010000, 0xD65F03C0
+                0x72A00001, 0x2A010000, 0x6A00001F, 0xD65F03C0
+              ] else { return false }
+        // OR EAX,0 produces ZF=1 when EAX=0; JZ must observe that flag.
+        let orAndJZ = Data([0xB8, 0, 0, 0, 0, 0x0D, 0, 0, 0, 0,
+                            0x74, 5, 0xB8, 99, 0, 0, 0, 0xC3])
+        guard runNativeSyntheticX86(orAndJZ) == 0,
+              arm64TranslationPreview(orAndJZ) == [
+                0x52800000, 0x72A00000, 0x52800001, 0x72A00001,
+                0x2A010000, 0x6A00001F, 0x54000060,
+                0x52800C60, 0x72A00000, 0xD65F03C0
               ] else { return false }
         guard arm64TranslationPreview(Data([0x0D, 1])) == nil else { return false }
         // CMP EAX, imm32 does not overwrite EAX; its ARM64 form sets NZCV.
