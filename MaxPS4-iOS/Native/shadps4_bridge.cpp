@@ -267,7 +267,15 @@ extern "C" int maxps4_arm64_translate_preview(
             for (unsigned i = 0; i < 4; ++i)
                 imm |= std::uint32_t(guest[pc+i]) << (i*8);
             pc += 4;
-            if (imm > 4095 || !put(0x11000000u | (imm << 10))) return 0;
+            if (imm <= 4095) {
+                if (!put(0x11000000u | (imm << 10))) return 0; // ADD W0,W0,#imm12
+            } else {
+                // Materialize full 32-bit immediate into W1 then ADD W0,W0,W1.
+                // This preserves x86 32-bit wrapping semantics.
+                if (!put(0x52800001u | ((imm & 0xffffu) << 5)) ||
+                    !put(0x72A00001u | (((imm >> 16) & 0xffffu) << 5)) ||
+                    !put(0x0B010000u)) return 0;
+            }
         } else if (opcode == 0x90) {
             if (!put(0xD503201Fu)) return 0; // ARM64 NOP
         } else if (opcode == 0xC3) {

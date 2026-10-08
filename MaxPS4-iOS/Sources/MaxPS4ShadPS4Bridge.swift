@@ -392,6 +392,12 @@ extension MaxPS4NativeLinkCheck {
         guard arm64TranslationPreview(program) == [
             0x52800500, 0x72A00000, 0x11000800, 0xD65F03C0
         ] else { return false }
+        // ADD EAX, 0x12345678 should become MOVZ/MOVK W1 + ADD W0,W0,W1.
+        let wide = Data([0xB8, 1, 0, 0, 0, 0x05, 0x78, 0x56, 0x34, 0x12, 0xC3])
+        guard arm64TranslationPreview(wide) == [
+            0x52800020, 0x72A00000, 0x528ACF01, 0x72A24681,
+            0x0B010000, 0xD65F03C0
+        ] else { return false }
         return arm64TranslationPreview(Data([0x0F, 0x05])) == nil &&
             arm64TranslationPreview(Data([0xB8, 1])) == nil &&
             arm64TranslationPreview(Data([0x90])) == nil &&
