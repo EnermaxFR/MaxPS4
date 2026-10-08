@@ -254,12 +254,6 @@ struct MaxPS4CPUPrototype {
                 if operation != 7 { registers[index] = UInt64(result) }
                 zeroFlag = result == 0
                 rip += 3
-            } else if opcode == 0x99 { // CDQ: sign-extend EAX into EDX (32-bit form)
-                // The prototype models 32-bit destination writes as zero-extending
-                // into the corresponding 64-bit register; flags are unchanged.
-                let eax = UInt32(truncatingIfNeeded: registers[0])
-                registers[2] = (eax & 0x8000_0000) == 0 ? 0 : UInt64(UInt32.max)
-                rip += 1
             } else if opcode == 0xA9 { // TEST EAX, imm32; flags only
                 guard program.count - rip >= 5 else { throw CPUError.truncatedInstruction }
                 let immediate = (0..<4).reduce(UInt32(0)) {
@@ -1290,7 +1284,10 @@ extension MaxPS4CPUPrototype {
             // MOV EAX,0x8001; CWDE -> EAX=0xffff8001; CDQ -> EDX=0xffffffff.
             try negative.run([0xB8, 0x01, 0x80, 0, 0, 0x98, 0x99, 0xC3])
             guard negative.rax == 0xffff8001,
-                  negative.registers[2] == 0xffffffff else { return false }
+                  negative.registers[2] == 0xffffffff else {
+                print("CWDE/CDQ negative mismatch: RAX=\(negative.rax), RDX=\(negative.registers[2])")
+                return false
+            }
             var positive = Self()
             try positive.run([0xB8, 0x2A, 0, 0, 0, 0x98, 0x99, 0xC3])
             guard positive.rax == 42, positive.registers[2] == 0 else { return false }
