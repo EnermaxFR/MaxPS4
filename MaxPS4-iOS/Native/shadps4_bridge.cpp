@@ -79,3 +79,25 @@ extern "C" int maxps4_native_self_segment_flags(const std::uint8_t* data,
     *compressed = compressed_total;
     return 1;
 }
+
+// Bounded SELF segment file-range validation based on shadPS4 self_segment_header.
+// Reject segments extending outside supplied bytes; metadata only, no mapping.
+extern "C" int maxps4_native_self_file_ranges_valid(const std::uint8_t* data,
+                                                       std::size_t count) noexcept {
+    std::uint16_t segments = 0;
+    if (!maxps4_native_self_segment_count(data, count, &segments)) return 0;
+    auto read_u64 = [&](std::size_t offset) noexcept {
+        std::uint64_t value = 0;
+        for (unsigned i = 0; i < 8; ++i)
+            value |= std::uint64_t(data[offset + i]) << (i * 8);
+        return value;
+    };
+    for (std::size_t i = 0; i < segments; ++i) {
+        const std::size_t offset = 32 + i * 32;
+        const std::uint64_t file_offset = read_u64(offset + 8);
+        const std::uint64_t file_size = read_u64(offset + 16);
+        // Division-free range check avoids integer overflow.
+        if (file_offset > count || file_size > count - file_offset) return 0;
+    }
+    return 1;
+}

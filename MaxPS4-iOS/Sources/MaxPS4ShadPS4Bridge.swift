@@ -164,3 +164,34 @@ extension MaxPS4NativeLinkCheck {
         return nativeSELFSegmentFlags(Data(header.prefix(95))) == nil
     }
 }
+
+@_silgen_name("maxps4_native_self_file_ranges_valid")
+private func maxps4_native_self_file_ranges_valid(
+    _ bytes: UnsafePointer<UInt8>?, _ count: Int
+) -> Int32
+
+extension MaxPS4NativeLinkCheck {
+    static func nativeSELFFileRangesValid(_ data: Data) -> Bool {
+        data.withUnsafeBytes { raw in
+            maxps4_native_self_file_ranges_valid(
+                raw.bindMemory(to: UInt8.self).baseAddress, data.count
+            ) == 1
+        }
+    }
+
+    static var nativeSELFFileRangesSelfTest: Bool {
+        var sample = Data(repeating: 0, count: 100)
+        sample.replaceSubrange(0..<4, with: [0x4F, 0x15, 0x3D, 0x1D])
+        sample[6] = 1
+        sample[24] = 1
+        sample[40] = 96 // segment file_offset
+        sample[48] = 4  // segment file_size
+        guard nativeSELFFileRangesValid(sample) else { return false }
+        sample[48] = 5
+        guard !nativeSELFFileRangesValid(sample) else { return false }
+        sample[48] = 4
+        sample[40] = 0xFF
+        return !nativeSELFFileRangesValid(sample) &&
+            !nativeSELFFileRangesValid(Data(sample.prefix(63)))
+    }
+}
