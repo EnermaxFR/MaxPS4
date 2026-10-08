@@ -471,12 +471,40 @@ final class MaxPS4Emulator: ObservableObject {
             if name.hasSuffix(".pkg") {
                 let handle = try FileHandle(forReadingFrom: url)
                 defer { try? handle.close() }
-                let header = try handle.read(upToCount: 4) ?? Data()
-                guard header == Data([0x7F, 0x43, 0x4E, 0x54]) else {
-                    status = "Essai moteur : signature PKG invalide"
+                let header = try handle.read(upToCount: 128) ?? Data()
+                guard header.count == 128 else {
+                    status = "Démarrage test • Étape 1/5 ❌ : en-tête PKG tronqué"
                     return
                 }
-                status = "Essai moteur : PKG PS4 reconnu ✅ • extraction/déchiffrement absents • exécution impossible sans moteur PS4 natif"
+                guard Array(header.prefix(4)) == [0x7F, 0x43, 0x4E, 0x54] else {
+                    status = "Démarrage test • Étape 1/5 ❌ : signature PKG invalide"
+                    return
+                }
+                func be32(_ offset: Int) -> UInt64 {
+                    (0..<4).reduce(UInt64(0)) { ($0 << 8) | UInt64(header[offset + $1]) }
+                }
+                func be64(_ offset: Int) -> UInt64 {
+                    (0..<8).reduce(UInt64(0)) { ($0 << 8) | UInt64(header[offset + $1]) }
+                }
+                let attributes = try fileManager.attributesOfItem(atPath: url.path)
+                let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
+                let count = be32(0x10)
+                let tableOffset = be32(0x18)
+                let bodyOffset = be64(0x20)
+                let bodySize = be64(0x28)
+                let tableOK = count > 0 && count <= 100_000
+                    && tableOffset <= size && count <= (size - tableOffset) / 32
+                let bodyOK = bodyOffset <= size && bodySize <= size - bodyOffset
+                let details = [
+                    "Sonic Mania / PKG PS4 • tentative de démarrage (lecture seule)",
+                    "1/5 ✅ Signature PKG reconnue",
+                    "2/5 " + (tableOK ? "✅" : "❌") + " Table d'entrées : " + String(count) + " entrées, offset 0x" + String(tableOffset, radix: 16),
+                    "3/5 " + (bodyOK ? "✅" : "❌") + " Zone de données : offset " + String(bodyOffset) + ", taille " + String(bodySize),
+                    "4/5 ⛔ Contenu exécutable non extrait/déchiffré",
+                    "5/5 ⛔ Aucun noyau, GPU ou runtime PS4 opérationnel",
+                    "Résultat : aucun code du jeu exécuté. Diagnostic terminé."
+                ]
+                status = details.joined(separator: "\n")
             } else if name.hasSuffix(".elf") || name == "eboot.bin" || name.hasSuffix(".self") {
                 let handle = try FileHandle(forReadingFrom: url)
                 defer { try? handle.close() }
