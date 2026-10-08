@@ -434,7 +434,18 @@ final class MaxPS4Emulator: ObservableObject {
                     return
                 }
                 let loaded = try MaxPS4ELFLoader.load(url: url)
-                status = "Essai moteur : ELF64 analysé ✅ • \(loaded.segments) segments • entrée 0x\(String(loaded.entry, radix: 16)) • pas d'exécution de jeu PS4"
+                // Only a strictly recognized 11-byte synthetic fixture may run.
+                // Unknown and real PS4 executables remain diagnostic-only.
+                let prefix = try loaded.memory.fetchInstructionBytes(at: loaded.entry, count: 11)
+                let bytes = Array(prefix)
+                if bytes.count == 11, bytes[0] == 0x48, bytes[1] == 0xB8,
+                   bytes[10] == 0xC3 {
+                    var cpu = MaxPS4CPUPrototype()
+                    try cpu.runLoadedTest(memory: loaded.memory, entry: loaded.entry, length: 11)
+                    status = "ELF64 de test exécuté ✅ • \(loaded.segments) segments • RAX=\(cpu.rax) • 2 instructions • environnement PS4 réel absent"
+                } else {
+                    status = "ELF64 chargé ✅ • \(loaded.segments) segments • entrée 0x\(String(loaded.entry, radix: 16)) • instructions non reconnues par le prototype : exécution refusée"
+                }
             } else {
                 status = "Essai moteur : format non pris en charge"
             }
