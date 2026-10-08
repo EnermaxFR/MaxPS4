@@ -246,6 +246,12 @@ struct MaxPS4CPUPrototype {
                 if operation != 7 { registers[index] = UInt64(result) }
                 zeroFlag = result == 0
                 rip += 3
+            } else if opcode == 0x99 { // CDQ: sign-extend EAX into EDX (32-bit form)
+                // The prototype models 32-bit destination writes as zero-extending
+                // into the corresponding 64-bit register; flags are unchanged.
+                let eax = UInt32(truncatingIfNeeded: registers[0])
+                registers[2] = (eax & 0x8000_0000) == 0 ? 0 : UInt64(UInt32.max)
+                rip += 1
             } else if opcode == 0xA9 { // TEST EAX, imm32; flags only
                 guard program.count - rip >= 5 else { throw CPUError.truncatedInstruction }
                 let immediate = (0..<4).reduce(UInt32(0)) {
@@ -1285,6 +1291,30 @@ extension MaxPS4CPUPrototype {
             do { try truncated.run([0xFF]); return false }
             catch CPUError.truncatedInstruction {}
             return true
+        } catch { return false }
+    }
+
+    /// CDQ is useful for signed 32-bit arithmetic; it must not touch flags.
+    static func cdqSelfTest() -> Bool {
+        do {
+            var negative = Self()
+            try negative.run([
+                0x31, 0xC9, // XOR ECX,ECX sets ZF
+                0xB8, 0xFF, 0xFF, 0xFF, 0xFF, // MOV EAX,-1
+                0x99, 0xC3 // CDQ, RET
+            ])
+            guard negative.registers[2] == UInt64(UInt32.max),
+                  negative.rax == UInt64(UInt32.max),
+                  negative.zeroFlag else { return false }
+            var positive = Self()
+            try positive.run([
+                0xB8, 0x00, 0x00, 0x00, 0x80, // MOV EAX,0x80000000
+                0x99, 0xC3
+            ])
+            guard positive.registers[2] == UInt64(UInt32.max) else { return false }
+            var zero = Self()
+            try zero.run([0xB8, 0x01, 0, 0, 0, 0x99, 0xC3])
+            return zero.registers[2] == 0 && zero.rax == 1
         } catch { return false }
     }
 
