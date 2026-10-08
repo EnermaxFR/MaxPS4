@@ -153,6 +153,18 @@ struct MaxPS4CPUPrototype {
                 registers[dest] = UInt64(value) // x86-64 clears upper 32 bits
                 zeroFlag = value == 0
                 rip += 2
+            } else if opcode == 0x89 || opcode == 0x8B {
+                // MOV r/m32,r32 and MOV r32,r/m32; register operands only.
+                guard program.count - rip >= 2 else { throw CPUError.truncatedInstruction }
+                let modrm = program[rip + 1]
+                guard modrm & 0xC0 == 0xC0 else { throw CPUError.unsupportedOpcode }
+                let reg = Int((modrm >> 3) & 7)
+                let rm = Int(modrm & 7)
+                let destination = opcode == 0x89 ? rm : reg
+                let source = opcode == 0x89 ? reg : rm
+                registers[destination] = UInt64(UInt32(truncatingIfNeeded: registers[source]))
+                // MOV does not update flags.
+                rip += 2
             } else if opcode == 0x85 { // TEST r/m32, r32 (register-only)
                 guard rip + 2 <= program.count else { throw CPUError.truncatedInstruction }
                 let modrm = program[rip + 1]
@@ -273,6 +285,25 @@ struct MaxPS4CPUPrototype {
             var incompleteMov32 = Self()
             do {
                 try incompleteMov32.run([0xBB, 0x01, 0x02])
+                return false
+            } catch CPUError.truncatedInstruction {}
+            var registerMoveCPU = Self()
+            try registerMoveCPU.run([
+                0xB8, 0x2A, 0, 0, 0,           // MOV EAX,42
+                0x89, 0xC3,                   // MOV EBX,EAX
+                0x8B, 0xCB,                   // MOV ECX,EBX
+                0xC3
+            ])
+            guard registerMoveCPU.registers[3] == 42,
+                  registerMoveCPU.registers[1] == 42 else { return false }
+            var unsupportedMemoryMove = Self()
+            do {
+                try unsupportedMemoryMove.run([0x8B, 0x00])
+                return false
+            } catch CPUError.unsupportedOpcode {}
+            var truncatedRegisterMove = Self()
+            do {
+                try truncatedRegisterMove.run([0x89])
                 return false
             } catch CPUError.truncatedInstruction {}
             var xorCPU = Self()
