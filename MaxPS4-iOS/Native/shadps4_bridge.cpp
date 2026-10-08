@@ -171,3 +171,47 @@ extern "C" int maxps4_native_ps4_elf_type(const std::uint8_t* data,
     default: return 0;
     }
 }
+
+// First bounded native execution backend for *synthetic* x86 guest bytecode.
+// Interpreter executes on ARM64 without JIT; not an upstream shadPS4 CPU engine.
+// Return: 1 halted, 0 malformed/unsupported, -1 exceeded instruction budget.
+extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
+                                            std::size_t size,
+                                            std::uint32_t budget,
+                                            std::uint64_t* result) noexcept {
+    if (!code || !result || size == 0 || size > 4096 || budget == 0 || budget > 4096) return 0;
+    std::uint64_t rax = 0;
+    std::size_t pc = 0;
+    for (std::uint32_t step = 0; step < budget; ++step) {
+        if (pc >= size) return 0;
+        const std::uint8_t op = code[pc++];
+        switch (op) {
+        case 0x90: // NOP
+            break;
+        case 0xB8: { // MOV EAX, imm32, zero extends into RAX
+            if (size - pc < 4) return 0;
+            std::uint32_t imm = 0;
+            for (unsigned i = 0; i < 4; ++i)
+                imm |= std::uint32_t(code[pc + i]) << (8 * i);
+            rax = imm;
+            pc += 4;
+            break;
+        }
+        case 0x05: { // ADD EAX, imm32 (wrap at 32 bits)
+            if (size - pc < 4) return 0;
+            std::uint32_t imm = 0;
+            for (unsigned i = 0; i < 4; ++i)
+                imm |= std::uint32_t(code[pc + i]) << (8 * i);
+            rax = std::uint32_t(rax) + imm;
+            rax &= 0xFFFF'FFFFull;
+            pc += 4;
+            break;
+        }
+        case 0xC3: // Termination only (no guest call stack yet)
+            *result = rax;
+            return 1;
+        default: return 0;
+        }
+    }
+    return -1;
+}

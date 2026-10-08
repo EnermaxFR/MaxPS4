@@ -299,3 +299,31 @@ extension MaxPS4NativeLinkCheck {
         return nativePS4ELFType(Data(elf.prefix(63))) == nil
     }
 }
+
+@_silgen_name("maxps4_native_guest_x86_run")
+private func maxps4_native_guest_x86_run(
+    _ code: UnsafePointer<UInt8>?, _ count: Int, _ budget: UInt32,
+    _ result: UnsafeMutablePointer<UInt64>?
+) -> Int32
+
+extension MaxPS4NativeLinkCheck {
+    static func runNativeSyntheticX86(_ code: Data, budget: UInt32 = 64) -> UInt64? {
+        var output: UInt64 = 0
+        let status = code.withUnsafeBytes { bytes in
+            maxps4_native_guest_x86_run(
+                bytes.bindMemory(to: UInt8.self).baseAddress,
+                code.count, budget, &output
+            )
+        }
+        return status == 1 ? output : nil
+    }
+
+    static var nativeSyntheticExecutionSelfTest: Bool {
+        let program = Data([0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3])
+        return runNativeSyntheticX86(program) == 42 &&
+            runNativeSyntheticX86(program, budget: 1) == nil &&
+            runNativeSyntheticX86(Data([0xB8, 2])) == nil &&
+            runNativeSyntheticX86(Data([0x0F, 0x05])) == nil &&
+            runNativeSyntheticX86(Data([0x90]), budget: 1) == nil
+    }
+}
