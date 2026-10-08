@@ -154,6 +154,17 @@ struct MaxPS4CPUPrototype {
                 registers[dest] = UInt64(value) // x86-64 clears upper 32 bits
                 zeroFlag = value == 0
                 rip += 2
+            } else if opcode == 0x33 { // XOR r32,r/m32, register-only reverse direction
+                guard program.count - rip >= 2 else { throw CPUError.truncatedInstruction }
+                let modrm = program[rip + 1]
+                guard modrm & 0xC0 == 0xC0 else { throw CPUError.unsupportedOpcode }
+                let dest = Int((modrm >> 3) & 7)
+                let src = Int(modrm & 7)
+                let value = UInt32(truncatingIfNeeded: registers[dest]) ^
+                    UInt32(truncatingIfNeeded: registers[src])
+                registers[dest] = UInt64(value)
+                zeroFlag = value == 0
+                rip += 2
             } else if opcode == 0x89 || opcode == 0x8B {
                 // MOV r/m32,r32 and MOV r32,r/m32; register operands only.
                 guard program.count - rip >= 2 else { throw CPUError.truncatedInstruction }
@@ -185,7 +196,7 @@ struct MaxPS4CPUPrototype {
                 }
                 // MOV does not update flags.
                 rip += 2
-            } else if opcode == 0x01 || opcode == 0x09 || opcode == 0x21 || opcode == 0x29 || opcode == 0x31 || opcode == 0x39 { // ADD/OR/AND/SUB/XOR/CMP r/m32, r32
+            } else if opcode == 0x01 || opcode == 0x09 || opcode == 0x21 || opcode == 0x29 || opcode == 0x39 { // ADD/OR/AND/SUB/CMP r/m32, r32
                 guard program.count - rip >= 2 else { throw CPUError.truncatedInstruction }
                 let modrm = program[rip + 1]
                 guard modrm & 0xC0 == 0xC0 else { throw CPUError.unsupportedOpcode }
@@ -197,7 +208,6 @@ struct MaxPS4CPUPrototype {
                 if opcode == 0x01 { result = lhs &+ rhs }
                 else if opcode == 0x09 { result = lhs | rhs }
                 else if opcode == 0x21 { result = lhs & rhs }
-                else if opcode == 0x31 { result = lhs ^ rhs }
                 else { result = lhs &- rhs }
                 if opcode != 0x39 { registers[dest] = UInt64(result) }
                 zeroFlag = result == 0
@@ -1101,16 +1111,16 @@ extension MaxPS4CPUPrototype {
     static func xorRegisterSelfTest() -> Bool {
         do {
             var cpu = Self()
-            try cpu.run([0xB8, 0x2A, 0, 0, 0, 0xB9, 0x0F, 0, 0, 0, 0x31, 0xC8, 0xC3])
+            try cpu.run([0xB8, 0x2A, 0, 0, 0, 0xB9, 0x0F, 0, 0, 0, 0x33, 0xC1, 0xC3])
             guard cpu.rax == 0x25, !cpu.zeroFlag else { return false }
             var zero = Self()
             try zero.run([0xB8, 42, 0, 0, 0, 0x31, 0xC0, 0xC3])
             guard zero.rax == 0, zero.zeroFlag else { return false }
             var invalid = Self()
-            do { try invalid.run([0x31, 0x08]); return false }
+            do { try invalid.run([0x33, 0x08]); return false }
             catch CPUError.unsupportedOpcode {}
             var truncated = Self()
-            do { try truncated.run([0x31]); return false }
+            do { try truncated.run([0x33]); return false }
             catch CPUError.truncatedInstruction {}
             return true
         } catch { return false }
