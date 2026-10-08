@@ -855,14 +855,14 @@ struct MaxPS4HomeView: View {
                     .tracking(2)
                     .foregroundStyle(.cyan)
                 Spacer()
-                Text("V1 • UI NOVA")
+                Text("MaxPS4")
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.55))
             }
             Text("Bienvenue sur MaxPS4")
                 .font(.system(size: 34, weight: .black, design: .rounded))
                 .foregroundStyle(.white)
-            Text("Votre bibliothèque PS4 sur iPhone • interface NOVA")
+            Text("Votre bibliothèque PS4 sur iPhone")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.66))
             HStack(spacing: 10) {
