@@ -208,6 +208,30 @@ enum MaxPS4ELFLoader {
         }
     }
 
+    /// Corrupted ELF64 segments must fail before guest memory is allocated.
+    static func segmentPreflightSelfTest() -> Bool {
+        do {
+            let url = try createImportDemo()
+            defer { try? FileManager.default.removeItem(at: url) }
+            let original = try Data(contentsOf: url)
+            func rejects(_ offset: Int, _ value: UInt8) throws -> Bool {
+                var corrupted = original
+                corrupted[offset] = value
+                try corrupted.write(to: url, options: .atomic)
+                do {
+                    _ = try load(url: url)
+                    return false
+                } catch LoaderError.invalid {
+                    return true
+                }
+            }
+            // Filesz exceeds memsz; unsupported permissions; input beyond EOF.
+            return try rejects(64 + 32, 0xFF)
+                && rejects(64 + 4, 0xFF)
+                && rejects(64 + 8, 0xFF)
+        } catch { return false }
+    }
+
     /// Bounds-checked ELF64 section-table import inventory (SHT_DYNSYM).
     /// Diagnostic only: no relocation application, SELF extraction or execution.
     static func inspectImports(url: URL) throws -> String {
@@ -300,7 +324,14 @@ enum MaxPS4ELFLoader {
             guard number(offset, 4) == 1 else { continue }
             let start = number(offset + 16, 8)
             let segmentMemory = number(offset + 40, 8)
-            guard start <= UInt64.max - segmentMemory else { throw LoaderError.invalid }
+            let source = number(offset + 8, 8)
+            let segmentFileSize = number(offset + 32, 8)
+            let flags = number(offset + 4, 4)
+            guard segmentFileSize <= segmentMemory,
+                  source <= UInt64(file.count),
+                  segmentFileSize <= UInt64(file.count) - source,
+                  flags & ~UInt64(7) == 0,
+                  start <= UInt64.max - segmentMemory else { throw LoaderError.invalid }
             guard segmentMemory <= UInt64(MaxPS4GuestMemory.maximumBytes),
                   totalMemory <= UInt64(MaxPS4GuestMemory.maximumBytes) - segmentMemory else {
                 throw LoaderError.invalid
