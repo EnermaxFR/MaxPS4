@@ -54,6 +54,13 @@ jobs:
             -I MaxPS4-iOS/Native/shadps4 \
             -c MaxPS4-iOS/Native/shadps4/common/string_util.cpp \
             -o build/diagnostics/shadps4-string-util-ios-arm64.o
+          xcrun --sdk iphoneos clang++ \
+            -std=c++23 \
+            -target arm64-apple-ios16.0 \
+            -isysroot "$SDK" \
+            -I MaxPS4-iOS/Native/shadps4 \
+            -c MaxPS4-iOS/Native/shadps4_bridge.cpp \
+            -o build/diagnostics/shadps4-bridge-ios-arm64.o
           file build/diagnostics/shadps4-string-util-ios-arm64.o
           xcrun lipo -archs build/diagnostics/shadps4-string-util-ios-arm64.o | grep -w arm64
 
@@ -84,6 +91,9 @@ jobs:
             -framework SwiftUI \
             -framework UIKit \
             MaxPS4-iOS/Sources/*.swift \
+            build/diagnostics/shadps4-string-util-ios-arm64.o \
+            build/diagnostics/shadps4-bridge-ios-arm64.o \
+            -lc++ \
             -o build/Payload/MaxPS4.app/MaxPS4 2>&1 | tee build/diagnostics/compile.log
 
       - name: Create Info.plist
