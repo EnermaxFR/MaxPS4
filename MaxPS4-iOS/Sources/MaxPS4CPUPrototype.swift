@@ -736,6 +736,35 @@ enum MaxPS4VirtualRuntime {
         }
     }
 
+    static func testPS4VirtualMemoryService() -> String {
+        // A safe, guest-only proof of concept. NOT Sony direct-memory semantics.
+        do {
+            var memory = MaxPS4GuestMemory()
+            let address: UInt64 = 0x8000
+            let size = 4096
+            try memory.mapZeroFilled(at: address, size: size)
+            guard memory.allocatedBytes == size else {
+                return "Mémoire PS4 expérimentale : allocation incohérente"
+            }
+            let testBytes = Data([0x4D, 0x41, 0x58, 0x34])
+            try memory.write(testBytes, at: address)
+            guard try memory.read(at: address, count: testBytes.count) == testBytes else {
+                return "Mémoire PS4 expérimentale : erreur de lecture"
+            }
+            try memory.protect(at: address, size: size, permissions: [.read])
+            guard try memory.read(at: address, count: testBytes.count) == testBytes else {
+                return "Mémoire PS4 expérimentale : lecture protégée incorrecte"
+            }
+            try memory.unmap(at: address, size: size)
+            guard memory.allocatedBytes == 0 else {
+                return "Mémoire PS4 expérimentale : libération incomplète"
+            }
+            return "Mémoire virtuelle OK ✅ • 4096 octets alloués, lecture/écriture vérifiées, protection lecture seule, libération validée • aucune mémoire PS4 réelle"
+        } catch {
+            return "Mémoire virtuelle : échec • \(error.localizedDescription)"
+        }
+    }
+
     static func testSimulatedKernelServices() -> String {
         // Synthetic syscall numbers are private to this prototype, not PS4 ABI.
         do {
