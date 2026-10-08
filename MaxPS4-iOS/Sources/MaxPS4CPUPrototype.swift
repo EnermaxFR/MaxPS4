@@ -759,6 +759,27 @@ enum MaxPS4VirtualRuntime {
         }
     }
 
+    /// A test import is resolved only after validating a synthetic ELF64 image.
+    /// This does not parse ELF dynamic relocations or load PS4 shared libraries.
+    static func testELFLibraryIntegration() -> String {
+        guard MaxPS4ELFLoader.integrationTest() else {
+            return "ELF64 + bibliothèques : échec du chargement ELF de test"
+        }
+        let resolver = SimulatedLibraryResolver()
+        do {
+            let importName = try resolver.resolve(library: "libkernel", symbol: "sceKernelGetProcessTime")
+            let result = try PS4CompatibilityShim.invoke(importName, virtualTicks: 3200)
+            guard result == 3200 else { return "ELF64 + bibliothèques : résultat inattendu" }
+            do {
+                _ = try resolver.resolve(library: "libkernel", symbol: "sceKernelCreateEqueue")
+                return "ELF64 + bibliothèques : symbole absent accepté"
+            } catch SimulatedLibraryResolver.ResolutionError.symbolUnavailable {}
+            return "ELF64 + bibliothèques OK ✅ • ELF64 de test chargé et exécuté • import libkernel simulé résolu (3200 µs) • symbole manquant refusé • pas de liaison dynamique PS4 réelle"
+        } catch {
+            return "ELF64 + bibliothèques : résolution impossible"
+        }
+    }
+
     static func testPS4LibraryResolver() -> String {
         let resolver = SimulatedLibraryResolver()
         do {
