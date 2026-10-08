@@ -132,6 +132,27 @@ struct MaxPS4GuestMemory {
         try write(bytes, at: address)
     }
 
+    static func isolationSelfTest() -> Bool {
+        do {
+            var memory = Self()
+            try memory.mapZeroFilled(at: 0x1000, size: 8, permissions: [.read, .write])
+            try memory.mapZeroFilled(at: 0x1008, size: 8, permissions: [.read, .execute])
+            try memory.writeUInt64(0x1122_3344_5566_7788, at: 0x1000)
+            // Adjacent regions must not silently join into one access.
+            do { _ = try memory.readUInt64(at: 0x1004); return false }
+            catch MemoryError.outOfBounds {}
+            do { try memory.writeUInt64(42, at: 0x1004); return false }
+            catch MemoryError.outOfBounds {}
+            do { try memory.writeUInt64(42, at: 0x1008); return false }
+            catch MemoryError.accessDenied {}
+            do { _ = try memory.fetchInstructionBytes(at: 0x1000, count: 1); return false }
+            catch MemoryError.accessDenied {}
+            guard try memory.fetchInstructionBytes(at: 0x1008, count: 1) == Data([0]) else { return false }
+            guard try memory.readUInt64(at: 0x1000) == 0x1122_3344_5566_7788 else { return false }
+            return true
+        } catch { return false }
+    }
+
     static func wordAccessSelfTest() -> Bool {
         do {
             var memory = Self()
