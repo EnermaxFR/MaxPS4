@@ -6,7 +6,7 @@
 
 **👉 [Rejoindre le serveur Discord MaxPS4](https://discord.gg/G7BaXN4fd)**
 
-MaxPS4 est un projet expérimental iOS autour d'un port du moteur open source shadPS4.
+MaxPS4 est un projet expérimental iOS qui prépare une intégration future du moteur open source shadPS4. **Le code C++ de shadPS4 n’est pas encore intégré et aucun jeu PS4 n'est actuellement jouable dans cette application.**
 
 > Projet en développement — la compatibilité des jeux et du core iOS n'est pas garantie.
 
@@ -14,7 +14,7 @@ MaxPS4 est un projet expérimental iOS autour d'un port du moteur open source sh
 
 MaxPS4 est distribué sous licence **GNU GPL v2.0 (GPL-2.0)**.
 
-Voir le fichier [LICENSE](LICENSE).
+Voir le fichier [LICENSE](LICENSE) et le document de [conformité, attribution et limites légales](docs/LEGAL-COMPLIANCE.md).
 
 Les composants et dépendances tiers restent soumis à leurs licences respectives.
 
@@ -23,7 +23,7 @@ Les composants et dépendances tiers restent soumis à leurs licences respective
 Un grand merci au projet **shadPS4** et à tous ses contributeurs :
 https://github.com/shadps4-emu/shadPS4
 
-MaxPS4 n'est pas un projet officiel de Sony Interactive Entertainment et n'est pas affilié à Sony ou PlayStation.
+MaxPS4 n'est pas un projet officiel de Sony Interactive Entertainment et n'est affilié ni à Sony ou PlayStation, ni à l'équipe officielle shadPS4.
 
 ## Contributions
 
