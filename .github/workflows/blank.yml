@@ -104,6 +104,24 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${GITHUB_RUN_NUMBER}" build/Payload/MaxPS4.app/Info.plist
           plutil -lint build/Payload/MaxPS4.app/Info.plist
 
+      - name: Install MaxPS4 app icon
+        shell: bash
+        run: |
+          set -e
+          ICON="MaxPS4-iOS/Resources/AppIcon.jpg"
+          APP="build/Payload/MaxPS4.app"
+          test -s "$ICON"
+          sips -s format png -z 120 120 "$ICON" --out "$APP/AppIcon60x60@2x.png" >/dev/null
+          sips -s format png -z 180 180 "$ICON" --out "$APP/AppIcon60x60@3x.png" >/dev/null
+          sips -s format png -z 152 152 "$ICON" --out "$APP/AppIcon76x76@2x.png" >/dev/null
+          sips -s format png -z 167 167 "$ICON" --out "$APP/AppIcon83.5x83.5@2x.png" >/dev/null
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleIcons dict' "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleIcons:CFBundlePrimaryIcon dict' "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconFiles array' "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconFiles:0 string AppIcon60x60' "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName string AppIcon' "$APP/Info.plist"
+          plutil -lint "$APP/Info.plist"
+
       - name: Verify executable
         run: |
           file build/Payload/MaxPS4.app/MaxPS4
