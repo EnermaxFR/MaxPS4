@@ -101,3 +101,29 @@ extern "C" int maxps4_native_self_file_ranges_valid(const std::uint8_t* data,
     }
     return 1;
 }
+
+// SELF segment memory-size preflight adapted from shadPS4's self_segment_header
+// (GPL-2.0-or-later). Metadata-only: no executable allocation or decryption.
+extern "C" int maxps4_native_self_memory_sizes_valid(const std::uint8_t* data,
+                                                       std::size_t count) noexcept {
+    std::uint16_t segments = 0;
+    if (!maxps4_native_self_segment_count(data, count, &segments)) return 0;
+    auto read_u64 = [&](std::size_t offset) noexcept {
+        std::uint64_t value = 0;
+        for (unsigned i = 0; i < 8; ++i)
+            value |= std::uint64_t(data[offset + i]) << (8 * i);
+        return value;
+    };
+    constexpr std::uint64_t max_segment_bytes = 256ull * 1024 * 1024;
+    constexpr std::uint64_t max_total_bytes = 512ull * 1024 * 1024;
+    std::uint64_t total = 0;
+    for (std::size_t i = 0; i < segments; ++i) {
+        const std::size_t offset = 32 + i * 32;
+        const std::uint64_t disk_size = read_u64(offset + 16);
+        const std::uint64_t memory_size = read_u64(offset + 24);
+        if (memory_size < disk_size || memory_size > max_segment_bytes ||
+            memory_size > max_total_bytes - total) return 0;
+        total += memory_size;
+    }
+    return 1;
+}

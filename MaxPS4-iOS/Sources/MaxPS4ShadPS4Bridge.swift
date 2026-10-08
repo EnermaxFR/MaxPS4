@@ -195,3 +195,33 @@ extension MaxPS4NativeLinkCheck {
             !nativeSELFFileRangesValid(Data(sample.prefix(63)))
     }
 }
+
+@_silgen_name("maxps4_native_self_memory_sizes_valid")
+private func maxps4_native_self_memory_sizes_valid(
+    _ bytes: UnsafePointer<UInt8>?, _ count: Int
+) -> Int32
+
+extension MaxPS4NativeLinkCheck {
+    static func nativeSELFMemorySizesValid(_ data: Data) -> Bool {
+        data.withUnsafeBytes { raw in
+            maxps4_native_self_memory_sizes_valid(
+                raw.bindMemory(to: UInt8.self).baseAddress, data.count
+            ) == 1
+        }
+    }
+
+    static var nativeSELFMemorySizesSelfTest: Bool {
+        var header = Data(repeating: 0, count: 96)
+        header.replaceSubrange(0..<4, with: [0x4F, 0x15, 0x3D, 0x1D])
+        header[6] = 1
+        header[24] = 1
+        header[48] = 4 // file size
+        header[56] = 8 // memory size
+        guard nativeSELFMemorySizesValid(header) else { return false }
+        header[56] = 3 // memory smaller than file
+        guard !nativeSELFMemorySizesValid(header) else { return false }
+        header[56] = 8
+        header[59] = 0x20 // >256 MiB
+        return !nativeSELFMemorySizesValid(header)
+    }
+}
