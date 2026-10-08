@@ -245,6 +245,11 @@ struct MaxPS4HomeView: View {
                                 detailsReport = emulator.status
                             }
                             .buttonStyle(.bordered)
+                            Button("Rechercher ressources Sonic Mania") {
+                                emulator.inspectPKGAssetCandidates(game)
+                                detailsReport = emulator.status
+                            }
+                            .buttonStyle(.bordered)
                             Button("Analyser la structure du PKG") {
                                 emulator.inspectPKGStructure(game)
                                 detailsReport = emulator.status
