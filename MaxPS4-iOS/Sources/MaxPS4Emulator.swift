@@ -426,7 +426,33 @@ final class MaxPS4Emulator: ObservableObject {
                 // SCE SELF is a container, not a directly executable ELF.
                 // Report this explicitly rather than treating it as a corrupt ELF.
                 if magic == Data([0x4F, 0x15, 0x3D, 0x1D]) {
-                    status = "Essai moteur : conteneur SELF PlayStation détecté • extraction et déchiffrement non implémentés • exécution indisponible"
+                    // Read only the fixed SELF header; never treat encrypted payload
+                    // as executable instructions or read arbitrary file offsets.
+                    let headerTail = try handle.read(upToCount: 28) ?? Data()
+                    guard headerTail.count == 28 else {
+                        status = "Chargeur SELF : en-tête tronqué (32 octets requis)"
+                        return
+                    }
+                    let header = Data(magic) + headerTail
+                    func be16(_ at: Int) -> UInt16 {
+                        (UInt16(header[at]) << 8) | UInt16(header[at + 1])
+                    }
+                    func be32(_ at: Int) -> UInt32 {
+                        (0..<4).reduce(UInt32(0)) { ($0 << 8) | UInt32(header[at + $1]) }
+                    }
+                    let version = be16(4)
+                    let mode = header[6]
+                    let segmentCount = be16(0x18)
+                    let metaSize = be32(0x10)
+                    status = [
+                        "Chargeur SELF : conteneur PlayStation reconnu ✅",
+                        "Version en-tête : 0x" + String(version, radix: 16),
+                        "Mode (champ brut) : 0x" + String(mode, radix: 16),
+                        "Segments déclarés : " + String(segmentCount),
+                        "Taille métadonnées (champ brut) : " + String(metaSize),
+                        "Limite : en-tête uniquement • segments non extraits",
+                        "Déchiffrement / chargement du jeu / exécution PS4 : indisponibles"
+                    ].joined(separator: "\\n")
                     return
                 }
                 guard magic == Data([0x7F, 0x45, 0x4C, 0x46]) else {
