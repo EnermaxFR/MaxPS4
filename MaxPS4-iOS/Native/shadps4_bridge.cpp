@@ -196,7 +196,7 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
             for (unsigned i = 0; i < 4; ++i)
                 imm |= std::uint32_t(code[pc + i]) << (8 * i);
             rax = imm;
-            flags_valid = false;
+            // x86 MOV does not modify RFLAGS (including ZF).
             pc += 4;
             break;
         }
@@ -393,7 +393,7 @@ extern "C" int maxps4_arm64_translate_preview(
         arm_at_guest[pc] = n;
         const std::uint8_t opcode = guest[pc++];
         if (opcode == 0xB8) {
-            cmp_ready = false;
+            // MOVZ/MOVK preserve ARM64 NZCV, matching x86 MOV preserving ZF.
             if (count - pc < 4) return 0;
             std::uint32_t imm = 0;
             for (unsigned i = 0; i < 4; ++i)
