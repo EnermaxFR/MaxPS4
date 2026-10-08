@@ -14,6 +14,7 @@ struct MaxPS4HomeView: View {
     @State private var selectedTab: MaxPS4Tab = .home
     @State private var importingGame = false
     @State private var gameSearch = ""
+    @State private var demoGuess = 7
     @State private var gameFilter = 0
     @State private var gameToRename: MaxPS4Game?
     @State private var gameToDelete: MaxPS4Game?
@@ -1000,6 +1001,26 @@ struct MaxPS4HomeView: View {
                 secondaryAction(icon: "point.3.connected.trianglepath.dotted", title: "Tester l’intégration complète", subtitle: "ELF64 → CPU → mémoire • programme synthétique") {
                     emulator.testIntegration()
                 }
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("MINI-JEU CPU x86-64")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.cyan)
+                    Text("Devine le nombre (1 à 20)").font(.headline)
+                    HStack(spacing: 12) {
+                        Button("−") { demoGuess = max(1, demoGuess - 1) }
+                        Text("\(demoGuess)")
+                            .font(.title2.monospacedDigit().bold())
+                            .frame(minWidth: 46)
+                        Button("+") { demoGuess = min(20, demoGuess + 1) }
+                        Spacer()
+                        Button("Jouer") { emulator.playGuessingDemo(guess: demoGuess) }
+                            .font(.headline)
+                    }
+                    Text("Mini-jeu de démonstration exécuté par le prototype x86-64, pas un jeu PS4.")
+                        .font(.caption).foregroundStyle(.white.opacity(0.7))
+                }
+                .padding(14)
+                .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 15))
                 Text("PROTOTYPES CPU, MÉMOIRE ET SERVICES")
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .tracking(1.1)
