@@ -231,6 +231,21 @@ struct MaxPS4CPUPrototype {
                 if opcode != 0x39 { registers[dest] = UInt64(result) }
                 zeroFlag = result == 0
                 rip += 2
+            } else if opcode == 0x83 { // ADD/SUB/CMP r/m32, sign-extended imm8
+                guard program.count - rip >= 3 else { throw CPUError.truncatedInstruction }
+                let modrm = program[rip + 1]
+                guard modrm & 0xC0 == 0xC0 else { throw CPUError.unsupportedOpcode }
+                let operation = (modrm >> 3) & 7
+                guard operation == 0 || operation == 5 || operation == 7 else {
+                    throw CPUError.unsupportedOpcode
+                }
+                let index = Int(modrm & 7)
+                let lhs = UInt32(truncatingIfNeeded: registers[index])
+                let rhs = UInt32(bitPattern: Int32(Int8(bitPattern: program[rip + 2])))
+                let result = operation == 0 ? lhs &+ rhs : lhs &- rhs
+                if operation != 7 { registers[index] = UInt64(result) }
+                zeroFlag = result == 0
+                rip += 3
             } else if opcode == 0x85 { // TEST r/m32, r32 (register-only)
                 guard rip + 2 <= program.count else { throw CPUError.truncatedInstruction }
                 let modrm = program[rip + 1]
@@ -1146,6 +1161,28 @@ enum MaxPS4VirtualRuntime {
 }
 
 extension MaxPS4CPUPrototype {
+    static func immediate8AndBranchesSelfTest() -> Bool {
+        do {
+            var cpu = Self()
+            // EAX=40; ADD EAX,2; CMP EAX,42; JNZ skips the RET only if nonzero.
+            try cpu.run([0xB8, 40, 0, 0, 0, 0x83, 0xC0, 2, 0x83, 0xF8, 42, 0x75, 0x01, 0xC3, 0xC3])
+            guard cpu.rax == 42, cpu.zeroFlag else { return false }
+            var negative = Self()
+            try negative.run([0xB8, 41, 0, 0, 0, 0x83, 0xC0, 0xFF, 0xC3])
+            guard negative.rax == 40 else { return false }
+            var sub = Self()
+            try sub.run([0xB8, 42, 0, 0, 0, 0x83, 0xE8, 42, 0xC3])
+            guard sub.rax == 0, sub.zeroFlag else { return false }
+            var invalid = Self()
+            do { try invalid.run([0x83, 0x08, 0]); return false }
+            catch CPUError.unsupportedOpcode {}
+            var short = Self()
+            do { try short.run([0x83, 0xC0]); return false }
+            catch CPUError.truncatedInstruction {}
+            return true
+        } catch { return false }
+    }
+
     static func nearConditionalBranchSelfTest() -> Bool {
         do {
             // XOR EAX,EAX -> ZF=1, JZ skips the first MOV.
