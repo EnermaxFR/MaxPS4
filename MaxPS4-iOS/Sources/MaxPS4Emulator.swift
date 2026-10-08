@@ -478,6 +478,74 @@ final class MaxPS4Emulator: ObservableObject {
 
     /// Read-only readiness report: verifies package header and descriptor bounds.
     /// Does not imply PS4 decryption, extraction or executable compatibility.
+    /// Read-only PS4 boot readiness probe: never treats a PKG signature as a decrypted executable.
+    func inspectPS4ExecutableReadiness(_ game: MaxPS4Game) {
+        guard game.fileName.lowercased().hasSuffix(".pkg") else {
+            status = "Chargeur PS4 : sélectionnez un PKG"
+            return
+        }
+        do {
+            let url = URL(fileURLWithPath: game.localPath)
+            let size = ((try fileManager.attributesOfItem(atPath: url.path))[.size] as? NSNumber)?.uint64Value ?? 0
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let header = try handle.read(upToCount: 32) ?? Data()
+            guard header.count == 32, Array(header.prefix(4)) == [0x7F, 0x43, 0x4E, 0x54] else {
+                status = "Chargeur PS4 : signature PKG incorrecte"
+                return
+            }
+            let count = (0..<4).reduce(UInt64(0)) { ($0 << 8) | UInt64(header[0x10 + $1]) }
+            let tableOffset = (0..<4).reduce(UInt64(0)) { ($0 << 8) | UInt64(header[0x18 + $1]) }
+            guard count > 0, count <= 4096, tableOffset <= size,
+                  count <= (size - tableOffset) / 32 else {
+                status = "Chargeur PS4 : index hors limites"
+                return
+            }
+            try handle.seek(toOffset: tableOffset)
+            guard let table = try handle.read(upToCount: Int(count * 32)),
+                  table.count == Int(count * 32) else {
+                status = "Chargeur PS4 : index incomplet"
+                return
+            }
+            func be32(_ at: Int) -> UInt64 {
+                (0..<4).reduce(UInt64(0)) { ($0 << 8) | UInt64(table[at + $1]) }
+            }
+            var checked = 0
+            var readableELF = 0
+            var possibleSELF = 0
+            var invalid = 0
+            for i in 0..<Int(count) {
+                let base = i * 32
+                let start = be32(base + 16)
+                let length = be32(base + 20)
+                guard start <= size, length <= size - start else {
+                    invalid += 1
+                    continue
+                }
+                checked += 1
+                if length < 4 { continue }
+                try handle.seek(toOffset: start)
+                let prefix = try handle.read(upToCount: 5) ?? Data()
+                if prefix.count >= 5 && Array(prefix.prefix(5)) == [0x7F, 0x45, 0x4C, 0x46, 2] {
+                    readableELF += 1
+                } else if prefix.count >= 4 && Array(prefix.prefix(4)) == [0x4F, 0x15, 0x3D, 0x1D] {
+                    possibleSELF += 1
+                }
+            }
+            status = [
+                "Sonic Mania • état du chargeur PS4",
+                "Index PKG : \(checked)/\(count) entrées dans les bornes ; invalides : \(invalid)",
+                "Signatures ELF64 aux débuts des entrées : \(readableELF)",
+                "Signatures SELF possibles aux débuts des entrées : \(possibleSELF)",
+                "Ce relevé ne déchiffre pas les entrées et ne détecte pas les exécutables imbriqués.",
+                "Un PKG valide n'est pas un binaire exécutable.",
+                "Démarrage : bloqué tant qu'un SELF/ELF exploitable et les services PS4 sont absents."
+            ].joined(separator: "\n")
+        } catch {
+            status = "Chargeur PS4 : erreur de lecture — \(error.localizedDescription)"
+        }
+    }
+
     func diagnosePKGBoot(_ game: MaxPS4Game) {
         guard game.fileName.lowercased().hasSuffix(".pkg") else {
             status = "Diagnostic démarrage : sélectionnez un PKG PS4"
