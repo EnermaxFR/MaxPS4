@@ -152,6 +152,22 @@ struct MaxPS4CPUPrototype {
                         number: registers[0], address: registers[1], size: registers[2], flags: registers[3], memory: &guestMemory
                     )
                     rip += 2
+                } else if second == 0xBE || second == 0xBF { // MOVSX r32, r/m8 or r/m16, register-only
+                    guard program.count - rip >= 3 else { throw CPUError.truncatedInstruction }
+                    let modrm = program[rip + 2]
+                    guard modrm & 0xC0 == 0xC0 else { throw CPUError.unsupportedOpcode }
+                    let destination = Int((modrm >> 3) & 7)
+                    let source = Int(modrm & 7)
+                    if second == 0xBE {
+                        let index = source < 4 ? source : source - 4
+                        let shift: UInt64 = source < 4 ? 0 : 8
+                        let byte = UInt8(truncatingIfNeeded: registers[index] >> shift)
+                        registers[destination] = UInt64(UInt32(bitPattern: Int32(Int8(bitPattern: byte))))
+                    } else {
+                        let word = UInt16(truncatingIfNeeded: registers[source])
+                        registers[destination] = UInt64(UInt32(bitPattern: Int32(Int16(bitPattern: word))))
+                    }
+                    rip += 3
                 } else if second == 0xB6 || second == 0xB7 { // MOVZX r32, r/m8 or r/m16, register-only
                     guard program.count - rip >= 3 else { throw CPUError.truncatedInstruction }
                     let modrm = program[rip + 2]
@@ -1290,6 +1306,27 @@ extension MaxPS4CPUPrototype {
                   try guessNumber(target: 20, guess: 20) else { return false }
             do { _ = try guessNumber(target: 21, guess: 7); return false }
             catch CPUError.unsupportedOpcode { return true }
+        } catch { return false }
+    }
+
+    static func signExtendMoveSelfTest() -> Bool {
+        do {
+            var byte = Self()
+            try byte.run([0xB8, 0x80, 0, 0, 0, 0x0F, 0xBE, 0xC8, 0xC3])
+            guard byte.registers[1] == 0xFFFF_FF80 else { return false }
+            var high = Self()
+            try high.run([0xB8, 0x00, 0xFE, 0, 0, 0x0F, 0xBE, 0xCC, 0xC3])
+            guard high.registers[1] == 0xFFFF_FFFE else { return false }
+            var word = Self()
+            try word.run([0xB8, 0x80, 0xFF, 0, 0, 0x0F, 0xBF, 0xD0, 0xC3])
+            guard word.registers[2] == 0xFFFF_FF80 else { return false }
+            var invalid = Self()
+            do { try invalid.run([0x0F, 0xBE, 0x00, 0xC3]); return false }
+            catch CPUError.unsupportedOpcode {}
+            var truncated = Self()
+            do { try truncated.run([0x0F, 0xBF]); return false }
+            catch CPUError.truncatedInstruction {}
+            return true
         } catch { return false }
     }
 
