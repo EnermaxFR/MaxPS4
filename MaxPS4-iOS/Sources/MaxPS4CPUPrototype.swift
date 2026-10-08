@@ -202,6 +202,15 @@ struct MaxPS4CPUPrototype {
                     rip += 1
                     return
                 }
+            } else if opcode == 0xE9 { // JMP rel32, bounded to the test buffer
+                guard program.count - rip >= 5 else { throw CPUError.truncatedInstruction }
+                let displacement = UInt32(program[rip + 1])
+                    | (UInt32(program[rip + 2]) << 8)
+                    | (UInt32(program[rip + 3]) << 16)
+                    | (UInt32(program[rip + 4]) << 24)
+                let target = Int64(rip) + 5 + Int64(Int32(bitPattern: displacement))
+                guard target >= 0 && target < Int64(program.count) else { throw CPUError.invalidBranch }
+                rip = Int(target)
             } else if opcode == 0xE8 { // CALL rel32; private test return frames
                 guard program.count - rip >= 5 else { throw CPUError.truncatedInstruction }
                 let displacement = UInt32(program[rip + 1])
@@ -1072,6 +1081,28 @@ enum MaxPS4VirtualRuntime {
 }
 
 extension MaxPS4CPUPrototype {
+    static func nearJumpSelfTest() -> Bool {
+        do {
+            var cpu = Self()
+            // JMP +5 skips MOV EAX,1, then MOV EAX,42 and RET.
+            try cpu.run([0xE9, 5, 0, 0, 0, 0xB8, 1, 0, 0, 0, 0xB8, 42, 0, 0, 0, 0xC3])
+            guard cpu.rax == 42, cpu.executedInstructions == 3 else { return false }
+            var invalid = Self()
+            do {
+                try invalid.run([0xE9, 0x7F, 0, 0, 0])
+                return false
+            } catch CPUError.invalidBranch {}
+            var truncated = Self()
+            do {
+                try truncated.run([0xE9, 0x01])
+                return false
+            } catch CPUError.truncatedInstruction {}
+            return true
+        } catch {
+            return false
+        }
+    }
+
     static func callAndBranchSelfTest() -> Bool {
         do {
             var cpu = MaxPS4CPUPrototype()
