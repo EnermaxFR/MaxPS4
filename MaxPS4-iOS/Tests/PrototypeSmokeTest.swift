@@ -16,6 +16,7 @@ struct PrototypeSmokeTest {
             ("XOR inverse et validation", MaxPS4CPUPrototype.xorRegisterSelfTest()),
             ("Arithmétique 64 bits, CMP et branchements", MaxPS4CPUPrototype.immediate32AndControlFlowSelfTest()),
             ("Sauts conditionnels longs JZ/JNZ", MaxPS4CPUPrototype.nearConditionalBranchSelfTest()),
+            ("Arithmétique immédiate 8 bits et branchements", MaxPS4CPUPrototype.immediate8AndBranchesSelfTest()),
             ("Chargeur ELF64", MaxPS4ELFLoader.selfTest()),
             ("Importations ELF64 synthétiques", MaxPS4ELFLoader.importDemoSelfTest()),
             ("Relocalisation relative x86-64", MaxPS4ELFLoader.relativeRelocationSelfTest()),
