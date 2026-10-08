@@ -185,6 +185,18 @@ struct MaxPS4CPUPrototype {
                 }
                 // MOV does not update flags.
                 rip += 2
+            } else if opcode == 0x01 || opcode == 0x29 { // ADD/SUB r/m32, r32 (register-only)
+                guard program.count - rip >= 2 else { throw CPUError.truncatedInstruction }
+                let modrm = program[rip + 1]
+                guard modrm & 0xC0 == 0xC0 else { throw CPUError.unsupportedOpcode }
+                let dest = Int(modrm & 7)
+                let src = Int((modrm >> 3) & 7)
+                let lhs = UInt32(truncatingIfNeeded: registers[dest])
+                let rhs = UInt32(truncatingIfNeeded: registers[src])
+                let result = opcode == 0x01 ? lhs &+ rhs : lhs &- rhs
+                registers[dest] = UInt64(result)
+                zeroFlag = result == 0
+                rip += 2
             } else if opcode == 0x85 { // TEST r/m32, r32 (register-only)
                 guard rip + 2 <= program.count else { throw CPUError.truncatedInstruction }
                 let modrm = program[rip + 1]
@@ -1081,6 +1093,38 @@ enum MaxPS4VirtualRuntime {
 }
 
 extension MaxPS4CPUPrototype {
+    static func arithmeticAndStackSelfTest() -> Bool {
+        do {
+            var cpu = Self()
+            try cpu.prepareTestStack(address: 0xA000, size: 64)
+            let stackTop = cpu.registers[4]
+            // MOV EAX,20; MOV ECX,22; ADD EAX,ECX; PUSH RAX;
+            // SUB EAX,ECX; POP RBX; SUB EAX,EAX; RET
+            try cpu.run([
+                0xB8, 20, 0, 0, 0,
+                0xB9, 22, 0, 0, 0,
+                0x01, 0xC8, 0x50,
+                0x29, 0xC8, 0x5B,
+                0x29, 0xC0, 0xC3
+            ])
+            guard cpu.rax == 0, cpu.registers[3] == 42,
+                  cpu.registers[4] == stackTop, cpu.zeroFlag else { return false }
+            var invalid = Self()
+            do {
+                try invalid.run([0x01, 0x08])
+                return false
+            } catch CPUError.unsupportedOpcode {}
+            var truncated = Self()
+            do {
+                try truncated.run([0x29])
+                return false
+            } catch CPUError.truncatedInstruction {}
+            return true
+        } catch {
+            return false
+        }
+    }
+
     static func nearJumpSelfTest() -> Bool {
         do {
             var cpu = Self()
