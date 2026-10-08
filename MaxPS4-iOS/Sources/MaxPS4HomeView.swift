@@ -240,6 +240,11 @@ struct MaxPS4HomeView: View {
                             .buttonStyle(.bordered)
                         }
                         if game.fileName.lowercased().hasSuffix(".pkg") {
+                            Button("Examiner les entrées du PKG") {
+                                emulator.inspectPKGEntries(game)
+                                detailsReport = emulator.status
+                            }
+                            .buttonStyle(.bordered)
                             Button("Analyser la structure du PKG") {
                                 emulator.inspectPKGStructure(game)
                                 detailsReport = emulator.status
