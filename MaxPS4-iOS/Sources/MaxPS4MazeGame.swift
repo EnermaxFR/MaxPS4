@@ -21,8 +21,8 @@ struct MaxPS4MazeGame: View {
     private static let start = Cell(row: 1, column: 1)
     private static let ghostStart = Cell(row: 7, column: 7)
 
-    @State private var player = start
-    @State private var ghost = ghostStart
+    @State private var player = Cell(row: 1, column: 1)
+    @State private var ghost = Cell(row: 7, column: 7)
     @State private var pellets = Set<Cell>()
     @State private var score = 0
     @State private var moves = 0
@@ -138,7 +138,7 @@ struct MaxPS4MazeGame: View {
         player = Self.start
         ghost = Self.ghostStart
         pellets = Set(Self.maze.indices.flatMap { row in
-            Self.maze[row].indices.compactMap { col -> Cell? in
+            (0..<Self.maze[row].count).compactMap { col -> Cell? in
                 let cell = Cell(row: row, column: col)
                 return isWall(cell) || cell == Self.start || cell == Self.ghostStart ? nil : cell
             }
