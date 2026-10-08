@@ -185,7 +185,7 @@ struct MaxPS4CPUPrototype {
                 }
                 // MOV does not update flags.
                 rip += 2
-            } else if opcode == 0x01 || opcode == 0x09 || opcode == 0x21 || opcode == 0x29 { // ADD/OR/AND/SUB r/m32, r32
+            } else if opcode == 0x01 || opcode == 0x09 || opcode == 0x21 || opcode == 0x29 || opcode == 0x39 { // ADD/OR/AND/SUB/CMP r/m32, r32
                 guard program.count - rip >= 2 else { throw CPUError.truncatedInstruction }
                 let modrm = program[rip + 1]
                 guard modrm & 0xC0 == 0xC0 else { throw CPUError.unsupportedOpcode }
@@ -198,7 +198,7 @@ struct MaxPS4CPUPrototype {
                 else if opcode == 0x09 { result = lhs | rhs }
                 else if opcode == 0x21 { result = lhs & rhs }
                 else { result = lhs &- rhs }
-                registers[dest] = UInt64(result)
+                if opcode != 0x39 { registers[dest] = UInt64(result) }
                 zeroFlag = result == 0
                 rip += 2
             } else if opcode == 0x85 { // TEST r/m32, r32 (register-only)
@@ -1097,6 +1097,25 @@ enum MaxPS4VirtualRuntime {
 }
 
 extension MaxPS4CPUPrototype {
+    static func compareRegistersSelfTest() -> Bool {
+        do {
+            var cpu = Self()
+            // CMP EAX,ECX sets ZF without modifying either register.
+            try cpu.run([0xB8, 42, 0, 0, 0, 0xB9, 42, 0, 0, 0, 0x39, 0xC8, 0xC3])
+            guard cpu.rax == 42, cpu.registers[1] == 42, cpu.zeroFlag else { return false }
+            var different = Self()
+            try different.run([0xB8, 42, 0, 0, 0, 0xB9, 1, 0, 0, 0, 0x39, 0xC8, 0xC3])
+            guard different.rax == 42, !different.zeroFlag else { return false }
+            var invalid = Self()
+            do { try invalid.run([0x39, 0x08]); return false }
+            catch CPUError.unsupportedOpcode {}
+            var short = Self()
+            do { try short.run([0x39]); return false }
+            catch CPUError.truncatedInstruction {}
+            return true
+        } catch { return false }
+    }
+
     static func bitwiseOrSelfTest() -> Bool {
         do {
             var cpu = Self()
