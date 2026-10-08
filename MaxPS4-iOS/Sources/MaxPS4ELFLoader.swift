@@ -57,6 +57,34 @@ enum MaxPS4ELFLoader {
         return url
     }
 
+    /// End-to-end sample validation: parse an actual generated ELF64 file,
+    /// ensure the missing-import diagnostic remains bounded and reject corruption.
+    static func importDemoSelfTest() -> Bool {
+        do {
+            let url = try createImportDemo()
+            defer { try? FileManager.default.removeItem(at: url) }
+            let loaded = try load(url: url)
+            let report = try inspectImports(url: url)
+            guard loaded.entry == 0x1000, loaded.segments == 1,
+                  report.contains("1 importations non définies"),
+                  report.contains("sceKernelGetProcessTime") else { return false }
+
+            var bytes = try Data(contentsOf: url)
+            // Corrupt the dynamic symbol's string-table link so that it must
+            // fail closed rather than read outside the ELF.
+            bytes[0x1C0 + 40] = 0xFF
+            try bytes.write(to: url, options: .atomic)
+            do {
+                _ = try inspectImports(url: url)
+                return false
+            } catch LoaderError.invalid {
+                return true
+            }
+        } catch {
+            return false
+        }
+    }
+
     /// Bounds-checked ELF64 section-table import inventory (SHT_DYNSYM).
     /// Diagnostic only: no relocation application, SELF extraction or execution.
     static func inspectImports(url: URL) throws -> String {
