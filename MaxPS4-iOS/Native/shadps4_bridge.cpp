@@ -1,3 +1,4 @@
+#include "common/alignment.h"
 // MaxPS4 bridge adapter (new work); calls original shadPS4 GPL-2.0-or-later utility.
 // This does not implement PS4 emulation or launch any executable.
 #include "common/string_util.h"
@@ -140,4 +141,11 @@ extern "C" int maxps4_native_self_embedded_elf_entry(const std::uint8_t* data,
     const std::size_t elf_offset = 32 + std::size_t(segments) * 32;
     if (elf_offset > count || count - elf_offset < 64) return 0;
     return maxps4_native_elf_entry_point(data + elf_offset, count - elf_offset, entry);
+}
+
+extern "C" int maxps4_shadps4_alignment_probe() noexcept {
+    return Common::AlignUp<std::uint64_t>(0x1001, 0x4000) == 0x4000 &&
+           Common::AlignDown<std::uint64_t>(0x7fff, 0x4000) == 0x4000 &&
+           Common::Is16KBAligned<std::uint64_t>(0x4000) &&
+           !Common::Is16KBAligned<std::uint64_t>(0x4001) ? 1 : 0;
 }

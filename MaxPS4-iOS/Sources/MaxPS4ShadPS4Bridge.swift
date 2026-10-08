@@ -257,3 +257,12 @@ extension MaxPS4NativeLinkCheck {
         return nativeSELFEmbeddedELFEntry(sample) == nil
     }
 }
+
+@_silgen_name("maxps4_shadps4_alignment_probe")
+private func maxps4_shadps4_alignment_probe() -> Int32
+
+extension MaxPS4NativeLinkCheck {
+    static var nativeUpstreamAlignmentSelfTest: Bool {
+        maxps4_shadps4_alignment_probe() == 1
+    }
+}
