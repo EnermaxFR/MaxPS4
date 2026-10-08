@@ -522,6 +522,23 @@ final class MaxPS4Emulator: ObservableObject {
         return "iOS \(process.operatingSystemVersionString) • \(process.processorCount) cœurs logiques • \(String(format: "%.1f", memoryGB)) Go RAM"
     }
 
+    /// Exercises a synthetic ELF64 -> guest memory -> x86-64 CPU pipeline.
+    /// Uses no PS4 binaries, game assets or native machine-code execution.
+    func runELFCPUBench() {
+        let loaderOK = MaxPS4ELFLoader.selfTest()
+        let cpuOK = MaxPS4CPUPrototype.selfTest()
+        let integrationOK = MaxPS4ELFLoader.integrationTest()
+        status = [
+            "Banc de test ELF64 / CPU x86-64",
+            "Chargeur ELF et permissions mémoire : " + (loaderOK ? "OK ✅" : "ÉCHEC ❌"),
+            "Interpréteur CPU synthétique : " + (cpuOK ? "OK ✅" : "ÉCHEC ❌"),
+            "Chaîne ELF → mémoire → CPU : " + (integrationOK ? "OK ✅" : "ÉCHEC ❌"),
+            "Résultat attendu du programme synthétique : RAX=42, stockage mémoire=42.",
+            "Ce test n'exécute pas Sonic Mania ni du code PS4.",
+            "Exécution réelle PS4 : indisponible."
+        ].joined(separator: "\n")
+    }
+
     func traceCPUPrototype() {
         do {
             var cpu = MaxPS4CPUPrototype()
