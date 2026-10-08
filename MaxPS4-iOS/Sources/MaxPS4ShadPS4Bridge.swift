@@ -380,7 +380,7 @@ extension MaxPS4NativeLinkCheck {
     static var executionBackendSelfTest: Bool {
         let program = Data([0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3])
         guard let output = runSyntheticX86PreferJIT(program) else { return false }
-        return output.result == 42 && !output.usedJIT && !isARM64JITReady
+        return output.result == 42 && !output.usedJIT && !isARM64JITReady && arm64CacheSelfTest
     }
 }
 
