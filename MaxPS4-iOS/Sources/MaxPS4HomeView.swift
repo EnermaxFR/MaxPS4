@@ -946,6 +946,9 @@ struct MaxPS4HomeView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
 
+                secondaryAction(icon: "checkmark.shield", title: "Tester le pont C++ shadPS4", subtitle: "Vérifier le composant natif sur iPhone • pas de jeu") {
+                    emulator.testShadPS4NativeUtility()
+                }
                 secondaryAction(icon: "cpu", title: "Diagnostic du moteur", subtitle: "Tester la connexion native") {
                     emulator.testBackend()
                 }
