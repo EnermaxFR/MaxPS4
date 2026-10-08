@@ -746,6 +746,39 @@ enum MaxPS4VirtualRuntime {
         }
     }
 
+    /// Explicitly simulated library resolver; not Sony's dynamic linker.
+    private struct SimulatedLibraryResolver {
+        enum ResolutionError: Error { case libraryUnavailable, symbolUnavailable }
+        private let exports: [String: Set<String>] = [
+            "libkernel": ["sceKernelGetProcessTime"]
+        ]
+        func resolve(library: String, symbol: String) throws -> String {
+            guard let functions = exports[library] else { throw ResolutionError.libraryUnavailable }
+            guard functions.contains(symbol) else { throw ResolutionError.symbolUnavailable }
+            return symbol
+        }
+    }
+
+    static func testPS4LibraryResolver() -> String {
+        let resolver = SimulatedLibraryResolver()
+        do {
+            let symbol = try resolver.resolve(library: "libkernel", symbol: "sceKernelGetProcessTime")
+            let ticks = try PS4CompatibilityShim.invoke(symbol, virtualTicks: 2500)
+            guard ticks == 2500 else { return "Bibliothèques PS4 : valeur d’horloge incorrecte" }
+            do {
+                _ = try resolver.resolve(library: "libkernel", symbol: "sceKernelAllocateDirectMemory")
+                return "Bibliothèques PS4 : symbole non implémenté accepté"
+            } catch SimulatedLibraryResolver.ResolutionError.symbolUnavailable {}
+            do {
+                _ = try resolver.resolve(library: "libSceGnmDriver", symbol: "sceGnmSubmitCommandBuffers")
+                return "Bibliothèques PS4 : bibliothèque absente acceptée"
+            } catch SimulatedLibraryResolver.ResolutionError.libraryUnavailable {}
+            return "Bibliothèques système OK ✅ • libkernel simulée • sceKernelGetProcessTime résolu (2500 µs) • symbole et bibliothèque indisponibles refusés • pas de chargement de modules PS4"
+        } catch {
+            return "Bibliothèques PS4 : échec de résolution du symbole de test"
+        }
+    }
+
     static func testPS4CompatibilityScaffold() -> String {
         do {
             let first = try PS4CompatibilityShim.invoke("sceKernelGetProcessTime", virtualTicks: 1200)
