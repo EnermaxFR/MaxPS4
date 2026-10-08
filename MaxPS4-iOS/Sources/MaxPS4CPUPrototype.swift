@@ -795,7 +795,7 @@ enum MaxPS4VirtualRuntime {
                   manager.count == 0 else { return "Isolation : nettoyage incomplet" }
             return "Processus + mémoire OK ✅ • 2 processus isolés • allocations virtuelles 4096/2048 octets • adresses identiques sans partage • libération et fermeture validées • simulation, pas de noyau PS4"
         } catch {
-            return "Processus + mémoire : échec • \\(error.localizedDescription)"
+            return "Processus + mémoire : échec • \(error.localizedDescription)"
         }
     }
 
