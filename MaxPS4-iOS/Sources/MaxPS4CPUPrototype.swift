@@ -152,6 +152,21 @@ struct MaxPS4CPUPrototype {
                         number: registers[0], address: registers[1], size: registers[2], flags: registers[3], memory: &guestMemory
                     )
                     rip += 2
+                } else if second == 0xB6 || second == 0xB7 { // MOVZX r32, r/m8 or r/m16, register-only
+                    guard program.count - rip >= 3 else { throw CPUError.truncatedInstruction }
+                    let modrm = program[rip + 2]
+                    guard modrm & 0xC0 == 0xC0 else { throw CPUError.unsupportedOpcode }
+                    let destination = Int((modrm >> 3) & 7)
+                    let source = Int(modrm & 7)
+                    if second == 0xB6 {
+                        // Without a REX prefix, register codes 4...7 name AH/CH/DH/BH.
+                        let index = source < 4 ? source : source - 4
+                        let shift: UInt64 = source < 4 ? 0 : 8
+                        registers[destination] = (registers[index] >> shift) & 0xFF
+                    } else {
+                        registers[destination] = registers[source] & 0xFFFF
+                    }
+                    rip += 3
                 } else if second == 0x84 || second == 0x85 { // JZ/JNZ rel32
                     guard program.count - rip >= 6 else { throw CPUError.truncatedInstruction }
                     let disp = (0..<4).reduce(UInt32(0)) {
@@ -1275,6 +1290,30 @@ extension MaxPS4CPUPrototype {
                   try guessNumber(target: 20, guess: 20) else { return false }
             do { _ = try guessNumber(target: 21, guess: 7); return false }
             catch CPUError.unsupportedOpcode { return true }
+        } catch { return false }
+    }
+
+    static func zeroExtendSelfTest() -> Bool {
+        do {
+            var lowByte = Self()
+            // MOV EAX, 0xABCD; MOVZX ECX, AL.
+            try lowByte.run([0xB8, 0xCD, 0xAB, 0, 0, 0x0F, 0xB6, 0xC8, 0xC3])
+            guard lowByte.registers[1] == 0xCD else { return false }
+            var highByte = Self()
+            // MOV EAX, 0x1234; MOVZX ECX, AH.
+            try highByte.run([0xB8, 0x34, 0x12, 0, 0, 0x0F, 0xB6, 0xCC, 0xC3])
+            guard highByte.registers[1] == 0x12 else { return false }
+            var word = Self()
+            // MOV EAX, 0xFF80; MOVZX EDX, AX.
+            try word.run([0xB8, 0x80, 0xFF, 0, 0, 0x0F, 0xB7, 0xD0, 0xC3])
+            guard word.registers[2] == 0xFF80 else { return false }
+            var memoryOperand = Self()
+            do { try memoryOperand.run([0x0F, 0xB6, 0x00, 0xC3]); return false }
+            catch CPUError.unsupportedOpcode {}
+            var truncated = Self()
+            do { try truncated.run([0x0F, 0xB7]); return false }
+            catch CPUError.truncatedInstruction {}
+            return true
         } catch { return false }
     }
 

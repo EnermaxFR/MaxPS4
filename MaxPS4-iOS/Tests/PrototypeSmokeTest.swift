@@ -23,6 +23,7 @@ struct PrototypeSmokeTest {
             ("Extension de signe CDQ EAX vers EDX", MaxPS4CPUPrototype.cdqSelfTest()),
             ("Incrémentation et décrémentation x86-64", MaxPS4CPUPrototype.incrementDecrementSelfTest()),
             ("Extensions de signe x86 CWDE et CDQ", MaxPS4CPUPrototype.signExtensionSelfTest()),
+            ("MOVZX octet et mot x86-64", MaxPS4CPUPrototype.zeroExtendSelfTest()),
             ("Mini-jeu de devinette sur CPU x86-64", MaxPS4CPUPrototype.guessingGameSelfTest()),
             ("Arithmétique immédiate 8 bits et branchements", MaxPS4CPUPrototype.immediate8AndBranchesSelfTest()),
             ("Chargeur ELF64", MaxPS4ELFLoader.selfTest()),
