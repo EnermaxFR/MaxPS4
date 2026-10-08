@@ -7,6 +7,63 @@ enum MaxPS4ELFLoader {
         var errorDescription: String? { "Fichier ELF64 incompatible avec le prototype" }
     }
 
+    /// Bounds-checked ELF64 section-table import inventory (SHT_DYNSYM).
+    /// Diagnostic only: no relocation application, SELF extraction or execution.
+    static func inspectImports(url: URL) throws -> String {
+        let file = try Data(contentsOf: url, options: [.mappedIfSafe])
+        guard file.count >= 64, file.count <= 32 * 1024 * 1024 else { throw LoaderError.invalid }
+        func n(_ pos: Int, _ width: Int) -> UInt64 {
+            (0..<width).reduce(UInt64(0)) { $0 | (UInt64(file[pos + $1]) << ($1 * 8)) }
+        }
+        guard Array(file.prefix(4)) == [0x7F, 0x45, 0x4C, 0x46],
+              file[4] == 2, file[5] == 1, n(18, 2) == 62 else { throw LoaderError.invalid }
+        let sectionOffset = n(40, 8)
+        let entrySize = n(58, 2)
+        let count = n(60, 2)
+        guard entrySize == 64, count <= 512, sectionOffset <= UInt64(file.count),
+              count <= (UInt64(file.count) - sectionOffset) / entrySize else {
+            return "ELF64 : table des sections absente ou invalide • importations non inspectables"
+        }
+        func section(_ index: Int) -> (type: UInt64, offset: UInt64, size: UInt64, link: UInt64, stride: UInt64) {
+            let at = Int(sectionOffset + UInt64(index) * 64)
+            return (n(at + 4, 4), n(at + 24, 8), n(at + 32, 8), n(at + 40, 4), n(at + 56, 8))
+        }
+        func valid(_ offset: UInt64, _ size: UInt64) -> Bool {
+            offset <= UInt64(file.count) && size <= UInt64(file.count) - offset
+        }
+        var symbols: [String] = []
+        var relocations = 0
+        for i in 0..<Int(count) {
+            let sec = section(i)
+            if sec.type == 4 || sec.type == 9 {
+                guard valid(sec.offset, sec.size) else { throw LoaderError.invalid }
+                relocations += 1
+            }
+            guard sec.type == 11 else { continue } // ELF SHT_DYNSYM
+            guard sec.link < count, sec.stride == 24, valid(sec.offset, sec.size),
+                  sec.size / sec.stride <= 4096 else { throw LoaderError.invalid }
+            let names = section(Int(sec.link))
+            guard names.type == 3, valid(names.offset, names.size) else { throw LoaderError.invalid }
+            for j in 0..<Int(sec.size / sec.stride) {
+                let at = Int(sec.offset) + j * 24
+                let nameOffset = n(at, 4)
+                let defined = n(at + 6, 2) != 0
+                guard defined == false, nameOffset < names.size else { continue }
+                let start = Int(names.offset + nameOffset)
+                let limit = Int(names.offset + names.size)
+                var end = start
+                while end < limit && end - start < 128 && file[end] != 0 { end += 1 }
+                guard end < limit, file[end] == 0, end > start,
+                      let name = String(bytes: file[start..<end], encoding: .utf8) else { continue }
+                symbols.append(name)
+            }
+        }
+        let shown = symbols.prefix(12).joined(separator: ", ")
+        return "ELF64 : \(symbols.count) importations non définies • \(relocations) sections de relocalisation • " +
+               (shown.isEmpty ? "aucun nom disponible" : shown) +
+               " • inventaire uniquement, résolution et application des relocalisations non implémentées"
+    }
+
     static func load(url: URL) throws -> (memory: MaxPS4GuestMemory, entry: UInt64, segments: Int) {
         // Keep this diagnostic loader bounded even for unexpectedly large inputs.
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
