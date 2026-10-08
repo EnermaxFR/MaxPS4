@@ -532,6 +532,7 @@ final class MaxPS4Emulator: ObservableObject {
         let nearJumpOK = MaxPS4CPUPrototype.nearJumpSelfTest()
         let stackArithmeticOK = MaxPS4CPUPrototype.arithmeticAndStackSelfTest()
         let bitwiseAndOK = MaxPS4CPUPrototype.bitwiseAndSelfTest()
+        let bitwiseOrOK = MaxPS4CPUPrototype.bitwiseOrSelfTest()
         status = [
             "Banc de test ELF64 / CPU x86-64",
             "Chargeur ELF et permissions mémoire : " + (loaderOK ? "OK ✅" : "ÉCHEC ❌"),
@@ -541,6 +542,7 @@ final class MaxPS4Emulator: ObservableObject {
             "JMP rel32 et rejets hors limites : " + (nearJumpOK ? "OK ✅" : "ÉCHEC ❌"),
             "ADD/SUB, PUSH/POP et pile virtuelle : " + (stackArithmeticOK ? "OK ✅" : "ÉCHEC ❌"),
             "AND bit-à-bit et drapeau zéro : " + (bitwiseAndOK ? "OK ✅" : "ÉCHEC ❌"),
+            "OR bit-à-bit et drapeau zéro : " + (bitwiseOrOK ? "OK ✅" : "ÉCHEC ❌"),
             "Résultat attendu du programme synthétique : RAX=42, stockage mémoire=42.",
             "Ce test n'exécute pas Sonic Mania ni du code PS4.",
             "Exécution réelle PS4 : indisponible."
