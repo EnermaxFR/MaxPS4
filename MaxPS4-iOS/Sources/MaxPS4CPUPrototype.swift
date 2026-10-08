@@ -699,6 +699,33 @@ struct MaxPS4VirtualProcessManager {
 /// A tiny, isolated guest execution environment for synthetic x86-64 tests.
 /// This is NOT the PlayStation 4 OS, kernel, graphics or system-library runtime.
 enum MaxPS4VirtualRuntime {
+    static func testSimulatedKernelServices() -> String {
+        // Synthetic syscall numbers are private to this prototype, not PS4 ABI.
+        do {
+            var cpu = MaxPS4CPUPrototype()
+            // number 0 = heartbeat, number 1 = allocated bytes.
+            try cpu.prepareGuestMemory(address: 0x9000, size: 4096)
+            try cpu.run([
+                0x31, 0xC0, 0x0F, 0x05, // XOR EAX,EAX; SYSCALL => 42
+                0x48, 0xB8, 0x01, 0, 0, 0, 0, 0, 0, 0,
+                0x0F, 0x05, 0xC3 // allocated bytes => 4096
+            ])
+            guard cpu.rax == 4096, cpu.executedInstructions == 5,
+                  cpu.guestMemory.allocatedBytes == 4096 else {
+                return "Services virtuels : résultat inattendu"
+            }
+            var rejected = MaxPS4CPUPrototype()
+            do {
+                try rejected.run([0x48, 0xB8, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0x0F, 0x05])
+                return "Services virtuels : appel inconnu accepté (échec)"
+            } catch {
+                return "Services virtuels OK ✅ • appel santé = 42, mémoire = 4096 octets, appel inconnu refusé • services simulés uniquement, pas de syscalls PS4"
+            }
+        } catch {
+            return "Services virtuels : erreur \(error.localizedDescription)"
+        }
+    }
+
     static func bootELFIntegrationTest() -> String {
         // The integration test builds an independent synthetic ELF64 fixture,
         // maps its PT_LOAD segment and runs its entry point in guest memory.
