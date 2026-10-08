@@ -362,6 +362,10 @@ final class MaxPS4Emulator: ObservableObject {
             : "CPU x86-64 : échec de l’auto-test"
     }
 
+    func testPS4VirtualMemoryService() {
+        status = MaxPS4VirtualRuntime.testPS4VirtualMemoryService()
+    }
+
     func testPS4CompatibilityScaffold() {
         status = MaxPS4VirtualRuntime.testPS4CompatibilityScaffold()
     }
