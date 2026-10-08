@@ -1,6 +1,6 @@
 import Foundation
 
-/// Host-side smoke test for isolated prototypes. No PS4 executable is run.
+/// Host-side smoke tests for isolated prototypes, including ELF/CPU integration. No PS4 executable is run.
 @main
 struct PrototypeSmokeTest {
     static func main() {
