@@ -245,6 +245,11 @@ struct MaxPS4HomeView: View {
                                 detailsReport = emulator.status
                             }
                             .buttonStyle(.bordered)
+                            Button("Scanner les exécutables PS4") {
+                                emulator.inspectPS4EntryPrefixes(game)
+                                detailsReport = emulator.status
+                            }
+                            .buttonStyle(.bordered)
                             Button("Vérifier le chargeur PS4 / SELF") {
                                 emulator.inspectPS4ExecutableReadiness(game)
                                 detailsReport = emulator.status
