@@ -345,6 +345,79 @@ final class MaxPS4Emulator: ObservableObject {
         }
     }
 
+    /// Searches raw PKG bytes for readable asset signatures. This never decrypts or modifies data.
+    func inspectPKGAssetCandidates(_ game: MaxPS4Game) {
+        guard game.fileName.lowercased().hasSuffix(".pkg") else {
+            status = "Ressources PKG : sélectionnez un fichier .pkg"
+            return
+        }
+        do {
+            let url = URL(fileURLWithPath: game.localPath)
+            let attributes = try fileManager.attributesOfItem(atPath: url.path)
+            guard let size = (attributes[.size] as? NSNumber)?.uint64Value, size >= 128 else {
+                status = "Ressources PKG : fichier absent ou trop court"
+                return
+            }
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let header = try handle.read(upToCount: 4) ?? Data()
+            guard Array(header) == [0x7F, 0x43, 0x4E, 0x54] else {
+                status = "Ressources PKG : signature PS4 invalide"
+                return
+            }
+            try handle.seek(toOffset: 0)
+            let patterns: [(String, [UInt8])] = [
+                ("Data.rsdk", Array("Data.rsdk".utf8)),
+                ("RSDK", Array("RSDK".utf8)),
+                ("ELF64", [0x7F, 0x45, 0x4C, 0x46, 0x02]),
+                ("DDS", Array("DDS ".utf8)),
+                ("PNG", [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+            ]
+            var matches: [String: [UInt64]] = [:]
+            var scanned: UInt64 = 0
+            var overlap = [UInt8]()
+            let chunkSize = 256 * 1024
+            while scanned < size {
+                let amount = Int(min(UInt64(chunkSize), size - scanned))
+                guard let data = try handle.read(upToCount: amount), !data.isEmpty else { break }
+                let current = [UInt8](data)
+                let bytes = overlap + current
+                let base = scanned - UInt64(overlap.count)
+                for (name, needle) in patterns {
+                    if bytes.count >= needle.count {
+                        for i in 0...(bytes.count - needle.count) {
+                            if bytes[i] == needle[0] && bytes[i..<(i + needle.count)].elementsEqual(needle) {
+                                let address = base + UInt64(i)
+                                var locations = matches[name, default: []]
+                                if locations.count < 8 && !locations.contains(address) {
+                                    locations.append(address)
+                                    matches[name] = locations
+                                }
+                            }
+                        }
+                    }
+                }
+                scanned += UInt64(current.count)
+                overlap = Array(bytes.suffix(8))
+            }
+            var lines = [
+                "Sonic Mania — diagnostic de ressources PKG",
+                "Analyse brute en lecture seule : \(scanned) / \(size) octets",
+                "Aucun déchiffrement ni extraction automatique."
+            ]
+            for (name, _) in patterns {
+                let positions = matches[name, default: []]
+                let locations = positions.map { "0x" + String($0, radix: 16) }.joined(separator: ", ")
+                lines.append("\(name) : " + (positions.isEmpty ? "non trouvé en clair" : locations))
+            }
+            lines.append("Les signatures ne prouvent pas qu'un fichier complet est exploitable.")
+            lines.append("Data.rsdk requis pour envisager un port natif ; contenu chiffré non pris en charge.")
+            status = lines.joined(separator: "\\n")
+        } catch {
+            status = "Analyse des ressources PKG impossible : \(error.localizedDescription)"
+        }
+    }
+
     func inspectPKGStructure(_ game: MaxPS4Game) {
         guard game.fileName.lowercased().hasSuffix(".pkg") else {
             status = "Structure PKG : sélectionnez un fichier .pkg"
