@@ -18,8 +18,15 @@ final class MaxPS4Emulator: ObservableObject {
     private var nativeEngine: (any MaxPS4NativeEngine)?
 
     func connectNativeEngine(_ engine: any MaxPS4NativeEngine) {
+        if let shadPS4 = engine as? any MaxPS4ShadPS4Backend {
+            guard shadPS4.capabilities.canLaunchPS4Game else {
+                nativeEngine = nil
+                status = "Port shadPS4 incomplet :\n" + shadPS4.capabilities.diagnostic
+                return
+            }
+        }
         nativeEngine = engine
-        status = "Moteur natif connecté"
+        status = engine.isReady ? "Moteur natif connecté" : "Moteur natif présent mais non prêt"
     }
 
     init() {
