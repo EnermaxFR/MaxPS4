@@ -492,6 +492,30 @@ extension MaxPS4NativeLinkCheck {
                 0x52800540, 0x72A00000, 0x52800521,
                 0x72A00001, 0x6B01001F, 0x54000021, 0xD65F03C0
               ] else { return false }
+        // A forward branch must skip whole guest instructions, not raw ARM64 words.
+        let forwardJZ = Data([0xB8, 42, 0, 0, 0, 0x3D, 42, 0, 0, 0,
+                              0x74, 5, 0xB8, 99, 0, 0, 0, 0xC3])
+        guard runNativeSyntheticX86(forwardJZ) == 42,
+              arm64TranslationPreview(forwardJZ) == [
+                0x52800540, 0x72A00000, 0x52800541, 0x72A00001,
+                0x6B01001F, 0x54000060, 0x52800C60, 0x72A00000,
+                0xD65F03C0
+              ] else { return false }
+        let forwardJNZ = Data([0xB8, 42, 0, 0, 0, 0x3D, 41, 0, 0, 0,
+                               0x75, 5, 0xB8, 99, 0, 0, 0, 0xC3])
+        guard runNativeSyntheticX86(forwardJNZ) == 42,
+              arm64TranslationPreview(forwardJNZ) == [
+                0x52800540, 0x72A00000, 0x52800521, 0x72A00001,
+                0x6B01001F, 0x54000061, 0x52800C60, 0x72A00000,
+                0xD65F03C0
+              ] else { return false }
+        // Jumping into the middle of an immediate or backward is unsupported.
+        let badTarget = Data([0xB8, 42, 0, 0, 0, 0x3D, 42, 0, 0, 0,
+                              0x74, 1, 0xB8, 99, 0, 0, 0, 0xC3])
+        let backward = Data([0xB8, 42, 0, 0, 0, 0x3D, 42, 0, 0, 0,
+                             0x74, 0xFE, 0xC3])
+        guard arm64TranslationPreview(badTarget) == nil,
+              arm64TranslationPreview(backward) == nil else { return false }
         // The ARM64 preview refuses other offsets and branches without CMP.
         guard arm64TranslationPreview(Data([0x74, 0, 0xC3])) == nil,
               arm64TranslationPreview(Data([0x75, 1, 0xC3])) == nil else { return false }
