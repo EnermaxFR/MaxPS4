@@ -1049,7 +1049,7 @@ enum MaxPS4VirtualRuntime {
             do {
                 try invalid.run([0xE8, 0x7F, 0, 0, 0])
                 return false
-            } catch CPUError.invalidBranch {
+            } catch MaxPS4CPUPrototype.CPUError.invalidBranch {
                 return true
             }
         } catch {
