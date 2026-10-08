@@ -772,8 +772,8 @@ enum MaxPS4VirtualRuntime {
         ]
         let passed = checks.filter { $0.1.contains($0.2) }.count
         let report = checks.map { ($0.1.contains($0.2) ? "✅ " : "❌ ") + $0.0 }
-        return (["Diagnostic global : \\(passed)/\\(checks.count) tests validés"] + report +
-                ["Exécution réelle de jeux PS4 : non prise en charge"]).joined(separator: "\\n")
+        return (["Diagnostic global : \(passed)/\(checks.count) tests validés"] + report +
+                ["Exécution réelle de jeux PS4 : non prise en charge"]).joined(separator: "\n")
     }
 
     static func testELFLibraryIntegration() -> String {
