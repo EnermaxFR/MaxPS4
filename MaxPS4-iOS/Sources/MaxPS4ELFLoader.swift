@@ -150,7 +150,7 @@ enum MaxPS4ELFLoader {
                                    records: [(0x6000, 0x10, 8), (0x6008, 0x20, 8)],
                                    base: 0x1000)
             guard try memory.read(at: 0x6000, count: 2) == Data([0x10, 0x10]),
-                  memory.read(at: 0x6008, count: 2) == Data([0x20, 0x10]) else { return false }
+                  try memory.read(at: 0x6008, count: 2) == Data([0x20, 0x10]) else { return false }
             do {
                 try applyRelativeBatch(memory: &memory,
                                        records: [(0x6010, 0x30, 8), (0xFFFF, 0, 8)],
