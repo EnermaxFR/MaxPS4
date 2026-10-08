@@ -18,6 +18,7 @@ struct PrototypeSmokeTest {
             ("Sauts conditionnels longs JZ/JNZ", MaxPS4CPUPrototype.nearConditionalBranchSelfTest()),
             ("Arithmétique immédiate 8 bits et branchements", MaxPS4CPUPrototype.immediate8AndBranchesSelfTest()),
             ("Chargeur ELF64", MaxPS4ELFLoader.selfTest()),
+            ("Validation des segments ELF64", MaxPS4ELFLoader.segmentPreflightSelfTest()),
             ("Importations ELF64 synthétiques", MaxPS4ELFLoader.importDemoSelfTest()),
             ("Relocalisation relative x86-64", MaxPS4ELFLoader.relativeRelocationSelfTest()),
             ("Relocalisations groupées atomiques", MaxPS4ELFLoader.relocationBatchSelfTest()),
