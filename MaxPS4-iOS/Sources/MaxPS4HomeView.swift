@@ -943,6 +943,9 @@ struct MaxPS4HomeView: View {
                 secondaryAction(icon: "cpu", title: "Tester le CPU x86-64", subtitle: "Instructions expérimentales • sans jeu PS4") {
                     emulator.testCPUPrototype()
                 }
+                secondaryAction(icon: "memorychip", title: "Banc de test ELF64 + CPU", subtitle: "Exécuter un ELF synthétique en mémoire invitée") {
+                    emulator.runELFCPUBench()
+                }
                 secondaryAction(icon: "check-check", title: "Diagnostic complet (11 tests)", subtitle: "ELF, imports, mémoire, processus, services et bibliothèques") {
                     emulator.runBatchDiagnostics()
                 }
