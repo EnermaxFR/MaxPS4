@@ -1290,10 +1290,17 @@ extension MaxPS4CPUPrototype {
             }
             var positive = Self()
             try positive.run([0xB8, 0x2A, 0, 0, 0, 0x98, 0x99, 0xC3])
-            guard positive.rax == 42, positive.registers[2] == 0 else { return false }
+            guard positive.rax == 42, positive.registers[2] == 0 else {
+                print("CWDE/CDQ positive mismatch: RAX=\(positive.rax), RDX=\(positive.registers[2])")
+                return false
+            }
             var zero = Self()
             try zero.run([0xB8, 0, 0, 0, 0x98, 0x99, 0xC3])
-            return zero.rax == 0 && zero.registers[2] == 0
+            guard zero.rax == 0 && zero.registers[2] == 0 else {
+                print("CWDE/CDQ zero mismatch: RAX=\(zero.rax), RDX=\(zero.registers[2])")
+                return false
+            }
+            return true
         } catch { return false }
     }
 
