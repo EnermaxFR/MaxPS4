@@ -149,3 +149,25 @@ extern "C" int maxps4_shadps4_alignment_probe() noexcept {
            Common::Is16KBAligned<std::uint64_t>(0x4000) &&
            !Common::Is16KBAligned<std::uint64_t>(0x4001) ? 1 : 0;
 }
+
+// PS4-specific ELF object types from upstream shadPS4 core/loader/elf.h.
+// Return the ELF e_type only for recognized PS4 SCE executables or libraries.
+// This is loader metadata inspection, NOT guest code execution.
+extern "C" int maxps4_native_ps4_elf_type(const std::uint8_t* data,
+                                           std::size_t count,
+                                           std::uint16_t* out_type) noexcept {
+    if (!out_type || !data || count < 64 ||
+        maxps4_native_executable_signature(data, count) != 1 || data[6] != 1)
+        return 0;
+    const std::uint16_t type = std::uint16_t(data[16]) |
+                               (std::uint16_t(data[17]) << 8);
+    switch (type) {
+    case 0xfe00: // ET_SCE_EXEC
+    case 0xfe0c: // ET_SCE_STUBLIB
+    case 0xfe10: // ET_SCE_DYNEXEC
+    case 0xfe18: // ET_SCE_DYNAMIC
+        *out_type = type;
+        return 1;
+    default: return 0;
+    }
+}
