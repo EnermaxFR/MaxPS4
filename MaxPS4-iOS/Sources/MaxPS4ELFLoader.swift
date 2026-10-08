@@ -234,6 +234,8 @@ enum MaxPS4ELFLoader {
                 && rejects(6, 0) // Invalid ELF identification version.
                 && rejects(18, 0) // Incorrect CPU architecture.
                 && rejects(54, 0) // Invalid program-header stride.
+                && rejects(32, 0) // Program-header table may not overlap ELF header.
+                && rejects(20, 0) // Invalid ELF header version.
                 && rejects(64 + 4, 4) // Entry requires an executable segment.
                 && rejects(56, 0) // Reject an ELF with no program headers.
                 && rejects(64 + 48, 3) // Reject non-power-of-two segment alignment.
@@ -352,7 +354,7 @@ enum MaxPS4ELFLoader {
         let table = number(32, 8)
         let size = number(54, 2)
         let count = number(56, 2)
-        guard size == 56, count > 0, count <= 64, table <= UInt64(file.count),
+        guard size == 56, count > 0, count <= 64, table >= 64, table <= UInt64(file.count),
               count <= (UInt64(file.count) - table) / size else { throw LoaderError.invalid }
 
         // Preflight every loadable segment before allocating guest memory.
