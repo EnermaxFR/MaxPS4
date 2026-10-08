@@ -448,11 +448,11 @@ final class MaxPS4Emulator: ObservableObject {
                         "Chargeur SELF : conteneur PlayStation reconnu ✅",
                         "Version en-tête : 0x" + String(version, radix: 16),
                         "Mode (champ brut) : 0x" + String(mode, radix: 16),
-                        "Segments déclarés : " + String(segmentCount),
-                        "Taille métadonnées (champ brut) : " + String(metaSize),
+                        "Champ 0x18 (brut) : " + String(segmentCount),
+                        "Champ 0x10 (brut) : " + String(metaSize),
                         "Limite : en-tête uniquement • segments non extraits",
                         "Déchiffrement / chargement du jeu / exécution PS4 : indisponibles"
-                    ].joined(separator: "\\n")
+                    ].joined(separator: "\n")
                     return
                 }
                 guard magic == Data([0x7F, 0x45, 0x4C, 0x46]) else {
