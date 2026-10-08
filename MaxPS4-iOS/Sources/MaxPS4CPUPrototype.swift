@@ -764,6 +764,7 @@ enum MaxPS4VirtualRuntime {
     static func runBatchDiagnostics() -> String {
         let checks: [(String, String, String)] = [
             ("ELF + CPU", testELFLibraryIntegration(), "ELF64 + bibliothèques OK"),
+            ("Imports ELF64", MaxPS4ELFLoader.importDemoSelfTest() ? "Imports ELF64 OK" : "Imports ELF64 ÉCHEC", "Imports ELF64 OK"),
             ("Bibliothèques", testPS4LibraryResolver(), "Bibliothèques système OK"),
             ("Mémoire", testPS4VirtualMemoryService(), "Mémoire virtuelle OK"),
             ("Processus", testProcessMemoryIsolation(), "Processus + mémoire OK"),
