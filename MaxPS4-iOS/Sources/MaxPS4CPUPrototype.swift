@@ -253,6 +253,21 @@ struct MaxPS4CPUPrototype {
                 }
                 zeroFlag = (UInt32(truncatingIfNeeded: registers[0]) & immediate) == 0
                 rip += 5
+            } else if opcode == 0xA8 { // TEST AL, imm8; flags only
+                guard program.count - rip >= 2 else { throw CPUError.truncatedInstruction }
+                zeroFlag = (UInt8(truncatingIfNeeded: registers[0]) & program[rip + 1]) == 0
+                rip += 2
+            } else if opcode == 0xF7 { // TEST r/m32, imm32 (register-only /0)
+                guard program.count - rip >= 2 else { throw CPUError.truncatedInstruction }
+                let modrm = program[rip + 1]
+                guard modrm & 0xF8 == 0xC0 else { throw CPUError.unsupportedOpcode }
+                guard program.count - rip >= 6 else { throw CPUError.truncatedInstruction }
+                let immediate = (0..<4).reduce(UInt32(0)) {
+                    $0 | (UInt32(program[rip + 2 + $1]) << ($1 * 8))
+                }
+                let value = UInt32(truncatingIfNeeded: registers[Int(modrm & 7)])
+                zeroFlag = (value & immediate) == 0
+                rip += 6
             } else if opcode == 0x85 { // TEST r/m32, r32 (register-only)
                 guard rip + 2 <= program.count else { throw CPUError.truncatedInstruction }
                 let modrm = program[rip + 1]
@@ -1191,6 +1206,24 @@ extension MaxPS4CPUPrototype {
     }
 
     /// Exercise bounded backward jumps and deterministic instruction limits.
+    static func extendedTestOpcodeSelfTest() -> Bool {
+        do {
+            var bytes = Self()
+            try bytes.run([0xB8, 0x10, 0, 0, 0, 0xA8, 0x10, 0xC3])
+            guard bytes.rax == 16, !bytes.zeroFlag else { return false }
+            var reg = Self()
+            try reg.run([0xB9, 0x20, 0, 0, 0, 0xF7, 0xC1, 0x10, 0, 0, 0, 0xC3])
+            guard reg.registers[1] == 32, reg.zeroFlag else { return false }
+            var badMode = Self()
+            do { try badMode.run([0xF7, 0x01, 0, 0, 0, 0]); return false }
+            catch CPUError.unsupportedOpcode {}
+            var truncated = Self()
+            do { try truncated.run([0xF7, 0xC0, 1]); return false }
+            catch CPUError.truncatedInstruction {}
+            return true
+        } catch { return false }
+    }
+
     static func testImmediateAndBranchSelfTest() -> Bool {
         do {
             var cpu = Self()
