@@ -100,6 +100,45 @@ extern "C" int maxps4_native_elf_load_layout(const std::uint8_t* data,
     return 1;
 }
 
+// Resolve the ELF64 entry to a validated executable PT_LOAD segment.
+// This is metadata validation, not a guest memory mapping or code execution.
+extern "C" int maxps4_native_elf_executable_entry(
+    const std::uint8_t* data, std::size_t count,
+    std::uint64_t* entry, std::uint64_t* file_offset) noexcept {
+    if (!entry || !file_offset || !data || count < 64) return 0;
+    std::uint32_t segments = 0;
+    std::uint64_t bytes = 0;
+    std::uint64_t start = 0;
+    if (!maxps4_native_elf_load_layout(data, count, &segments, &bytes) ||
+        !maxps4_native_elf_entry_point(data, count, &start)) return 0;
+    auto u32 = [&](std::size_t p) -> std::uint32_t {
+        std::uint32_t v = 0;
+        for (unsigned j = 0; j < 4; ++j) v |= std::uint32_t(data[p + j]) << (8 * j);
+        return v;
+    };
+    auto u64 = [&](std::size_t p) -> std::uint64_t {
+        std::uint64_t v = 0;
+        for (unsigned j = 0; j < 8; ++j) v |= std::uint64_t(data[p + j]) << (8 * j);
+        return v;
+    };
+    const auto phoff = u64(32);
+    const auto phnum = std::size_t(data[56]) | (std::size_t(data[57]) << 8);
+    for (std::size_t i = 0; i < phnum; ++i) {
+        const auto p = static_cast<std::size_t>(phoff + i * 56);
+        if (u32(p) != 1 || (u32(p + 4) & 1u) == 0) continue; // PT_LOAD + PF_X
+        const auto offset = u64(p + 8);
+        const auto va = u64(p + 16);
+        const auto filesz = u64(p + 32);
+        // Require an actual instruction byte in the file-backed area.
+        if (start >= va && start - va < filesz) {
+            *entry = start;
+            *file_offset = offset + (start - va);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 // PS4 SELF header layout adapted from shadPS4 src/core/loader/elf.h,
 // Copyright 2024 shadPS4 Emulator Project, GPL-2.0-or-later.
 // Metadata-only inspection; does not decrypt, extract or execute a SELF.
