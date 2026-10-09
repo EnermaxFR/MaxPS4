@@ -858,6 +858,7 @@ jobs:
             build/diagnostics/fexcore-jit-partial-link-status.txt
             build/diagnostics/fexcore-jit-full-link.log
             build/diagnostics/fexcore-jit-full-link-status.txt
+            build/diagnostics/fexcore-ipa-link-status.txt
             build/diagnostics/fexcore-jit-partial-undefined-symbols.txt
             build/diagnostics/fexcore-jit-partial-demangled-symbols.txt
             build/diagnostics/fexcore-jit-nm-error.log
@@ -943,6 +944,21 @@ jobs:
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           mkdir -p build/Payload/MaxPS4.app
 
+          # Link the genuine FEXCore archive only after the strict iOS linker
+          # probe passes. This alone does NOT activate guest execution or JIT.
+          FEXCORE_LINK_ARGS=()
+          if test -f build/diagnostics/fexcore-jit-full-link-status.txt &&
+              grep -q '^PASS isolated full linker dependency check' \
+                build/diagnostics/fexcore-jit-full-link-status.txt &&
+              test -s build/diagnostics/libMaxPS4FEXJITProbe.a; then
+            FEXCORE_LINK_ARGS=(-Xlinker -force_load -Xlinker build/diagnostics/libMaxPS4FEXJITProbe.a)
+            echo "FEXCore archive selected for iOS executable link (JIT still inactive)" \
+              | tee build/diagnostics/fexcore-ipa-link-status.txt
+          else
+            echo "FEXCore archive not link-ready; using existing CPU backend" \
+              | tee build/diagnostics/fexcore-ipa-link-status.txt
+          fi
+
           xcrun --sdk iphoneos swiftc \
             -target arm64-apple-ios16.0 \
             -sdk "$SDK" \
@@ -956,6 +972,7 @@ jobs:
             build/diagnostics/aether-guest-cpu-ios-arm64.o \
             build/diagnostics/aether-guest-adapter-ios-arm64.o \
             build/diagnostics/aether-jit-abi-ios-arm64.o \
+            "${FEXCORE_LINK_ARGS[@]}" \
             -lc++ \
             -o build/Payload/MaxPS4.app/MaxPS4 2>&1 | tee build/diagnostics/compile.log
 
