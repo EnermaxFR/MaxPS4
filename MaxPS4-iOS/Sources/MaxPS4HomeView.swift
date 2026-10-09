@@ -340,8 +340,8 @@ struct MaxPS4HomeView: View {
 
                 secondaryAction(
                     icon: "cpu",
-                    title: "Tester le backend shadPS4/FEX",
-                    subtitle: "Vérifie l’état de l’intégration"
+                    title: "État du moteur PS4",
+                    subtitle: "Diagnostic du moteur natif"
                 ) {
                     emulator.testBackend()
                 }
@@ -449,7 +449,7 @@ struct MaxPS4HomeView: View {
     private var settings: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 18) {
-                Text("RÉGLAGES")
+                Text("PARAMÈTRES")
                     .font(.system(size: 36, weight: .black, design: .rounded))
                     .padding(.top, 12)
 
@@ -569,13 +569,13 @@ struct MaxPS4HomeView: View {
                     Button {
                         jitStatusReport = MaxPS4NativeLinkCheck.aetherGuestBackendReport
                     } label: {
-                        settingButton(icon: "cpu", title: "Tester le backend CPU AetherPS4")
+                        settingButton(icon: "cpu", title: "Tester le backend CPU natif")
                     }
                     Divider().overlay(.white.opacity(0.08))
                     Button {
                         jitStatusReport = MaxPS4NativeLinkCheck.aetherJITABIReport
                     } label: {
-                        settingButton(icon: "memorychip", title: "Vérifier l’interface JIT AetherPS4")
+                        settingButton(icon: "memorychip", title: "Vérifier l’interface JIT native")
                     }
                     Divider().overlay(.white.opacity(0.08))
                     Button {
@@ -642,7 +642,7 @@ struct MaxPS4HomeView: View {
             }
             .font(.system(size: 42, weight: .black, design: .rounded))
 
-            Text("iOS  •  ÉDITION NÉON")
+            Text("VOS JEUX • VOTRE UNIVERS")
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.white.opacity(0.60))
         }
@@ -733,7 +733,7 @@ struct MaxPS4HomeView: View {
 
                 Text(
                     emulator.backendReady
-                        ? "shadPS4 / FEXCore connecté"
+                        ? "Moteur natif connecté"
                         : "Interface active • pont natif à connecter"
                 )
                 .font(.subheadline)
@@ -1060,10 +1060,10 @@ struct MaxPS4HomeView: View {
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.55))
             }
-            Text("Ta console. Ton univers.")
+            Text("Vos jeux sur iPhone")
                 .font(.system(size: 34, weight: .black, design: .rounded))
                 .foregroundStyle(.white)
-            Text("Bibliothèque locale et laboratoire PS4 sur iPhone")
+            Text("Bibliothèque, import et outils dans un seul espace.")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.66))
             HStack(spacing: 10) {
@@ -1105,7 +1105,7 @@ struct MaxPS4HomeView: View {
     private var toolsPage: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 20) {
-                Text("OUTILS")
+                Text("IMPORT & OUTILS")
                     .font(.system(size: 36, weight: .black, design: .rounded))
                 Text("CENTRE DE CONTRÔLE")
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
@@ -1117,7 +1117,7 @@ struct MaxPS4HomeView: View {
                     Text(emulator.deviceDiagnostic)
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.82))
-                    Text("shadPS4 / FEX : " + (emulator.backendReady ? "connecté" : "non intégré"))
+                    Text("Moteur PS4 : " + (emulator.backendReady ? "connecté" : "non intégré"))
                         .font(.caption)
                         .foregroundStyle(emulator.backendReady ? Color.green : Color.orange)
                 }
@@ -1141,7 +1141,7 @@ struct MaxPS4HomeView: View {
                     .tracking(1.1)
                     .foregroundStyle(.cyan)
                     .padding(.top, 8)
-                secondaryAction(icon: "checkmark.shield", title: "Tester le pont C++ shadPS4", subtitle: "Vérifier le composant natif sur iPhone • pas de jeu") {
+                secondaryAction(icon: "checkmark.shield", title: "Tester le pont C++ natif", subtitle: "Vérifier le composant natif sur iPhone • pas de jeu") {
                     emulator.testShadPS4NativeUtility()
                 }
                 secondaryAction(icon: "cpu", title: "Diagnostic du moteur", subtitle: "Tester la connexion native") {
@@ -1221,9 +1221,9 @@ struct MaxPS4HomeView: View {
     private var tabBar: some View {
         HStack(spacing: 0) {
             tabButton(.home, icon: "house.fill", title: "Accueil")
-            tabButton(.games, icon: "square.grid.2x2.fill", title: "Jeux")
-            tabButton(.tools, icon: "slider.horizontal.3", title: "Outils")
-            tabButton(.settings, icon: "gearshape.fill", title: "Réglages")
+            tabButton(.games, icon: "square.grid.2x2.fill", title: "Bibliothèque")
+            tabButton(.tools, icon: "square.and.arrow.down.fill", title: "Import")
+            tabButton(.settings, icon: "gearshape.fill", title: "Paramètres")
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 11)
