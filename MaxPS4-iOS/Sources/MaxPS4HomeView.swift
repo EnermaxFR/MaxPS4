@@ -325,6 +325,8 @@ struct MaxPS4HomeView: View {
 
                 heroPanel
 
+                homeQuickActions
+
                 backendCard
                 systemOverview
 
@@ -640,11 +642,53 @@ struct MaxPS4HomeView: View {
             }
             .font(.system(size: 42, weight: .black, design: .rounded))
 
-            Text("N O V A  •  iOS")
+            Text("iOS  •  ÉDITION NÉON")
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.white.opacity(0.60))
         }
         .padding(.top, 8)
+    }
+
+    private var homeQuickActions: some View {
+        HStack(spacing: 12) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.22)) { selectedTab = .tools }
+            } label: {
+                HStack(spacing: 11) {
+                    Image(systemName: "gamecontroller.fill")
+                        .font(.title3)
+                        .foregroundStyle(.cyan)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("MAX MAZE").font(.subheadline.bold())
+                        Text("Mini-jeu arcade").font(.caption2).foregroundStyle(.white.opacity(0.60))
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "arrow.up.right").font(.caption.bold())
+                        .foregroundStyle(.cyan)
+                }
+                .padding(15)
+                .frame(maxWidth: .infinity)
+                .background(Color.cyan.opacity(0.09), in: RoundedRectangle(cornerRadius: 18))
+                .overlay(RoundedRectangle(cornerRadius: 18).stroke(.cyan.opacity(0.34)))
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Ouvre les outils où se trouve Max Maze")
+
+            Button {
+                importingGame = true
+            } label: {
+                VStack(spacing: 5) {
+                    Image(systemName: "plus.square.on.square")
+                        .font(.title3)
+                    Text("Importer").font(.caption.bold())
+                }
+                .foregroundStyle(.white)
+                .frame(width: 89, height: 62)
+                .background(.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 18))
+                .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.13)))
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private var systemOverview: some View {
@@ -1007,7 +1051,7 @@ struct MaxPS4HomeView: View {
     private var heroPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Label("MAXPS4 SYSTEM", systemImage: "sparkles.rectangle.stack.fill")
+                Label("MAXPS4  /  CONTROL CENTER", systemImage: "sparkles.rectangle.stack.fill")
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .tracking(2)
                     .foregroundStyle(.cyan)
@@ -1016,10 +1060,10 @@ struct MaxPS4HomeView: View {
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.55))
             }
-            Text("Bienvenue sur MaxPS4")
+            Text("Ta console. Ton univers.")
                 .font(.system(size: 34, weight: .black, design: .rounded))
                 .foregroundStyle(.white)
-            Text("Votre bibliothèque PS4 sur iPhone")
+            Text("Bibliothèque locale et laboratoire PS4 sur iPhone")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.66))
             HStack(spacing: 10) {
@@ -1029,6 +1073,19 @@ struct MaxPS4HomeView: View {
             }
             .font(.system(size: 11, weight: .bold, design: .monospaced))
             .foregroundStyle(.cyan)
+            HStack(spacing: 8) {
+                Circle().fill(emulator.backendReady ? Color.green : Color.orange)
+                    .frame(width: 7, height: 7)
+                Text(emulator.backendReady ? "Backend connecté" : "Émulation PS4 en développement")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.83))
+                Spacer()
+                Image(systemName: "waveform.path")
+                    .foregroundStyle(.cyan.opacity(0.8))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(.black.opacity(0.24), in: RoundedRectangle(cornerRadius: 12))
         }
         .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
