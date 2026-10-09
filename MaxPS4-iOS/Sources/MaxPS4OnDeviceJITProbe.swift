@@ -15,6 +15,9 @@ private func maxps4NativeMapJITErrnoProbe(_ errorOut: UnsafeMutablePointer<Int32
 @_silgen_name("maxps4_stikdualmap_port_present")
 private func maxps4StikDualMapPortPresent() -> Int32
 
+@_silgen_name("maxps4_stikdualmap_arm64_context_three_blocks_test")
+private func maxps4StikDualMapContextThreeBlocksTest() -> Int32
+
 @_silgen_name("maxps4_stikdualmap_arm64_two_blocks_test")
 private func maxps4StikDualMapTwoBlocksTest() -> Int32
 
@@ -590,6 +593,19 @@ extension MaxPS4OnDeviceJITProbe {
     // Show the precise readiness gates without branching into RX memory.
     // User-initiated experimental BRK path. The debugger trap can terminate the app.
     // A marker survives a crash/relaunch, without implying that the trap was handled.
+    static func manuallyExecuteThreeBlockContext() -> String {
+        guard maxps4StikDualMapDebuggerPreflight() == 1 else {
+            return "Test contexte CPU non lancé : P_TRACED absent."
+        }
+        UserDefaults.standard.set("Test contexte CPU 3 blocs lancé — issue inconnue si fermeture", forKey: "maxps4StikDebugAttempt")
+        let status = maxps4StikDualMapContextThreeBlocksTest()
+        let report = status == 1
+            ? "PASS : contexte EAX partagé sur 3 blocs ARM64 (40 → 41 → 42)"
+            : "ÉCHEC : contexte CPU 3 blocs (code \(status))."
+        UserDefaults.standard.set(report, forKey: "maxps4StikDebugAttempt")
+        return "Laboratoire — contexte CPU JIT, 3 blocs\n" + report
+    }
+
     static func manuallyExecuteTwoBlocks() -> String {
         guard maxps4StikDualMapDebuggerPreflight() == 1 else {
             return "Test inter-blocs non lancé : P_TRACED absent."
