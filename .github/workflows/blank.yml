@@ -83,7 +83,7 @@ jobs:
           echo "CPU / FEX / iOS JIT sources resolved for porting audit."
           echo "NOTE: sources are not yet built or linked into MaxPS4."
           git -C . rev-parse HEAD > ../aetherps4-upstream-sha.txt
-          rm -rf .git
+          # Keep Git metadata for the audit; avoid macOS runner cleanup races.
 
       - name: Test ARM64 translation and safe interpreter fallback on macOS
         shell: bash
