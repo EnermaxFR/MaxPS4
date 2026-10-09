@@ -1052,7 +1052,7 @@ extern "C" int maxps4_stikdualmap_arm64_full_batch(int* passed_out, int* total_o
     status = maxps4_stikdualmap_arm64_branch_suite(&passed);
     *passed_out += passed;
     if (status != 1) return status;
-    const int (*tests[])() noexcept = {
+    int (*tests[])() noexcept = {
         maxps4_stikdualmap_arm64_two_register_test,
         maxps4_stikdualmap_arm64_memory_test,
         maxps4_stikdualmap_arm64_multislot_test,
