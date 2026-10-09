@@ -518,6 +518,46 @@ extern "C" int maxps4_native_jit_writable_page_probe(
 #endif
 }
 
+// Stage verified translator output in a private RW page, then compare its bytes.
+// Does NOT grant execute permission, call BRK, or jump into generated code.
+extern "C" int maxps4_arm64_translate_preview(
+    const std::uint8_t*, std::size_t, std::uint32_t*, std::size_t,
+    std::size_t*) noexcept;
+extern "C" int maxps4_arm64_verify_preview(
+    const std::uint32_t*, std::size_t) noexcept;
+extern "C" int maxps4_native_jit_stage_arm64(
+    const std::uint8_t* code, std::size_t size,
+    std::size_t* staged_bytes) noexcept {
+    if (!staged_bytes) return 0;
+    *staged_bytes = 0;
+#if defined(__APPLE__)
+    if (!code || size == 0 || size > 4096) return 0;
+    std::uint32_t words[4096] = {};
+    std::size_t count = 0;
+    if (!maxps4_arm64_translate_preview(code, size, words, 4096, &count) ||
+        !maxps4_arm64_verify_preview(words, count)) return 0;
+    const long page = sysconf(_SC_PAGESIZE);
+    if (page <= 0 || page > 65536) return 0;
+    const std::size_t total = count * sizeof(std::uint32_t);
+    if (total > static_cast<std::size_t>(page)) return 0;
+    void* dest = mmap(nullptr, static_cast<std::size_t>(page),
+                      PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (dest == MAP_FAILED) return 0;
+    auto* data = static_cast<std::uint32_t*>(dest);
+    bool match = true;
+    for (std::size_t i = 0; i < count; ++i) data[i] = words[i];
+    for (std::size_t i = 0; i < count; ++i)
+        if (data[i] != words[i]) { match = false; break; }
+    const int unmapped = munmap(dest, static_cast<std::size_t>(page));
+    if (!match || unmapped != 0) return 0;
+    *staged_bytes = total;
+    return 1;
+#else
+    (void)code; (void)size;
+    return 0;
+#endif
+}
+
 // Read-only debugger attachment hint on iOS. A traced process does NOT
 // necessarily have StikDebug's script, JIT permissions or executable pages.
 // Never emit BRK merely to probe whether a debugger exists.
