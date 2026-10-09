@@ -46,7 +46,7 @@ static bool reject_exhausted_budget() {
     int used_jit = -1;
     std::uint64_t result = 0;
     return maxps4_native_guest_run_with_backend(endless, sizeof(endless), 12, 1,
-                                                &used_jit, &result) == 0 &&
+                                                &used_jit, &result) == -1 &&
            used_jit == 0;
 }
 int main() {
