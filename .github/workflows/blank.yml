@@ -268,7 +268,7 @@ jobs:
           git clone --quiet --no-checkout --filter=blob:none \
             https://github.com/FEX-Emu/FEX.git "$FEX_DIR"
           git -C "$FEX_DIR" sparse-checkout init --cone
-          git -C "$FEX_DIR" sparse-checkout set FEXCore Source
+          git -C "$FEX_DIR" sparse-checkout set FEXCore Source CodeEmitter
           git -C "$FEX_DIR" checkout --quiet f2b679f6028ce1c38875233aecfcf5d3f8ebecec
           test -s "$FEX_DIR/FEXCore/include/FEXCore/Core/Context.h"
           echo "PASS pinned FEXCore source headers available"
