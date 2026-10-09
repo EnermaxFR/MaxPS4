@@ -522,6 +522,17 @@ jobs:
               | tee build/diagnostics/fexcore-jit-core-status.txt
             head -25 build/diagnostics/fexcore-jit-core-compile.log
           fi
+          # Report unresolved symbols of the genuine JIT object if compilation succeeds.
+          # This is a link-dependency inventory, not JIT execution on iOS.
+          if test -s build/diagnostics/fexcore-jit-core-ios.o; then
+            xcrun --sdk iphoneos nm -u build/diagnostics/fexcore-jit-core-ios.o \
+              > build/diagnostics/fexcore-jit-core-undefined-symbols.txt 2>&1 || true
+            echo "JIT.cpp object produced; unresolved symbol inventory saved" \
+              | tee build/diagnostics/fexcore-jit-link-readiness.txt
+          else
+            echo "JIT.cpp object not produced; linking remains blocked" \
+              | tee build/diagnostics/fexcore-jit-link-readiness.txt
+          fi
           # Second genuine FEXCore JIT compilation unit: arithmetic emitter.
           ALU_SRC="$FEX/FEXCore/Source/Interface/Core/JIT/ALUOps.cpp"
           test -s "$ALU_SRC"
@@ -567,6 +578,9 @@ jobs:
               fi
               if test -f build/diagnostics/fexcore-jit-core-status.txt; then
                 cat build/diagnostics/fexcore-jit-core-status.txt
+              fi
+              if test -f build/diagnostics/fexcore-jit-link-readiness.txt; then
+                cat build/diagnostics/fexcore-jit-link-readiness.txt
               fi
               if test -f build/diagnostics/fexcore-jit-alu-status.txt; then
                 cat build/diagnostics/fexcore-jit-alu-status.txt
@@ -614,6 +628,8 @@ jobs:
             build/diagnostics/fexcore-jit-macro-errors.log
             build/diagnostics/fexcore-jit-core-status.txt
             build/diagnostics/fexcore-jit-core-compile.log
+            build/diagnostics/fexcore-jit-link-readiness.txt
+            build/diagnostics/fexcore-jit-core-undefined-symbols.txt
             build/diagnostics/fexcore-jit-alu-status.txt
             build/diagnostics/fexcore-jit-alu-compile.log
           if-no-files-found: ignore
