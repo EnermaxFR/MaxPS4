@@ -507,6 +507,7 @@ extern "C" int maxps4_native_arm64_static_execute_probe() noexcept {
 #if defined(__APPLE__)
 #include <sys/mman.h>
 #include <unistd.h>
+#include <libkern/OSCacheControl.h>
 #endif
 // On-device MAP_JIT permission probe, deliberately without executing bytes.
 // 1 = allocation succeeded, 0 = denied, -1 = unsupported platform.
@@ -545,7 +546,7 @@ extern "C" int maxps4_native_generated_arm64_execute_probe() noexcept {
     auto* words = static_cast<std::uint32_t*>(p);
     words[0] = program[0];
     words[1] = program[1];
-    __builtin___clear_cache(static_cast<char*>(p), static_cast<char*>(p) + sizeof(program));
+    sys_icache_invalidate(p, sizeof(program));
     if (mprotect(p, page, PROT_READ | PROT_EXEC) != 0) {
         (void)munmap(p, page);
         return -3;
