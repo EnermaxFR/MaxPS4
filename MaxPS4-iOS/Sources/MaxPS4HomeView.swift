@@ -72,7 +72,7 @@ struct MaxPS4HomeView: View {
         .alert("Backend CPU/JIT intégré — risque de fermeture", isPresented: $showingIntegratedJITWarning) {
             Button("Annuler", role: .cancel) {}
             Button("Tester le backend JIT") {
-                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyCheckIntegratedJITBackend()
+                jitStatusReport = ("Test BRK suspendu après le crash iOS build 981 (EXC_BREAKPOINT). Utilisez le précontrôle sans exécution ci-dessous.\n\n" + MaxPS4OnDeviceJITProbe.stikAllocatorPreflightReport())
             }
         } message: {
             Text("Test manuel du sélecteur CPU mode 2 : interpréteur vérifié puis exécution ARM64 générée via StikDebug BRK. Peut fermer MaxPS4 si le débogueur n'est plus actif. N'active pas le JIT pour les jeux PS4.")
@@ -80,7 +80,7 @@ struct MaxPS4HomeView: View {
         .alert("Batterie JIT complète — risque de fermeture", isPresented: $showingJITFullBatchWarning) {
             Button("Annuler", role: .cancel) {}
             Button("Lancer les 13 tests") {
-                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteFullBatch()
+                jitStatusReport = ("Test BRK suspendu après le crash iOS build 981 (EXC_BREAKPOINT). Utilisez le précontrôle sans exécution ci-dessous.\n\n" + MaxPS4OnDeviceJITProbe.stikAllocatorPreflightReport())
             }
         } message: {
             Text("Lance 13 vérifications JIT ARM64 à la suite (calculs, branches, registres, mémoire, blocs). Plusieurs interruptions BRK StikDebug : MaxPS4 peut se fermer si le débogueur cesse de répondre.")
@@ -88,7 +88,7 @@ struct MaxPS4HomeView: View {
         .alert("Contexte JIT sur trois blocs — risque de fermeture", isPresented: $showingJITThreeBlocksWarning) {
             Button("Annuler", role: .cancel) {}
             Button("Tester les trois blocs") {
-                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteThreeBlockContext()
+                jitStatusReport = ("Test BRK suspendu après le crash iOS build 981 (EXC_BREAKPOINT). Utilisez le précontrôle sans exécution ci-dessous.\n\n" + MaxPS4OnDeviceJITProbe.stikAllocatorPreflightReport())
             }
         } message: {
             Text("Test expérimental avec StikDebug BRK : transmission du registre EAX entre trois blocs ARM64. MaxPS4 peut se fermer si le débogueur n'est plus actif.")
@@ -96,7 +96,7 @@ struct MaxPS4HomeView: View {
         .alert("JIT sur deux blocs — risque de fermeture", isPresented: $showingJITTwoBlocksWarning) {
             Button("Annuler", role: .cancel) {}
             Button("Tester les deux blocs") {
-                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteTwoBlocks()
+                jitStatusReport = ("Test BRK suspendu après le crash iOS build 981 (EXC_BREAKPOINT). Utilisez le précontrôle sans exécution ci-dessous.\n\n" + MaxPS4OnDeviceJITProbe.stikAllocatorPreflightReport())
             }
         } message: {
             Text("Deux exécutions JIT ARM64 séparées avec transmission de EAX. Risque de fermeture si StikDebug n'est plus actif.")
@@ -104,7 +104,7 @@ struct MaxPS4HomeView: View {
         .alert("Mémoire JIT étendue — risque de fermeture", isPresented: $showingJITMultislotWarning) {
             Button("Annuler", role: .cancel) {}
             Button("Tester les 3 emplacements") {
-                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteMultislotMemory()
+                jitStatusReport = ("Test BRK suspendu après le crash iOS build 981 (EXC_BREAKPOINT). Utilisez le précontrôle sans exécution ci-dessous.\n\n" + MaxPS4OnDeviceJITProbe.stikAllocatorPreflightReport())
             }
         } message: {
             Text("Test natif StikDebug BRK sur trois emplacements de pile. MaxPS4 peut se fermer si le gestionnaire JIT n'est plus actif.")
@@ -112,7 +112,7 @@ struct MaxPS4HomeView: View {
         .alert("Mémoire JIT ARM64 — risque de fermeture", isPresented: $showingJITMemoryWarning) {
             Button("Annuler", role: .cancel) {}
             Button("Tester la mémoire") {
-                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteMemory()
+                jitStatusReport = ("Test BRK suspendu après le crash iOS build 981 (EXC_BREAKPOINT). Utilisez le précontrôle sans exécution ci-dessous.\n\n" + MaxPS4OnDeviceJITProbe.stikAllocatorPreflightReport())
             }
         } message: {
             Text("Test JIT via StikDebug BRK : écriture et lecture d'un emplacement de pile invité. MaxPS4 peut se fermer si le débogueur n'est plus actif.")
@@ -120,7 +120,7 @@ struct MaxPS4HomeView: View {
         .alert("Registres JIT ARM64 — risque de fermeture", isPresented: $showingJITRegistersWarning) {
             Button("Annuler", role: .cancel) {}
             Button("Tester EAX et ECX") {
-                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteTwoRegisters()
+                jitStatusReport = ("Test BRK suspendu après le crash iOS build 981 (EXC_BREAKPOINT). Utilisez le précontrôle sans exécution ci-dessous.\n\n" + MaxPS4OnDeviceJITProbe.stikAllocatorPreflightReport())
             }
         } message: {
             Text("Test JIT non isolé avec StikDebug : MOV EAX,40 ; MOV ECX,2 ; ADD EAX,ECX ; RET. MaxPS4 peut se fermer si le gestionnaire BRK n'est plus actif.")
@@ -128,7 +128,7 @@ struct MaxPS4HomeView: View {
         .alert("Branchements JIT ARM64 — risque de fermeture", isPresented: $showingJITBranchesWarning) {
             Button("Annuler", role: .cancel) {}
             Button("Lancer les 3 tests") {
-                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteBranchSuite()
+                jitStatusReport = ("Test BRK suspendu après le crash iOS build 981 (EXC_BREAKPOINT). Utilisez le précontrôle sans exécution ci-dessous.\n\n" + MaxPS4OnDeviceJITProbe.stikAllocatorPreflightReport())
             }
         } message: {
             Text("Test non isolé via StikDebug BRK : conditions CMP/JZ, TEST/JNZ et boucle SUB/JNZ. MaxPS4 peut se fermer si la session StikDebug cesse de répondre.")
@@ -136,7 +136,7 @@ struct MaxPS4HomeView: View {
         .alert("Suite JIT ARM64 — risque de fermeture", isPresented: $showingJITSuiteWarning) {
             Button("Annuler", role: .cancel) {}
             Button("Exécuter les 3 programmes") {
-                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteStikDebugSuite()
+                jitStatusReport = ("Test BRK suspendu après le crash iOS build 981 (EXC_BREAKPOINT). Utilisez le précontrôle sans exécution ci-dessous.\n\n" + MaxPS4OnDeviceJITProbe.stikAllocatorPreflightReport())
             }
         } message: {
             Text("Essai expérimental non isolé : 3 programmes x86-64 sont traduits puis exécutés en ARM64 via BRK StikDebug. MaxPS4 peut se fermer si universal.js cesse de répondre.")
@@ -144,7 +144,7 @@ struct MaxPS4HomeView: View {
         .alert("Essai JIT StikDebug — risque de fermeture", isPresented: $showingStikDebugExecutionWarning) {
             Button("Annuler", role: .cancel) {}
             Button("Lancer le test ARM64") {
-                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteStikDebug42()
+                jitStatusReport = ("Test BRK suspendu après le crash iOS build 981 (EXC_BREAKPOINT). Utilisez le précontrôle sans exécution ci-dessous.\n\n" + MaxPS4OnDeviceJITProbe.stikAllocatorPreflightReport())
             }
         } message: {
             Text("Expérience volontaire : envoie BRK #0xf00d et tente d’exécuter le code ARM64 généré. Si universal.js ne gère pas ce trap, MaxPS4 peut se fermer. Aucun jeu PS4 n’est lancé.")
