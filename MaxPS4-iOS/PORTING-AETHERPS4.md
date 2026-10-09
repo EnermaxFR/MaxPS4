@@ -64,3 +64,32 @@ Source inspected: `src/core/ios/ios_jit_allocator.{h,cpp}` in
 
 The current StikDebug deep link only requests that the debugger open.
 It does not establish JIT memory or make the MaxPS4 guest backend runnable.
+
+
+## FEXCore ARM64 object-link gate (2026-10-09)
+
+The pinned FEXCore `JIT.cpp`, `ALUOps.cpp` and
+`Arm64Relocations.cpp` compiled successfully in GitHub Actions run #809.
+These are only **three translation units**, not an integrated FEXCore runtime.
+
+The workflow now attempts to archive these objects and link them into a
+relocatable ARM64 object, deliberately permitting unresolved references.
+Do not treat a successful archive, `ld -r`, or `nm` inventory as proof
+that a complete FEXCore backend can be linked to the iOS app.
+
+**Integration sequence:**
+1. Inspect `fexcore-jit-partial-link-status.txt` and
+   `fexcore-jit-partial-demangled-symbols.txt` from a *new* Actions run;
+   the #809 build predates this linker probe.
+2. Identify each missing symbol's owning FEXCore translation unit or
+   external dependency; add the required real implementation instead of
+   stub functions just to satisfy the linker.
+3. Resolve Darwin/iOS ABI, exception/signal handling, executable page
+   allocation and guest-state ownership with separately testable components.
+4. Add a full native linking test independent of the shipping IPA and require
+   zero unexpected missing symbols before changing the application link.
+5. Enable a device-only executable-memory probe **only with verified JIT
+   authorization**. A debugger deep link is not evidence that generated
+   ARM64 code ran. Keep the interpreter fallback when authorization fails.
+
+Status: **JIT not linked, no generated-code execution, no PS4 title launch.**
