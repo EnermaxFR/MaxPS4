@@ -216,8 +216,10 @@ jobs:
           UPSTREAM="build/diagnostics/aetherps4-upstream"
           xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
             -isysroot "$SDK" -I "$UPSTREAM/src" \
-            -fsyntax-only "$UPSTREAM/src/core/guest_cpu/hle_call_adapter.cpp"
-          echo "PASS AetherPS4 guest HLE call adapter iOS syntax compilation"
+            -c "$UPSTREAM/src/core/guest_cpu/hle_call_adapter.cpp" \
+            -o build/diagnostics/aether-hle-call-adapter-ios-arm64.o
+          xcrun lipo -archs build/diagnostics/aether-hle-call-adapter-ios-arm64.o | grep -w arm64
+          echo "PASS AetherPS4 HLE adapter compiled to real iOS arm64 object (not linked)"
 
       - name: Test ARM64 translation and safe interpreter fallback on macOS
         shell: bash
