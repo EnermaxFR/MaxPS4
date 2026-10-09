@@ -244,6 +244,19 @@ jobs:
           xcrun lipo -archs build/diagnostics/aether-jit-abi-ios-arm64.o | grep -w arm64
           echo "PASS upstream allocator ABI compiled (no JIT allocated)"
 
+      - name: Compile AetherPS4 FEX HLE bridge for iOS ARM64
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          UPSTREAM="build/diagnostics/aetherps4-upstream"
+          xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
+            -isysroot "$SDK" -I "$UPSTREAM/src" \
+            -c "$UPSTREAM/src/core/guest_cpu/fex_hle_bridge.cpp" \
+            -o build/diagnostics/aether-fex-hle-bridge-ios-arm64.o
+          xcrun lipo -archs build/diagnostics/aether-fex-hle-bridge-ios-arm64.o | grep -w arm64
+          echo "PASS AetherPS4 FEX HLE bridge cross-compiled; linking awaits FEXCore"
+
       - name: Test ARM64 translation and safe interpreter fallback on macOS
         shell: bash
         run: |
