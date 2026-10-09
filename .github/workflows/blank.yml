@@ -673,6 +673,8 @@ jobs:
             echo "BLOCKED FEXCore JIT archive: required objects missing" \
               | tee build/diagnostics/fexcore-jit-archive-status.txt
           fi
+          # Avoid accidental reuse of a previously generated relocatable object.
+          rm -f build/diagnostics/fexcore-jit-partial-link.o
           # Partial link of the three genuine FEXCore JIT units. Undefined
           # references remain permitted; this does not make the JIT executable.
           if grep -q '^PASS FEXCore JIT ARM64 static archive' \
