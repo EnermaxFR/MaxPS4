@@ -255,7 +255,10 @@ jobs:
             -c "$UPSTREAM/src/core/guest_cpu/fex_hle_bridge.cpp" \
             -o build/diagnostics/aether-fex-hle-bridge-ios-arm64.o
           xcrun lipo -archs build/diagnostics/aether-fex-hle-bridge-ios-arm64.o | grep -w arm64
-          echo "PASS AetherPS4 FEX HLE bridge cross-compiled; linking awaits FEXCore"
+          xcrun nm -u build/diagnostics/aether-fex-hle-bridge-ios-arm64.o \
+            | sort -u > build/diagnostics/aether-fex-hle-required-symbols.txt
+          test -s build/diagnostics/aether-fex-hle-required-symbols.txt
+          echo "PASS AetherPS4 FEX HLE bridge cross-compiled; dependencies recorded; linking awaits FEXCore"
 
       - name: Test ARM64 translation and safe interpreter fallback on macOS
         shell: bash
