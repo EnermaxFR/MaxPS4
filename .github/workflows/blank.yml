@@ -318,6 +318,8 @@ jobs:
                  -target arm64-apple-ios16.0 -isysroot "$SDK" \
                  -I "$ROOT/src" -I "build/diagnostics/fexcore-upstream" \
                  -I "build/diagnostics/fexcore-upstream/FEXCore/include" \
+                 -I "build/diagnostics/fexcore-upstream/FEXCore/Source" \
+                 -I "build/diagnostics/fexcore-upstream/Source" \
                  -c "$ROOT/$source" -o "$output" \
                  > "$log" 2>&1; then
               echo "PASS compile $source (linking and guest execution unverified)" \
