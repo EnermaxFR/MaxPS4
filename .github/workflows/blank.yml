@@ -699,8 +699,14 @@ jobs:
                 echo "Symbol inventory unavailable" \
                   > build/diagnostics/fexcore-jit-partial-demangled-symbols.txt
               fi
-              echo "PASS FEXCore ARM64 partial link (unresolved references allowed)" \
-                | tee build/diagnostics/fexcore-jit-partial-link-status.txt
+              if test -s build/diagnostics/fexcore-jit-partial-undefined-symbols.txt \
+                  && ! grep -q '^nm:' build/diagnostics/fexcore-jit-partial-undefined-symbols.txt; then
+                echo "PASS FEXCore ARM64 partial link; unresolved symbol inventory saved" \
+                  | tee build/diagnostics/fexcore-jit-partial-link-status.txt
+              else
+                echo "BLOCKED FEXCore ARM64 symbol inventory; inspect nm output" \
+                  | tee build/diagnostics/fexcore-jit-partial-link-status.txt
+              fi
             else
               echo "BLOCKED FEXCore ARM64 partial link; inspect linker log" \
                 | tee build/diagnostics/fexcore-jit-partial-link-status.txt
