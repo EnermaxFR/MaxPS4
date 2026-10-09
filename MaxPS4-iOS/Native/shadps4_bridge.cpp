@@ -488,6 +488,11 @@ extern "C" int maxps4_arm64_translate_preview(
     for (std::size_t i = 0; i < fixup_count; ++i) {
         const auto& fixup = fixups[i];
         if (!boundary[fixup.guest_target]) return 0;
+        // A branch landing directly on another conditional branch could
+        // bypass the flag producer required by that branch. Until we have
+        // control-flow flag liveness analysis, reject such merges.
+        const std::uint8_t target_opcode = guest[fixup.guest_target];
+        if (target_opcode == 0x74 || target_opcode == 0x75) return 0;
         const std::size_t dest = arm_at_guest[fixup.guest_target];
         const std::int64_t delta = static_cast<std::int64_t>(dest) -
                                    static_cast<std::int64_t>(fixup.arm_index);
