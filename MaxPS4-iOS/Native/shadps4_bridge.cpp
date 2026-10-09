@@ -684,7 +684,10 @@ extern "C" int maxps4_native_guest_run_with_backend(
     if (!used_mode) return 0;
     *used_mode = 0; // Never claim JIT execution on iOS without executable-code support.
     if (requested_mode != 0 && requested_mode != 1) return 0;
-    if (requested_mode == 1 && code && size > 0 && size <= 4096) {
+    // Reject invalid inputs before attempting even a data-only translation.
+    if (!result || !code || size == 0 || size > 4096 ||
+        budget == 0 || budget > 4096) return 0;
+    if (requested_mode == 1) {
         // Cache exact translated blocks as DATA; execution still uses interpreter.
         (void)translate_or_reuse(code, size);
     }
