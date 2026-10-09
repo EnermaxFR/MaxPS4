@@ -425,6 +425,9 @@ private func maxps4_native_arm64_preflight(
     _ code: UnsafePointer<UInt8>?, _ size: Int
 ) -> Int32
 
+@_silgen_name("maxps4_native_debugger_attached")
+private func maxps4_native_debugger_attached() -> Int32
+
 @_silgen_name("maxps4_stikdebug_jit26_protocol_available")
 private func maxps4_stikdebug_jit26_protocol_available() -> Int32
 
@@ -433,6 +436,14 @@ private func maxps4_native_arm64_jit_ready() -> Int32
 
 extension MaxPS4NativeLinkCheck {
     static var isARM64JITReady: Bool { maxps4_native_arm64_jit_ready() == 1 }
+    static var debuggerAttachmentDescription: String {
+        switch maxps4_native_debugger_attached() {
+        case 1: return "Débogueur détecté (identité non vérifiée)"
+        case 0: return "Aucun débogueur détecté"
+        default: return "État indéterminé"
+        }
+    }
+
     static var isStikDebugProtocolPresent: Bool {
         maxps4_stikdebug_jit26_protocol_available() == 1
     }
@@ -448,7 +459,7 @@ extension MaxPS4NativeLinkCheck {
         Passerelle StikDebug : \(isStikDebugProtocolPresent ? "Intégrée" : "Indisponible")
         Traduction ARM64 : \(supported && words != nil ? "Acceptée (" + String(words!.count) + " mots)" : "Refusée")
         Exécution du test : \(fallback?.result == 42 ? (fallback!.usedJIT ? "JIT" : "Interpréteur") : "Échec")
-        Connexion StikDebug : Non vérifiée par MaxPS4
+        Attachement : \(debuggerAttachmentDescription)\n        Connexion StikDebug : Non vérifiée par MaxPS4
         Mémoire exécutable : Non testée
 
         Ce test n’émet aucune interruption BRK et ne valide pas encore l’exécution JIT sur cet iPhone.
@@ -473,7 +484,7 @@ extension MaxPS4NativeLinkCheck {
         }
         return """
         JIT natif : \(execution)
-        Protocole StikDebug : \(protocolStatus)
+        Protocole StikDebug : \(protocolStatus)\n        Attachement : \(debuggerAttachmentDescription)
         Traduction x86 → ARM64 : \(translation)
         Test réel du backend : \(executionTest)
 
