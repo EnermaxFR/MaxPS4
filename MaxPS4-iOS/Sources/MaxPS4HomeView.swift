@@ -33,6 +33,7 @@ struct MaxPS4HomeView: View {
     @State private var showingJITRegistersWarning = false
     @State private var showingJITMemoryWarning = false
     @State private var showingJITMultislotWarning = false
+    @State private var showingJITTwoBlocksWarning = false
 
     @AppStorage("maxps4ExperimentalLab") private var experimentalLab = false
     @AppStorage("showFPS") private var showFPS = false
@@ -64,6 +65,14 @@ struct MaxPS4HomeView: View {
         .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) {
             tabBar
+        }
+        .alert("JIT sur deux blocs — risque de fermeture", isPresented: $showingJITTwoBlocksWarning) {
+            Button("Annuler", role: .cancel) {}
+            Button("Tester les deux blocs") {
+                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteTwoBlocks()
+            }
+        } message: {
+            Text("Deux exécutions JIT ARM64 séparées avec transmission de EAX. Risque de fermeture si StikDebug n'est plus actif.")
         }
         .alert("Mémoire JIT étendue — risque de fermeture", isPresented: $showingJITMultislotWarning) {
             Button("Annuler", role: .cancel) {}
@@ -636,6 +645,12 @@ struct MaxPS4HomeView: View {
                             showingJITMultislotWarning = true
                         } label: {
                             settingButton(icon: "layers", title: "EXPÉRIENCE : JIT mémoire étendue (3 emplacements)")
+                        }
+                        Divider().overlay(.white.opacity(0.08))
+                        Button {
+                            showingJITTwoBlocksWarning = true
+                        } label: {
+                            settingButton(icon: "workflow", title: "EXPÉRIENCE : JIT deux blocs et état EAX")
                         }
                         Divider().overlay(.white.opacity(0.08))
                         Button {
