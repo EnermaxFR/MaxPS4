@@ -892,6 +892,9 @@ jobs:
           MAC_SDK="$(xcrun --sdk macosx --show-sdk-path)"
           xcrun --sdk macosx clang++ -std=c++17 -Wall -Wextra -Werror \
             -target arm64-apple-macos13 -isysroot "$MAC_SDK" \
+            -I MaxPS4-iOS/Native/shadps4 \
+            MaxPS4-iOS/Native/shadps4/common/string_util.cpp \
+            MaxPS4-iOS/Native/shadps4_bridge.cpp \
             MaxPS4-iOS/Tests/GeneratedARM64ExecutionHostTest.cpp \
             -o build/diagnostics/generated-arm64-execution-test
           xcrun lipo -archs build/diagnostics/generated-arm64-execution-test \
