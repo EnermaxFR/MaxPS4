@@ -36,7 +36,7 @@ int main() {
     if (!maxps4_arm64_translate_preview(guest, sizeof(guest), translated, 64, &count) ||
         !maxps4_arm64_verify_preview(translated, count) ||
         count == 0 || count > static_cast<std::size_t>(length) / sizeof(std::uint32_t)) {
-        std::fputs("FAIL: MaxPS4 x86-to-ARM64 translation or verification failed\\n", stderr);
+        std::fputs("FAIL: MaxPS4 x86-to-ARM64 translation or verification failed\n", stderr);
         munmap(page, static_cast<std::size_t>(length));
         return 1;
     }
