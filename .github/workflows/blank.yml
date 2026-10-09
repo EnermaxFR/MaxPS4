@@ -74,7 +74,7 @@ jobs:
             https://github.com/Leviidev/AetherPS4.git build/diagnostics/aetherps4-upstream
           cd build/diagnostics/aetherps4-upstream
           git sparse-checkout init --cone
-          git sparse-checkout set src/core/fex src/core/guest_cpu src/core/ios src/common
+          git sparse-checkout set src/core/fex src/core/guest_cpu src/core/ios src/core/libraries src/common
           git checkout --quiet 3347fc13f19860855ce91b66356940989ea6b6a6
           test -s src/core/fex/fex_guest_engine.cpp
           test -s src/core/guest_cpu/fex_guest_cpu.cpp
