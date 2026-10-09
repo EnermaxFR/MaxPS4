@@ -651,7 +651,6 @@ jobs:
                 echo "BLOCKED FEXCore JIT archive member inventory" \
                   | tee build/diagnostics/fexcore-jit-archive-status.txt
               fi
-                | tee build/diagnostics/fexcore-jit-archive-status.txt
             else
               echo "BLOCKED FEXCore JIT archive construction" \
                 | tee build/diagnostics/fexcore-jit-archive-status.txt
