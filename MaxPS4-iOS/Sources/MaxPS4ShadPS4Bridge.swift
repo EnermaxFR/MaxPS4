@@ -432,6 +432,9 @@ private func maxps4_native_jit_arm64_block_checksum(
     _ bytes: UnsafeMutablePointer<Int>?
 ) -> Int32
 
+@_silgen_name("maxps4_native_arm64_static_execute_probe")
+private func maxps4_native_arm64_static_execute_probe() -> Int32
+
 @_silgen_name("maxps4_aether_jit_allocator_abi_probe")
 private func maxps4_aether_jit_allocator_abi_probe() -> Int32
 
@@ -543,6 +546,20 @@ extension MaxPS4NativeLinkCheck {
         Empreinte de diagnostic : \(firstOK ? String(first, radix: 16) : "Indisponible")
         JIT natif : Inactif
         Aucun code généré n’a été exécuté.
+        """
+    }
+
+    static var arm64ExecutionBaselineReport: String {
+        let works = maxps4_native_arm64_static_execute_probe() == 1
+        return """
+        Exécution ARM64 native statique : \(works ? "Réussie (42)" : "Échec")
+        Instructions ARM64 générées dynamiquement : Non exécutées
+        Mémoire JIT RW/RX : Non activée
+        FEXCore : Non connecté
+        JIT ARM64 : Inactif
+
+        Ce test exécute une instruction compilée et signée dans MaxPS4,
+        pas une instruction produite par le traducteur JIT.
         """
     }
 
