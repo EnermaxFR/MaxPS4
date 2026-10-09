@@ -29,6 +29,7 @@ struct MaxPS4HomeView: View {
     @State private var importingPKGHeader = false
     @State private var showingStikDebugExecutionWarning = false
     @State private var showingJITSuiteWarning = false
+    @State private var showingJITBranchesWarning = false
 
     @AppStorage("maxps4ExperimentalLab") private var experimentalLab = false
     @AppStorage("showFPS") private var showFPS = false
@@ -60,6 +61,14 @@ struct MaxPS4HomeView: View {
         .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) {
             tabBar
+        }
+        .alert("Branchements JIT ARM64 — risque de fermeture", isPresented: $showingJITBranchesWarning) {
+            Button("Annuler", role: .cancel) {}
+            Button("Lancer les 3 tests") {
+                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteBranchSuite()
+            }
+        } message: {
+            Text("Test non isolé via StikDebug BRK : conditions CMP/JZ, TEST/JNZ et boucle SUB/JNZ. MaxPS4 peut se fermer si la session StikDebug cesse de répondre.")
         }
         .alert("Suite JIT ARM64 — risque de fermeture", isPresented: $showingJITSuiteWarning) {
             Button("Annuler", role: .cancel) {}
@@ -576,6 +585,12 @@ struct MaxPS4HomeView: View {
                             showingJITSuiteWarning = true
                         } label: {
                             settingButton(icon: "cpu.fill", title: "EXPÉRIENCE : JIT réel sur 3 programmes x86-64")
+                        }
+                        Divider().overlay(.white.opacity(0.08))
+                        Button {
+                            showingJITBranchesWarning = true
+                        } label: {
+                            settingButton(icon: "arrow.triangle.branch", title: "EXPÉRIENCE : JIT branchements et boucles (3 tests)")
                         }
                         Divider().overlay(.white.opacity(0.08))
                         Button {
