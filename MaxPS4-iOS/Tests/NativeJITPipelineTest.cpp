@@ -39,6 +39,16 @@ static bool reject_invalid_guest(const std::uint8_t* input, std::size_t length) 
                                                 &used_jit, &result) == 0 &&
            used_jit == 0 && maxps4_native_arm64_jit_ready() == 0;
 }
+// A nonterminating guest loop must stop at its instruction budget; never
+// return a result or claim execution by an unavailable dynamic JIT.
+static bool reject_exhausted_budget() {
+    constexpr std::uint8_t endless[] = {0xB8, 1, 0, 0, 0, 0x2D, 0, 0, 0, 0, 0x75, 0xF9};
+    int used_jit = -1;
+    std::uint64_t result = 0;
+    return maxps4_native_guest_run_with_backend(endless, sizeof(endless), 12, 1,
+                                                &used_jit, &result) == 0 &&
+           used_jit == 0;
+}
 int main() {
     constexpr std::uint8_t add[] = {0xB8,40,0,0,0,0x05,2,0,0,0,0xC3};
     constexpr std::uint8_t loop[] = {0xB8,3,0,0,0,0x2D,1,0,0,0,0x75,0xF9,0xC3};
@@ -69,6 +79,7 @@ int main() {
         !maxps4_arm64_verify_preview(invalid_words, 2) &&
         reject_invalid_guest(invalid, sizeof(invalid)) &&
         reject_invalid_guest(nullptr, 0) &&
+        reject_exhausted_budget() &&
         maxps4_native_arm64_jit_ready() == 0 &&
 #if defined(__aarch64__)
         maxps4_native_arm64_static_execute_probe() == 1;
