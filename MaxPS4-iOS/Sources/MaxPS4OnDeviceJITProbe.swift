@@ -235,10 +235,16 @@ enum MaxPS4OnDeviceJITProbe {
                         .prefix(3).map {
                             String(format: "0x%llX–0x%llX (%llu octets)", $0.0, $0.1, $0.1 - $0.0)
                         }
-                    let gapReport = "Zones référencées uniques : " + String(covered) +
-                        " octets; zones non référencées : " + String(UInt64(total) - covered) +
-                        " octets; plus grands intervalles : " +
-                        (largestGaps.isEmpty ? "Aucun" : largestGaps.joined(separator: "; "))
+                    let unreferencedBytes = UInt64(total) - covered
+                    let largestGapDescription: String
+                    if largestGaps.isEmpty {
+                        largestGapDescription = "Aucun"
+                    } else {
+                        largestGapDescription = largestGaps.joined(separator: "; ")
+                    }
+                    let gapReport = "Zones référencées uniques : \\(covered) octets; " +
+                        "zones non référencées : \\(unreferencedBytes) octets; " +
+                        "plus grands intervalles : \\(largestGapDescription)"
                     // Entry 0x200 is the bounded null-terminated filename table.
                     var names = Data()
                     for index in 0..<entries {
