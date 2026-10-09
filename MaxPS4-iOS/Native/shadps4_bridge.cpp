@@ -967,9 +967,9 @@ extern "C" int maxps4_stikdualmap_arm64_execute_42() noexcept {
 // Requires an active StikDebug universal.js session; do not call automatically.
 // status: 1 executed, -1 debugger missing, -2 page invalid, -3 allocation,
 // -4 invalid input, -5 translation/verification failed.
-extern "C" int maxps4_stikdualmap_execute_guest_block(
+extern "C" int maxps4_stikdualmap_execute_guest_block_with_eax(
     const std::uint8_t* guest, std::size_t length,
-    std::uint64_t* result_out) noexcept {
+    std::uint32_t initial_eax, std::uint64_t* result_out) noexcept {
     if (!result_out || !guest || length == 0 || length > 256) return -4;
     *result_out = 0;
 #if defined(__APPLE__) && defined(__aarch64__)
@@ -986,13 +986,19 @@ extern "C" int maxps4_stikdualmap_execute_guest_block(
     if (maxps4_stikdualmap_allocate(static_cast<std::size_t>(n), &rw, &rx) != 1) return -3;
     std::memcpy(rw, words, count * sizeof(std::uint32_t));
     sys_icache_invalidate(rx, count * sizeof(std::uint32_t));
-    using Function = std::uint32_t (*)();
-    *result_out = reinterpret_cast<Function>(rx)();
+    using Function = std::uint32_t (*)(std::uint32_t);
+    *result_out = reinterpret_cast<Function>(rx)(initial_eax);
     maxps4_stikdualmap_release(rw, rx, static_cast<std::size_t>(n));
     return 1;
 #else
     return 0;
 #endif
+}
+
+extern "C" int maxps4_stikdualmap_execute_guest_block(
+    const std::uint8_t* guest, std::size_t length,
+    std::uint64_t* result_out) noexcept {
+    return maxps4_stikdualmap_execute_guest_block_with_eax(guest, length, 0, result_out);
 }
 
 // Manual multi-program native JIT test. Requires the same confirmed StikDebug
@@ -1020,6 +1026,22 @@ extern "C" int maxps4_stikdualmap_arm64_execute_suite(int* passed_out) noexcept 
 #else
     return 0;
 #endif
+}
+
+// Two separate ARM64 JIT allocations; EAX flows from block A to block B.
+// This verifies EAX continuity only, not yet a full guest register file.
+extern "C" int maxps4_stikdualmap_arm64_two_blocks_test() noexcept {
+    constexpr std::uint8_t first[] = {0xB8,40,0,0,0,0xC3};
+    constexpr std::uint8_t second[] = {0x05,2,0,0,0,0xC3};
+    std::uint64_t intermediate = 0, final_value = 0;
+    const int a = maxps4_stikdualmap_execute_guest_block_with_eax(
+        first, sizeof(first), 0, &intermediate);
+    if (a != 1) return a;
+    if (intermediate != 40) return -4;
+    const int b = maxps4_stikdualmap_execute_guest_block_with_eax(
+        second, sizeof(second), static_cast<std::uint32_t>(intermediate), &final_value);
+    if (b != 1) return b;
+    return final_value == 42 ? 1 : -4;
 }
 
 // Multi-slot guest memory experiment. Only three 32-bit local stack slots.
