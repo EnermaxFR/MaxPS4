@@ -357,6 +357,13 @@ extern "C" void maxps4_arm64_preview_cache_stats(
     if (misses) *misses = preview_cache.misses;
 }
 
+// Explicit non-executable preflight: 1 means supported and cached as DATA,
+// 0 means the guest sequence is invalid/unsupported. Never signals usable JIT.
+extern "C" int maxps4_native_arm64_preflight(
+    const std::uint8_t* code, std::size_t size) noexcept {
+    return translate_or_reuse(code, size) ? 1 : 0;
+}
+
 // Execution backend selection point for an eventual ARM64 dynamic recompiler.
 // iOS code-signing/JIT entitlements must be validated before enabling JIT.
 // No RWX memory allocation or code generation is attempted here.
