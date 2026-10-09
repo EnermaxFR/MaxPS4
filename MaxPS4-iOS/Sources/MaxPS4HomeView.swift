@@ -28,6 +28,7 @@ struct MaxPS4HomeView: View {
     @State private var jitStatusReport: String?
     @State private var importingPKGHeader = false
 
+    @AppStorage("maxps4ExperimentalLab") private var experimentalLab = false
     @AppStorage("showFPS") private var showFPS = false
     @AppStorage("networkEnabled") private var networkEnabled = false
 
@@ -506,6 +507,23 @@ struct MaxPS4HomeView: View {
                         value: MaxPS4NativeLinkCheck.isStikDebugProtocolPresent ? "Intégré" : "Absent",
                         color: MaxPS4NativeLinkCheck.isStikDebugProtocolPresent ? .cyan : .orange
                     )
+                    Divider().overlay(.white.opacity(0.08))
+                    Toggle(isOn: $experimentalLab) {
+                        Label("Laboratoire expérimental", systemImage: "flask")
+                            .foregroundStyle(.white)
+                    }
+                    .tint(.cyan)
+                    .accessibilityHint("Affiche les tests natifs expérimentaux sans activer automatiquement le JIT")
+                    if experimentalLab {
+                        Button {
+                            jitStatusReport = MaxPS4OnDeviceJITProbe.stikAllocatorPreflightReport()
+                                + "\n\n"
+                                + MaxPS4OnDeviceJITProbe.combinedEngineReport()
+                        } label: {
+                            settingButton(icon: "waveform.path.ecg.rectangle", title: "Laboratoire : mémoire et traduction ARM64")
+                        }
+                        Divider().overlay(.white.opacity(0.08))
+                    }
                     Divider().overlay(.white.opacity(0.08))
                     Button {
                         jitStatusReport = MaxPS4NativeLinkCheck.jitStatusReport
