@@ -15,6 +15,9 @@ private func maxps4NativeMapJITErrnoProbe(_ errorOut: UnsafeMutablePointer<Int32
 @_silgen_name("maxps4_stikdualmap_port_present")
 private func maxps4StikDualMapPortPresent() -> Int32
 
+@_silgen_name("maxps4_stikdualmap_arm64_execute_42")
+private func maxps4StikDualMapARM64Execute42() -> Int32
+
 @_silgen_name("maxps4_stikdualmap_debugger_preflight")
 private func maxps4StikDualMapDebuggerPreflight() -> Int32
 
@@ -567,6 +570,32 @@ private func maxps4_native_generated_arm64_execute_probe() -> Int32
 extension MaxPS4OnDeviceJITProbe {
     // A standard iOS app has no safe fork-based crash sandbox for generated code.
     // Show the precise readiness gates without branching into RX memory.
+    // User-initiated experimental BRK path. The debugger trap can terminate the app.
+    // A marker survives a crash/relaunch, without implying that the trap was handled.
+    static func manuallyExecuteStikDebug42() -> String {
+        guard maxps4StikDualMapDebuggerPreflight() == 1 else {
+            return "Test non lancé : P_TRACED absent. Aucune commande BRK envoyée."
+        }
+        UserDefaults.standard.set("tentative démarrée — résultat inconnu si MaxPS4 se ferme", forKey: "maxps4StikDebugAttempt")
+        let result = maxps4StikDualMapARM64Execute42()
+        let text: String
+        switch result {
+        case 1: text = "PASS : code ARM64 généré exécuté et résultat 42 obtenu via StikDebug"
+        case -1: text = "Refus : attachement du débogueur non observé"
+        case -2: text = "Refus : taille de page incompatible"
+        case -3: text = "Échec : allocation RX/RW via StikDebug non obtenue"
+        case -4: text = "Échec : la fonction ARM64 n’a pas renvoyé 42"
+        case -5: text = "Échec : traduction ou vérification ARM64"
+        default: text = "Test non pris en charge"
+        }
+        UserDefaults.standard.set(text, forKey: "maxps4StikDebugAttempt")
+        return "Laboratoire — test manuel StikDebug (BRK)\n" + text
+    }
+
+    static func lastStikDebugAttemptReport() -> String {
+        "Dernière tentative StikDebug : " + (UserDefaults.standard.string(forKey: "maxps4StikDebugAttempt") ?? "aucune")
+    }
+
     static func executionIsolationReadinessReport() -> String {
         var jitError: Int32 = 0
         let jit = maxps4NativeMapJITErrnoProbe(&jitError)
