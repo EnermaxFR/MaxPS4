@@ -26,12 +26,29 @@ enum MaxPS4OnDeviceJITProbe {
         let debugger = MaxPS4NativeLinkCheck.debuggerAttachmentDescription
         let debugSigning = MaxPS4NativeLinkCheck.codeSigningDebugStatus
         let protocolPresent = MaxPS4NativeLinkCheck.isStikDebugProtocolPresent
+        var allocationError: Int32 = 0
+        let mapResult = maxps4NativeMapJITErrnoProbe(&allocationError)
+        let mapDescription: String
+        switch mapResult {
+        case 1:
+            mapDescription = "Allocation MAP_JIT autorisée (aucune exécution)"
+        case 0:
+            mapDescription = "Refus MAP_JIT par iOS (errno \\(allocationError))"
+        default:
+            mapDescription = "Indisponible / non pris en charge"
+        }
+        let attachObserved = maxps4StikDualMapDebuggerPreflight() == 1
+        let safeNextStep = attachObserved
+            ? "P_TRACED observé, mais le script universal.js reste à confirmer avant tout BRK"
+            : "Vérifier la connexion debugserver à MaxPS4 dans StikDebug; ne pas lancer BRK"
         return """
         Précontrôle allocateur AetherPS4 / StikDebug (sans BRK)
         Code dual-mapping compilé : \(integrated ? "Oui" : "Non")
         État signature : \(debugSigning)
         État du débogueur : \(debugger)
         Entrées du protocole intégrées : \(protocolPresent ? "Oui" : "Non")
+        Allocation mémoire iOS : \(mapDescription)
+        Étape de vérification : \(safeNextStep)
         Précondition native débogueur : \(maxps4StikDualMapDebuggerPreflight() == 1 ? "Présent (script non confirmé)" : "Absente — test exécutable interdit")
         Test ARM64 via double mapping : Codé en natif, non exposé tant que le BRK reste dangereux
         Protocole source StikDebug : BRK #0xf00d, commande x16=1, arguments x0=0 / x1=taille
