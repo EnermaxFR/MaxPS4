@@ -331,6 +331,25 @@ jobs:
               | tee build/diagnostics/fexcore-ir-status.txt
             head -45 build/diagnostics/fexcore-ir-compile.log
           fi
+          # Second real FEXCore JIT-related implementation probe.
+          JIT_SRC="$FEX/FEXCore/Source/Interface/Core/JIT/Arm64Relocations.cpp"
+          test -s "$JIT_SRC"
+          if xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
+              -isysroot "$SDK" -I "$FEX/FEXCore/include" \
+              -D MADV_HUGEPAGE=0 -D MADV_NOHUGEPAGE=0 \
+              -I "build/diagnostics/fexcore-generated" \
+              -I "MaxPS4-iOS/Native/compat/fex_ios" \
+              -I "$FEX/CodeEmitter" -I "$FEX/FEXHeaderUtils" \
+              -I "$FEX/FEXCore/Source" -I "$FEX/Source" -I "$FMT_INCLUDE" \
+              -c "$JIT_SRC" -o build/diagnostics/fexcore-arm64-relocations-ios.o \
+              > build/diagnostics/fexcore-arm64-relocations-compile.log 2>&1; then
+            echo "PASS FEXCore JIT Arm64Relocations.cpp compiled for iOS arm64" \
+              | tee build/diagnostics/fexcore-arm64-relocations-status.txt
+          else
+            echo "BLOCKED FEXCore JIT Arm64Relocations.cpp; check compiler log" \
+              | tee build/diagnostics/fexcore-arm64-relocations-status.txt
+            head -30 build/diagnostics/fexcore-arm64-relocations-compile.log
+          fi
           # Exploratory compile only: do not link until prerequisites are resolved.
           # A blocked FEXCore component must not prevent a working MaxPS4 IPA.
 
@@ -342,6 +361,9 @@ jobs:
             echo '## FEXCore iOS — compilation réelle'
             if test -f build/diagnostics/fexcore-ir-status.txt; then
               cat build/diagnostics/fexcore-ir-status.txt
+              if test -f build/diagnostics/fexcore-arm64-relocations-status.txt; then
+                cat build/diagnostics/fexcore-arm64-relocations-status.txt
+              fi
               echo ''
               echo '### Premières erreurs ou avertissements'
               echo '```text'
@@ -362,6 +384,8 @@ jobs:
           path: |
             build/diagnostics/fexcore-ir-status.txt
             build/diagnostics/fexcore-ir-compile.log
+            build/diagnostics/fexcore-arm64-relocations-status.txt
+            build/diagnostics/fexcore-arm64-relocations-compile.log
           if-no-files-found: ignore
           retention-days: 7
 
