@@ -640,11 +640,17 @@ jobs:
                 > build/diagnostics/fexcore-jit-archive.log 2>&1 \
                 && xcrun lipo -archs build/diagnostics/libMaxPS4FEXJITProbe.a \
                 | grep -Eq '(^|[[:space:]])arm64([[:space:]]|$)'; then
-              xcrun ar -t build/diagnostics/libMaxPS4FEXJITProbe.a \
-                > build/diagnostics/fexcore-jit-archive-members.txt
-              xcrun nm -u build/diagnostics/libMaxPS4FEXJITProbe.a \
-                > build/diagnostics/fexcore-jit-archive-undefined-symbols.txt 2>&1 || true
-              echo "PASS FEXCore JIT ARM64 static archive created; not yet linked" \
+              if xcrun ar -t build/diagnostics/libMaxPS4FEXJITProbe.a \
+                  > build/diagnostics/fexcore-jit-archive-members.txt \
+                  && test "$(wc -l < build/diagnostics/fexcore-jit-archive-members.txt | tr -d ' ')" -eq 3; then
+                xcrun nm -u build/diagnostics/libMaxPS4FEXJITProbe.a \
+                  > build/diagnostics/fexcore-jit-archive-undefined-symbols.txt 2>&1 || true
+                echo "PASS FEXCore JIT ARM64 static archive created; not yet linked" \
+                  | tee build/diagnostics/fexcore-jit-archive-status.txt
+              else
+                echo "BLOCKED FEXCore JIT archive member inventory" \
+                  | tee build/diagnostics/fexcore-jit-archive-status.txt
+              fi
                 | tee build/diagnostics/fexcore-jit-archive-status.txt
             else
               echo "BLOCKED FEXCore JIT archive construction" \
