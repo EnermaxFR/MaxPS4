@@ -102,6 +102,33 @@ enum MaxPS4OnDeviceJITProbe {
         return lines.joined(separator: "\n")
     }
 
+    // Expanded deterministic translator coverage. JIT execution is not claimed.
+    static func expandedARM64TranslationReport() -> String {
+        let cases: [(String, [UInt8], UInt64)] = [
+            ("MOV 42", [0xB8, 42, 0, 0, 0, 0xC3], 42),
+            ("ADD 2", [0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3], 42),
+            ("SUB 8", [0xB8, 50, 0, 0, 0, 0x2D, 8, 0, 0, 0, 0xC3], 42),
+            ("XOR", [0xB8, 40, 0, 0, 0, 0x35, 2, 0, 0, 0, 0xC3], 42),
+            ("AND", [0xB8, 43, 0, 0, 0, 0x25, 42, 0, 0, 0, 0xC3], 42),
+            ("OR", [0xB8, 40, 0, 0, 0, 0x0D, 2, 0, 0, 0, 0xC3], 42),
+            ("NOP", [0x90, 0xB8, 42, 0, 0, 0, 0xC3], 42)
+        ]
+        var lines = ["Laboratoire MaxPS4 — couverture x86-64 → ARM64 (données uniquement)"]
+        var passed = 0
+        for (name, bytes, expected) in cases {
+            let code = Data(bytes)
+            let actual = MaxPS4NativeLinkCheck.runNativeSyntheticX86(code)
+            let words = MaxPS4NativeLinkCheck.arm64TranslationPreview(code)
+            let accepted = words.map { MaxPS4NativeLinkCheck.verifyARM64Preview($0) } ?? false
+            let ok = actual == expected && accepted
+            if ok { passed += 1 }
+            lines.append("\(name) : \(ok ? "PASS" : "FAIL") — interpréteur \(actual.map(String.init) ?? "échec"), traduction \(accepted ? "validée" : "refusée")")
+        }
+        lines.append("Total : \(passed)/\(cases.count)")
+        lines.append("Aucune instruction ARM64 générée n’a été exécutée. JIT et FEXCore non validés.")
+        return lines.joined(separator: "\n")
+    }
+
     // Deterministic synthetic ELF64 x86-64 test: a data-only loader exercise,
     // not a real PS4 homebrew or SELF and not a functional PS4 runtime.
     static func minimalELFLoaderReport() -> String {
