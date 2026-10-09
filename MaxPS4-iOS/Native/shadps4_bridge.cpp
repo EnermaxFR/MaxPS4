@@ -207,7 +207,8 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
                 imm |= std::uint32_t(code[pc + i]) << (8 * i);
             rax = std::uint32_t(rax) + imm;
             rax &= 0xFFFF'FFFFull;
-            flags_valid = false;
+            zero_flag = static_cast<std::uint32_t>(rax) == 0;
+            flags_valid = true;
             pc += 4;
             break;
         }
@@ -217,7 +218,8 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
             for (unsigned i = 0; i < 4; ++i)
                 imm |= std::uint32_t(code[pc + i]) << (8 * i);
             rax = static_cast<std::uint32_t>(static_cast<std::uint32_t>(rax) - imm);
-            flags_valid = false;
+            zero_flag = static_cast<std::uint32_t>(rax) == 0;
+            flags_valid = true;
             pc += 4;
             break;
         }
@@ -416,20 +418,20 @@ extern "C" int maxps4_arm64_translate_preview(
             if (!put(0x52800000u | ((imm & 0xffffu) << 5)) ||
                 !put(0x72A00000u | (((imm >> 16) & 0xffffu) << 5))) return 0;
         } else if (opcode == 0x05 || opcode == 0x2D) {
-            cmp_ready = false;
+            cmp_ready = true; // ADDS/SUBS will set NZCV.Z
             if (count - pc < 4) return 0;
             std::uint32_t imm = 0;
             for (unsigned i = 0; i < 4; ++i)
                 imm |= std::uint32_t(guest[pc+i]) << (i*8);
             pc += 4;
             if (imm <= 4095) {
-                if (!put((opcode == 0x05 ? 0x11000000u : 0x51000000u) | (imm << 10))) return 0; // ADD/SUB W0,W0,#imm12
+                if (!put((opcode == 0x05 ? 0x31000000u : 0x71000000u) | (imm << 10))) return 0; // ADDS/SUBS W0,W0,#imm12
             } else {
-                // Materialize full 32-bit immediate into W1 then ADD W0,W0,W1.
+                // Materialize full 32-bit immediate into W1 then ADDS/SUBS W0,W0,W1.
                 // This preserves x86 32-bit wrapping semantics.
                 if (!put(0x52800001u | ((imm & 0xffffu) << 5)) ||
                     !put(0x72A00001u | (((imm >> 16) & 0xffffu) << 5)) ||
-                    !put(opcode == 0x05 ? 0x0B010000u : 0x4B010000u)) return 0;
+                    !put(opcode == 0x05 ? 0x2B010000u : 0x6B010000u)) return 0;
             }
         } else if (opcode == 0x35 || opcode == 0x25 || opcode == 0x0D) {
             cmp_ready = true; // XOR/AND/OR all define x86 ZF
