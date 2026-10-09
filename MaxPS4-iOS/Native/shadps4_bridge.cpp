@@ -740,6 +740,84 @@ extern "C" int maxps4_native_debugger_attached() noexcept {
 #endif
 }
 
+// First real AetherPS4-style dual-view allocator port (iOS 26 StikDebug).
+// Based on Core::DualMappedRegion in AetherPS4 (GPL-2.0-or-later).
+// DANGEROUS: the BRK protocol may SIGTRAP when the Universal JIT Script is not
+// servicing this process; therefore this function is NOT called by the UI or
+// emulator yet. A reported P_TRACED state alone is not enough authorization.
+// Caller must guarantee an active compatible debugger before invoking.
+// Returns 1 only when separate RX and RW aliases were created.
+extern "C" int maxps4_stikdualmap_allocate(
+    std::size_t bytes, void** rw_out, void** rx_out) noexcept {
+#if defined(__APPLE__) && defined(__aarch64__)
+    if (!rw_out || !rx_out) return 0;
+    *rw_out = nullptr;
+    *rx_out = nullptr;
+    const long raw_page = sysconf(_SC_PAGESIZE);
+    if (raw_page <= 0 || raw_page > 65536 || bytes == 0) return 0;
+    const std::size_t page = static_cast<std::size_t>(raw_page);
+    if (bytes > 64 * 1024 * 1024 || bytes > SIZE_MAX - (page - 1)) return 0;
+    const std::size_t size = (bytes + page - 1) & ~(page - 1);
+    if (maxps4_native_debugger_attached() != 1) return 0;
+    // StikDebug Universal JIT26 fresh-allocation protocol: x0=NULL, x1=size.
+    // Only a verified, currently attached Universal JIT Script may service BRK.
+    void* rx = maxps4_stikdebug_jit26_prepare_region(nullptr, size);
+    if (!rx) return 0;
+    vm_address_t rw = 0;
+    vm_prot_t current = VM_PROT_NONE, maximum = VM_PROT_NONE;
+    kern_return_t kr = vm_remap(mach_task_self(), &rw,
+        static_cast<vm_size_t>(size), 0, VM_FLAGS_ANYWHERE,
+        mach_task_self(), reinterpret_cast<vm_address_t>(rx),
+        FALSE, &current, &maximum, VM_INHERIT_NONE);
+    if (kr != KERN_SUCCESS) {
+        (void)vm_deallocate(mach_task_self(),
+            reinterpret_cast<vm_address_t>(rx), static_cast<vm_size_t>(size));
+        return 0;
+    }
+    kr = vm_protect(mach_task_self(), rw, static_cast<vm_size_t>(size),
+                    FALSE, VM_PROT_READ | VM_PROT_WRITE);
+    if (kr != KERN_SUCCESS || rw == reinterpret_cast<vm_address_t>(rx)) {
+        (void)vm_deallocate(mach_task_self(), rw, static_cast<vm_size_t>(size));
+        (void)vm_deallocate(mach_task_self(),
+            reinterpret_cast<vm_address_t>(rx), static_cast<vm_size_t>(size));
+        return 0;
+    }
+    *rw_out = reinterpret_cast<void*>(rw);
+    *rx_out = rx;
+    return 1;
+#else
+    (void)bytes; (void)rw_out; (void)rx_out;
+    return 0;
+#endif
+}
+
+extern "C" void maxps4_stikdualmap_release(
+    void* rw, void* rx, std::size_t bytes) noexcept {
+#if defined(__APPLE__) && defined(__aarch64__)
+    if (!bytes) return;
+    const long raw_page = sysconf(_SC_PAGESIZE);
+    if (raw_page <= 0 || raw_page > 65536) return;
+    const std::size_t page = static_cast<std::size_t>(raw_page);
+    if (bytes > SIZE_MAX - (page - 1)) return;
+    const vm_size_t length = static_cast<vm_size_t>((bytes + page - 1) & ~(page - 1));
+    if (rw) (void)vm_deallocate(mach_task_self(),
+        reinterpret_cast<vm_address_t>(rw), length);
+    if (rx && rx != rw) (void)vm_deallocate(mach_task_self(),
+        reinterpret_cast<vm_address_t>(rx), length);
+#else
+    (void)rw; (void)rx; (void)bytes;
+#endif
+}
+
+// ABI readiness checks, no debugger trap or executable mapping performed.
+extern "C" int maxps4_stikdualmap_port_present() noexcept {
+#if defined(__APPLE__) && defined(__aarch64__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
 // A protocol ABI existing in the binary does not mean the debugger attached,
 // that executable memory was prepared, or that a functional recompiler exists.
 extern "C" int maxps4_stikdebug_jit26_protocol_available() noexcept {
