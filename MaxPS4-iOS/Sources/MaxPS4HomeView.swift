@@ -569,6 +569,12 @@ struct MaxPS4HomeView: View {
                     } label: {
                         settingButton(icon: "cpu", title: "Tester le backend CPU AetherPS4")
                     }
+                    Divider().overlay(.white.opacity(0.08))
+                    Button {
+                        jitStatusReport = MaxPS4NativeLinkCheck.aetherJITABIReport
+                    } label: {
+                        settingButton(icon: "memorychip", title: "Vérifier l’interface JIT AetherPS4")
+                    }
                     if let jitStatusReport {
                         Button {
                             UIPasteboard.general.string = jitStatusReport
