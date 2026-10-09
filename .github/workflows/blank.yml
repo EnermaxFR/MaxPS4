@@ -231,6 +231,19 @@ jobs:
           echo "HLE unresolved symbols recorded; linking deferred until dependencies are satisfied."
           head -35 build/diagnostics/aether-hle-unresolved-symbols.txt
 
+      - name: Compile AetherPS4 JIT allocator ABI contract (no BRK)
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          UPSTREAM="build/diagnostics/aetherps4-upstream"
+          xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
+            -isysroot "$SDK" -I "$UPSTREAM/src" \
+            -c MaxPS4-iOS/Native/aether_jit_allocator_abi.cpp \
+            -o build/diagnostics/aether-jit-abi-ios-arm64.o
+          xcrun lipo -archs build/diagnostics/aether-jit-abi-ios-arm64.o | grep -w arm64
+          echo "PASS upstream allocator ABI compiled (no JIT allocated)"
+
       - name: Test ARM64 translation and safe interpreter fallback on macOS
         shell: bash
         run: |
@@ -274,6 +287,7 @@ jobs:
             build/diagnostics/shadps4-bridge-ios-arm64.o \
             build/diagnostics/aether-guest-cpu-ios-arm64.o \
             build/diagnostics/aether-guest-adapter-ios-arm64.o \
+            build/diagnostics/aether-jit-abi-ios-arm64.o \
             -lc++ \
             -o build/Payload/MaxPS4.app/MaxPS4 2>&1 | tee build/diagnostics/compile.log
 
