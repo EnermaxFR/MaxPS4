@@ -12,6 +12,13 @@ private func maxps4StikDualMapPortPresent() -> Int32
 @_silgen_name("maxps4_stikdualmap_debugger_preflight")
 private func maxps4StikDualMapDebuggerPreflight() -> Int32
 
+@_silgen_name("maxps4_native_pkg_header")
+private func maxps4NativePKGHeader(
+    _ data: UnsafePointer<UInt8>?, _ length: Int,
+    _ contentID: UnsafeMutablePointer<CChar>?, _ capacity: Int,
+    _ revision: UnsafeMutablePointer<UInt32>?
+) -> Int32
+
 enum MaxPS4OnDeviceJITProbe {
     // Read-only preflight: does not issue BRK, map executable pages or call the allocator.
     static func stikAllocatorPreflightReport() -> String {
@@ -111,6 +118,48 @@ enum MaxPS4OnDeviceJITProbe {
 
         Ce test construit un ELF artificiel en mémoire et extrait son code pour
         l'interpréteur limité. Il ne lance ni homebrew PS4 ni jeu commercial.
+        """
+    }
+
+    // Test fixture uses the first 0x70 bytes of the user-supplied Kero Blaster PKG
+    // (not the complete package). It proves parsing only, not game installation.
+    static func keroPKGHeaderReport() -> String {
+        var header = [UInt8](repeating: 0, count: 0x70)
+        header[0] = 0x7f; header[1] = 0x43; header[2] = 0x4e; header[3] = 0x54
+        header[7] = 1
+        let id = Array("UP0969-CUSA06015_00-KEROBLASTERUS000".utf8)
+        for (index, byte) in id.enumerated() { header[0x40 + index] = byte }
+        var output = [CChar](repeating: 0, count: 37)
+        var revision: UInt32 = 0
+        let ok = header.withUnsafeBufferPointer { data in
+            output.withUnsafeMutableBufferPointer { dst in
+                maxps4NativePKGHeader(data.baseAddress, data.count,
+                    dst.baseAddress, dst.count, &revision)
+            }
+        } == 1
+        let parsed = String(cString: output)
+        var corrupt = header
+        corrupt[0] = 0
+        var unused = [CChar](repeating: 0, count: 37)
+        var badRevision: UInt32 = 0
+        let rejected = corrupt.withUnsafeBufferPointer { data in
+            unused.withUnsafeMutableBufferPointer { dst in
+                maxps4NativePKGHeader(data.baseAddress, data.count,
+                    dst.baseAddress, dst.count, &badRevision)
+            }
+        } == 0
+        return """
+        Lecteur PKG PS4 — test Kero Blaster (en-tête témoin)
+        Signature PKG reconnue : \(ok ? "PASS" : "FAIL")
+        Content ID : \(parsed)
+        Révision de conteneur : \(revision)
+        Signature corrompue refusée : \(rejected ? "PASS" : "FAIL")
+        Fichier PKG entier analysé sur cet iPhone : Non
+        Entrées internes / eboot.bin : Non analysés
+        Déchiffrement et exécution : Non disponibles
+        JIT : Non activé
+
+        Test basé sur les octets de l’en-tête fourni, sans charger le PKG entier.
         """
     }
 
