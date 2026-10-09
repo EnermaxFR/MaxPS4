@@ -486,6 +486,27 @@ void* maxps4_stikdebug_jit26_prepare_region(void* address,
 }
 #endif
 
+// Read-only debugger attachment hint on iOS. A traced process does NOT
+// necessarily have StikDebug's script, JIT permissions or executable pages.
+// Never emit BRK merely to probe whether a debugger exists.
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#include <sys/proc.h>
+#include <unistd.h>
+#endif
+extern "C" int maxps4_native_debugger_attached() noexcept {
+#if defined(__APPLE__)
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()};
+    struct kinfo_proc info = {};
+    std::size_t length = sizeof(info);
+    if (sysctl(mib, 4, &info, &length, nullptr, 0) != 0 ||
+        length != sizeof(info)) return -1; // Unknown: not false.
+    return (info.kp_proc.p_flag & P_TRACED) != 0 ? 1 : 0;
+#else
+    return -1;
+#endif
+}
+
 // A protocol ABI existing in the binary does not mean the debugger attached,
 // that executable memory was prepared, or that a functional recompiler exists.
 extern "C" int maxps4_stikdebug_jit26_protocol_available() noexcept {
