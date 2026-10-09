@@ -1002,6 +1002,28 @@ jobs:
           fi
           cat build/diagnostics/compile.log
 
+      - name: Verify selected iOS CPU backend linkage
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=build/Payload/MaxPS4.app/MaxPS4
+          xcrun lipo -archs "$BIN" | grep -w arm64
+          if grep -q '^PASS FEXCore archive linked into iOS app' \
+              build/diagnostics/fexcore-ipa-link-status.txt; then
+            # The selected archive must contribute real JIT symbols; a
+            # successful Swift link alone could silently strip unused code.
+            if xcrun nm "$BIN" | grep -E 'FEXCore|_ZN3FEX' \
+                > build/diagnostics/fexcore-ipa-linked-symbols.txt; then
+              echo "PASS FEXCore archive symbols present; guest JIT still inactive" \
+                | tee -a build/diagnostics/fexcore-ipa-link-status.txt
+            else
+              echo "BLOCKED FEXCore symbol verification: inspect final executable" \
+                | tee -a build/diagnostics/fexcore-ipa-link-status.txt
+            fi
+          else
+            echo "Existing CPU backend selected; JIT remains unavailable"
+          fi
+
       - name: Create Info.plist
         shell: bash
         run: |
