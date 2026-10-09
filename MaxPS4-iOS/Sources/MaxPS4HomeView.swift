@@ -809,10 +809,21 @@ struct MaxPS4HomeView: View {
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.title2)
-                    .frame(width: 52, height: 52)
-                    .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 15))
+                ZStack {
+                    RoundedRectangle(cornerRadius: 15)
+                        .fill(Color.cyan.opacity(0.12))
+                    Image(systemName: icon)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.cyan)
+                        .symbolRenderingMode(.hierarchical)
+                    // Persistent visible fallback when an unavailable SF Symbol
+                    // name is used on a particular iOS version.
+                    Image(systemName: "square.grid.2x2.fill")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.cyan.opacity(0.52))
+                        .offset(x: 15, y: 15)
+                }
+                .frame(width: 52, height: 52)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
