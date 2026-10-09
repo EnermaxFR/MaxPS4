@@ -321,6 +321,7 @@ jobs:
               -I "build/diagnostics/fexcore-generated" \
               -I "MaxPS4-iOS/Native/compat/fex_ios" \
               -I "$FEX/CodeEmitter" -I "$FEX/FEXHeaderUtils" \
+              -I "$UNORDERED/include" \
               -I "$FEX/FEXCore/Source" -I "$FEX/Source" -I "$FMT_INCLUDE" \
               -c "$SRC" -o build/diagnostics/fexcore-addressing-ios-arm64.o \
               > build/diagnostics/fexcore-ir-compile.log 2>&1; then
@@ -397,6 +398,12 @@ jobs:
           dest = Path("build/diagnostics/fexcore-generated/FEXCore/Config/ConfigOptions.inl")
           dest.write_text("\\n".join(lines) + "\\n")
           PY
+          # Fetch the exact upstream unordered_dense submodule dependency.
+          UNORDERED="build/diagnostics/unordered-dense-upstream"
+          git clone --quiet --no-checkout --filter=blob:none \
+            https://github.com/martinus/unordered_dense.git "$UNORDERED"
+          git -C "$UNORDERED" checkout --quiet 3234af2c03549bc85656bfd3a86993bf1cd8aef1
+          test -s "$UNORDERED/include/ankerl/unordered_dense.h"
           # Second real FEXCore JIT-related implementation probe.
           JIT_SRC="$FEX/FEXCore/Source/Interface/Core/JIT/Arm64Relocations.cpp"
           test -s "$JIT_SRC"
