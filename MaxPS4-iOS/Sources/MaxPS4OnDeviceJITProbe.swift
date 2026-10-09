@@ -66,7 +66,7 @@ enum MaxPS4OnDeviceJITProbe {
         Réponse du serveur debugserver : Non vérifiée (aucune commande envoyée)
         Universal JIT Script attaché : Non vérifiable par ce test
         Allocation RX via StikDebug : Non tentée
-        Alias RW via vm_remap : Non tenté ici
+        Alias RW via vm_remap : \(rwAliasWorks ? "Validé en RW/RW (sans RX)" : "Non validé")
         Exécution ARM64 générée : Non tentée
         Activation automatique : Désactivée
 
