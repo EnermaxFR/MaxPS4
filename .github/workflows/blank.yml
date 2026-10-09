@@ -655,6 +655,13 @@ jobs:
             build/diagnostics/fexcore-jit-alu-ios.o
             build/diagnostics/fexcore-arm64-relocations-ios.o
           )
+          # Add the real CPUBackend only when its independent iOS build passed.
+          # A failed optional port must not invalidate the proven JIT archive.
+          if grep -q '^PASS FEXCore CPUBackend.cpp compiled' \
+              build/diagnostics/fexcore-cpu-backend-status.txt &&
+              test -s build/diagnostics/fexcore-cpu-backend-ios.o; then
+            JIT_OBJECTS+=(build/diagnostics/fexcore-cpu-backend-ios.o)
+          fi
           if test -s "${JIT_OBJECTS[0]}" && test -s "${JIT_OBJECTS[1]}" \
               && test -s "${JIT_OBJECTS[2]}"; then
             if xcrun libtool -static -o build/diagnostics/libMaxPS4FEXJITProbe.a \
@@ -674,9 +681,12 @@ jobs:
               "fexcore-jit-alu-ios.o",
               "fexcore-arm64-relocations-ios.o",
           ))
-          if actual != expected:
-              raise SystemExit(f"Incorrect FEXCore archive members: expected={expected}, actual={actual}")
-          print("PASS exact three upstream FEXCore ARM64 archive members")
+          cpu_backend = Path("build/diagnostics/fexcore-cpu-backend-status.txt").read_text()
+          if cpu_backend.startswith("PASS FEXCore CPUBackend.cpp compiled"):
+              expected.append("fexcore-cpu-backend-ios.o")
+          if actual != sorted(expected):
+              raise SystemExit(f"Incorrect FEXCore archive members: expected={sorted(expected)}, actual={actual}")
+          print(f"PASS {len(expected)} upstream FEXCore ARM64 archive members")
           PY
           then
                 xcrun nm -u build/diagnostics/libMaxPS4FEXJITProbe.a \
