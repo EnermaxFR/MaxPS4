@@ -681,8 +681,9 @@ extern "C" int maxps4_stikdebug_jit26_protocol_available() noexcept {
 extern "C" int maxps4_native_guest_run_with_backend(
     const std::uint8_t* code, std::size_t size, std::uint32_t budget,
     int requested_mode, int* used_mode, std::uint64_t* result) noexcept {
-    if (!used_mode || (requested_mode != 0 && requested_mode != 1)) return 0;
+    if (!used_mode) return 0;
     *used_mode = 0; // Never claim JIT execution on iOS without executable-code support.
+    if (requested_mode != 0 && requested_mode != 1) return 0;
     if (requested_mode == 1 && code && size > 0 && size <= 4096) {
         // Cache exact translated blocks as DATA; execution still uses interpreter.
         (void)translate_or_reuse(code, size);
