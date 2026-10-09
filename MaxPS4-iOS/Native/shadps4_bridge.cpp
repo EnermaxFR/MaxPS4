@@ -1028,6 +1028,14 @@ extern "C" int maxps4_stikdualmap_arm64_execute_suite(int* passed_out) noexcept 
 #endif
 }
 
+// Forward declarations for the opt-in experimental regression routines.
+extern "C" int maxps4_stikdualmap_arm64_branch_suite(int*) noexcept;
+extern "C" int maxps4_stikdualmap_arm64_two_register_test() noexcept;
+extern "C" int maxps4_stikdualmap_arm64_memory_test() noexcept;
+extern "C" int maxps4_stikdualmap_arm64_multislot_test() noexcept;
+extern "C" int maxps4_stikdualmap_arm64_two_blocks_test() noexcept;
+extern "C" int maxps4_stikdualmap_arm64_context_three_blocks_test() noexcept;
+
 // Manual batch regression of all previously introduced JIT probes.
 // Reports individual synthetic checks completed before the first failure.
 // Multiple BRK-backed generated-code invocations; never run automatically.
