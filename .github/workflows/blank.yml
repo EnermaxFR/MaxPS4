@@ -369,6 +369,13 @@ jobs:
           s = s[:start] + replacement + s[stop:]
           p.write_text(s)
           PY
+          # Generate FEXCore's real config schema required by JIT headers.
+          mkdir -p build/diagnostics/fexcore-generated/FEXCore/Config
+          python3 "$FEX/FEXCore/Scripts/config_generator.py" \
+            "$FEX/FEXCore/Source/Interface/Config/Config.json.in" \
+            build/diagnostics/fexcore-generated/FEXCore/Config/ConfigValues.inl \
+            build/diagnostics/fexcore-generated/fexcore-options.1 \
+            build/diagnostics/fexcore-generated/ConfigArgumentLoader.inc
           # Second real FEXCore JIT-related implementation probe.
           JIT_SRC="$FEX/FEXCore/Source/Interface/Core/JIT/Arm64Relocations.cpp"
           test -s "$JIT_SRC"
