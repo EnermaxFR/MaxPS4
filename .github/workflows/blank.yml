@@ -782,6 +782,36 @@ jobs:
                   sort -u build/diagnostics/fexcore-jit-partial-undefined-symbols.txt \
                     > build/diagnostics/fexcore-jit-partial-demangled-symbols.txt
                 fi
+                # Group genuinely unresolved symbols by implementation family.
+                python3 - <<'PY'
+          from pathlib import Path
+          import json
+          source = Path("build/diagnostics/fexcore-jit-partial-demangled-symbols.txt")
+          lines = sorted(set(line.strip() for line in source.read_text().splitlines() if line.strip()))
+          groups = {
+              "CPUBackend": [], "Arm64Emitter": [], "LookupCache": [],
+              "Other FEXCore": [], "External/runtime": [],
+          }
+          for symbol in lines:
+              if "CPUBackend" in symbol:
+                  group = "CPUBackend"
+              elif "Arm64Emitter" in symbol:
+                  group = "Arm64Emitter"
+              elif "LookupCache" in symbol:
+                  group = "LookupCache"
+              elif "FEXCore" in symbol or "FEX::" in symbol:
+                  group = "Other FEXCore"
+              else:
+                  group = "External/runtime"
+              groups[group].append(symbol)
+          target = Path("build/diagnostics/fexcore-unresolved-families.json")
+          target.write_text(json.dumps({
+              "total": len(lines),
+              "groups": {key: {"count": len(items), "examples": items[:20]}
+                         for key, items in groups.items()}
+          }, indent=2) + "\n")
+          print("FEXCore unresolved symbol families:", {k: len(v) for k, v in groups.items()})
+          PY
                 echo "PASS FEXCore ARM64 partial link; symbol inventory collected" \
                   | tee build/diagnostics/fexcore-jit-partial-link-status.txt
               else
@@ -949,6 +979,7 @@ jobs:
             build/diagnostics/fexcore-ipa-link-status.txt
             build/diagnostics/fexcore-jit-partial-undefined-symbols.txt
             build/diagnostics/fexcore-jit-partial-demangled-symbols.txt
+            build/diagnostics/fexcore-unresolved-families.json
             build/diagnostics/fexcore-jit-nm-error.log
             build/diagnostics/fexcore-jit-archive-undefined-symbols.txt
             build/diagnostics/fexcore-jit-core-ios.o
