@@ -11,22 +11,38 @@ extern "C" int maxps4_native_guest_x86_run(
     const std::uint8_t*, std::size_t, std::uint32_t, std::uint64_t*) noexcept;
 static Core::GuestExecutionResult MaxPS4RestrictedExecutor(
     const Core::GuestExecutionRequest& request) {
-    if (request.Rip != 0x1000 || request.Rsp == 0)
+    if (request.Rsp == 0)
         return Core::GuestExecutionFailure{
             .Stage = Core::GuestExecutionStage::Mapping, .Error = EINVAL};
-    // Synthetic in-memory guest block: MOV EAX,40; ADD EAX,2; RET.
-    // No PS4 ELF/SELF loading, no mapped external guest pointers.
-    constexpr std::uint8_t code[] = {
+    // Whitelisted virtual RIP values for two safe synthetic blocks only.
+    // No arbitrary guest-pointer dereference, PS4 ELF/SELF loading or FEXCore.
+    constexpr std::uint8_t arithmetic[] = {
         0xB8,40,0,0,0, 0x05,2,0,0,0, 0xC3
     };
+    constexpr std::uint8_t conditional[] = {
+        0xB8,42,0,0,0, 0x3D,42,0,0,0,
+        0x74,5, 0xB8,1,0,0,0, 0xC3
+    };
+    const std::uint8_t* code = nullptr;
+    std::size_t length = 0;
+    if (request.Rip == 0x1000) {
+        code = arithmetic;
+        length = sizeof(arithmetic);
+    } else if (request.Rip == 0x1100) {
+        code = conditional;
+        length = sizeof(conditional);
+    } else {
+        return Core::GuestExecutionFailure{
+            .Stage = Core::GuestExecutionStage::Mapping, .Error = EINVAL};
+    }
     std::uint64_t result = 0;
-    if (maxps4_native_guest_x86_run(code, sizeof(code), 16, &result) != 1)
+    if (maxps4_native_guest_x86_run(code, length, 32, &result) != 1)
         return Core::GuestExecutionFailure{
             .Stage = Core::GuestExecutionStage::Execute, .Error = ENOTSUP};
     Core::GuestExecutionState state{};
     state.FirstRip = request.Rip;
     state.LastRip = request.Rip;
-    state.Rip = request.Rip + sizeof(code);
+    state.Rip = request.Rip + length;
     state.Rsp = request.Rsp;
     state.Gpr = request.Gpr;
     state.Gpr[0] = result;
@@ -85,6 +101,26 @@ extern "C" int maxps4_aether_cpu_state_regression() noexcept {
         const auto* failure = std::get_if<Core::GuestExecutionFailure>(&outcome);
         if (!failure || failure->Error != EINVAL ||
             failure->Stage != Core::GuestExecutionStage::Mapping) return 0;
+    }
+    return 1;
+}
+
+// Confirm that upstream dispatch selects multiple synthetic guest RIP blocks,
+// preserves guest state and reports bad mappings without executing pointers.
+extern "C" int maxps4_aether_multi_block_dispatch_probe() noexcept {
+    Core::NativeGuestCpuBackend backend(&MaxPS4RestrictedExecutor);
+    for (const std::uintptr_t rip : {std::uintptr_t(0x1000), std::uintptr_t(0x1100)}) {
+        Core::GuestExecutionRequest request{};
+        request.Rip = rip;
+        request.Rsp = 0x3000;
+        request.Gpr[2] = 0xCAFE;
+        request.Rflags = 0x202;
+        const auto output = backend.Run(request);
+        const auto* state = std::get_if<Core::GuestExecutionState>(&output);
+        if (!state || state->Gpr[0] != 42 || state->Gpr[2] != 0xCAFE ||
+            state->Rflags != 0x202 || state->Rsp != request.Rsp ||
+            state->Rip != rip + (rip == 0x1000 ? 11 : 18) ||
+            state->StopReason != Core::GuestStopReason::Returned) return 0;
     }
     return 1;
 }
