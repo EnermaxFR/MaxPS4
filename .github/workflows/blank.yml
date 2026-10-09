@@ -627,6 +627,7 @@ jobs:
           fi
           # Prepare a real static archive of upstream FEXCore ARM64 JIT objects.
           # Archiving does not resolve external symbols or enable executable memory.
+          rm -f build/diagnostics/libMaxPS4FEXJITProbe.a
           JIT_OBJECTS=(
             build/diagnostics/fexcore-jit-core-ios.o
             build/diagnostics/fexcore-jit-alu-ios.o
@@ -639,6 +640,10 @@ jobs:
                 > build/diagnostics/fexcore-jit-archive.log 2>&1 \
                 && xcrun lipo -archs build/diagnostics/libMaxPS4FEXJITProbe.a \
                 | grep -Eq '(^|[[:space:]])arm64([[:space:]]|$)'; then
+              xcrun ar -t build/diagnostics/libMaxPS4FEXJITProbe.a \
+                > build/diagnostics/fexcore-jit-archive-members.txt
+              xcrun nm -u build/diagnostics/libMaxPS4FEXJITProbe.a \
+                > build/diagnostics/fexcore-jit-archive-undefined-symbols.txt 2>&1 || true
               echo "PASS FEXCore JIT ARM64 static archive created; not yet linked" \
                 | tee build/diagnostics/fexcore-jit-archive-status.txt
             else
@@ -738,6 +743,8 @@ jobs:
             build/diagnostics/libMaxPS4FEXJITProbe.a
             build/diagnostics/fexcore-jit-archive-status.txt
             build/diagnostics/fexcore-jit-archive.log
+            build/diagnostics/fexcore-jit-archive-members.txt
+            build/diagnostics/fexcore-jit-archive-undefined-symbols.txt
             build/diagnostics/fexcore-jit-core-ios.o
             build/diagnostics/fexcore-jit-alu-ios.o
             build/diagnostics/fexcore-arm64-relocations-ios.o
