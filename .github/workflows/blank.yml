@@ -292,6 +292,29 @@ jobs:
           xcrun lipo -archs build/diagnostics/fexcore-ios-header-probe.o | grep -w arm64
           echo "PASS pinned FEXCore header compiled for native iOS arm64 (JIT not linked)"
 
+      - name: Probe real FEXCore IR implementation compilation for iOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          FEX="build/diagnostics/fexcore-upstream"
+          SRC="$FEX/FEXCore/Source/Interface/Core/Addressing.cpp"
+          test -s "$SRC"
+          if xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
+              -isysroot "$SDK" -I "$FEX/FEXCore/include" \
+              -I "$FEX/FEXCore/Source" -I "$FEX/Source" \
+              -c "$SRC" -o build/diagnostics/fexcore-addressing-ios-arm64.o \
+              > build/diagnostics/fexcore-ir-compile.log 2>&1; then
+            echo "PASS real FEXCore IR Addressing.cpp compiled for iOS arm64" \
+              | tee build/diagnostics/fexcore-ir-status.txt
+          else
+            echo "BLOCKED FEXCore IR Addressing.cpp: inspect fexcore-ir-compile.log for missing prerequisites" \
+              | tee build/diagnostics/fexcore-ir-status.txt
+            head -45 build/diagnostics/fexcore-ir-compile.log
+          fi
+          # Exploratory compile only: do not link until prerequisites are resolved.
+          # A blocked FEXCore component must not prevent a working MaxPS4 IPA.
+
       - name: Test ARM64 translation and safe interpreter fallback on macOS
         shell: bash
         run: |
