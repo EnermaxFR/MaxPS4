@@ -274,6 +274,7 @@ jobs:
             build/diagnostics/shadps4-bridge-ios-arm64.o \
             build/diagnostics/aether-guest-cpu-ios-arm64.o \
             build/diagnostics/aether-guest-adapter-ios-arm64.o \
+            build/diagnostics/aether-hle-call-adapter-ios-arm64.o \
             -lc++ \
             -o build/Payload/MaxPS4.app/MaxPS4 2>&1 | tee build/diagnostics/compile.log
 
