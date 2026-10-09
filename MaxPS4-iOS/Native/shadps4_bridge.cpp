@@ -489,6 +489,18 @@ void* maxps4_stikdebug_jit26_prepare_region(void* address,
 }
 #endif
 
+// Baseline ARM64 execution smoke test: compiler-emitted instruction only.
+// This verifies the ARM64 CPU path on device, NOT dynamic JIT or FEXCore.
+extern "C" int maxps4_native_arm64_static_execute_probe() noexcept {
+#if defined(__aarch64__)
+    int result = 0;
+    __asm__ volatile("mov %w0, #42" : "=r"(result));
+    return result == 42 ? 1 : 0;
+#else
+    return 0;
+#endif
+}
+
 // JIT allocator groundwork: validate an ordinary writable page and release it.
 // Deliberately NEVER requests executable protection or sends BRK. Success
 // proves only that the VM allocator works, not that iOS permits JIT execution.
