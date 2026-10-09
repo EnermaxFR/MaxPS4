@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import UIKit
 
 private enum MaxPS4Tab: Hashable {
     case home
@@ -502,6 +503,12 @@ struct MaxPS4HomeView: View {
                         settingButton(icon: "shield.lefthalf.filled", title: "Tester StikDebug sans risque")
                     }
                     if let jitStatusReport {
+                        Button {
+                            UIPasteboard.general.string = jitStatusReport
+                        } label: {
+                            settingButton(icon: "doc.on.doc", title: "Copier le diagnostic JIT")
+                        }
+                        Divider().overlay(.white.opacity(0.08))
                         Text(jitStatusReport)
                             .font(.footnote.monospaced())
                             .foregroundStyle(.white.opacity(0.85))
