@@ -123,6 +123,50 @@ enum MaxPS4OnDeviceJITProbe {
 
     // Test fixture uses the first 0x70 bytes of the user-supplied Kero Blaster PKG
     // (not the complete package). It proves parsing only, not game installation.
+    // Import through Files: read only a bounded header using a security-scoped URL.
+    // No game installation, decryption, or whole-PKG allocation.
+    static func inspectImportedPKG(_ url: URL) -> String {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let data = try handle.read(upToCount: 0x70) ?? Data()
+            guard data.count >= 0x70 else {
+                return "PKG : en-tête incomplet (moins de 112 octets)."
+            }
+            var output = [CChar](repeating: 0, count: 37)
+            var revision: UInt32 = 0
+            let valid = data.withUnsafeBytes { raw in
+                output.withUnsafeMutableBufferPointer { dst in
+                    maxps4NativePKGHeader(
+                        raw.bindMemory(to: UInt8.self).baseAddress, data.count,
+                        dst.baseAddress, dst.count, &revision
+                    )
+                }
+            } == 1
+            guard valid else {
+                return "PKG : signature ou identifiant non reconnu. Aucun contenu exécuté."
+            }
+            let contentID = String(cString: output)
+            let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value
+            return """
+            PKG PS4 importé depuis Fichiers
+            Nom : \(url.lastPathComponent)
+            Taille : \(fileSize.map { String($0) + " octets" } ?? "Inconnue")
+            Signature : Reconnue
+            Content ID : \(contentID)
+            Révision en-tête : \(revision)
+            Lecture : 112 octets seulement
+            Liste des entrées / eboot.bin : Non analysée
+            Déchiffrement / exécution PS4 : Non disponibles
+            JIT : Non utilisé
+            """
+        } catch {
+            return "Impossible d’ouvrir le PKG : \(error.localizedDescription)"
+        }
+    }
+
     static func keroPKGHeaderReport() -> String {
         var header = [UInt8](repeating: 0, count: 0x70)
         header[0] = 0x7f; header[1] = 0x43; header[2] = 0x4e; header[3] = 0x54
