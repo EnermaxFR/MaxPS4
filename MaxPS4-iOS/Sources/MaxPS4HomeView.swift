@@ -523,6 +523,12 @@ struct MaxPS4HomeView: View {
                             settingButton(icon: "waveform.path.ecg.rectangle", title: "Laboratoire : mémoire et traduction ARM64")
                         }
                         Divider().overlay(.white.opacity(0.08))
+                        Button {
+                            jitStatusReport = MaxPS4OnDeviceJITProbe.expandedARM64TranslationReport()
+                        } label: {
+                            settingButton(icon: "testtube.2", title: "Laboratoire : 7 tests de traduction ARM64")
+                        }
+                        Divider().overlay(.white.opacity(0.08))
                         Divider().overlay(.white.opacity(0.08))
                     Button {
                         jitStatusReport = MaxPS4NativeLinkCheck.jitStatusReport
