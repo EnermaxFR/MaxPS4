@@ -460,6 +460,12 @@ jobs:
           # Probe the central upstream ARM64 JIT implementation after relocations.
           # This is a compiler diagnostic only; no generated code executes on iOS.
           JIT_CORE="$FEX/FEXCore/Source/Interface/Core/JIT/JIT.cpp"
+          # GCC/Clang expects -Dname=value as a single argument.
+          # The prior "-DARCHITECTURE_arm64=1" spelling is rejected by
+          # the FEX headers on this compile path: verify the macro explicitly.
+          printf '#ifndef ARCHITECTURE_arm64\n#error ARM64 macro missing\n#endif\n' \
+            | xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
+                -DARCHITECTURE_arm64=1 -x c++ -fsyntax-only -
           if xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
               -isysroot "$SDK" -I "$FEX/FEXCore/include" \
               -D ARCHITECTURE_arm64=1 -D MADV_HUGEPAGE=0 -D MADV_NOHUGEPAGE=0 \
