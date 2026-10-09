@@ -511,6 +511,7 @@ jobs:
               | tee build/diagnostics/fexcore-jit-macro-status.txt
           fi
           JIT_CORE="$FEX/FEXCore/Source/Interface/Core/JIT/JIT.cpp"
+          rm -f build/diagnostics/fexcore-jit-core-ios.o
           # Check architecture feature macro before probing the real JIT translation unit.
           # Required by SHMStats and member-function-pointer ABI helpers.
           printf '#ifndef ARCHITECTURE_arm64\n#error ARM64 macro missing\n#endif\n' \
@@ -547,6 +548,8 @@ jobs:
           base = Path("build/diagnostics")
           logfile = base / "fexcore-jit-core-compile.log"
           obj = base / "fexcore-jit-core-ios.o"
+          status_path = base / "fexcore-jit-core-status.txt"
+          status = status_path.read_text(errors="replace").strip() if status_path.exists() else "MISSING"
           content = logfile.read_text(errors="replace") if logfile.exists() else ""
           error_lines = [line for line in content.splitlines()
                          if re.search(r"(?:fatal )?error:", line)]
@@ -565,6 +568,8 @@ jobs:
               "source": "FEXCore/Source/Interface/Core/JIT/JIT.cpp",
               "target": "arm64-apple-ios16.0",
               "object_produced": obj.is_file() and obj.stat().st_size > 0,
+              "compile_and_architecture_passed": status.startswith("PASS "),
+              "compiler_status": status,
               "error_count": len(error_lines),
               "categories": categories,
               "first_errors": error_lines[:20],
