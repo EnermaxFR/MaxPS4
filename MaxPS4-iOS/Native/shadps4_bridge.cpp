@@ -1063,6 +1063,7 @@ extern "C" int maxps4_stikdualmap_arm64_two_register_test() noexcept;
 extern "C" int maxps4_stikdualmap_arm64_memory_test() noexcept;
 extern "C" int maxps4_stikdualmap_arm64_multislot_test() noexcept;
 extern "C" int maxps4_stikdualmap_arm64_two_blocks_test() noexcept;
+extern "C" int maxps4_stikdualmap_arm64_two_register_blocks_test() noexcept;
 extern "C" int maxps4_stikdualmap_arm64_context_three_blocks_test() noexcept;
 
 // Manual batch regression of all previously introduced JIT probes.
@@ -1071,7 +1072,7 @@ extern "C" int maxps4_stikdualmap_arm64_context_three_blocks_test() noexcept;
 extern "C" int maxps4_stikdualmap_arm64_full_batch(int* passed_out, int* total_out) noexcept {
     if (!passed_out || !total_out) return -6;
     *passed_out = 0;
-    *total_out = 11; // Arithmetic (3), branches (3), registers, memory, slots, two/three blocks.
+    *total_out = 12; // Original 11 checks and EAX/ECX across blocks.
     if (maxps4_native_debugger_attached() != 1) return -1;
     int passed = 0;
     int status = maxps4_stikdualmap_arm64_execute_suite(&passed);
@@ -1086,7 +1087,8 @@ extern "C" int maxps4_stikdualmap_arm64_full_batch(int* passed_out, int* total_o
         maxps4_stikdualmap_arm64_memory_test,
         maxps4_stikdualmap_arm64_multislot_test,
         maxps4_stikdualmap_arm64_two_blocks_test,
-        maxps4_stikdualmap_arm64_context_three_blocks_test
+        maxps4_stikdualmap_arm64_context_three_blocks_test,
+        maxps4_stikdualmap_arm64_two_register_blocks_test
     };
     for (auto test : tests) {
         status = test();
