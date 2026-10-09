@@ -1151,14 +1151,53 @@ final class MaxPS4Emulator: ObservableObject {
 
     private func loadLibrary() {
         guard fileManager.fileExists(atPath: libraryURL.path) else {
-            games = []
+            // An absent JSON catalog should not hide existing imported files.
+            if let folder = try? importFolder(),
+               let files = try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) {
+                games = files.filter {
+                    ["pkg", "elf", "self"].contains($0.pathExtension.lowercased())
+                        || $0.lastPathComponent.lowercased() == "eboot.bin"
+                }.map {
+                    MaxPS4Game(id: UUID(), name: $0.deletingPathExtension().lastPathComponent,
+                               fileName: $0.lastPathComponent, localPath: $0.path,
+                               importedAt: Date())
+                }
+                try? saveLibrary()
+            } else { games = [] }
             return
         }
 
         do {
             let data = try Data(contentsOf: libraryURL)
             let decoded = try JSONDecoder().decode([MaxPS4Game].self, from: data)
-            games = decoded.filter { fileManager.fileExists(atPath: $0.localPath) }
+            // Container UUIDs may change after an iOS app update. Never trust
+            // a persisted absolute sandbox path; resolve the saved filename
+            // relative to our current Documents/MaxPS4Games directory instead.
+            let folder = try importFolder()
+            let recovered = decoded.compactMap { game -> MaxPS4Game? in
+                let fileName = URL(fileURLWithPath: game.fileName).lastPathComponent
+                guard fileName != ".", fileName != "..", !fileName.isEmpty else { return nil }
+                let current = folder.appendingPathComponent(fileName)
+                guard fileManager.fileExists(atPath: current.path) else { return nil }
+                return MaxPS4Game(id: game.id, name: game.name, fileName: fileName,
+                                  localPath: current.path, importedAt: game.importedAt)
+            }
+            // Also recover game files when the metadata JSON is stale or incomplete.
+            let existing = Set(recovered.map { $0.fileName.lowercased() })
+            let recognized = Set(["pkg", "elf", "self"])
+            let files = (try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+            let extra = files.filter {
+                let name = $0.lastPathComponent
+                return (recognized.contains($0.pathExtension.lowercased()) || name.lowercased() == "eboot.bin")
+                    && !existing.contains(name.lowercased())
+            }.map { url in
+                MaxPS4Game(id: UUID(),
+                           name: url.deletingPathExtension().lastPathComponent,
+                           fileName: url.lastPathComponent,
+                           localPath: url.path, importedAt: Date())
+            }
+            games = recovered + extra
+            try? saveLibrary()
         } catch {
             games = []
             status = "Bibliothèque réinitialisée"
