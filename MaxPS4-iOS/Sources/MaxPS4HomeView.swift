@@ -26,6 +26,7 @@ struct MaxPS4HomeView: View {
     @State private var selectedGameDetails: MaxPS4Game?
     @State private var detailsReport: String?
     @State private var jitStatusReport: String?
+    @State private var importingPKGHeader = false
 
     @AppStorage("showFPS") private var showFPS = false
     @AppStorage("networkEnabled") private var networkEnabled = false
@@ -303,6 +304,19 @@ struct MaxPS4HomeView: View {
             .preferredColorScheme(.dark)
         }
         .fileImporter(
+            isPresented: $importingPKGHeader,
+            allowedContentTypes: [.data, .item],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                jitStatusReport = MaxPS4OnDeviceJITProbe.inspectImportedPKG(url)
+            case .failure(let error):
+                jitStatusReport = "Import PKG impossible : \(error.localizedDescription)"
+            }
+        }
+        .fileImporter(
             isPresented: $importingGame,
             allowedContentTypes: [.data, .item],
             allowsMultipleSelection: false
@@ -527,6 +541,12 @@ struct MaxPS4HomeView: View {
                         jitStatusReport = MaxPS4OnDeviceJITProbe.keroPKGHeaderReport()
                     } label: {
                         settingButton(icon: "shippingbox", title: "Tester le lecteur PKG Kero Blaster")
+                    }
+                    Divider().overlay(.white.opacity(0.08))
+                    Button {
+                        importingPKGHeader = true
+                    } label: {
+                        settingButton(icon: "doc.viewfinder", title: "Importer et inspecter un vrai PKG")
                     }
                     Divider().overlay(.white.opacity(0.08))
                     Button {
