@@ -85,6 +85,42 @@ jobs:
           git -C . rev-parse HEAD > ../aetherps4-upstream-sha.txt
           # Keep Git metadata for the audit; avoid macOS runner cleanup races.
 
+      - name: Audit AetherPS4 guest CPU integration dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path("build/diagnostics/aetherps4-upstream")
+          required = [
+              "src/core/fex/fex_guest_engine.cpp",
+              "src/core/guest_cpu/fex_guest_cpu.cpp",
+              "src/core/guest_cpu/guest_cpu.cpp",
+              "src/core/ios/ios_jit_allocator.cpp",
+          ]
+          missing = [path for path in required if not (root / path).is_file()]
+          if missing:
+              raise SystemExit("Missing pinned AetherPS4 sources: " + ", ".join(missing))
+          report = [
+              "MaxPS4 - pinned AetherPS4 integration dependency audit",
+              "Upstream: Leviidev/AetherPS4 @ 3347fc13f19860855ce91b66356940989ea6b6a6",
+              "Status: source audit only; FEXCore not compiled or linked",
+              "",
+          ]
+          for filename in required:
+              source = (root / filename).read_text(errors="replace")
+              includes = re.findall(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', source, re.M)
+              report.append(filename)
+              report.extend("  include: " + name for name in sorted(set(includes)))
+              report.append("")
+          out = Path("build/diagnostics/aetherps4-dependency-audit.txt")
+          out.write_text("\n".join(report) + "\n")
+          print("Audited", len(required), "real guest CPU/JIT translation units")
+          print("Dependency manifest:", out)
+          PY
+
       - name: Test ARM64 translation and safe interpreter fallback on macOS
         shell: bash
         run: |
