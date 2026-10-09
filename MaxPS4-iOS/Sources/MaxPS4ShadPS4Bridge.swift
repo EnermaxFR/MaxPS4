@@ -341,11 +341,25 @@ private func maxps4_arm64_preview_cache_stats(
     _ misses: UnsafeMutablePointer<UInt64>?
 )
 
+@_silgen_name("maxps4_native_arm64_preflight")
+private func maxps4_native_arm64_preflight(
+    _ code: UnsafePointer<UInt8>?, _ size: Int
+) -> Int32
+
 @_silgen_name("maxps4_native_arm64_jit_ready")
 private func maxps4_native_arm64_jit_ready() -> Int32
 
 extension MaxPS4NativeLinkCheck {
     static var isARM64JITReady: Bool { maxps4_native_arm64_jit_ready() == 1 }
+
+    /// Validates and caches an ARM64 translation as non-executable data only.
+    static func isARM64TranslationSupported(_ code: Data) -> Bool {
+        code.withUnsafeBytes { raw in
+            maxps4_native_arm64_preflight(
+                raw.bindMemory(to: UInt8.self).baseAddress, code.count
+            ) == 1
+        }
+    }
 
     /// Requests JIT; the native dispatcher reports whether it actually used it.
     /// Fallback always remains available for synthetic tests.
@@ -380,6 +394,9 @@ extension MaxPS4NativeLinkCheck {
     static var executionBackendSelfTest: Bool {
         let program = Data([0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3])
         guard let output = runSyntheticX86PreferJIT(program) else { return false }
+        guard isARM64TranslationSupported(program),
+              !isARM64TranslationSupported(Data([0x0F, 0x05])),
+              !isARM64TranslationSupported(Data()) else { return false }
         // A terminating three-iteration loop must stay in interpreter mode.
         let loop = Data([0xB8, 3, 0, 0, 0, 0x2D, 1, 0, 0, 0,
                          0x75, 0xF9, 0xC3])
