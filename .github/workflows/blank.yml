@@ -321,7 +321,6 @@ jobs:
               -I "build/diagnostics/fexcore-generated" \
               -I "MaxPS4-iOS/Native/compat/fex_ios" \
               -I "$FEX/CodeEmitter" -I "$FEX/FEXHeaderUtils" \
-              -I "$UNORDERED/include" \
               -I "$FEX/FEXCore/Source" -I "$FEX/Source" -I "$FMT_INCLUDE" \
               -c "$SRC" -o build/diagnostics/fexcore-addressing-ios-arm64.o \
               > build/diagnostics/fexcore-ir-compile.log 2>&1; then
@@ -413,6 +412,7 @@ jobs:
               -I "build/diagnostics/fexcore-generated" \
               -I "MaxPS4-iOS/Native/compat/fex_ios" \
               -I "$FEX/CodeEmitter" -I "$FEX/FEXHeaderUtils" \
+              -I "$UNORDERED/include" \
               -I "$FEX/FEXCore/Source" -I "$FEX/Source" -I "$FMT_INCLUDE" \
               -c "$JIT_SRC" -o build/diagnostics/fexcore-arm64-relocations-ios.o \
               > build/diagnostics/fexcore-arm64-relocations-compile.log 2>&1; then
