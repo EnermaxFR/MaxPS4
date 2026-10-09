@@ -459,6 +459,34 @@ jobs:
           fi
           # Probe the central upstream ARM64 JIT implementation after relocations.
           # This is a compiler diagnostic only; no generated code executes on iOS.
+          # Validate the two upstream headers that failed in builds #807/#808.
+          # Keep this as an isolated compile-only probe, without iOS JIT execution.
+          cat > build/diagnostics/fexcore-jit-abi-probe.cpp <<'CPP'
+          #ifndef __aarch64__
+          #error Target must be ARM64
+          #endif
+          #ifndef ARCHITECTURE_arm64
+          #error FEXCore ARM64 architecture macro is not defined
+          #endif
+          #include <FEXCore/Utils/SHMStats.h>
+          #include "Utils/MemberFunctionToPointer.h"
+          static_assert(sizeof(FEXCore::SHMStats::ThreadStats) % 16 == 0);
+          CPP
+          if xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
+              -isysroot "$SDK" -DARCHITECTURE_arm64=1 \
+              -I "$FEX/FEXCore/include" -I "$FEX/FEXCore/Source" \
+              -I "$FEX/CodeEmitter" -I "$FEX/FEXHeaderUtils" \
+              -I "build/diagnostics/fexcore-generated" -I "$FMT_INCLUDE" \
+              -I "$UNORDERED/include" -fsyntax-only \
+              build/diagnostics/fexcore-jit-abi-probe.cpp \
+              > build/diagnostics/fexcore-jit-abi-compile.log 2>&1; then
+            echo "PASS FEXCore ARM64 JIT headers compile for iOS" \
+              | tee build/diagnostics/fexcore-jit-abi-status.txt
+          else
+            echo "BLOCKED FEXCore ARM64 JIT header ABI probe" \
+              | tee build/diagnostics/fexcore-jit-abi-status.txt
+            head -20 build/diagnostics/fexcore-jit-abi-compile.log
+          fi
           JIT_CORE="$FEX/FEXCore/Source/Interface/Core/JIT/JIT.cpp"
           # Check architecture feature macro before probing the real JIT translation unit.
           # Required by SHMStats and member-function-pointer ABI helpers.
@@ -516,6 +544,9 @@ jobs:
               if test -f build/diagnostics/fexcore-arm64-relocations-status.txt; then
                 cat build/diagnostics/fexcore-arm64-relocations-status.txt
               fi
+              if test -f build/diagnostics/fexcore-jit-abi-status.txt; then
+                cat build/diagnostics/fexcore-jit-abi-status.txt
+              fi
               if test -f build/diagnostics/fexcore-jit-core-status.txt; then
                 cat build/diagnostics/fexcore-jit-core-status.txt
               fi
@@ -555,6 +586,8 @@ jobs:
             build/diagnostics/fexcore-ir-compile.log
             build/diagnostics/fexcore-arm64-relocations-status.txt
             build/diagnostics/fexcore-arm64-relocations-compile.log
+            build/diagnostics/fexcore-jit-abi-status.txt
+            build/diagnostics/fexcore-jit-abi-compile.log
             build/diagnostics/fexcore-jit-core-status.txt
             build/diagnostics/fexcore-jit-core-compile.log
             build/diagnostics/fexcore-jit-alu-status.txt
