@@ -412,25 +412,25 @@ extension MaxPS4NativeLinkCheck {
     static var arm64TranslationPreviewSelfTest: Bool {
         let program = Data([0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3])
         guard arm64TranslationPreview(program) == [
-            0x52800500, 0x72A00000, 0x11000800, 0xD65F03C0
+            0x52800500, 0x72A00000, 0x31000800, 0xD65F03C0
         ] else { return false }
         // ADD EAX, 0x12345678 should become MOVZ/MOVK W1 + ADD W0,W0,W1.
         let wide = Data([0xB8, 1, 0, 0, 0, 0x05, 0x78, 0x56, 0x34, 0x12, 0xC3])
         guard arm64TranslationPreview(wide) == [
             0x52800020, 0x72A00000, 0x528ACF01, 0x72A24681,
-            0x0B010000, 0xD65F03C0
+            0x2B010000, 0xD65F03C0
         ] else { return false }
         // Boundary regression: ARM64 ADD immediate covers 0...4095, not 4096.
         let boundary = Data([0xB8, 0xFF, 0xFF, 0xFF, 0xFF,
                              0x05, 0xFF, 0x0F, 0, 0, 0xC3])
         guard arm64TranslationPreview(boundary) == [
-            0x529FFFE0, 0x72BFFFE0, 0x113FFC00, 0xD65F03C0
+            0x529FFFE0, 0x72BFFFE0, 0x313FFC00, 0xD65F03C0
         ] else { return false }
         let beyond = Data([0xB8, 0, 0, 0, 0,
                            0x05, 0, 0x10, 0, 0, 0xC3])
         guard arm64TranslationPreview(beyond) == [
             0x52800000, 0x72A00000, 0x52820001,
-            0x72A00001, 0x0B010000, 0xD65F03C0
+            0x72A00001, 0x2B010000, 0xD65F03C0
         ] else { return false }
         // ADD EAX, -1 must wrap at 32 bits; preview must preserve all bits.
         let negative = Data([0xB8, 1, 0, 0, 0,
@@ -438,20 +438,38 @@ extension MaxPS4NativeLinkCheck {
         guard runNativeSyntheticX86(negative) == 0,
               arm64TranslationPreview(negative) == [
                 0x52800020, 0x72A00000, 0x529FFFE1,
-                0x72BFFFE1, 0x0B010000, 0xD65F03C0
+                0x72BFFFE1, 0x2B010000, 0xD65F03C0
               ] else { return false }
         // SUB immediate has the same 32-bit wraparound as x86 EAX.
         let subSmall = Data([0xB8, 2, 0, 0, 0, 0x2D, 3, 0, 0, 0, 0xC3])
         guard runNativeSyntheticX86(subSmall) == 0xFFFF_FFFF,
               arm64TranslationPreview(subSmall) == [
-                0x52800040, 0x72A00000, 0x51000C00, 0xD65F03C0
+                0x52800040, 0x72A00000, 0x71000C00, 0xD65F03C0
               ] else { return false }
         let subWide = Data([0xB8, 0, 0, 0, 0, 0x2D,
                             0x78, 0x56, 0x34, 0x12, 0xC3])
         guard runNativeSyntheticX86(subWide) == 0xEDCB_A988,
               arm64TranslationPreview(subWide) == [
                 0x52800000, 0x72A00000, 0x528ACF01,
-                0x72A24681, 0x4B010000, 0xD65F03C0
+                0x72A24681, 0x6B010000, 0xD65F03C0
+              ] else { return false }
+        // ADD wraps at 32 bits and must set ZF for the following JZ.
+        let addWrapJZ = Data([0xB8, 0xFF, 0xFF, 0xFF, 0xFF,
+                             0x05, 1, 0, 0, 0, 0x74, 5,
+                             0xB8, 99, 0, 0, 0, 0xC3])
+        guard runNativeSyntheticX86(addWrapJZ) == 0,
+              arm64TranslationPreview(addWrapJZ) == [
+                0x529FFFE0, 0x72BFFFE0, 0x31000400,
+                0x54000060, 0x52800C60, 0x72A00000, 0xD65F03C0
+              ] else { return false }
+        // SUB 1 from 1 sets ZF;  JZ skips the next MOV.
+        let subZeroJZ = Data([0xB8, 1, 0, 0, 0,
+                             0x2D, 1, 0, 0, 0, 0x74, 5,
+                             0xB8, 99, 0, 0, 0, 0xC3])
+        guard runNativeSyntheticX86(subZeroJZ) == 0,
+              arm64TranslationPreview(subZeroJZ) == [
+                0x52800020, 0x72A00000, 0x71000400,
+                0x54000060, 0x52800C60, 0x72A00000, 0xD65F03C0
               ] else { return false }
         // XOR EAX, imm32: compare native interpreter with inert ARM64 EOR emission.
         let xorProgram = Data([0xB8, 0x78, 0x56, 0x34, 0x12,
