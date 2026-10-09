@@ -715,6 +715,27 @@ jobs:
             echo "SKIPPED partial link: JIT archive not validated" \
               | tee build/diagnostics/fexcore-jit-partial-link-status.txt
           fi
+          # Force-load every JIT object into a temporary iOS dylib to expose
+          # actual unresolved link dependencies. This is never shipped in IPA.
+          if grep -q '^PASS FEXCore JIT ARM64 static archive' \
+              build/diagnostics/fexcore-jit-archive-status.txt; then
+            rm -f build/diagnostics/libMaxPS4FEXJITLinkProbe.dylib
+            if xcrun --sdk iphoneos clang++ \
+                -target arm64-apple-ios16.0 -isysroot "$SDK" \
+                -dynamiclib -Wl,-undefined,error \
+                -Wl,-force_load,build/diagnostics/libMaxPS4FEXJITProbe.a \
+                -o build/diagnostics/libMaxPS4FEXJITLinkProbe.dylib \
+                > build/diagnostics/fexcore-jit-full-link.log 2>&1; then
+              echo "PASS isolated full linker dependency check (not executable JIT)" \
+                | tee build/diagnostics/fexcore-jit-full-link-status.txt
+            else
+              echo "BLOCKED isolated full link: dependencies in fexcore-jit-full-link.log" \
+                | tee build/diagnostics/fexcore-jit-full-link-status.txt
+            fi
+          else
+            echo "SKIPPED full link: JIT archive not validated" \
+              | tee build/diagnostics/fexcore-jit-full-link-status.txt
+          fi
           # Exploratory compile only: do not link until prerequisites are resolved.
           # A blocked FEXCore component must not prevent a working MaxPS4 IPA.
 
@@ -833,6 +854,8 @@ jobs:
             build/diagnostics/fexcore-jit-partial-link.o
             build/diagnostics/fexcore-jit-partial-link.log
             build/diagnostics/fexcore-jit-partial-link-status.txt
+            build/diagnostics/fexcore-jit-full-link.log
+            build/diagnostics/fexcore-jit-full-link-status.txt
             build/diagnostics/fexcore-jit-partial-undefined-symbols.txt
             build/diagnostics/fexcore-jit-partial-demangled-symbols.txt
             build/diagnostics/fexcore-jit-nm-error.log
