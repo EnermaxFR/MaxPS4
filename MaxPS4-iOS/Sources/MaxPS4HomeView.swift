@@ -30,6 +30,7 @@ struct MaxPS4HomeView: View {
     @State private var showingStikDebugExecutionWarning = false
     @State private var showingJITSuiteWarning = false
     @State private var showingJITBranchesWarning = false
+    @State private var showingJITRegistersWarning = false
 
     @AppStorage("maxps4ExperimentalLab") private var experimentalLab = false
     @AppStorage("showFPS") private var showFPS = false
@@ -61,6 +62,14 @@ struct MaxPS4HomeView: View {
         .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) {
             tabBar
+        }
+        .alert("Registres JIT ARM64 — risque de fermeture", isPresented: $showingJITRegistersWarning) {
+            Button("Annuler", role: .cancel) {}
+            Button("Tester EAX et ECX") {
+                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteTwoRegisters()
+            }
+        } message: {
+            Text("Test JIT non isolé avec StikDebug : MOV EAX,40 ; MOV ECX,2 ; ADD EAX,ECX ; RET. MaxPS4 peut se fermer si le gestionnaire BRK n'est plus actif.")
         }
         .alert("Branchements JIT ARM64 — risque de fermeture", isPresented: $showingJITBranchesWarning) {
             Button("Annuler", role: .cancel) {}
@@ -591,6 +600,12 @@ struct MaxPS4HomeView: View {
                             showingJITBranchesWarning = true
                         } label: {
                             settingButton(icon: "arrow.triangle.branch", title: "EXPÉRIENCE : JIT branchements et boucles (3 tests)")
+                        }
+                        Divider().overlay(.white.opacity(0.08))
+                        Button {
+                            showingJITRegistersWarning = true
+                        } label: {
+                            settingButton(icon: "cpu", title: "EXPÉRIENCE : JIT deux registres EAX / ECX")
                         }
                         Divider().overlay(.white.opacity(0.08))
                         Button {
