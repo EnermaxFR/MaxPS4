@@ -28,6 +28,7 @@ struct MaxPS4HomeView: View {
     @State private var jitStatusReport: String?
     @State private var importingPKGHeader = false
     @State private var showingStikDebugExecutionWarning = false
+    @State private var showingJITSuiteWarning = false
 
     @AppStorage("maxps4ExperimentalLab") private var experimentalLab = false
     @AppStorage("showFPS") private var showFPS = false
@@ -59,6 +60,14 @@ struct MaxPS4HomeView: View {
         .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) {
             tabBar
+        }
+        .alert("Suite JIT ARM64 — risque de fermeture", isPresented: $showingJITSuiteWarning) {
+            Button("Annuler", role: .cancel) {}
+            Button("Exécuter les 3 programmes") {
+                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteStikDebugSuite()
+            }
+        } message: {
+            Text("Essai expérimental non isolé : 3 programmes x86-64 sont traduits puis exécutés en ARM64 via BRK StikDebug. MaxPS4 peut se fermer si universal.js cesse de répondre.")
         }
         .alert("Essai JIT StikDebug — risque de fermeture", isPresented: $showingStikDebugExecutionWarning) {
             Button("Annuler", role: .cancel) {}
@@ -561,6 +570,12 @@ struct MaxPS4HomeView: View {
                             showingStikDebugExecutionWarning = true
                         } label: {
                             settingButton(icon: "bolt.trianglebadge.exclamationmark", title: "EXPÉRIENCE : exécuter ARM64 via StikDebug (BRK)")
+                        }
+                        Divider().overlay(.white.opacity(0.08))
+                        Button {
+                            showingJITSuiteWarning = true
+                        } label: {
+                            settingButton(icon: "cpu.fill", title: "EXPÉRIENCE : JIT réel sur 3 programmes x86-64")
                         }
                         Divider().overlay(.white.opacity(0.08))
                         Button {
