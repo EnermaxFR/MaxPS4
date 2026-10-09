@@ -5,14 +5,24 @@ private func maxps4NativeMapJITAllocationProbe() -> Int32
 
 enum MaxPS4OnDeviceJITProbe {
     static func report() -> String {
+        let mapStatus: String
         switch maxps4NativeMapJITAllocationProbe() {
-        case 1:
-            return "iPhone : allocation MAP_JIT autorisée. Cela ne prouve pas que le code ARM64 généré s’exécute, ni que FEXCore fonctionne."
-        case 0:
-            return "iPhone : allocation MAP_JIT refusée ou indisponible. Vérifie StikDebug et la signature de l’application. Aucun code généré n’a été exécuté."
-        default:
-            return "Test MAP_JIT non pris en charge sur cet appareil."
+        case 1: mapStatus = "Allocation MAP_JIT : Autorisée (sans exécution)"
+        case 0: mapStatus = "Allocation MAP_JIT : Refusée par iOS"
+        default: mapStatus = "Allocation MAP_JIT : Indisponible"
         }
+        return """
+        Diagnostic JIT iPhone
+        Signature / CS_DEBUGGED : \(MaxPS4NativeLinkCheck.codeSigningDebugStatus)
+        Débogueur / P_TRACED : \(MaxPS4NativeLinkCheck.debuggerAttachmentDescription)
+        Protocole StikDebug intégré : \(MaxPS4NativeLinkCheck.isStikDebugProtocolPresent ? "Oui" : "Non")
+        \(mapStatus)
+        Entitlement get-task-allow : Non lu directement (vérifier dans StikDebug)
+        Exécution ARM64 générée : Non testée par ce diagnostic
+        FEXCore : Non validé
+
+        Remarque : P_TRACED absent ne signifie pas à lui seul que StikDebug a échoué. MAP_JIT autorisé ne prouve pas une mémoire RX ni une exécution JIT réussie.
+        """
     }
 }
 
