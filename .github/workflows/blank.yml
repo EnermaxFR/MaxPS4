@@ -288,6 +288,20 @@ jobs:
           test -s build/diagnostics/aether-fex-hle-required-symbols.txt
           echo "PASS AetherPS4 FEX HLE bridge cross-compiled; dependencies recorded; linking awaits FEXCore"
 
+      - name: Verify FEXCore upstream source availability (pinned)
+        shell: bash
+        run: |
+          set -euo pipefail
+          FEX_DIR="build/diagnostics/fexcore-upstream"
+          git clone --quiet --no-checkout --filter=blob:none \
+            https://github.com/FEX-Emu/FEX.git "$FEX_DIR"
+          git -C "$FEX_DIR" sparse-checkout init --cone
+          git -C "$FEX_DIR" sparse-checkout set FEXCore Source CodeEmitter FEXHeaderUtils
+          git -C "$FEX_DIR" checkout --quiet f2b679f6028ce1c38875233aecfcf5d3f8ebecec
+          test -s "$FEX_DIR/FEXCore/include/FEXCore/Core/Context.h"
+          echo "PASS pinned FEXCore source headers available"
+          echo "NOTE: FEXCore is not yet compiled or linked"
+
       - name: Probe real AetherPS4 guest engine and CPU compilation for iOS
         shell: bash
         run: |
@@ -302,7 +316,9 @@ jobs:
             log="build/diagnostics/aether-full-engine/${base}.log"
             if xcrun --sdk iphoneos clang++ -std=c++23 \
                  -target arm64-apple-ios16.0 -isysroot "$SDK" \
-                 -I "$ROOT/src" -c "$ROOT/$source" -o "$output" \
+                 -I "$ROOT/src" -I "build/diagnostics/fexcore-upstream" \
+                 -I "build/diagnostics/fexcore-upstream/FEXCore/include" \
+                 -c "$ROOT/$source" -o "$output" \
                  > "$log" 2>&1; then
               echo "PASS compile $source (linking and guest execution unverified)" \
                 | tee -a build/diagnostics/aether-full-engine/status.txt
@@ -334,20 +350,6 @@ jobs:
           path: build/diagnostics/aether-full-engine/
           if-no-files-found: ignore
           retention-days: 14
-
-      - name: Verify FEXCore upstream source availability (pinned)
-        shell: bash
-        run: |
-          set -euo pipefail
-          FEX_DIR="build/diagnostics/fexcore-upstream"
-          git clone --quiet --no-checkout --filter=blob:none \
-            https://github.com/FEX-Emu/FEX.git "$FEX_DIR"
-          git -C "$FEX_DIR" sparse-checkout init --cone
-          git -C "$FEX_DIR" sparse-checkout set FEXCore Source CodeEmitter FEXHeaderUtils
-          git -C "$FEX_DIR" checkout --quiet f2b679f6028ce1c38875233aecfcf5d3f8ebecec
-          test -s "$FEX_DIR/FEXCore/include/FEXCore/Core/Context.h"
-          echo "PASS pinned FEXCore source headers available"
-          echo "NOTE: FEXCore is not yet compiled or linked"
 
       - name: Compile pinned FEXCore guest ISA header against iOS arm64 SDK
         shell: bash
