@@ -35,6 +35,7 @@ struct MaxPS4HomeView: View {
     @State private var showingJITMultislotWarning = false
     @State private var showingJITTwoBlocksWarning = false
     @State private var showingJITThreeBlocksWarning = false
+    @State private var showingJITFullBatchWarning = false
 
     @AppStorage("maxps4ExperimentalLab") private var experimentalLab = false
     @AppStorage("showFPS") private var showFPS = false
@@ -66,6 +67,14 @@ struct MaxPS4HomeView: View {
         .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) {
             tabBar
+        }
+        .alert("Batterie JIT complète — risque de fermeture", isPresented: $showingJITFullBatchWarning) {
+            Button("Annuler", role: .cancel) {}
+            Button("Lancer les 11 tests") {
+                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteFullBatch()
+            }
+        } message: {
+            Text("Lance 11 vérifications JIT ARM64 à la suite (calculs, branches, registres, mémoire, blocs). Plusieurs interruptions BRK StikDebug : MaxPS4 peut se fermer si le débogueur cesse de répondre.")
         }
         .alert("Contexte JIT sur trois blocs — risque de fermeture", isPresented: $showingJITThreeBlocksWarning) {
             Button("Annuler", role: .cancel) {}
@@ -666,6 +675,12 @@ struct MaxPS4HomeView: View {
                             showingJITThreeBlocksWarning = true
                         } label: {
                             settingButton(icon: "workflow", title: "EXPÉRIENCE : contexte JIT sur 3 blocs")
+                        }
+                        Divider().overlay(.white.opacity(0.08))
+                        Button {
+                            showingJITFullBatchWarning = true
+                        } label: {
+                            settingButton(icon: "checklist", title: "EXPÉRIENCE : lancer tous les tests JIT (11)")
                         }
                         Divider().overlay(.white.opacity(0.08))
                         Button {
