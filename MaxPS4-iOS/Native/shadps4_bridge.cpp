@@ -8,6 +8,7 @@ extern "C" int maxps4_shadps4_utility_probe() noexcept {
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #if defined(__APPLE__)
 #include <unistd.h>
 #endif
