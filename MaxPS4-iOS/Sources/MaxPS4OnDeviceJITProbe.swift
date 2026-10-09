@@ -33,7 +33,7 @@ enum MaxPS4OnDeviceJITProbe {
         case 1:
             mapDescription = "Allocation MAP_JIT autorisée (aucune exécution)"
         case 0:
-            mapDescription = "Refus MAP_JIT par iOS (errno \\(allocationError))"
+            mapDescription = "Refus MAP_JIT par iOS (errno \(allocationError))"
         default:
             mapDescription = "Indisponible / non pris en charge"
         }
