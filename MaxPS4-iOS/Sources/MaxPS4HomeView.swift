@@ -513,6 +513,7 @@ struct MaxPS4HomeView: View {
                             .foregroundStyle(.white)
                     }
                     .tint(.cyan)
+                    .padding(.vertical, 18)
                     .accessibilityHint("Affiche les tests natifs expérimentaux sans activer automatiquement le JIT")
                     if experimentalLab {
                         Button {
@@ -528,7 +529,6 @@ struct MaxPS4HomeView: View {
                         } label: {
                             settingButton(icon: "testtube.2", title: "Laboratoire : 7 tests de traduction ARM64")
                         }
-                        Divider().overlay(.white.opacity(0.08))
                         Divider().overlay(.white.opacity(0.08))
                     Button {
                         jitStatusReport = MaxPS4NativeLinkCheck.jitStatusReport
