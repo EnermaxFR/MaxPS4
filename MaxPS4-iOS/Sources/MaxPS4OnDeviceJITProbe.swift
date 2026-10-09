@@ -473,7 +473,7 @@ extension MaxPS4OnDeviceJITProbe {
         var allocationError: Int32 = 0
         let mapStatus = maxps4NativeMapJITErrnoProbe(&allocationError)
         if mapStatus == 0 {
-            return "Test ARM64 arrêté avant exécution : iOS refuse MAP_JIT (errno \\(allocationError)). Aucun code généré exécuté. Le statut CS_DEBUGGED seul ne suffit pas."
+            return "Test ARM64 arrêté avant exécution : iOS refuse MAP_JIT (errno \(allocationError)). Aucun code généré exécuté. Le statut CS_DEBUGGED seul ne suffit pas."
         }
         if mapStatus != 1 {
             return "Test ARM64 arrêté : état MAP_JIT indisponible. Aucun code généré exécuté."
