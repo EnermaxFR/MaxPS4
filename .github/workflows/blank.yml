@@ -457,6 +457,26 @@ jobs:
               | tee build/diagnostics/fexcore-arm64-relocations-status.txt
             head -30 build/diagnostics/fexcore-arm64-relocations-compile.log
           fi
+          # Probe the central upstream ARM64 JIT implementation after relocations.
+          # This is a compiler diagnostic only; no generated code executes on iOS.
+          JIT_CORE="$FEX/FEXCore/Source/Interface/Core/JIT/JIT.cpp"
+          if xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
+              -isysroot "$SDK" -I "$FEX/FEXCore/include" \
+              -D MADV_HUGEPAGE=0 -D MADV_NOHUGEPAGE=0 \
+              -I "build/diagnostics/fexcore-generated" \
+              -I "MaxPS4-iOS/Native/compat/fex_ios" \
+              -I "$FEX/CodeEmitter" -I "$FEX/FEXHeaderUtils" \
+              -I "$UNORDERED/include" \
+              -I "$FEX/FEXCore/Source" -I "$FEX/Source" -I "$FMT_INCLUDE" \
+              -c "$JIT_CORE" -o build/diagnostics/fexcore-jit-core-ios.o \
+              > build/diagnostics/fexcore-jit-core-compile.log 2>&1; then
+            echo "PASS FEXCore central JIT.cpp compiled for iOS arm64" \
+              | tee build/diagnostics/fexcore-jit-core-status.txt
+          else
+            echo "BLOCKED FEXCore central JIT.cpp; check compiler log" \
+              | tee build/diagnostics/fexcore-jit-core-status.txt
+            head -25 build/diagnostics/fexcore-jit-core-compile.log
+          fi
           # Exploratory compile only: do not link until prerequisites are resolved.
           # A blocked FEXCore component must not prevent a working MaxPS4 IPA.
 
