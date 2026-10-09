@@ -348,6 +348,18 @@ jobs:
           PY
           test -s build/diagnostics/fexcore-generated/FEXCore/Config/ConfigOptions.inl
 
+      - name: Prepare unordered_dense headers for AetherPS4 guest engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Fetch the exact upstream unordered_dense submodule dependency.
+          UNORDERED="build/diagnostics/unordered-dense-upstream"
+          git clone --quiet --no-checkout --filter=blob:none \
+            https://github.com/martinus/unordered_dense.git "$UNORDERED"
+          git -C "$UNORDERED" checkout --quiet 3234af2c03549bc85656bfd3a86993bf1cd8aef1
+          test -s "$UNORDERED/include/ankerl/unordered_dense.h"
+          echo "PASS unordered_dense headers available before AetherPS4 compile"
+
       - name: Probe real AetherPS4 guest engine and CPU compilation for iOS
         shell: bash
         run: |
@@ -369,6 +381,7 @@ jobs:
                  -I "build/diagnostics/fexcore-upstream/FEXCore/Source" \
                  -I "build/diagnostics/fexcore-upstream/Source" \
                  -I "MaxPS4-iOS/Native/compat/fex_ios" \
+                 -I "build/diagnostics/unordered-dense-upstream/include" \
                  -I "$(brew --prefix fmt)/include" \
                  -c "$ROOT/$source" -o "$output" \
                  > "$log" 2>&1; then
