@@ -491,6 +491,7 @@ void* maxps4_stikdebug_jit26_prepare_region(void* address,
 // proves only that the VM allocator works, not that iOS permits JIT execution.
 #if defined(__APPLE__)
 #include <sys/mman.h>
+#include <unistd.h>
 #endif
 extern "C" int maxps4_native_jit_writable_page_probe(
     std::size_t* page_size_out) noexcept {
