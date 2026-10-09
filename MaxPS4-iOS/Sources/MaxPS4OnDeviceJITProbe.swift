@@ -464,6 +464,25 @@ private func maxps4_native_generated_arm64_execute_probe() -> Int32
 
 extension MaxPS4OnDeviceJITProbe {
     static func generatedARM64ExecutionReport() -> String {
+        // Fail closed before entering generated-code execution. This check is
+        // intentionally independent of CS_DEBUGGED: its presence is not proof
+        // that an executable mapping is permitted on this iPhone.
+        guard maxps4StikDualMapPortPresent() == 1 else {
+            return "Test ARM64 arrêté : backend natif non disponible."
+        }
+        var allocationError: Int32 = 0
+        let mapStatus = maxps4NativeMapJITErrnoProbe(&allocationError)
+        if mapStatus == 0 {
+            return "Test ARM64 arrêté avant exécution : iOS refuse MAP_JIT (errno \\(allocationError)). Aucun code généré exécuté. Le statut CS_DEBUGGED seul ne suffit pas."
+        }
+        if mapStatus != 1 {
+            return "Test ARM64 arrêté : état MAP_JIT indisponible. Aucun code généré exécuté."
+        }
+        guard maxps4StikDualMapDebuggerPreflight() == 1 else {
+            return "Test ARM64 arrêté : aucun débogueur détecté. MAP_JIT accessible ne prouve pas que le script StikDebug est attaché."
+        }
+        // Even if these gates pass, the native probe can fail; its return
+        // value is the only success evidence. No BRK is emitted by this path.
         switch maxps4_native_generated_arm64_execute_probe() {
         case 1:
             return "Instructions ARM64 générées dynamiquement : Exécutées (42). Test isolé réussi ; FEXCore et les jeux PS4 ne sont pas validés."
