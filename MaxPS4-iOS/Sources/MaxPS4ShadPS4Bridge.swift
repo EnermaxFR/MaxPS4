@@ -432,6 +432,9 @@ private func maxps4_native_jit_arm64_block_checksum(
     _ bytes: UnsafeMutablePointer<Int>?
 ) -> Int32
 
+@_silgen_name("maxps4_aether_jit_allocator_abi_probe")
+private func maxps4_aether_jit_allocator_abi_probe() -> Int32
+
 @_silgen_name("maxps4_aether_guest_backend_probe")
 private func maxps4_aether_guest_backend_probe() -> Int32
 
@@ -540,6 +543,16 @@ extension MaxPS4NativeLinkCheck {
         Empreinte de diagnostic : \(firstOK ? String(first, radix: 16) : "Indisponible")
         JIT natif : Inactif
         Aucun code généré n’a été exécuté.
+        """
+    }
+
+    static var aetherJITABIReport: String {
+        let compatible = maxps4_aether_jit_allocator_abi_probe() == 1
+        return """
+        Interface mémoire AetherPS4 : \(compatible ? "Compatible ARM64" : "Non compatible")
+        Structure DualMappedRegion : \(compatible ? "Validée" : "Échec")
+        Allocation réelle RX : Non testée
+        Exécution JIT : Inactive
         """
     }
 
