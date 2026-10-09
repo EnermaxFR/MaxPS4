@@ -533,6 +533,43 @@ jobs:
               | tee build/diagnostics/fexcore-jit-core-status.txt
             head -25 build/diagnostics/fexcore-jit-core-compile.log
           fi
+          # Emit a machine-readable classification of the real JIT.cpp build.
+          # This is diagnostic-only; the working IPA must still be generated.
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          import re
+
+          base = Path("build/diagnostics")
+          logfile = base / "fexcore-jit-core-compile.log"
+          obj = base / "fexcore-jit-core-ios.o"
+          content = logfile.read_text(errors="replace") if logfile.exists() else ""
+          error_lines = [line for line in content.splitlines()
+                         if re.search(r"(?:fatal )?error:", line)]
+          categories = {
+              "missing_headers": sum("file not found" in line for line in error_lines),
+              "architecture_intrinsics": sum(
+                  any(token in line for token in ("__rdtscp", "__builtin_ia32", "__x86"))
+                  for line in error_lines),
+              "architecture_abi": sum(
+                  "Don't know how to cast Member" in line for line in error_lines),
+              "other_errors": 0,
+          }
+          categories["other_errors"] = max(
+              0, len(error_lines) - sum(categories.values()))
+          report = {
+              "source": "FEXCore/Source/Interface/Core/JIT/JIT.cpp",
+              "target": "arm64-apple-ios16.0",
+              "object_produced": obj.is_file() and obj.stat().st_size > 0,
+              "error_count": len(error_lines),
+              "categories": categories,
+              "first_errors": error_lines[:20],
+              "runtime_jit_tested": False,
+          }
+          (base / "fexcore-jit-core-report.json").write_text(
+              json.dumps(report, indent=2, ensure_ascii=False) + "\\n")
+          print("FEXCore JIT compile report:", json.dumps(report))
+          PY
           # Confirm the produced object is genuinely Mach-O arm64 rather than
           # accepting an accidental host-architecture compilation.
           if test -s build/diagnostics/fexcore-jit-core-ios.o; then
@@ -661,6 +698,7 @@ jobs:
             build/diagnostics/fexcore-jit-macro-errors.log
             build/diagnostics/fexcore-jit-core-status.txt
             build/diagnostics/fexcore-jit-core-compile.log
+            build/diagnostics/fexcore-jit-core-report.json
             build/diagnostics/fexcore-jit-object-arch-status.txt
             build/diagnostics/fexcore-jit-link-readiness.txt
             build/diagnostics/fexcore-jit-core-undefined-symbols.txt
