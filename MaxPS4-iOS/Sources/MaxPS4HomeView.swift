@@ -27,6 +27,7 @@ struct MaxPS4HomeView: View {
     @State private var detailsReport: String?
     @State private var jitStatusReport: String?
     @State private var importingPKGHeader = false
+    @State private var showingStikDebugExecutionWarning = false
 
     @AppStorage("maxps4ExperimentalLab") private var experimentalLab = false
     @AppStorage("showFPS") private var showFPS = false
@@ -58,6 +59,14 @@ struct MaxPS4HomeView: View {
         .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) {
             tabBar
+        }
+        .alert("Essai JIT StikDebug — risque de fermeture", isPresented: $showingStikDebugExecutionWarning) {
+            Button("Annuler", role: .cancel) {}
+            Button("Lancer le test ARM64") {
+                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteStikDebug42()
+            }
+        } message: {
+            Text("Expérience volontaire : envoie BRK #0xf00d et tente d’exécuter le code ARM64 généré. Si universal.js ne gère pas ce trap, MaxPS4 peut se fermer. Aucun jeu PS4 n’est lancé.")
         }
         .alert("Supprimer ce fichier ?", isPresented: Binding(
             get: { gameToDelete != nil },
@@ -546,6 +555,18 @@ struct MaxPS4HomeView: View {
                             jitStatusReport = MaxPS4OnDeviceJITProbe.executionIsolationReadinessReport()
                         } label: {
                             settingButton(icon: "shield.lefthalf.filled", title: "Laboratoire : vérifier l'isolation de l'exécution ARM64")
+                        }
+                        Divider().overlay(.white.opacity(0.08))
+                        Button {
+                            showingStikDebugExecutionWarning = true
+                        } label: {
+                            settingButton(icon: "bolt.trianglebadge.exclamationmark", title: "EXPÉRIENCE : exécuter ARM64 via StikDebug (BRK)")
+                        }
+                        Divider().overlay(.white.opacity(0.08))
+                        Button {
+                            jitStatusReport = MaxPS4OnDeviceJITProbe.lastStikDebugAttemptReport()
+                        } label: {
+                            settingButton(icon: "clock.arrow.circlepath", title: "Voir le résultat du dernier essai StikDebug")
                         }
                         Divider().overlay(.white.opacity(0.08))
                     Button {
