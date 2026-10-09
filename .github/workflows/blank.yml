@@ -241,6 +241,24 @@ jobs:
           echo "HLE unresolved symbols recorded; linking deferred until dependencies are satisfied."
           head -35 build/diagnostics/aether-hle-unresolved-symbols.txt
 
+      - name: Probe real AetherPS4 HLE adapter for executable linkage
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          OBJ=build/diagnostics/aether-hle-call-adapter-ios-arm64.o
+          OUT=build/diagnostics/aether-hle-link-probe.dylib
+          if xcrun --sdk iphoneos clang++ -target arm64-apple-ios16.0 \
+              -isysroot "$SDK" -dynamiclib -Wl,-undefined,error \
+              "$OBJ" -o "$OUT" \
+              > build/diagnostics/aether-hle-link.log 2>&1; then
+            echo "PASS isolated AetherPS4 HLE adapter link (not a full PS4 engine)" \
+              | tee build/diagnostics/aether-hle-link-status.txt
+          else
+            echo "BLOCKED AetherPS4 HLE adapter: unresolved dependencies" \
+              | tee build/diagnostics/aether-hle-link-status.txt
+          fi
+
       - name: Compile AetherPS4 JIT allocator ABI contract (no BRK)
         shell: bash
         run: |
@@ -1093,6 +1111,19 @@ jobs:
               | tee build/diagnostics/fexcore-ipa-link-status.txt
           fi
 
+          # Add the upstream HLE guest-call component only when it passes an
+          # isolated strict iOS link test. It is not a PS4 services runtime.
+          AETHER_HLE_LINK_ARGS=()
+          if grep -q '^PASS isolated AetherPS4 HLE adapter link' \
+               build/diagnostics/aether-hle-link-status.txt; then
+            AETHER_HLE_LINK_ARGS=(build/diagnostics/aether-hle-call-adapter-ios-arm64.o)
+            echo "AetherPS4 HLE adapter selected for executable link" \
+              | tee build/diagnostics/aether-hle-ipa-link-status.txt
+          else
+            echo "AetherPS4 HLE adapter link blocked; preserving working IPA" \
+              | tee build/diagnostics/aether-hle-ipa-link-status.txt
+          fi
+
           SWIFT_LINK_CMD=(
             xcrun --sdk iphoneos swiftc
             -target arm64-apple-ios16.0
@@ -1107,6 +1138,7 @@ jobs:
             build/diagnostics/aether-guest-cpu-ios-arm64.o
             build/diagnostics/aether-guest-adapter-ios-arm64.o
             build/diagnostics/aether-jit-abi-ios-arm64.o
+            "${AETHER_HLE_LINK_ARGS[@]}"
           )
           OUTPUT=build/Payload/MaxPS4.app/MaxPS4
           if test "${#FEXCORE_LINK_ARGS[@]}" -gt 0; then
