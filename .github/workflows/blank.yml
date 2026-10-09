@@ -300,9 +300,17 @@ jobs:
           FEX="build/diagnostics/fexcore-upstream"
           SRC="$FEX/FEXCore/Source/Interface/Core/Addressing.cpp"
           test -s "$SRC"
+          # FEXCore's LogManager.h directly includes fmt/format.h.
+          # fmt is header-only for this compile-only experiment: do not link
+          # macOS Homebrew libraries into the iOS executable.
+          if ! brew --prefix fmt >/dev/null 2>&1; then
+            brew install fmt
+          fi
+          FMT_INCLUDE="$(brew --prefix fmt)/include"
+          test -s "$FMT_INCLUDE/fmt/format.h"
           if xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
               -isysroot "$SDK" -I "$FEX/FEXCore/include" \
-              -I "$FEX/FEXCore/Source" -I "$FEX/Source" \
+              -I "$FEX/FEXCore/Source" -I "$FEX/Source" -I "$FMT_INCLUDE" \
               -c "$SRC" -o build/diagnostics/fexcore-addressing-ios-arm64.o \
               > build/diagnostics/fexcore-ir-compile.log 2>&1; then
             echo "PASS real FEXCore IR Addressing.cpp compiled for iOS arm64" \
