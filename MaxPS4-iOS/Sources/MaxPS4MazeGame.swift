@@ -48,7 +48,7 @@ struct MaxPS4MazeGame: View {
                     .font(.subheadline.monospacedDigit().bold())
             }
 
-            Text("Ramasse les pastilles ! Une super pastille permet de capturer le fantôme.")
+            Text("Glisse sur le labyrinthe ou utilise les flèches. Les super-pastilles permettent de capturer le fantôme.")
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.8))
 
@@ -70,6 +70,20 @@ struct MaxPS4MazeGame: View {
                 }
             }
             .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 18)
+                    .onEnded { value in
+                        let horizontal = value.translation.width
+                        let vertical = value.translation.height
+                        if abs(horizontal) > abs(vertical) {
+                            move(row: 0, col: horizontal > 0 ? 1 : -1)
+                        } else {
+                            move(row: vertical > 0 ? 1 : -1, col: 0)
+                        }
+                    }
+            )
+            .accessibilityHint("Glisse vers le haut, le bas, la gauche ou la droite pour avancer.")
 
             if powerTurns > 0 && !finished {
                 Text("SUPER PASTILLE : capture le fantôme ! (\(powerTurns) tours)")
