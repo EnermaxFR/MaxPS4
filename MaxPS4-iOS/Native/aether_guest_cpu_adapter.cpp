@@ -122,6 +122,29 @@ extern "C" int maxps4_aether_multi_block_dispatch_probe() noexcept {
             state->Rip != rip + (rip == 0x1000 ? 11 : 18) ||
             state->StopReason != Core::GuestStopReason::Returned) return 0;
     }
+    // Invalid guest RIP values must fail as mappings, not fall through to host
+    // pointers. An absent guest stack must also fail closed.
+    for (const std::uintptr_t rip : {
+            std::uintptr_t(0), std::uintptr_t(0x1001),
+            std::uintptr_t(0x10FF), std::uintptr_t(0x1101),
+            std::uintptr_t(0xDEAD)}) {
+        Core::GuestExecutionRequest bad{};
+        bad.Rip = rip;
+        bad.Rsp = 0x3000;
+        const auto result = backend.Run(bad);
+        const auto* failure = std::get_if<Core::GuestExecutionFailure>(&result);
+        if (!failure || failure->Stage != Core::GuestExecutionStage::Mapping ||
+            failure->Error != EINVAL) return 0;
+    }
+    for (const std::uintptr_t rip : {std::uintptr_t(0x1000), std::uintptr_t(0x1100)}) {
+        Core::GuestExecutionRequest bad{};
+        bad.Rip = rip;
+        bad.Rsp = 0;
+        const auto result = backend.Run(bad);
+        const auto* failure = std::get_if<Core::GuestExecutionFailure>(&result);
+        if (!failure || failure->Stage != Core::GuestExecutionStage::Mapping ||
+            failure->Error != EINVAL) return 0;
+    }
     return 1;
 }
 
