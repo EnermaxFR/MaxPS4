@@ -8,6 +8,7 @@ extern "C" int maxps4_arm64_verify_preview(const std::uint32_t*, std::size_t) no
 extern "C" int maxps4_native_guest_run_with_backend(const std::uint8_t*, std::size_t,
     std::uint32_t, int, int*, std::uint64_t*) noexcept;
 extern "C" int maxps4_native_arm64_jit_ready() noexcept;
+extern "C" int maxps4_native_arm64_static_execute_probe() noexcept;
 
 static bool run(const char* label, const std::uint8_t* input, std::size_t length,
                 std::uint64_t expected) {
@@ -58,7 +59,12 @@ int main() {
         !maxps4_arm64_translate_preview(invalid, sizeof(invalid), words, 16, &emitted) &&
         !maxps4_arm64_verify_preview(nullptr, 0) &&
         !maxps4_arm64_verify_preview(invalid_words, 2) &&
-        maxps4_native_arm64_jit_ready() == 0;
+        maxps4_native_arm64_jit_ready() == 0 &&
+#if defined(__aarch64__)
+        maxps4_native_arm64_static_execute_probe() == 1;
+#else
+        maxps4_native_arm64_static_execute_probe() == 0;
+#endif
     std::puts(checks ? "PASS JIT pipeline regression" : "FAIL JIT pipeline regression");
     return checks ? 0 : 1;
 }
