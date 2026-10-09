@@ -178,6 +178,9 @@ enum MaxPS4OnDeviceJITProbe {
                     }
                     var invalidRanges = 0
                     var encryptedFlags = 0
+                    var encryptedEntries: [String] = []
+                    var clearDataBytes: UInt64 = 0
+                    var protectedDataBytes: UInt64 = 0
                     for index in 0..<entries {
                         let p = index * 32
                         func beTable32(_ at: Int) -> UInt32 {
@@ -192,7 +195,14 @@ enum MaxPS4OnDeviceJITProbe {
                            size > UInt64(total) - min(offset, UInt64(total)) {
                             invalidRanges += 1
                         }
-                        if flags & 0x80000000 != 0 { encryptedFlags += 1 }
+                        if flags & 0x80000000 != 0 {
+                            encryptedFlags += 1
+                            protectedDataBytes += size
+                            encryptedEntries.append(String(format: "%08X", beTable32(0)) +
+                                " (" + String(size) + " octets)")
+                        } else {
+                            clearDataBytes += size
+                        }
                     }
                     // Entry 0x200 is the bounded null-terminated filename table.
                     var names = Data()
@@ -296,7 +306,7 @@ enum MaxPS4OnDeviceJITProbe {
                             signatures.append(String(format: "%08X", ident) + " : " + label)
                         }
                     }
-                    entryReport = "Entrées de table lues : \(entries) (IDs initiaux : \(preview.joined(separator: ", ")))\nPlages hors fichier : \(invalidRanges)\nEntrées marquées chiffrées (flags +8) : \(encryptedFlags)\nSignatures internes reconnues : \(signatures.isEmpty ? "Aucune" : signatures.joined(separator: "; "))\nNoms résolus : \(resolved.isEmpty ? "Aucun" : resolved.joined(separator: "; "))\nMétadonnées PSF : \(psfDetails.isEmpty ? "Aucune valeur décodée (format à examiner)" : psfDetails.joined(separator: "; "))"
+                    entryReport = "Entrées de table lues : \(entries) (IDs initiaux : \(preview.joined(separator: ", ")))\nPlages hors fichier : \(invalidRanges)\nEntrées marquées chiffrées (flags +8) : \(encryptedFlags)\nEntrées protégées (ID et taille) : \(encryptedEntries.isEmpty ? "Aucune" : encryptedEntries.joined(separator: "; "))\nTailles déclarées (non dédupliquées) : accessibles \(clearDataBytes) octets; protégées \(protectedDataBytes) octets\nSignatures internes reconnues : \(signatures.isEmpty ? "Aucune" : signatures.joined(separator: "; "))\nNoms résolus : \(resolved.isEmpty ? "Aucun" : resolved.joined(separator: "; "))\nMétadonnées PSF : \(psfDetails.isEmpty ? "Aucune valeur décodée (format à examiner)" : psfDetails.joined(separator: "; "))"
 
                 } else {
                     entryReport = "Entrées : lecture incomplète"
