@@ -502,7 +502,8 @@ extension MaxPS4NativeLinkCheck {
             let code = Data(bytes)
             let translated = arm64TranslationPreview(code)
             let fallback = runSyntheticX86PreferJIT(code, budget: 64)
-            let ok = translated.map { verifyARM64Preview($0) } == true &&\n                     fallback?.result == expected &&
+            let ok = translated.map { verifyARM64Preview($0) } == true &&
+                     fallback?.result == expected &&
                      fallback?.usedJIT == false
             summary.append("\(ok ? "✓" : "✗") \(name): \(translated?.count ?? 0) mots ARM64, " +
                            "sortie \(fallback.map { String($0.result) } ?? "échec")")
