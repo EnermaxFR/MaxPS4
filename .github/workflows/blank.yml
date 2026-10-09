@@ -313,8 +313,27 @@ jobs:
                 | tee -a build/diagnostics/aether-full-engine/status.txt
             fi
           done
+          # Surface concrete compiler errors in the job log, not just a
+          # generic BLOCKED line hidden inside the diagnostics directory.
+          for log in build/diagnostics/aether-full-engine/*.log; do
+            test -f "$log" || continue
+            if test -s "$log"; then
+              echo "::group::AetherPS4 compiler diagnostics: $log"
+              grep -m 25 -E 'fatal error:|error:|warning:' "$log" || tail -25 "$log"
+              echo "::endgroup::"
+            fi
+          done
           # This exploration must not break the working MaxPS4 IPA.
           echo "No full guest engine is selected for shipping without resolved dependencies."
+
+      - name: Upload AetherPS4 guest engine compile diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-AetherPS4-full-engine-diagnostics
+          path: build/diagnostics/aether-full-engine/
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Verify FEXCore upstream source availability (pinned)
         shell: bash
