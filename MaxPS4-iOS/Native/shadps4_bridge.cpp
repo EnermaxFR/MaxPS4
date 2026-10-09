@@ -525,6 +525,30 @@ extern "C" int maxps4_native_map_jit_allocation_probe() noexcept {
 #endif
 }
 
+// Non-executable MAP_JIT diagnostic. Capture errno immediately on failure;
+// this does not attempt RX permissions or generated-code execution.
+#include <cerrno>
+extern "C" int maxps4_native_map_jit_errno_probe(int* error_out) noexcept {
+    if (!error_out) return -1;
+    *error_out = 0;
+#if defined(__APPLE__) && defined(__aarch64__) && defined(MAP_JIT)
+    const long n = sysconf(_SC_PAGESIZE);
+    if (n <= 0 || n > 65536) return -1;
+    errno = 0;
+    void* p = mmap(nullptr, static_cast<std::size_t>(n),
+                   PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0);
+    if (p == MAP_FAILED) {
+        *error_out = errno;
+        return 0;
+    }
+    (void)munmap(p, static_cast<std::size_t>(n));
+    return 1;
+#else
+    return -1;
+#endif
+}
+
 extern "C" int maxps4_native_debugger_attached() noexcept;
 // Manual, opt-in execution test, independent of the PS4 guest translator.
 // Return codes: 1 = generated 42 executed; 0 = unsupported; -1 = no debugger;
