@@ -666,6 +666,7 @@ jobs:
           PY
           : > build/diagnostics/fexcore-extra-compile-status.txt
           FEX_EXTRA_OBJECTS=()
+          : > build/diagnostics/fexcore-extra-objects.txt
           extra_index=0
           while IFS= read -r source; do
             test -f "$source" || continue
@@ -682,6 +683,7 @@ jobs:
                 -I "$FEX/FEXCore/Source" -I "$FEX/Source" -I "$FMT_INCLUDE" \
                 -c "$source" -o "$output" > "$log" 2>&1; then
               FEX_EXTRA_OBJECTS+=("$output")
+              printf '%s\n' "$output" >> build/diagnostics/fexcore-extra-objects.txt
               echo "PASS $source" >> build/diagnostics/fexcore-extra-compile-status.txt
             else
               echo "BLOCKED $source (see $log)" >> build/diagnostics/fexcore-extra-compile-status.txt
@@ -729,7 +731,8 @@ jobs:
           cpu_backend = Path("build/diagnostics/fexcore-cpu-backend-status.txt").read_text()
           if cpu_backend.startswith("PASS FEXCore CPUBackend.cpp compiled"):
               expected.append("fexcore-cpu-backend-ios.o")
-          expected += sorted(p.name for p in Path("build/diagnostics").glob("fexcore-extra-*-ios.o"))
+          manifest = Path("build/diagnostics/fexcore-extra-objects.txt").read_text().splitlines()
+          expected += sorted(Path(path).name for path in manifest)
           if actual != sorted(expected):
               raise SystemExit(f"Incorrect FEXCore archive members: expected={sorted(expected)}, actual={actual}")
           print(f"PASS {len(expected)} upstream FEXCore ARM64 archive members")
@@ -939,6 +942,7 @@ jobs:
             build/diagnostics/fexcore-cpu-backend-status.txt
             build/diagnostics/fexcore-missing-components.txt
             build/diagnostics/fexcore-extra-compile-status.txt
+            build/diagnostics/fexcore-extra-objects.txt
             build/diagnostics/fexcore-extra-*-compile.log
             build/diagnostics/fexcore-cpu-backend-ios.o
             build/diagnostics/fexcore-jit-full-link-status.txt
