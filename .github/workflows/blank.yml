@@ -724,6 +724,7 @@ jobs:
                 -target arm64-apple-ios16.0 -isysroot "$SDK" \
                 -dynamiclib -Wl,-undefined,error \
                 -Wl,-force_load,build/diagnostics/libMaxPS4FEXJITProbe.a \
+                -Wl,-dead_strip_dylibs \
                 -o build/diagnostics/libMaxPS4FEXJITLinkProbe.dylib \
                 > build/diagnostics/fexcore-jit-full-link.log 2>&1; then
               echo "PASS isolated full linker dependency check (not executable JIT)" \
