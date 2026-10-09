@@ -526,6 +526,12 @@ struct MaxPS4HomeView: View {
                     } label: {
                         settingButton(icon: "memorychip", title: "Tester la mémoire du futur JIT")
                     }
+                    Divider().overlay(.white.opacity(0.08))
+                    Button {
+                        jitStatusReport = MaxPS4NativeLinkCheck.jitARM64StagingReport
+                    } label: {
+                        settingButton(icon: "memorychip.fill", title: "Préparer un bloc ARM64 en mémoire")
+                    }
                     if let jitStatusReport {
                         Button {
                             UIPasteboard.general.string = jitStatusReport
