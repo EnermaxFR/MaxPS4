@@ -320,6 +320,7 @@ jobs:
                  -I "build/diagnostics/fexcore-upstream/FEXCore/include" \
                  -I "build/diagnostics/fexcore-upstream/FEXCore/Source" \
                  -I "build/diagnostics/fexcore-upstream/Source" \
+                 -I "$(brew --prefix fmt)/include" \
                  -c "$ROOT/$source" -o "$output" \
                  > "$log" 2>&1; then
               echo "PASS compile $source (linking and guest execution unverified)" \
