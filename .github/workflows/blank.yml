@@ -646,14 +646,14 @@ jobs:
           from pathlib import Path
           members = Path("build/diagnostics/fexcore-jit-archive-members.txt").read_text().splitlines()
           # Apple's ar may expose a ranlib symbol table alongside actual objects.
-          actual = {member for member in members if not member.startswith("__.SYMDEF")}
-          expected = {
+          actual = sorted(member for member in members if not member.startswith("__.SYMDEF"))
+          expected = sorted((
               "fexcore-jit-core-ios.o",
               "fexcore-jit-alu-ios.o",
               "fexcore-arm64-relocations-ios.o",
-          }
+          ))
           if actual != expected:
-              raise SystemExit(f"Incorrect FEXCore archive members: missing={sorted(expected - actual)}, extra={sorted(actual - expected)}")
+              raise SystemExit(f"Incorrect FEXCore archive members: expected={expected}, actual={actual}")
           print("PASS exact three upstream FEXCore ARM64 archive members")
           PY
           then
