@@ -15,6 +15,9 @@ private func maxps4NativeMapJITErrnoProbe(_ errorOut: UnsafeMutablePointer<Int32
 @_silgen_name("maxps4_stikdualmap_port_present")
 private func maxps4StikDualMapPortPresent() -> Int32
 
+@_silgen_name("maxps4_stikdualmap_arm64_execute_suite")
+private func maxps4StikDualMapARM64ExecuteSuite(_ passed: UnsafeMutablePointer<Int32>?) -> Int32
+
 @_silgen_name("maxps4_stikdualmap_arm64_execute_42")
 private func maxps4StikDualMapARM64Execute42() -> Int32
 
@@ -572,6 +575,26 @@ extension MaxPS4OnDeviceJITProbe {
     // Show the precise readiness gates without branching into RX memory.
     // User-initiated experimental BRK path. The debugger trap can terminate the app.
     // A marker survives a crash/relaunch, without implying that the trap was handled.
+    static func manuallyExecuteStikDebugSuite() -> String {
+        guard maxps4StikDualMapDebuggerPreflight() == 1 else {
+            return "Suite ARM64 non lancée : P_TRACED absent ; aucun BRK envoyé."
+        }
+        UserDefaults.standard.set("suite MOV/ADD/SUB commencée — issue inconnue en cas de fermeture", forKey: "maxps4StikDebugAttempt")
+        var passed: Int32 = 0
+        let status = maxps4StikDualMapARM64ExecuteSuite(&passed)
+        let detail: String
+        switch status {
+        case 1: detail = "PASS : \(passed)/3 programmes exécutés en ARM64 natif ; MOV 42, MOV 40 + ADD 2, MOV 50 - SUB 8"
+        case -3: detail = "Allocation StikDebug impossible (BRK non confirmé)"
+        case -4: detail = "Échec de résultat pour le programme \(passed + 1)"
+        case -5: detail = "Traduction/vérification refusée pour le programme \(passed + 1)"
+        case -1: detail = "Débogueur absent au démarrage"
+        default: detail = "Test indisponible (code \(status))"
+        }
+        UserDefaults.standard.set(detail, forKey: "maxps4StikDebugAttempt")
+        return "Laboratoire — suite JIT ARM64 réelle\n" + detail + "\nCette suite synthétique ne valide pas encore FEXCore ou Kero Blaster."
+    }
+
     static func manuallyExecuteStikDebug42() -> String {
         guard maxps4StikDualMapDebuggerPreflight() == 1 else {
             return "Test non lancé : P_TRACED absent. Aucune commande BRK envoyée."
