@@ -524,6 +524,7 @@ extern "C" int maxps4_native_map_jit_allocation_probe() noexcept {
 #endif
 }
 
+extern "C" int maxps4_native_debugger_attached() noexcept;
 // Manual, opt-in execution test, independent of the PS4 guest translator.
 // Return codes: 1 = generated 42 executed; 0 = unsupported; -1 = no debugger;
 // -2 = MAP_JIT allocation denied; -3 = RX transition denied; -4 = wrong result.
