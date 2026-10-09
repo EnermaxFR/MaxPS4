@@ -565,6 +565,29 @@ enum MaxPS4OnDeviceJITProbe {
 private func maxps4_native_generated_arm64_execute_probe() -> Int32
 
 extension MaxPS4OnDeviceJITProbe {
+    // A standard iOS app has no safe fork-based crash sandbox for generated code.
+    // Show the precise readiness gates without branching into RX memory.
+    static func executionIsolationReadinessReport() -> String {
+        var jitError: Int32 = 0
+        let jit = maxps4NativeMapJITErrnoProbe(&jitError)
+        var rxError: Int32 = 0
+        let rx = maxps4NativeRWtoRXProbe(&rxError)
+        let debugger = maxps4StikDualMapDebuggerPreflight() == 1
+        let jitText = jit == 1 ? "disponible" : (jit == 0 ? "refusé (errno \(jitError))" : "indisponible")
+        let rxText = rx == 1 ? "autorisée" : (rx == 0 ? "refusée (errno \(rxError))" : "indisponible")
+        return """
+        Laboratoire MaxPS4 — préparation d'exécution native ARM64
+        MAP_JIT : \(jitText)
+        Transition RW → RX : \(rxText)
+        État de signature : \(MaxPS4NativeLinkCheck.codeSigningDebugStatus)
+        Indice P_TRACED : \(debugger ? "présent" : "absent (non concluant pour StikDebug)")
+        Service universal.js : non confirmé
+        Processus de test isolé : non disponible dans cette application iOS
+        Exécution dynamique ARM64 : NON déclenchée
+        Étape suivante : ajouter une cible auxiliaire réellement isolée et signée, puis valider la gestion des erreurs iOS avant tout branchement.
+        """
+    }
+
     static func generatedARM64ExecutionReport() -> String {
         // Fail closed before entering generated-code execution. This check is
         // intentionally independent of CS_DEBUGGED: its presence is not proof
@@ -587,7 +610,7 @@ extension MaxPS4OnDeviceJITProbe {
         // value is the only success evidence. No BRK is emitted by this path.
         switch maxps4_native_generated_arm64_execute_probe() {
         case 1:
-            return "Instructions ARM64 générées dynamiquement : Exécutées (42). Test isolé réussi ; FEXCore et les jeux PS4 ne sont pas validés."
+            return "Instructions ARM64 générées dynamiquement : Exécutées (42). Test exécuté dans le processus MaxPS4, NON isolé ; FEXCore et les jeux PS4 ne sont pas validés."
         case -1:
             return "Test ARM64 généré arrêté : P_TRACED absent selon iOS. Cela ne démontre pas à lui seul un échec de StikDebug. Aucune instruction ARM64 générée exécutée. Vérifier la session debugserver et les permissions de mémoire."
         case -2:
