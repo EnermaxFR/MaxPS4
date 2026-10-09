@@ -538,6 +538,25 @@ struct MaxPS4HomeView: View {
                     } label: {
                         settingButton(icon: "checkmark.seal", title: "Vérifier l’intégrité des blocs ARM64")
                     }
+                    Divider().overlay(.white.opacity(0.08))
+                    Button {
+                        guard let bundleID = Bundle.main.bundleIdentifier,
+                              let escaped = bundleID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+                              let url = URL(string: "stikjit://enable-jit?bundle-id=" + escaped) else {
+                            jitStatusReport = "Impossible de préparer le lien StikDebug : identifiant d’application absent."
+                            return
+                        }
+                        UIApplication.shared.open(url, options: [:]) { opened in
+                            if !opened {
+                                jitStatusReport = "StikDebug n’a pas accepté le lien. Ouvre StikDebug manuellement et sélectionne MaxPS4."
+                            }
+                        }
+                    } label: {
+                        settingButton(icon: "arrow.up.right.square", title: "Demander le JIT dans StikDebug")
+                    }
+                    Text("Ouvre StikDebug pour MaxPS4. Le retour dans l’application ne prouve pas que le JIT natif fonctionne.")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.56))
                     if let jitStatusReport {
                         Button {
                             UIPasteboard.general.string = jitStatusReport
