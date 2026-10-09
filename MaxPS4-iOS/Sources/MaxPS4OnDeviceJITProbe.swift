@@ -15,6 +15,9 @@ private func maxps4NativeMapJITErrnoProbe(_ errorOut: UnsafeMutablePointer<Int32
 @_silgen_name("maxps4_stikdualmap_port_present")
 private func maxps4StikDualMapPortPresent() -> Int32
 
+@_silgen_name("maxps4_stikdualmap_arm64_two_register_test")
+private func maxps4StikDualMapTwoRegisters() -> Int32
+
 @_silgen_name("maxps4_stikdualmap_arm64_branch_suite")
 private func maxps4StikDualMapARM64BranchSuite(_ passed: UnsafeMutablePointer<Int32>?) -> Int32
 
@@ -578,6 +581,19 @@ extension MaxPS4OnDeviceJITProbe {
     // Show the precise readiness gates without branching into RX memory.
     // User-initiated experimental BRK path. The debugger trap can terminate the app.
     // A marker survives a crash/relaunch, without implying that the trap was handled.
+    static func manuallyExecuteTwoRegisters() -> String {
+        guard maxps4StikDualMapDebuggerPreflight() == 1 else {
+            return "Test EAX/ECX non lancé : P_TRACED absent."
+        }
+        UserDefaults.standard.set("Test EAX/ECX démarré — issue inconnue si fermeture", forKey: "maxps4StikDebugAttempt")
+        let status = maxps4StikDualMapTwoRegisters()
+        let report = status == 1
+            ? "PASS : EAX=40, ECX=2, ADD EAX,ECX ; interpréteur et JIT ARM64 retournent 42"
+            : "ÉCHEC : test JIT deux registres (code \(status))."
+        UserDefaults.standard.set(report, forKey: "maxps4StikDebugAttempt")
+        return "Laboratoire — deux registres x86-64\n" + report
+    }
+
     static func manuallyExecuteBranchSuite() -> String {
         guard maxps4StikDualMapDebuggerPreflight() == 1 else {
             return "Branchements JIT non lancés : P_TRACED absent ; aucun BRK envoyé."
