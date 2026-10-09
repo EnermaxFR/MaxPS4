@@ -536,6 +536,12 @@ struct MaxPS4HomeView: View {
                             settingButton(icon: "lock.open", title: "Laboratoire : tester les permissions RX (sans exécution)")
                         }
                         Divider().overlay(.white.opacity(0.08))
+                        Button {
+                            jitStatusReport = MaxPS4OnDeviceJITProbe.arm64RXStagingReport()
+                        } label: {
+                            settingButton(icon: "memorychip", title: "Laboratoire : préparer MOV 42 / RET en RX")
+                        }
+                        Divider().overlay(.white.opacity(0.08))
                     Button {
                         jitStatusReport = MaxPS4NativeLinkCheck.jitStatusReport
                     } label: {
