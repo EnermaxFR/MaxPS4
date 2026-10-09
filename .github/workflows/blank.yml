@@ -567,7 +567,7 @@ jobs:
               "runtime_jit_tested": False,
           }
           (base / "fexcore-jit-core-report.json").write_text(
-              json.dumps(report, indent=2, ensure_ascii=False) + "\\n")
+              json.dumps(report, indent=2, ensure_ascii=False) + "\n")
           print("FEXCore JIT compile report:", json.dumps(report))
           PY
           # Confirm the produced object is genuinely Mach-O arm64 rather than
