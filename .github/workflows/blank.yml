@@ -684,11 +684,17 @@ jobs:
                 && test -s build/diagnostics/fexcore-jit-partial-link.o \
                 && xcrun lipo -archs build/diagnostics/fexcore-jit-partial-link.o \
                   | grep -Eq '(^|[[:space:]])arm64([[:space:]]|$)'; then
-              # Demangle and deduplicate unresolved C++ references for porting.
-              if xcrun nm -u build/diagnostics/fexcore-jit-partial-link.o \
+              # Mach-O symbols are underscore-prefixed; nm -j yields names only.
+              # Prefer toolchain c++filt when available and preserve raw names.
+              if xcrun nm -u -j build/diagnostics/fexcore-jit-partial-link.o \
                   > build/diagnostics/fexcore-jit-partial-undefined-symbols.txt 2>&1; then
-                xcrun c++filt < build/diagnostics/fexcore-jit-partial-undefined-symbols.txt \
-                  | sort -u > build/diagnostics/fexcore-jit-partial-demangled-symbols.txt
+                if xcrun --find c++filt >/dev/null 2>&1; then
+                  xcrun c++filt < build/diagnostics/fexcore-jit-partial-undefined-symbols.txt \
+                    | sort -u > build/diagnostics/fexcore-jit-partial-demangled-symbols.txt
+                else
+                  sort -u build/diagnostics/fexcore-jit-partial-undefined-symbols.txt \
+                    > build/diagnostics/fexcore-jit-partial-demangled-symbols.txt
+                fi
               else
                 echo "Symbol inventory unavailable" \
                   > build/diagnostics/fexcore-jit-partial-demangled-symbols.txt
