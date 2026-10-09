@@ -24,6 +24,7 @@ struct MaxPS4HomeView: View {
     @State private var inspectionReport: String?
     @State private var selectedGameDetails: MaxPS4Game?
     @State private var detailsReport: String?
+    @State private var jitStatusReport: String?
 
     @AppStorage("showFPS") private var showFPS = false
     @AppStorage("networkEnabled") private var networkEnabled = false
@@ -472,6 +473,35 @@ struct MaxPS4HomeView: View {
                     }
                     .tint(.blue)
                     .padding(.vertical, 14)
+                }
+
+                settingsCard {
+                    settingInfoRow(
+                        icon: "cpu",
+                        title: "JIT ARM64",
+                        value: MaxPS4NativeLinkCheck.isARM64JITReady ? "Prêt" : "Inactif",
+                        color: MaxPS4NativeLinkCheck.isARM64JITReady ? .green : .orange
+                    )
+                    Divider().overlay(.white.opacity(0.08))
+                    settingInfoRow(
+                        icon: "ant.fill",
+                        title: "Protocole StikDebug",
+                        value: MaxPS4NativeLinkCheck.isStikDebugProtocolPresent ? "Intégré" : "Absent",
+                        color: MaxPS4NativeLinkCheck.isStikDebugProtocolPresent ? .cyan : .orange
+                    )
+                    Divider().overlay(.white.opacity(0.08))
+                    Button {
+                        jitStatusReport = MaxPS4NativeLinkCheck.jitStatusReport
+                    } label: {
+                        settingButton(icon: "checkmark.shield.fill", title: "Vérifier l’état du JIT")
+                    }
+                    if let jitStatusReport {
+                        Text(jitStatusReport)
+                            .font(.footnote.monospaced())
+                            .foregroundStyle(.white.opacity(0.85))
+                            .textSelection(.enabled)
+                            .padding(.vertical, 10)
+                    }
                 }
 
                 settingsCard {
