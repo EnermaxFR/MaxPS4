@@ -3,6 +3,9 @@ import Foundation
 @_silgen_name("maxps4_native_map_jit_allocation_probe")
 private func maxps4NativeMapJITAllocationProbe() -> Int32
 
+@_silgen_name("maxps4_native_arm64_rx_staging_probe")
+private func maxps4NativeARM64RXStagingProbe(_ errorOut: UnsafeMutablePointer<Int32>?) -> Int32
+
 @_silgen_name("maxps4_native_rw_to_rx_permission_probe")
 private func maxps4NativeRWtoRXProbe(_ errorOut: UnsafeMutablePointer<Int32>?) -> Int32
 
@@ -26,6 +29,25 @@ private func maxps4NativePKGHeader(
 ) -> Int32
 
 enum MaxPS4OnDeviceJITProbe {
+    static func arm64RXStagingReport() -> String {
+        var errorCode: Int32 = 0
+        let status = maxps4NativeARM64RXStagingProbe(&errorCode)
+        let result: String
+        switch status {
+        case 1: result = "PASS : MOV W0, #42 / RET écrits et vérifiés sur page RX"
+        case 0: result = "REFUS : allocation ou passage RX impossible (errno \(errorCode))"
+        case -2: result = "ÉCHEC : octets ARM64 modifiés ou illisibles après passage RX"
+        default: result = "Test non disponible sur cet appareil"
+        }
+        return """
+        Laboratoire MaxPS4 — staging ARM64 en mémoire RX
+        \(result)
+        Instructions ARM64 : 0x52800540, 0xD65F03C0
+        Aucun branchement vers le code généré ; aucune exécution JIT.
+        Aucun BRK StikDebug envoyé ; processus isolé non disponible.
+        """
+    }
+
     // Permission test only: no instruction execution and no StikDebug BRK.
     static func executablePermissionReport() -> String {
         var errorCode: Int32 = 0
