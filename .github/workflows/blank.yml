@@ -151,6 +151,28 @@ jobs:
           xcrun lipo -archs build/diagnostics/aether-guest-cpu-ios-arm64.o | grep -w arm64
           echo "PASS: real AetherPS4 GuestCpuBackend compiled for iOS arm64"
 
+      - name: Run real AetherPS4 GuestCpuBackend native ABI regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          UPSTREAM="build/diagnostics/aetherps4-upstream"
+          cat > build/diagnostics/aether-guest-test.cpp <<'CPP'
+          #include <cstdio>
+          extern "C" int maxps4_aether_guest_backend_probe() noexcept;
+          int main() {
+              const bool success = maxps4_aether_guest_backend_probe() == 1;
+              std::puts(success ? "PASS AetherPS4 CPU ABI and failure handling"
+                                : "FAIL AetherPS4 CPU ABI and failure handling");
+              return success ? 0 : 1;
+          }
+          CPP
+          clang++ -std=c++23 -I "$UPSTREAM/src" \
+            "$UPSTREAM/src/core/guest_cpu/guest_cpu.cpp" \
+            MaxPS4-iOS/Native/aether_guest_cpu_adapter.cpp \
+            build/diagnostics/aether-guest-test.cpp \
+            -o build/diagnostics/aether-guest-test
+          build/diagnostics/aether-guest-test | tee build/diagnostics/aether-guest-test.log
+
       - name: Test ARM64 translation and safe interpreter fallback on macOS
         shell: bash
         run: |
