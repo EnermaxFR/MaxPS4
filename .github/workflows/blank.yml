@@ -409,8 +409,8 @@ jobs:
           from pathlib import Path
           p = Path("build/diagnostics/fexcore-upstream/FEXCore/include/FEXCore/Utils/WritePriorityMutex.h")
           s = p.read_text()
-          s = s.replace("#if !defined(_WIN32)\\n#include <linux/futex.h>", "#if defined(__APPLE__)\\n// Darwin uses C++20 atomic wait/notify below.\\n#elif !defined(_WIN32)\\n#include <linux/futex.h>", 1)
-          start = s.index("private:\\n\\n#if !defined(_WIN32)\\n  void FutexWaitForWriteAvailable")
+          s = s.replace("#if !defined(_WIN32)\n#include <linux/futex.h>", "#if defined(__APPLE__)\n// Darwin uses C++20 atomic wait/notify below.\n#elif !defined(_WIN32)\n#include <linux/futex.h>", 1)
+          start = s.index("private:\n\n#if !defined(_WIN32)\n  void FutexWaitForWriteAvailable")
           insert = """private:
 
           #if defined(__APPLE__)
@@ -427,7 +427,7 @@ jobs:
               std::atomic_ref<uint32_t>(Futex).notify_all();
             }
           #elif !defined(_WIN32)"""
-          s = s[:start] + s[start:].replace("private:\\n\\n#if !defined(_WIN32)", insert, 1)
+          s = s[:start] + s[start:].replace("private:\n\n#if !defined(_WIN32)", insert, 1)
           p.write_text(s)
           PY
           # Second real FEXCore JIT-related implementation probe.
