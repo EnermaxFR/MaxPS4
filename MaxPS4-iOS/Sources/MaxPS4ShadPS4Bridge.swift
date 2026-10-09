@@ -425,6 +425,13 @@ private func maxps4_native_arm64_preflight(
     _ code: UnsafePointer<UInt8>?, _ size: Int
 ) -> Int32
 
+@_silgen_name("maxps4_native_jit_arm64_block_checksum")
+private func maxps4_native_jit_arm64_block_checksum(
+    _ code: UnsafePointer<UInt8>?, _ size: Int,
+    _ checksum: UnsafeMutablePointer<UInt64>?,
+    _ bytes: UnsafeMutablePointer<Int>?
+) -> Int32
+
 @_silgen_name("maxps4_native_jit_stage_arm64")
 private func maxps4_native_jit_stage_arm64(
     _ bytes: UnsafePointer<UInt8>?, _ length: Int,
@@ -482,6 +489,32 @@ extension MaxPS4NativeLinkCheck {
     /// Explicit safety gate for future JIT experiments. A debugger hint alone
     /// cannot authorize executable memory, BRK requests or generated-code calls.
     /// A real iOS VM allocation test, but no executable/JIT permission test.
+    static var jitBlockIntegrityReport: String {
+        let guest = Data([0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3])
+        var first: UInt64 = 0
+        var second: UInt64 = 0
+        var sizeA = 0
+        var sizeB = 0
+        let firstOK = guest.withUnsafeBytes { raw in
+            maxps4_native_jit_arm64_block_checksum(
+                raw.bindMemory(to: UInt8.self).baseAddress, guest.count, &first, &sizeA
+            ) == 1
+        }
+        let secondOK = guest.withUnsafeBytes { raw in
+            maxps4_native_jit_arm64_block_checksum(
+                raw.bindMemory(to: UInt8.self).baseAddress, guest.count, &second, &sizeB
+            ) == 1
+        }
+        let consistent = firstOK && secondOK && first == second && sizeA == sizeB
+        return """
+        Intégrité des blocs ARM64 : \(consistent ? "Validée" : "Échec")
+        Taille du bloc : \(sizeA) octets
+        Empreinte de diagnostic : \(firstOK ? String(first, radix: 16) : "Indisponible")
+        JIT natif : Inactif
+        Aucun code généré n’a été exécuté.
+        """
+    }
+
     static var jitARM64StagingReport: String {
         let guest = Data([0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3])
         var bytes = 0
