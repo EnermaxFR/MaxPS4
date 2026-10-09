@@ -562,6 +562,37 @@ extern "C" int maxps4_native_map_jit_allocation_probe() noexcept {
 #include <cerrno>
 // Probe anonymous RW -> RX permission transition without executing the page.
 // A successful mprotect does not prove that unsigned generated code can run.
+// Stage generated ARM64 code in anonymous memory, switch RW->RX, and verify bytes.
+// Deliberately does NOT branch into the RX page: iOS may terminate this process.
+extern "C" int maxps4_native_arm64_rx_staging_probe(int* error_out) noexcept {
+    if (!error_out) return -1;
+    *error_out = 0;
+#if defined(__APPLE__) && defined(__aarch64__)
+    const long n = sysconf(_SC_PAGESIZE);
+    if (n <= 0 || n > 65536) return -1;
+    void* p = mmap(nullptr, static_cast<std::size_t>(n),
+                   PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (p == MAP_FAILED) {
+        *error_out = errno;
+        return 0;
+    }
+    constexpr std::uint32_t instructions[] = {0x52800540u, 0xD65F03C0u};
+    std::memcpy(p, instructions, sizeof(instructions));
+    sys_icache_invalidate(p, sizeof(instructions));
+    errno = 0;
+    if (mprotect(p, static_cast<std::size_t>(n), PROT_READ | PROT_EXEC) != 0) {
+        *error_out = errno;
+        (void)munmap(p, static_cast<std::size_t>(n));
+        return 0;
+    }
+    const bool intact = std::memcmp(p, instructions, sizeof(instructions)) == 0;
+    (void)munmap(p, static_cast<std::size_t>(n));
+    return intact ? 1 : -2;
+#else
+    return -1;
+#endif
+}
+
 extern "C" int maxps4_native_rw_to_rx_permission_probe(int* error_out) noexcept {
     if (!error_out) return -1;
     *error_out = 0;
