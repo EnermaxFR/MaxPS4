@@ -647,6 +647,24 @@ jobs:
             echo "BLOCKED FEXCore CPUBackend.cpp port; inspect compiler output" \
               | tee build/diagnostics/fexcore-cpu-backend-status.txt
           fi
+          # Discover upstream ARM64 emitter and lookup-cache implementation files.
+          # Record exact paths and compilation prerequisites instead of guessing
+          # filenames or treating the three-object archive as a complete runtime.
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path("build/diagnostics/fexcore-upstream")
+          candidates = []
+          for base in (Path("build/diagnostics/fexcore-upstream"), Path("build/diagnostics/aetherps4-upstream")):
+              if not base.exists():
+                  continue
+              for path in base.rglob("*.cpp"):
+                  name = path.name.lower()
+                  if "arm64emitter" in name or "lookupcache" in name:
+                      candidates.append(str(path))
+          report = Path("build/diagnostics/fexcore-missing-components.txt")
+          report.write_text("\\n".join(sorted(set(candidates))) + ("\\n" if candidates else "No standalone Arm64Emitter/LookupCache .cpp files located; inspect upstream definitions.\\n"))
+          print(report.read_text())
+          PY
           # Prepare a real static archive of upstream FEXCore ARM64 JIT objects.
           # Archiving does not resolve external symbols or enable executable memory.
           rm -f build/diagnostics/libMaxPS4FEXJITProbe.a
@@ -891,6 +909,7 @@ jobs:
             build/diagnostics/fexcore-jit-full-link.log
             build/diagnostics/fexcore-cpu-backend-compile.log
             build/diagnostics/fexcore-cpu-backend-status.txt
+            build/diagnostics/fexcore-missing-components.txt
             build/diagnostics/fexcore-cpu-backend-ios.o
             build/diagnostics/fexcore-jit-full-link-status.txt
             build/diagnostics/fexcore-ipa-link-status.txt
