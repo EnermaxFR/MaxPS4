@@ -221,6 +221,16 @@ jobs:
           xcrun lipo -archs build/diagnostics/aether-hle-call-adapter-ios-arm64.o | grep -w arm64
           echo "PASS AetherPS4 HLE adapter compiled to real iOS arm64 object (not linked)"
 
+      - name: Inspect HLE adapter link dependencies before wiring CPU backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          OBJ=build/diagnostics/aether-hle-call-adapter-ios-arm64.o
+          xcrun nm -u "$OBJ" | sort -u > build/diagnostics/aether-hle-unresolved-symbols.txt
+          test -s build/diagnostics/aether-hle-unresolved-symbols.txt
+          echo "HLE unresolved symbols recorded; linking deferred until dependencies are satisfied."
+          head -35 build/diagnostics/aether-hle-unresolved-symbols.txt
+
       - name: Test ARM64 translation and safe interpreter fallback on macOS
         shell: bash
         run: |
