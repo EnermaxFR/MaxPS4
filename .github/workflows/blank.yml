@@ -274,6 +274,24 @@ jobs:
           echo "PASS pinned FEXCore source headers available"
           echo "NOTE: FEXCore is not yet compiled or linked"
 
+      - name: Compile pinned FEXCore guest ISA header against iOS arm64 SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          FEX="build/diagnostics/fexcore-upstream"
+          cat > build/diagnostics/fexcore-ios-header-probe.cpp <<'CPP'
+          #include <FEXCore/Core/X86Enums.h>
+          // Compile-only probe of a real FEXCore API header, not a JIT run.
+          int maxps4_fexcore_header_probe() { return 1; }
+          CPP
+          xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
+            -isysroot "$SDK" -I "$FEX/FEXCore/include" \
+            -c build/diagnostics/fexcore-ios-header-probe.cpp \
+            -o build/diagnostics/fexcore-ios-header-probe.o
+          xcrun lipo -archs build/diagnostics/fexcore-ios-header-probe.o | grep -w arm64
+          echo "PASS pinned FEXCore header compiled for native iOS arm64 (JIT not linked)"
+
       - name: Test ARM64 translation and safe interpreter fallback on macOS
         shell: bash
         run: |
