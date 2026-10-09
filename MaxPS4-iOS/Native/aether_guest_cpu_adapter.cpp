@@ -5,6 +5,56 @@
 #include <cerrno>
 #include <variant>
 
+// Real MaxPS4 restricted x86 interpreter reached through AetherPS4's
+// unmodified NativeGuestCpuBackend dispatch. This is NOT FEXCore.
+extern "C" int maxps4_native_guest_x86_run(
+    const std::uint8_t*, std::size_t, std::uint32_t, std::uint64_t*) noexcept;
+static Core::GuestExecutionResult MaxPS4RestrictedExecutor(
+    const Core::GuestExecutionRequest& request) {
+    if (request.Rip != 0x1000 || request.Rsp == 0)
+        return Core::GuestExecutionFailure{
+            .Stage = Core::GuestExecutionStage::Mapping, .Error = EINVAL};
+    // Synthetic in-memory guest block: MOV EAX,40; ADD EAX,2; RET.
+    // No PS4 ELF/SELF loading, no mapped external guest pointers.
+    constexpr std::uint8_t code[] = {
+        0xB8,40,0,0,0, 0x05,2,0,0,0, 0xC3
+    };
+    std::uint64_t result = 0;
+    if (maxps4_native_guest_x86_run(code, sizeof(code), 16, &result) != 1)
+        return Core::GuestExecutionFailure{
+            .Stage = Core::GuestExecutionStage::Execute, .Error = ENOTSUP};
+    Core::GuestExecutionState state{};
+    state.FirstRip = request.Rip;
+    state.LastRip = request.Rip;
+    state.Rip = request.Rip + sizeof(code);
+    state.Rsp = request.Rsp;
+    state.Gpr = request.Gpr;
+    state.Gpr[0] = result;
+    state.Rflags = request.Rflags;
+    state.StopReason = Core::GuestStopReason::Returned;
+    return state;
+}
+
+extern "C" int maxps4_aether_restricted_cpu_dispatch_probe() noexcept {
+    Core::GuestExecutionRequest request{};
+    request.Rip = 0x1000;
+    request.Rsp = 0x2000;
+    request.Gpr[1] = 99;
+    request.Rflags = 0x202;
+    Core::NativeGuestCpuBackend backend(&MaxPS4RestrictedExecutor);
+    const auto output = backend.Run(request);
+    const auto* state = std::get_if<Core::GuestExecutionState>(&output);
+    if (!state || state->Gpr[0] != 42 || state->Gpr[1] != 99 ||
+        state->Rflags != 0x202 || state->Rip != 0x100B ||
+        state->Rsp != request.Rsp ||
+        state->StopReason != Core::GuestStopReason::Returned) return 0;
+    request.Rip = 0xDEAD;
+    const auto bad = backend.Run(request);
+    const auto* failure = std::get_if<Core::GuestExecutionFailure>(&bad);
+    return failure && failure->Stage == Core::GuestExecutionStage::Mapping &&
+           failure->Error == EINVAL ? 1 : 0;
+}
+
 // Synthetic executor tests the upstream backend's success/result dispatch.
 // It is intentionally not a guest CPU interpreter or a FEXCore JIT.
 static Core::GuestExecutionResult TestExecutor(
