@@ -822,12 +822,21 @@ extern "C" int maxps4_stikdualmap_arm64_execute_42() noexcept {
     void* rw = nullptr;
     void* rx = nullptr;
     if (maxps4_stikdualmap_allocate(page, &rw, &rx) != 1) return -3;
-    // MOV W0, #42; RET. Write only to the RW alias; execute via RX alias.
-    constexpr std::uint32_t code[] = {0x52800540u, 0xD65F03C0u};
+    // Translate a synthetic x86-64 program through the SAME translator that
+    // backs the interpreter/JIT bridge; no hardcoded ARM64 execution payload.
+    constexpr std::uint8_t guest[] = {0xB8, 42, 0, 0, 0, 0xC3};
+    std::uint32_t words[16] = {};
+    std::size_t count = 0;
+    if (maxps4_arm64_translate_preview(guest, sizeof(guest), words, 16, &count) != 1 ||
+        count == 0 || count * sizeof(std::uint32_t) > page ||
+        maxps4_arm64_verify_preview(words, count) != 1) {
+        maxps4_stikdualmap_release(rw, rx, page);
+        return -5;
+    }
     auto* writable = static_cast<std::uint32_t*>(rw);
-    writable[0] = code[0];
-    writable[1] = code[1];
-    sys_icache_invalidate(rx, sizeof(code));
+    for (std::size_t i = 0; i < count; ++i) writable[i] = words[i];
+    // ARM64 instruction cache must be invalidated at the RX virtual alias.
+    sys_icache_invalidate(rx, count * sizeof(std::uint32_t));
     using Function = int (*)();
     const int value = reinterpret_cast<Function>(rx)();
     maxps4_stikdualmap_release(rw, rx, page);
