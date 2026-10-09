@@ -22,6 +22,9 @@ enum MaxPS4OnDeviceJITProbe {
         État signature : \(debugSigning)
         État du débogueur : \(debugger)
         Entrées du protocole intégrées : \(protocolPresent ? "Oui" : "Non")
+        Protocole source StikDebug : BRK #0xf00d, commande x16=1, arguments x0=0 / x1=taille
+        Compatibilité statique : Commande et paramètres concordants avec StikDebug/Scripts/universal.js
+        Réponse du serveur debugserver : Non vérifiée (aucune commande envoyée)
         Universal JIT Script attaché : Non vérifiable par ce test
         Allocation RX via StikDebug : Non tentée
         Alias RW via vm_remap : Non tenté ici
