@@ -573,10 +573,23 @@ extension MaxPS4NativeLinkCheck {
         """
     }
 
+    // These functions are implemented by the linked upstream AetherPS4
+    // GuestCpuBackend adapter. They run synthetic, restricted guest bytecode;
+    // they do not establish a PS4 game runtime or a working FEXCore JIT.
+    @_silgen_name("maxps4_aether_restricted_cpu_dispatch_probe")
+    private static func aetherRestrictedDispatchProbe() -> Int32
+
+    @_silgen_name("maxps4_aether_multi_block_dispatch_probe")
+    private static func aetherMultiBlockDispatchProbe() -> Int32
+
     static var aetherGuestBackendReport: String {
         let supported = maxps4_aether_guest_backend_probe() == 1
+        let dispatch = aetherRestrictedDispatchProbe() == 1
+        let blocks = aetherMultiBlockDispatchProbe() == 1
         return """
-        Backend CPU réel d’AetherPS4 : \(supported ? "Relié et testé" : "Échec du test")
+        Backend CPU d’AetherPS4 : \(supported ? "Relié et testé" : "Échec du test")
+        Dispatch CPU synthétique : \(dispatch ? "Réussi" : "Échec")
+        Deux blocs invités synthétiques : \(blocks ? "Réussis" : "Échec")
         Interface GuestCpuBackend : \(supported ? "Accessible" : "Non disponible")
         FEXCore JIT : Non encore relié
         Jeux PS4 : Pas encore exécutables
