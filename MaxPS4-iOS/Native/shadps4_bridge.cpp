@@ -486,6 +486,34 @@ void* maxps4_stikdebug_jit26_prepare_region(void* address,
 }
 #endif
 
+// JIT allocator groundwork: validate an ordinary writable page and release it.
+// Deliberately NEVER requests executable protection or sends BRK. Success
+// proves only that the VM allocator works, not that iOS permits JIT execution.
+#if defined(__APPLE__)
+#include <sys/mman.h>
+#endif
+extern "C" int maxps4_native_jit_writable_page_probe(
+    std::size_t* page_size_out) noexcept {
+    if (!page_size_out) return 0;
+    *page_size_out = 0;
+#if defined(__APPLE__)
+    const long page = sysconf(_SC_PAGESIZE);
+    if (page <= 0 || page > 65536) return 0;
+    void* memory = mmap(nullptr, static_cast<std::size_t>(page),
+                        PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (memory == MAP_FAILED) return 0;
+    auto* bytes = static_cast<volatile std::uint8_t*>(memory);
+    bytes[0] = 0x2a;
+    const bool ok = bytes[0] == 0x2a;
+    const int released = munmap(memory, static_cast<std::size_t>(page));
+    if (!ok || released != 0) return 0;
+    *page_size_out = static_cast<std::size_t>(page);
+    return 1;
+#else
+    return 0;
+#endif
+}
+
 // Read-only debugger attachment hint on iOS. A traced process does NOT
 // necessarily have StikDebug's script, JIT permissions or executable pages.
 // Never emit BRK merely to probe whether a debugger exists.
