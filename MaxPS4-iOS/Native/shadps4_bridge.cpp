@@ -583,6 +583,54 @@ extern "C" int maxps4_native_jit_arm64_block_checksum(
     return 1;
 }
 
+// Safe dual-map preparation probe: writable aliases only, no executable
+// permissions and no debugger trap. Based on the iOS vm_remap strategy used
+// by AetherPS4; this is NOT an active JIT allocator.
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/vm_map.h>
+#endif
+extern "C" int maxps4_native_jit_rw_alias_probe(std::size_t* page_bytes) noexcept {
+    if (!page_bytes) return 0;
+    *page_bytes = 0;
+#if defined(__APPLE__) && defined(__aarch64__)
+    const long raw_page = sysconf(_SC_PAGESIZE);
+    if (raw_page <= 0 || raw_page > 65536) return 0;
+    const std::size_t page = static_cast<std::size_t>(raw_page);
+    void* source = mmap(nullptr, page, PROT_READ | PROT_WRITE,
+                        MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (source == MAP_FAILED) return 0;
+    auto* original = static_cast<volatile std::uint8_t*>(source);
+    original[0] = 0x39;
+    vm_address_t alias = 0;
+    vm_prot_t current = 0;
+    vm_prot_t maximum = 0;
+    const kern_return_t status = vm_remap(mach_task_self(), &alias,
+                                         static_cast<vm_size_t>(page), 0,
+                                         VM_FLAGS_ANYWHERE, mach_task_self(),
+                                         reinterpret_cast<vm_address_t>(source),
+                                         FALSE, &current, &maximum,
+                                         VM_INHERIT_NONE);
+    bool success = false;
+    if (status == KERN_SUCCESS && alias != 0) {
+        auto* mapped = reinterpret_cast<volatile std::uint8_t*>(alias);
+        success = (current & VM_PROT_WRITE) != 0 && mapped[0] == 0x39;
+        if (success) {
+            mapped[0] = 0x7B;
+            success = original[0] == 0x7B;
+        }
+        if (vm_deallocate(mach_task_self(), alias,
+                          static_cast<vm_size_t>(page)) != KERN_SUCCESS)
+            success = false;
+    }
+    if (munmap(source, page) != 0) success = false;
+    if (success) *page_bytes = page;
+    return success ? 1 : 0;
+#else
+    return 0;
+#endif
+}
+
 // Read-only debugger attachment hint on iOS. A traced process does NOT
 // necessarily have StikDebug's script, JIT permissions or executable pages.
 // Never emit BRK merely to probe whether a debugger exists.
