@@ -288,6 +288,34 @@ jobs:
           test -s build/diagnostics/aether-fex-hle-required-symbols.txt
           echo "PASS AetherPS4 FEX HLE bridge cross-compiled; dependencies recorded; linking awaits FEXCore"
 
+      - name: Probe real AetherPS4 guest engine and CPU compilation for iOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          ROOT="build/diagnostics/aetherps4-upstream"
+          mkdir -p build/diagnostics/aether-full-engine
+          : > build/diagnostics/aether-full-engine/status.txt
+          for source in src/core/fex/fex_guest_engine.cpp src/core/guest_cpu/fex_guest_cpu.cpp; do
+            base="$(basename "$source" .cpp)"
+            output="build/diagnostics/aether-full-engine/${base}.o"
+            log="build/diagnostics/aether-full-engine/${base}.log"
+            if xcrun --sdk iphoneos clang++ -std=c++23 \
+                 -target arm64-apple-ios16.0 -isysroot "$SDK" \
+                 -I "$ROOT/src" -c "$ROOT/$source" -o "$output" \
+                 > "$log" 2>&1; then
+              echo "PASS compile $source (linking and guest execution unverified)" \
+                | tee -a build/diagnostics/aether-full-engine/status.txt
+              xcrun nm -u "$output" | sort -u \
+                > "build/diagnostics/aether-full-engine/${base}-unresolved.txt"
+            else
+              echo "BLOCKED compile $source; inspect $log for dependencies" \
+                | tee -a build/diagnostics/aether-full-engine/status.txt
+            fi
+          done
+          # This exploration must not break the working MaxPS4 IPA.
+          echo "No full guest engine is selected for shipping without resolved dependencies."
+
       - name: Verify FEXCore upstream source availability (pinned)
         shell: bash
         run: |
