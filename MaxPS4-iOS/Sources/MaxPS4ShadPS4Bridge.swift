@@ -466,6 +466,33 @@ extension MaxPS4NativeLinkCheck {
         """
     }
 
+    /// End-to-end compiler pipeline smoke test. The generated ARM64 words
+    /// remain inert data; results are produced by the x86 interpreter.
+    static var arm64PipelineSelfTestReport: String {
+        let programs: [(String, [UInt8], UInt64)] = [
+            ("MOV / ADD", [0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3], 42),
+            ("SUB / JNZ", [0xB8, 3, 0, 0, 0, 0x2D, 1, 0, 0, 0,
+                           0x75, 0xF9, 0xC3], 0),
+            ("CMP / JZ", [0xB8, 7, 0, 0, 0, 0x3D, 7, 0, 0, 0,
+                          0x74, 0x05, 0xB8, 0, 0, 0, 0, 0xC3], 7)
+        ]
+        var summary: [String] = []
+        var passing = 0
+        for (name, bytes, expected) in programs {
+            let code = Data(bytes)
+            let translated = arm64TranslationPreview(code)
+            let fallback = runSyntheticX86PreferJIT(code, budget: 64)
+            let ok = translated != nil && fallback?.result == expected &&
+                     fallback?.usedJIT == false
+            summary.append("\(ok ? "✓" : "✗") \(name): \(translated?.count ?? 0) mots ARM64, " +
+                           "sortie \(fallback.map { String($0.result) } ?? "échec")")
+            if ok { passing += 1 }
+        }
+        summary.insert("Pipeline ARM64 : \(passing)/\(programs.count) tests réussis", at: 0)
+        summary.append("Exécution des mots ARM64 : non effectuée (JIT inactif)")
+        return summary.joined(separator: "\n")
+    }
+
     static var jitStatusReport: String {
         let protocolStatus = isStikDebugProtocolPresent ? "Passerelle intégrée" : "Passerelle absente"
         let translation = isARM64TranslationSupported(
