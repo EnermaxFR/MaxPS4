@@ -39,6 +39,67 @@ extern "C" int maxps4_native_elf_entry_point(const std::uint8_t* data,
     return 1;
 }
 
+// First PS4 ELF64 loader stage: validate PT_LOAD mapping without executing code.
+// Assumes unmodified ELF64 x86-64 bytes, not an encrypted PS4 SELF container.
+// Bounds, integer overflow, and overlap are rejected before eventual mapping.
+extern "C" int maxps4_native_elf_load_layout(const std::uint8_t* data,
+                                               std::size_t count,
+                                               std::uint32_t* load_count,
+                                               std::uint64_t* mapped_bytes) noexcept {
+    if (!data || !load_count || !mapped_bytes || count < 64 ||
+        maxps4_native_executable_signature(data, count) != 1 ||
+        data[6] != 1) return 0;
+    auto read16 = [&](std::size_t i) -> std::uint16_t {
+        return std::uint16_t(data[i]) | (std::uint16_t(data[i + 1]) << 8);
+    };
+    auto read32 = [&](std::size_t i) -> std::uint32_t {
+        std::uint32_t v = 0;
+        for (unsigned b = 0; b < 4; ++b) v |= std::uint32_t(data[i + b]) << (8 * b);
+        return v;
+    };
+    auto read64 = [&](std::size_t i) -> std::uint64_t {
+        std::uint64_t v = 0;
+        for (unsigned b = 0; b < 8; ++b) v |= std::uint64_t(data[i + b]) << (8 * b);
+        return v;
+    };
+    const std::uint64_t offset = read64(32);
+    const std::uint16_t entry_size = read16(54);
+    const std::uint16_t headers = read16(56);
+    if (entry_size != 56 || headers == 0 || headers > 256 ||
+        offset > count || std::uint64_t(headers) * entry_size > count - offset) return 0;
+    std::uint64_t total = 0;
+    std::uint32_t mapped = 0;
+    for (std::uint16_t i = 0; i < headers; ++i) {
+        const auto h = static_cast<std::size_t>(offset + std::uint64_t(i) * entry_size);
+        if (read32(h) != 1) continue; // PT_LOAD
+        const std::uint64_t file_offset = read64(h + 8);
+        const std::uint64_t virtual_address = read64(h + 16);
+        const std::uint64_t file_size = read64(h + 32);
+        const std::uint64_t memory_size = read64(h + 40);
+        if (file_size > memory_size || file_offset > count ||
+            file_size > count - file_offset ||
+            virtual_address > UINT64_MAX - memory_size ||
+            total > UINT64_MAX - memory_size) return 0;
+        const std::uint64_t end = virtual_address + memory_size;
+        for (std::uint16_t j = 0; j < i; ++j) {
+            const auto old = static_cast<std::size_t>(offset + std::uint64_t(j) * entry_size);
+            if (read32(old) != 1) continue;
+            const auto old_address = read64(old + 16);
+            const auto old_size = read64(old + 40);
+            if (old_address > UINT64_MAX - old_size) return 0;
+            if (memory_size && old_size &&
+                virtual_address < old_address + old_size && old_address < end)
+                return 0;
+        }
+        total += memory_size;
+        ++mapped;
+    }
+    if (!mapped) return 0;
+    *load_count = mapped;
+    *mapped_bytes = total;
+    return 1;
+}
+
 // PS4 SELF header layout adapted from shadPS4 src/core/loader/elf.h,
 // Copyright 2024 shadPS4 Emulator Project, GPL-2.0-or-later.
 // Metadata-only inspection; does not decrypt, extract or execute a SELF.
