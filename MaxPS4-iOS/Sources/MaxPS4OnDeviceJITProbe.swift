@@ -3,12 +3,17 @@ import Foundation
 @_silgen_name("maxps4_native_map_jit_allocation_probe")
 private func maxps4NativeMapJITAllocationProbe() -> Int32
 
+@_silgen_name("maxps4_native_map_jit_errno_probe")
+private func maxps4NativeMapJITErrnoProbe(_ errorOut: UnsafeMutablePointer<Int32>?) -> Int32
+
 enum MaxPS4OnDeviceJITProbe {
     static func report() -> String {
         let mapStatus: String
-        switch maxps4NativeMapJITAllocationProbe() {
+        var errorCode: Int32 = 0
+        let allocation = maxps4NativeMapJITErrnoProbe(&errorCode)
+        switch allocation {
         case 1: mapStatus = "Allocation MAP_JIT : Autorisée (sans exécution)"
-        case 0: mapStatus = "Allocation MAP_JIT : Refusée par iOS"
+        case 0: mapStatus = "Allocation MAP_JIT : Refusée par iOS (errno \(errorCode): \(String(cString: strerror(errorCode))))"
         default: mapStatus = "Allocation MAP_JIT : Indisponible"
         }
         return """
@@ -17,7 +22,7 @@ enum MaxPS4OnDeviceJITProbe {
         Débogueur / P_TRACED : \(MaxPS4NativeLinkCheck.debuggerAttachmentDescription)
         Protocole StikDebug intégré : \(MaxPS4NativeLinkCheck.isStikDebugProtocolPresent ? "Oui" : "Non")
         \(mapStatus)
-        Entitlement get-task-allow : Non lu directement (vérifier dans StikDebug)
+        Entitlement get-task-allow : Non lu directement (vérifier dans StikDebug)\n        Méthode StikDebug : la confirmation de demande ne garantit pas le succès de mmap(MAP_JIT)
         Exécution ARM64 générée : Non testée par ce diagnostic
         FEXCore : Non validé
 
