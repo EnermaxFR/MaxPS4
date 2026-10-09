@@ -44,7 +44,7 @@ enum MaxPS4OnDeviceJITProbe {
         var aliasPageSize = 0
         let rwAliasWorks = maxps4StikRWMemoryAliasProbe(&aliasPageSize) == 1
         let aliasDescription = rwAliasWorks
-            ? "RW/RW validé sur \\(aliasPageSize) octets (sans droits exécutables)"
+            ? "RW/RW validé sur \(aliasPageSize) octets (sans droits exécutables)"
             : "Échec ou indisponible (aucune page exécutable testée)"
         let attachObserved = maxps4StikDualMapDebuggerPreflight() == 1
         let safeNextStep = attachObserved
