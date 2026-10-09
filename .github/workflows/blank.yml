@@ -430,6 +430,13 @@ jobs:
           s = s[:start] + s[start:].replace("private:\n\n#if !defined(_WIN32)", insert, 1)
           p.write_text(s)
           PY
+          # Generate IR instruction definitions and dispatch tables from upstream IR.json.
+          mkdir -p build/diagnostics/fexcore-generated/FEXCore/IR
+          python3 "$FEX/FEXCore/Scripts/json_ir_generator.py" \
+            "$FEX/FEXCore/Source/Interface/IR/IR.json" \
+            build/diagnostics/fexcore-generated/FEXCore/IR/IRDefines.inc \
+            build/diagnostics/fexcore-generated/FEXCore/IR/IRDefines_Dispatch.inc
+          test -s build/diagnostics/fexcore-generated/FEXCore/IR/IRDefines_Dispatch.inc
           # Second real FEXCore JIT-related implementation probe.
           JIT_SRC="$FEX/FEXCore/Source/Interface/Core/JIT/Arm64Relocations.cpp"
           test -s "$JIT_SRC"
