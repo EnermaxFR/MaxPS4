@@ -934,6 +934,51 @@ extern "C" int maxps4_stikdualmap_arm64_execute_42() noexcept {
 #endif
 }
 
+// Manual multi-program native JIT test. Requires the same confirmed StikDebug
+// session as execute_42 and may terminate MaxPS4 if the BRK handler disappears.
+// passed_out retains the number completed if a later test fails.
+extern "C" int maxps4_stikdualmap_arm64_execute_suite(int* passed_out) noexcept {
+    if (!passed_out) return -6;
+    *passed_out = 0;
+#if defined(__APPLE__) && defined(__aarch64__)
+    if (maxps4_native_debugger_attached() != 1) return -1;
+    const long n = sysconf(_SC_PAGESIZE);
+    if (n <= 0 || n > 65536) return -2;
+    const std::size_t page = static_cast<std::size_t>(n);
+    void* rw = nullptr;
+    void* rx = nullptr;
+    if (maxps4_stikdualmap_allocate(page, &rw, &rx) != 1) return -3;
+    constexpr std::uint8_t mov[] = {0xB8,42,0,0,0,0xC3};
+    constexpr std::uint8_t add[] = {0xB8,40,0,0,0,0x05,2,0,0,0,0xC3};
+    constexpr std::uint8_t sub[] = {0xB8,50,0,0,0,0x2D,8,0,0,0,0xC3};
+    const std::uint8_t* programs[] = {mov, add, sub};
+    const std::size_t lengths[] = {sizeof(mov), sizeof(add), sizeof(sub)};
+    int status = 1;
+    for (int test = 0; test < 3; ++test) {
+        std::uint32_t words[32] = {};
+        std::size_t count = 0;
+        if (maxps4_arm64_translate_preview(programs[test], lengths[test], words, 32, &count) != 1 ||
+            count == 0 || count * sizeof(std::uint32_t) > page ||
+            maxps4_arm64_verify_preview(words, count) != 1) {
+            status = -5;
+            break;
+        }
+        std::memcpy(rw, words, count * sizeof(std::uint32_t));
+        sys_icache_invalidate(rx, count * sizeof(std::uint32_t));
+        using Function = int (*)();
+        if (reinterpret_cast<Function>(rx)() != 42) {
+            status = -4;
+            break;
+        }
+        ++*passed_out;
+    }
+    maxps4_stikdualmap_release(rw, rx, page);
+    return status;
+#else
+    return 0;
+#endif
+}
+
 // Returns 1 only if both the port exists and a debugger is presently observed.
 // It does not claim that the Universal JIT Script is handling traps.
 extern "C" int maxps4_stikdualmap_debugger_preflight() noexcept {
