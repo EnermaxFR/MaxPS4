@@ -334,6 +334,37 @@ jobs:
           # Exploratory compile only: do not link until prerequisites are resolved.
           # A blocked FEXCore component must not prevent a working MaxPS4 IPA.
 
+      - name: Report actual FEXCore iOS compilation status
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## FEXCore iOS — compilation réelle'
+            if test -f build/diagnostics/fexcore-ir-status.txt; then
+              cat build/diagnostics/fexcore-ir-status.txt
+              echo ''
+              echo '### Premières erreurs ou avertissements'
+              echo '\`\`\`text'
+              head -30 build/diagnostics/fexcore-ir-compile.log 2>/dev/null || true
+              echo '\`\`\`'
+            else
+              echo 'Test non exécuté.'
+            fi
+            echo ''
+            echo 'Une compilation réussie de Addressing.cpp ne signifie pas que FEXCore ou le JIT sont exécutables.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload FEXCore compilation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-FEXCore-porting-diagnostics
+          path: |
+            build/diagnostics/fexcore-ir-status.txt
+            build/diagnostics/fexcore-ir-compile.log
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Test ARM64 translation and safe interpreter fallback on macOS
         shell: bash
         run: |
