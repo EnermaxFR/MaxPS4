@@ -15,6 +15,9 @@ private func maxps4NativeMapJITErrnoProbe(_ errorOut: UnsafeMutablePointer<Int32
 @_silgen_name("maxps4_stikdualmap_port_present")
 private func maxps4StikDualMapPortPresent() -> Int32
 
+@_silgen_name("maxps4_stikdualmap_arm64_two_blocks_test")
+private func maxps4StikDualMapTwoBlocksTest() -> Int32
+
 @_silgen_name("maxps4_stikdualmap_arm64_multislot_test")
 private func maxps4StikDualMapMultislotTest() -> Int32
 
@@ -587,6 +590,19 @@ extension MaxPS4OnDeviceJITProbe {
     // Show the precise readiness gates without branching into RX memory.
     // User-initiated experimental BRK path. The debugger trap can terminate the app.
     // A marker survives a crash/relaunch, without implying that the trap was handled.
+    static func manuallyExecuteTwoBlocks() -> String {
+        guard maxps4StikDualMapDebuggerPreflight() == 1 else {
+            return "Test inter-blocs non lancé : P_TRACED absent."
+        }
+        UserDefaults.standard.set("Test JIT deux blocs démarré — issue inconnue si fermeture", forKey: "maxps4StikDebugAttempt")
+        let status = maxps4StikDualMapTwoBlocksTest()
+        let report = status == 1
+            ? "PASS : bloc A renvoie EAX=40 ; bloc B reçoit EAX=40 et renvoie 42"
+            : "ÉCHEC : continuité EAX sur deux blocs JIT (code \(status))."
+        UserDefaults.standard.set(report, forKey: "maxps4StikDebugAttempt")
+        return "Laboratoire — état CPU entre blocs JIT\n" + report
+    }
+
     static func manuallyExecuteMultislotMemory() -> String {
         guard maxps4StikDualMapDebuggerPreflight() == 1 else {
             return "Test mémoire multi-emplacements non lancé : P_TRACED absent."
