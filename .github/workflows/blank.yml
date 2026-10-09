@@ -300,6 +300,13 @@ jobs:
           FEX="build/diagnostics/fexcore-upstream"
           SRC="$FEX/FEXCore/Source/Interface/Core/Addressing.cpp"
           test -s "$SRC"
+          # Generate FEXCore's real IR definitions from upstream IR.json.
+          # These are build-generated files, not handwritten stubs.
+          mkdir -p build/diagnostics/fexcore-generated/FEXCore/IR
+          python3 "$FEX/FEXCore/Scripts/json_ir_generator.py" \
+            "$FEX/FEXCore/Source/Interface/IR/IR.json" \
+            build/diagnostics/fexcore-generated/FEXCore/IR/IRDefines.inc \
+            build/diagnostics/fexcore-generated/FEXCore/IR/IRDispatch.inc
           # FEXCore's LogManager.h directly includes fmt/format.h.
           # fmt is header-only for this compile-only experiment: do not link
           # macOS Homebrew libraries into the iOS executable.
@@ -310,6 +317,8 @@ jobs:
           test -s "$FMT_INCLUDE/fmt/format.h"
           if xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
               -isysroot "$SDK" -I "$FEX/FEXCore/include" \
+              -D MADV_HUGEPAGE=0 -D MADV_NOHUGEPAGE=0 \
+              -I "build/diagnostics/fexcore-generated" \
               -I "MaxPS4-iOS/Native/compat/fex_ios" \
               -I "$FEX/FEXCore/Source" -I "$FEX/Source" -I "$FMT_INCLUDE" \
               -c "$SRC" -o build/diagnostics/fexcore-addressing-ios-arm64.o \
