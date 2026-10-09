@@ -500,6 +500,12 @@ struct MaxPS4HomeView: View {
                     }
                     Divider().overlay(.white.opacity(0.08))
                     Button {
+                        jitStatusReport = MaxPS4OnDeviceJITProbe.report()
+                    } label: {
+                        settingButton(icon: "iphone", title: "Tester MAP_JIT sur cet iPhone")
+                    }
+                    Divider().overlay(.white.opacity(0.08))
+                    Button {
                         jitStatusReport = MaxPS4NativeLinkCheck.stikDebugSafePreflightReport
                     } label: {
                         settingButton(icon: "shield.lefthalf.filled", title: "Tester StikDebug sans risque")
