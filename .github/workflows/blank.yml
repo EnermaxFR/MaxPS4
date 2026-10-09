@@ -131,7 +131,6 @@ jobs:
             build/diagnostics/aetherps4-upstream/src/core/ios/
             build/diagnostics/aetherps4-dependency-audit.txt
             build/diagnostics/aetherps4-upstream-sha.txt
-            build/diagnostics/fexcore-build-prerequisites.txt
           if-no-files-found: error
           retention-days: 14
 
