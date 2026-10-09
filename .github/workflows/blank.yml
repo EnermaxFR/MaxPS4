@@ -160,6 +160,7 @@ jobs:
           #include <cstdio>
           extern "C" int maxps4_aether_guest_backend_probe() noexcept;
           extern "C" int maxps4_aether_restricted_cpu_dispatch_probe() noexcept;
+          extern "C" int maxps4_aether_cpu_state_regression() noexcept;
           int main() {
               const bool abi = maxps4_aether_guest_backend_probe() == 1;
               const bool dispatch = maxps4_aether_restricted_cpu_dispatch_probe() == 1;
@@ -167,7 +168,10 @@ jobs:
                             : "FAIL AetherPS4 CPU ABI and failure handling");
               std::puts(dispatch ? "PASS AetherPS4 to MaxPS4 guest CPU dispatch"
                                  : "FAIL AetherPS4 to MaxPS4 guest CPU dispatch");
-              return abi && dispatch ? 0 : 1;
+              const bool state = maxps4_aether_cpu_state_regression() == 1;
+              std::puts(state ? "PASS AetherPS4 CPU 8-state integration regression"
+                              : "FAIL AetherPS4 CPU 8-state integration regression");
+              return abi && dispatch && state ? 0 : 1;
           }
           CPP
           clang++ -std=c++23 -I "$UPSTREAM/src" -I MaxPS4-iOS/Native/shadps4 \
