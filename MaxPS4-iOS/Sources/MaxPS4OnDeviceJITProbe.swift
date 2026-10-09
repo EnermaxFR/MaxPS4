@@ -10,6 +10,28 @@ private func maxps4NativeMapJITErrnoProbe(_ errorOut: UnsafeMutablePointer<Int32
 private func maxps4StikDualMapPortPresent() -> Int32
 
 enum MaxPS4OnDeviceJITProbe {
+    // Read-only preflight: does not issue BRK, map executable pages or call the allocator.
+    static func stikAllocatorPreflightReport() -> String {
+        let integrated = maxps4StikDualMapPortPresent() == 1
+        let debugger = MaxPS4NativeLinkCheck.debuggerAttachmentDescription
+        let debugSigning = MaxPS4NativeLinkCheck.codeSigningDebugStatus
+        let protocolPresent = MaxPS4NativeLinkCheck.isStikDebugProtocolPresent
+        return """
+        Précontrôle allocateur AetherPS4 / StikDebug (sans BRK)
+        Code dual-mapping compilé : \(integrated ? "Oui" : "Non")
+        État signature : \(debugSigning)
+        État du débogueur : \(debugger)
+        Entrées du protocole intégrées : \(protocolPresent ? "Oui" : "Non")
+        Universal JIT Script attaché : Non vérifiable par ce test
+        Allocation RX via StikDebug : Non tentée
+        Alias RW via vm_remap : Non tenté ici
+        Exécution ARM64 générée : Non tentée
+        Activation automatique : Désactivée
+
+        Ce précontrôle ne prouve pas que StikDebug peut servir le protocole BRK. Ne pas activer l'allocateur tant que l'attachement et la gestion du trap ne sont pas validés.
+        """
+    }
+
     static func report() -> String {
         let mapStatus: String
         var errorCode: Int32 = 0
