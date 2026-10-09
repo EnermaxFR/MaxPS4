@@ -150,6 +150,37 @@ enum MaxPS4OnDeviceJITProbe {
             }
             let contentID = String(cString: output)
             let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value
+            // Standard PS4 PKG: BE entry count at 0x10, table offset at 0x18.
+            // Each table record occupies 32 bytes. Limit reads to 128 KiB.
+            func be32(_ index: Int) -> UInt32 {
+                data[index..<(index + 4)].reduce(UInt32(0)) {
+                    ($0 << 8) | UInt32($1)
+                }
+            }
+            let entries = Int(be32(0x10))
+            let tableOffset = UInt64(be32(0x18))
+            let tableBytes = entries <= 4096 ? UInt64(entries) * 32 : 0
+            var entryReport = "Entrées : table invalide ou limites dépassées"
+            if entries > 0, tableBytes > 0, tableBytes <= 131072,
+               let total = fileSize, total >= 0,
+               tableOffset <= UInt64(total),
+               tableBytes <= UInt64(total) - tableOffset {
+                try handle.seek(toOffset: tableOffset)
+                let table = try handle.read(upToCount: Int(tableBytes)) ?? Data()
+                if table.count == Int(tableBytes) {
+                    var preview: [String] = []
+                    for index in 0..<min(entries, 8) {
+                        let position = index * 32
+                        let ident = table[position..<(position + 4)].reduce(UInt32(0)) {
+                            ($0 << 8) | UInt32($1)
+                        }
+                        preview.append(String(format: "%08X", ident))
+                    }
+                    entryReport = "Entrées de table lues : \(entries) (IDs initiaux : \(preview.joined(separator: ", ")))"
+                } else {
+                    entryReport = "Entrées : lecture incomplète"
+                }
+            }
             return """
             PKG PS4 importé depuis Fichiers
             Nom : \(url.lastPathComponent)
@@ -157,8 +188,9 @@ enum MaxPS4OnDeviceJITProbe {
             Signature : Reconnue
             Content ID : \(contentID)
             Révision en-tête : \(revision)
-            Lecture : 112 octets seulement
-            Liste des entrées / eboot.bin : Non analysée
+            Lecture : en-tête de 112 octets + table bornée si valide
+            \(entryReport)
+            Noms des fichiers / eboot.bin : Non résolus (IDs techniques uniquement)
             Déchiffrement / exécution PS4 : Non disponibles
             JIT : Non utilisé
             """
