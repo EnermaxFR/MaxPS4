@@ -6,6 +6,10 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+extern "C" int maxps4_arm64_translate_preview(const std::uint8_t*, std::size_t,
+    std::uint32_t*, std::size_t, std::size_t*) noexcept;
+extern "C" int maxps4_arm64_verify_preview(const std::uint32_t*, std::size_t) noexcept;
+
 int main() {
 #if !defined(__APPLE__) || !defined(__aarch64__)
     std::puts("SKIPPED: requires Apple Silicon macOS");
@@ -24,12 +28,21 @@ int main() {
         return 1;
     }
 
-    // mov w0, #42; ret. These instruction bytes are generated test data,
-    // not compiler-emitted function instructions.
-    constexpr std::uint32_t code[] = {0x52800540u, 0xD65F03C0u};
-    std::memcpy(page, code, sizeof(code));
+    // Translate actual x86 instructions with MaxPS4's experimental translator:
+    // MOV EAX, 40; ADD EAX, 2; RET.
+    constexpr std::uint8_t guest[] = {0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3};
+    std::uint32_t translated[64] = {};
+    std::size_t count = 0;
+    if (!maxps4_arm64_translate_preview(guest, sizeof(guest), translated, 64, &count) ||
+        !maxps4_arm64_verify_preview(translated, count) ||
+        count == 0 || count > static_cast<std::size_t>(length) / sizeof(std::uint32_t)) {
+        std::fputs("FAIL: MaxPS4 x86-to-ARM64 translation or verification failed\\n", stderr);
+        munmap(page, static_cast<std::size_t>(length));
+        return 1;
+    }
+    std::memcpy(page, translated, count * sizeof(std::uint32_t));
     __builtin___clear_cache(static_cast<char*>(page),
-                            static_cast<char*>(page) + sizeof(code));
+                            static_cast<char*>(page) + count * sizeof(std::uint32_t));
 
     // Never use RWX: switch writable memory to read+execute on the host.
     if (mprotect(page, static_cast<std::size_t>(length),
