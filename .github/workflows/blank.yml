@@ -65,6 +65,18 @@ jobs:
           file build/diagnostics/shadps4-string-util-ios-arm64.o
           xcrun lipo -archs build/diagnostics/shadps4-string-util-ios-arm64.o | grep -w arm64
 
+      - name: Test ARM64 translation and safe interpreter fallback on macOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          clang++ -std=c++23 -I MaxPS4-iOS/Native/shadps4 \
+            MaxPS4-iOS/Native/shadps4/common/string_util.cpp \
+            MaxPS4-iOS/Native/shadps4_bridge.cpp \
+            MaxPS4-iOS/Tests/NativeJITPipelineTest.cpp \
+            -o build/diagnostics/maxps4-jit-pipeline-test
+          build/diagnostics/maxps4-jit-pipeline-test \
+            | tee build/diagnostics/jit-pipeline-results.log
+
       - name: Swift source typecheck
         shell: bash
         run: |
