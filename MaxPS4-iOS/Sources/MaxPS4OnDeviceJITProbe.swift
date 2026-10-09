@@ -3,6 +3,9 @@ import Foundation
 @_silgen_name("maxps4_native_map_jit_allocation_probe")
 private func maxps4NativeMapJITAllocationProbe() -> Int32
 
+@_silgen_name("maxps4_native_rw_to_rx_permission_probe")
+private func maxps4NativeRWtoRXProbe(_ errorOut: UnsafeMutablePointer<Int32>?) -> Int32
+
 @_silgen_name("maxps4_native_map_jit_errno_probe")
 private func maxps4NativeMapJITErrnoProbe(_ errorOut: UnsafeMutablePointer<Int32>?) -> Int32
 
@@ -23,6 +26,29 @@ private func maxps4NativePKGHeader(
 ) -> Int32
 
 enum MaxPS4OnDeviceJITProbe {
+    // Permission test only: no instruction execution and no StikDebug BRK.
+    static func executablePermissionReport() -> String {
+        var errorCode: Int32 = 0
+        let status = maxps4NativeRWtoRXProbe(&errorCode)
+        let outcome: String
+        switch status {
+        case 1:
+            outcome = "Transition RW → RX acceptée par mprotect (exécution NON testée)"
+        case 0:
+            outcome = "Transition RW → RX refusée (errno \\(errorCode))"
+        default:
+            outcome = "Test indisponible sur cette architecture"
+        }
+        return """
+        Laboratoire MaxPS4 — permissions mémoire JIT
+        \\(outcome)
+        CS_DEBUGGED : \\(MaxPS4NativeLinkCheck.codeSigningDebugStatus)
+        Aucun BRK StikDebug envoyé.
+        Aucun code ARM64 généré exécuté.
+        Cette expérience ne prouve pas l'accès au JIT ou à FEXCore.
+        """
+    }
+
     // Read-only preflight: does not issue BRK, map executable pages or call the allocator.
     static func stikAllocatorPreflightReport() -> String {
         let integrated = maxps4StikDualMapPortPresent() == 1
