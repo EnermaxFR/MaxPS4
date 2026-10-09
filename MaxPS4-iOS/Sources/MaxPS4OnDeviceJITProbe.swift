@@ -487,7 +487,7 @@ extension MaxPS4OnDeviceJITProbe {
         case 1:
             return "Instructions ARM64 générées dynamiquement : Exécutées (42). Test isolé réussi ; FEXCore et les jeux PS4 ne sont pas validés."
         case -1:
-            return "Test interrompu : aucun débogueur attaché détecté par MaxPS4. Vérifie StikDebug. Aucune instruction générée exécutée."
+            return "Test ARM64 généré arrêté : P_TRACED absent selon iOS. Cela ne démontre pas à lui seul un échec de StikDebug. Aucune instruction ARM64 générée exécutée. Vérifier la session debugserver et les permissions de mémoire."
         case -2:
             return "Test interrompu : allocation MAP_JIT refusée par iOS. Aucun code généré exécuté."
         case -3:
