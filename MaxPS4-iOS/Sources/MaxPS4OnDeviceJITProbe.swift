@@ -68,6 +68,52 @@ enum MaxPS4OnDeviceJITProbe {
         return lines.joined(separator: "\n")
     }
 
+    // Deterministic synthetic ELF64 x86-64 test: a data-only loader exercise,
+    // not a real PS4 homebrew or SELF and not a functional PS4 runtime.
+    static func minimalELFLoaderReport() -> String {
+        var elf = Data(repeating: 0, count: 134)
+        elf.replaceSubrange(0..<7, with: [0x7f, 0x45, 0x4c, 0x46, 2, 1, 1])
+        elf[18] = 0x3e // e_machine = x86_64
+        elf[24] = 0x00; elf[25] = 0x10 // entry = 0x1000
+        elf[32] = 64 // ELF program header table
+        elf[54] = 56 // ELF64 program header size
+        elf[56] = 1
+        elf[64] = 1 // PT_LOAD
+        elf[68] = 5 // PF_R | PF_X
+        elf[72] = 128 // segment file offset
+        elf[80] = 0x00; elf[81] = 0x10 // virtual address 0x1000
+        elf[96] = 6  // filesz
+        elf[104] = 6 // memsz
+        elf.replaceSubrange(128..<134, with: [0xB8, 42, 0, 0, 0, 0xC3])
+        let signature = MaxPS4NativeLinkCheck.executableSignature(elf) == 1
+        let layout = MaxPS4NativeLinkCheck.nativeELFLoadLayout(elf)
+        let entry = MaxPS4NativeLinkCheck.nativeELFExecutableEntry(elf)
+        let boundsOK = entry?.entry == 0x1000 && entry?.offset == 128
+            && layout?.segments == 1 && layout?.bytes == 6
+        let code = boundsOK ? elf.subdata(in: 128..<134) : Data()
+        let result = MaxPS4NativeLinkCheck.runNativeSyntheticX86(code)
+        var invalid = elf
+        invalid[68] = 4 // remove execute permission
+        let rejectsNotExecutable = MaxPS4NativeLinkCheck.nativeELFExecutableEntry(invalid) == nil
+        let rejectsTruncated = MaxPS4NativeLinkCheck.nativeELFLoadLayout(Data(elf.prefix(133))) == nil
+        let good = signature && boundsOK && result == 42 &&
+            rejectsNotExecutable && rejectsTruncated
+        return """
+        Test ELF64 x86-64 minimal (fichier synthétique)
+        En-tête ELF reconnu : \(signature ? "PASS" : "FAIL")
+        Segment PT_LOAD et point d'entrée : \(boundsOK ? "PASS" : "FAIL")
+        Exécution des 6 octets à l'entrée par l'interpréteur : \(result == 42 ? "PASS — retour 42" : "FAIL")
+        Permissions d'exécution refusées : \(rejectsNotExecutable ? "PASS" : "FAIL")
+        Fichier tronqué refusé : \(rejectsTruncated ? "PASS" : "FAIL")
+        Résultat global : \(good ? "PASS" : "FAIL")
+        JIT utilisé : Non
+        Chargeur SELF PS4 et services PS4 : Non opérationnels
+
+        Ce test construit un ELF artificiel en mémoire et extrait son code pour
+        l'interpréteur limité. Il ne lance ni homebrew PS4 ni jeu commercial.
+        """
+    }
+
     static func report() -> String {
         let mapStatus: String
         var errorCode: Int32 = 0
