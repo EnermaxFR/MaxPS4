@@ -9,6 +9,9 @@ private func maxps4NativeMapJITErrnoProbe(_ errorOut: UnsafeMutablePointer<Int32
 @_silgen_name("maxps4_stikdualmap_port_present")
 private func maxps4StikDualMapPortPresent() -> Int32
 
+@_silgen_name("maxps4_stikdualmap_debugger_preflight")
+private func maxps4StikDualMapDebuggerPreflight() -> Int32
+
 enum MaxPS4OnDeviceJITProbe {
     // Read-only preflight: does not issue BRK, map executable pages or call the allocator.
     static func stikAllocatorPreflightReport() -> String {
@@ -22,6 +25,8 @@ enum MaxPS4OnDeviceJITProbe {
         État signature : \(debugSigning)
         État du débogueur : \(debugger)
         Entrées du protocole intégrées : \(protocolPresent ? "Oui" : "Non")
+        Précondition native débogueur : \(maxps4StikDualMapDebuggerPreflight() == 1 ? "Présent (script non confirmé)" : "Absente — test exécutable interdit")
+        Test ARM64 via double mapping : Codé en natif, non exposé tant que le BRK reste dangereux
         Protocole source StikDebug : BRK #0xf00d, commande x16=1, arguments x0=0 / x1=taille
         Compatibilité statique : Commande et paramètres concordants avec StikDebug/Scripts/universal.js
         Réponse du serveur debugserver : Non vérifiée (aucune commande envoyée)
