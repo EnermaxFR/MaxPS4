@@ -346,11 +346,33 @@ private func maxps4_native_arm64_preflight(
     _ code: UnsafePointer<UInt8>?, _ size: Int
 ) -> Int32
 
+@_silgen_name("maxps4_stikdebug_jit26_protocol_available")
+private func maxps4_stikdebug_jit26_protocol_available() -> Int32
+
 @_silgen_name("maxps4_native_arm64_jit_ready")
 private func maxps4_native_arm64_jit_ready() -> Int32
 
 extension MaxPS4NativeLinkCheck {
     static var isARM64JITReady: Bool { maxps4_native_arm64_jit_ready() == 1 }
+    static var isStikDebugProtocolPresent: Bool {
+        maxps4_stikdebug_jit26_protocol_available() == 1
+    }
+
+    static var jitStatusReport: String {
+        let protocolStatus = isStikDebugProtocolPresent ? "Passerelle intégrée" : "Passerelle absente"
+        let translation = isARM64TranslationSupported(
+            Data([0xB8, 42, 0, 0, 0, 0xC3])
+        ) ? "Disponible (données uniquement)" : "Non disponible"
+        let execution = isARM64JITReady ? "Prêt (backend)" : "Inactif"
+        return """
+        JIT natif : \(execution)
+        Protocole StikDebug : \(protocolStatus)
+        Traduction x86 → ARM64 : \(translation)
+
+        Attention : la présence du protocole StikDebug ou de code traduit ne prouve pas que StikDebug est attaché ou que des instructions JIT s’exécutent.
+        """
+    }
+
 
     /// Validates and caches an ARM64 translation as non-executable data only.
     static func isARM64TranslationSupported(_ code: Data) -> Bool {
