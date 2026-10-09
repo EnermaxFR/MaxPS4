@@ -735,6 +735,9 @@ jobs:
             build/diagnostics/fexcore-jit-core-status.txt
             build/diagnostics/fexcore-jit-core-compile.log
             build/diagnostics/fexcore-jit-core-report.json
+            build/diagnostics/libMaxPS4FEXJITProbe.a
+            build/diagnostics/fexcore-jit-archive-status.txt
+            build/diagnostics/fexcore-jit-archive.log
             build/diagnostics/fexcore-jit-core-ios.o
             build/diagnostics/fexcore-jit-alu-ios.o
             build/diagnostics/fexcore-arm64-relocations-ios.o
