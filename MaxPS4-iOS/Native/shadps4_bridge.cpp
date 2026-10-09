@@ -1009,6 +1009,20 @@ extern "C" int maxps4_stikdualmap_arm64_execute_suite(int* passed_out) noexcept 
 #endif
 }
 
+// Experimental two-register execution: EAX=40, ECX=2, ADD EAX,ECX, RET.
+extern "C" int maxps4_stikdualmap_arm64_two_register_test() noexcept {
+    constexpr std::uint8_t guest[] = {
+        0xB8,40,0,0,0, 0xB9,2,0,0,0, 0x01,0xC8,0xC3
+    };
+    std::uint64_t interpreted = 0;
+    if (maxps4_native_guest_x86_run(guest, sizeof(guest), 20, &interpreted) != 1 ||
+        interpreted != 42) return -7;
+    std::uint64_t native = 0;
+    const int status = maxps4_stikdualmap_execute_guest_block(guest, sizeof(guest), &native);
+    if (status != 1) return status;
+    return native == interpreted ? 1 : -4;
+}
+
 // Opt-in JIT control-flow regression: CMP/JZ, TEST/JNZ and bounded SUB/JNZ loop.
 // Each execution goes through the reusable StikDebug guest block runner.
 extern "C" int maxps4_stikdualmap_arm64_branch_suite(int* passed_out) noexcept {
