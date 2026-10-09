@@ -1113,10 +1113,10 @@ jobs:
 
           # Add the upstream HLE guest-call component only when it passes an
           # isolated strict iOS link test. It is not a PS4 services runtime.
-          AETHER_HLE_LINK_ARGS=()
+          AETHER_HLE_LINK_OBJECT=""
           if grep -q '^PASS isolated AetherPS4 HLE adapter link' \
                build/diagnostics/aether-hle-link-status.txt; then
-            AETHER_HLE_LINK_ARGS=(build/diagnostics/aether-hle-call-adapter-ios-arm64.o)
+            AETHER_HLE_LINK_OBJECT=build/diagnostics/aether-hle-call-adapter-ios-arm64.o
             echo "AetherPS4 HLE adapter selected for executable link" \
               | tee build/diagnostics/aether-hle-ipa-link-status.txt
           else
@@ -1138,8 +1138,10 @@ jobs:
             build/diagnostics/aether-guest-cpu-ios-arm64.o
             build/diagnostics/aether-guest-adapter-ios-arm64.o
             build/diagnostics/aether-jit-abi-ios-arm64.o
-            "${AETHER_HLE_LINK_ARGS[@]}"
           )
+          if test -n "$AETHER_HLE_LINK_OBJECT"; then
+            SWIFT_LINK_CMD+=("$AETHER_HLE_LINK_OBJECT")
+          fi
           OUTPUT=build/Payload/MaxPS4.app/MaxPS4
           if test "${#FEXCORE_LINK_ARGS[@]}" -gt 0; then
             if "${SWIFT_LINK_CMD[@]}" "${FEXCORE_LINK_ARGS[@]}" -lc++ \
