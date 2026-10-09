@@ -1283,19 +1283,35 @@ extern "C" int maxps4_stikdebug_jit26_protocol_available() noexcept {
 // Execution backend selection point for an eventual ARM64 dynamic recompiler.
 // iOS code-signing/JIT entitlements must be validated before enabling JIT.
 // No RWX memory allocation or code generation is attempted here.
-// requested_mode: 0 = interpreter, 1 = request JIT; used_mode reports reality.
+// requested_mode: 0 = interpreter, 1 = data-only preflight, 2 = explicit StikDebug JIT.
+// used_mode = 2 only after real native execution and interpreter agreement.
 extern "C" int maxps4_native_guest_run_with_backend(
     const std::uint8_t* code, std::size_t size, std::uint32_t budget,
     int requested_mode, int* used_mode, std::uint64_t* result) noexcept {
     if (!used_mode) return 0;
     *used_mode = 0; // Never claim JIT execution on iOS without executable-code support.
-    if (requested_mode != 0 && requested_mode != 1) return 0;
-    // Reject invalid inputs before attempting even a data-only translation.
+    if (requested_mode != 0 && requested_mode != 1 && requested_mode != 2) return 0;
     if (!result || !code || size == 0 || size > 4096 ||
         budget == 0 || budget > 4096) return 0;
+    // Mode 2 is an EXPLICIT opt-in for the experimental StikDebug JIT.
+    // It is never selected during PS4 game launch: a missing BRK handler can
+    // terminate the process, and the translator covers only a tiny subset.
+    if (requested_mode == 2) {
+        if (size > 256 || maxps4_native_debugger_attached() != 1) return 0;
+        std::uint64_t expected = 0;
+        // Restrict this backend to finite, interpreter-verified programs.
+        // This avoids unsafe infinite JIT loops (which have no instruction budget).
+        if (maxps4_native_guest_x86_run(code, size, budget, &expected) != 1)
+            return 0;
+        std::uint64_t native = 0;
+        if (maxps4_stikdualmap_execute_guest_block(code, size, &native) != 1 ||
+            native != expected) return 0;
+        *result = native;
+        *used_mode = 2;
+        return 1;
+    }
     if (requested_mode == 1) {
-        // Cache exact translated blocks as DATA; execution still uses interpreter.
-        (void)translate_or_reuse(code, size);
+        (void)translate_or_reuse(code, size); // data-only preflight
     }
     return maxps4_native_guest_x86_run(code, size, budget, result);
 }
