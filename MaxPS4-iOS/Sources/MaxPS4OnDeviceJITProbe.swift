@@ -195,6 +195,7 @@ enum MaxPS4OnDeviceJITProbe {
                         if flags & 0x80000000 != 0 { encryptedFlags += 1 }
                     }
                     var signatures: [String] = []
+                    var psfDetails: [String] = []
                     for index in 0..<entries {
                         let p = index * 32
                         func word(_ at: Int) -> UInt32 {
@@ -212,6 +213,42 @@ enum MaxPS4OnDeviceJITProbe {
                         let label: String?
                         if signature.starts(with: [0, 0x50, 0x53, 0x46]) {
                             label = "PSF (probable param.sfo)"
+                            // Strictly bounded metadata preview; no encrypted contents touched.
+                            if length >= 20 && length <= 65536 {
+                                try handle.seek(toOffset: offset)
+                                let psf = try handle.read(upToCount: Int(length)) ?? Data()
+                                if psf.count >= 20 {
+                                    func le32(_ i: Int) -> Int {
+                                        Int(psf[i]) | (Int(psf[i + 1]) << 8) |
+                                        (Int(psf[i + 2]) << 16) | (Int(psf[i + 3]) << 24)
+                                    }
+                                    let keyStart = le32(8), dataStart = le32(12), count = le32(16)
+                                    if keyStart >= 20 && keyStart < psf.count &&
+                                       dataStart >= keyStart && dataStart < psf.count &&
+                                       count >= 0 && count <= 128 && count <= (psf.count - 20) / 16 {
+                                        for j in 0..<count {
+                                            let base = 20 + j * 16
+                                            let keyOffset = Int(psf[base]) | (Int(psf[base + 1]) << 8)
+                                            let format = Int(psf[base + 2]) | (Int(psf[base + 3]) << 8)
+                                            let size = le32(base + 4)
+                                            let valueOffset = le32(base + 12)
+                                            guard keyOffset <= psf.count - keyStart - 1,
+                                                  valueOffset <= psf.count - dataStart,
+                                                  size >= 0 && size <= psf.count - dataStart - valueOffset else { continue }
+                                            let keyBytes = psf[(keyStart + keyOffset)..<psf.count].prefix(while: { $0 != 0 })
+                                            guard keyBytes.count <= 64,
+                                                  let key = String(bytes: keyBytes, encoding: .utf8),
+                                                  ["TITLE", "TITLE_ID", "CONTENT_ID", "APP_VER"].contains(key) else { continue }
+                                            if format == 0x0204 {
+                                                let valueBytes = psf[(dataStart + valueOffset)..<(dataStart + valueOffset + size)].prefix(while: { $0 != 0 })
+                                                if let value = String(bytes: valueBytes, encoding: .utf8), value.count <= 128 {
+                                                    psfDetails.append(key + " : " + value)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         } else if signature.starts(with: [0x89, 0x50, 0x4E, 0x47]) {
                             label = "PNG"
                         } else if signature.starts(with: [0x7F, 0x45, 0x4C, 0x46]) {
