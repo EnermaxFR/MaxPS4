@@ -79,6 +79,14 @@ int main() {
         !maxps4_arm64_verify_preview(invalid_words, 2) &&
         reject_invalid_guest(invalid, sizeof(invalid)) &&
         reject_invalid_guest(nullptr, 0) &&
+        // Reject invalid backend selectors rather than silently falling back.
+        ([] {
+            constexpr std::uint8_t ret[] = {0xC3};
+            int used_jit = -1;
+            std::uint64_t result = 0;
+            return maxps4_native_guest_run_with_backend(ret, sizeof(ret), 64, 2,
+                                                        &used_jit, &result) == 0;
+        }()) &&
         reject_exhausted_budget() &&
         ([] {
             constexpr std::uint8_t ret[] = {0xC3};
