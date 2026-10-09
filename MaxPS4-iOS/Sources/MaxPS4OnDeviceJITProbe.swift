@@ -176,7 +176,26 @@ enum MaxPS4OnDeviceJITProbe {
                         }
                         preview.append(String(format: "%08X", ident))
                     }
-                    entryReport = "Entrées de table lues : \(entries) (IDs initiaux : \(preview.joined(separator: ", ")))"
+                    var invalidRanges = 0
+                    var encryptedFlags = 0
+                    for index in 0..<entries {
+                        let p = index * 32
+                        func beTable32(_ at: Int) -> UInt32 {
+                            table[(p + at)..<(p + at + 4)].reduce(UInt32(0)) {
+                                ($0 << 8) | UInt32($1)
+                            }
+                        }
+                        let flags = beTable32(4)
+                        let offset = UInt64(beTable32(16))
+                        let size = UInt64(beTable32(20))
+                        if offset > UInt64(total) ||
+                           size > UInt64(total) - min(offset, UInt64(total)) {
+                            invalidRanges += 1
+                        }
+                        if flags & 0x80000000 != 0 { encryptedFlags += 1 }
+                    }
+                    entryReport = "Entrées de table lues : \(entries) (IDs initiaux : \(preview.joined(separator: ", ")))\nPlages hors fichier : \(invalidRanges)\nEntrées marquées chiffrées : \(encryptedFlags)"
+
                 } else {
                     entryReport = "Entrées : lecture incomplète"
                 }
