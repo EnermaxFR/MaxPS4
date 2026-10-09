@@ -642,7 +642,7 @@ struct MaxPS4HomeView: View {
             }
             .font(.system(size: 42, weight: .black, design: .rounded))
 
-            Text("iOS  •  ÉDITION NÉON")
+            Text("iOS  •  ÉDITION NUIT")
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.white.opacity(0.60))
         }
@@ -1062,22 +1062,23 @@ struct MaxPS4HomeView: View {
     private var heroPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Label("MAXPS4  /  CONTROL CENTER", systemImage: "sparkles.rectangle.stack.fill")
+                Label("MAXPS4  /  NUIT", systemImage: "moon.stars.fill")
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .tracking(2)
                     .foregroundStyle(.cyan)
                 Spacer()
-                Text("MaxPS4")
+                Text("ÉDITION NUIT")
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.55))
             }
-            Text("Ta console. Ton univers.")
+            Text("Dans la légende.")
                 .font(.system(size: 34, weight: .black, design: .rounded))
                 .foregroundStyle(.white)
-            Text("Bibliothèque locale et laboratoire PS4 sur iPhone")
+            Text("Une interface nocturne. Tes jeux, ton univers.")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.66))
             HStack(spacing: 10) {
+                Image(systemName: "moon.stars.fill").foregroundStyle(.white.opacity(0.85))
                 Label("\(emulator.games.count) JEUX", systemImage: "gamecontroller.fill")
                 Spacer()
                 Label("iOS", systemImage: "iphone.gen3")
@@ -1102,15 +1103,15 @@ struct MaxPS4HomeView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             LinearGradient(colors: [
-                Color(red: 0.07, green: 0.12, blue: 0.28),
-                Color(red: 0.19, green: 0.07, blue: 0.34),
-                Color(red: 0.03, green: 0.06, blue: 0.17)
+                Color(red: 0.025, green: 0.035, blue: 0.13),
+                Color(red: 0.105, green: 0.08, blue: 0.23),
+                Color(red: 0.018, green: 0.025, blue: 0.07)
             ], startPoint: .topLeading, endPoint: .bottomTrailing),
             in: RoundedRectangle(cornerRadius: 28)
         )
         .overlay(RoundedRectangle(cornerRadius: 28)
             .stroke(LinearGradient(colors: [.cyan.opacity(0.8), .purple.opacity(0.65)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.3))
-        .shadow(color: .purple.opacity(0.22), radius: 20, y: 8)
+        .shadow(color: .indigo.opacity(0.32), radius: 24, y: 8)
     }
 
     private var toolsPage: some View {
@@ -1238,11 +1239,11 @@ struct MaxPS4HomeView: View {
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 11)
-        .background(Color(red: 0.035, green: 0.055, blue: 0.14).opacity(0.98),
+        .background(Color(red: 0.018, green: 0.025, blue: 0.075).opacity(0.98),
                     in: RoundedRectangle(cornerRadius: 24))
         .overlay(RoundedRectangle(cornerRadius: 24)
-                    .stroke(.cyan.opacity(0.35), lineWidth: 1))
-        .shadow(color: .cyan.opacity(0.17), radius: 17, y: -3)
+                    .stroke(.indigo.opacity(0.55), lineWidth: 1))
+        .shadow(color: .indigo.opacity(0.28), radius: 20, y: -3)
         .padding(.horizontal, 12)
         .padding(.bottom, 4)
     }
@@ -1328,29 +1329,37 @@ struct MaxPS4HomeView: View {
 
 private struct MaxPS4Background: View {
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.025, green: 0.018, blue: 0.085),
-                    Color(red: 0.055, green: 0.025, blue: 0.17),
-                    .black
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+        GeometryReader { geometry in
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.013, green: 0.019, blue: 0.075),
+                        Color(red: 0.060, green: 0.045, blue: 0.15),
+                        Color(red: 0.014, green: 0.018, blue: 0.055)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Circle()
+                    .fill(Color.indigo.opacity(0.27))
+                    .frame(width: 340, height: 340)
+                    .blur(radius: 75)
+                    .position(x: geometry.size.width * 0.92, y: 85)
+                Circle()
+                    .fill(Color.cyan.opacity(0.12))
+                    .frame(width: 260, height: 260)
+                    .blur(radius: 72)
+                    .position(x: geometry.size.width * 0.04, y: geometry.size.height * 0.76)
+                Image(systemName: "moon.stars.fill")
+                    .font(.system(size: 110, weight: .ultraLight))
+                    .foregroundStyle(.white.opacity(0.055))
+                    .rotationEffect(.degrees(-12))
+                    .position(x: geometry.size.width * 0.87, y: 155)
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
             .ignoresSafeArea()
-
-            Circle()
-                .fill(.purple.opacity(0.24))
-                .frame(width: 360, height: 360)
-                .blur(radius: 80)
-                .offset(x: 180, y: -300)
-
-            Circle()
-                .fill(.cyan.opacity(0.08))
-                .frame(width: 260, height: 260)
-                .blur(radius: 70)
-                .offset(x: -180, y: 280)
+            .allowsHitTesting(false)
         }
+        .ignoresSafeArea()
     }
 }
