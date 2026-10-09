@@ -809,6 +809,44 @@ extern "C" void maxps4_stikdualmap_release(
 #endif
 }
 
+// Isolated proof-of-execution using AetherPS4-style StikDebug dual mapping.
+// NOT exposed to Swift/UI: the native BRK call can crash when StikDebug's
+// universal script is not actively attached, even when CS_DEBUGGED is set.
+// A future supervised harness may invoke this only after verifying that script.
+extern "C" int maxps4_stikdualmap_arm64_execute_42() noexcept {
+#if defined(__APPLE__) && defined(__aarch64__)
+    if (maxps4_native_debugger_attached() != 1) return -1;
+    const long raw_page = sysconf(_SC_PAGESIZE);
+    if (raw_page <= 0 || raw_page > 65536) return -2;
+    const std::size_t page = static_cast<std::size_t>(raw_page);
+    void* rw = nullptr;
+    void* rx = nullptr;
+    if (maxps4_stikdualmap_allocate(page, &rw, &rx) != 1) return -3;
+    // MOV W0, #42; RET. Write only to the RW alias; execute via RX alias.
+    constexpr std::uint32_t code[] = {0x52800540u, 0xD65F03C0u};
+    auto* writable = static_cast<std::uint32_t*>(rw);
+    writable[0] = code[0];
+    writable[1] = code[1];
+    sys_icache_invalidate(rx, sizeof(code));
+    using Function = int (*)();
+    const int value = reinterpret_cast<Function>(rx)();
+    maxps4_stikdualmap_release(rw, rx, page);
+    return value == 42 ? 1 : -4;
+#else
+    return 0;
+#endif
+}
+
+// Returns 1 only if both the port exists and a debugger is presently observed.
+// It does not claim that the Universal JIT Script is handling traps.
+extern "C" int maxps4_stikdualmap_debugger_preflight() noexcept {
+#if defined(__APPLE__) && defined(__aarch64__)
+    return maxps4_native_debugger_attached() == 1 ? 1 : 0;
+#else
+    return 0;
+#endif
+}
+
 // ABI readiness checks, no debugger trap or executable mapping performed.
 extern "C" int maxps4_stikdualmap_port_present() noexcept {
 #if defined(__APPLE__) && defined(__aarch64__)
