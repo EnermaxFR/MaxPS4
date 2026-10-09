@@ -8,6 +8,9 @@ extern "C" int maxps4_shadps4_utility_probe() noexcept {
 
 #include <cstddef>
 #include <cstdint>
+#if defined(__APPLE__)
+#include <unistd.h>
+#endif
 
 // Bounded native executable signature classifier for the future PS4 loader.
 // Returns 1 for ELF64 x86-64, 2 for a possible SELF, 0 otherwise.
