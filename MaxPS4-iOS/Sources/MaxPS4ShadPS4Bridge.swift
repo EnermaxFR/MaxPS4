@@ -364,10 +364,21 @@ extension MaxPS4NativeLinkCheck {
             Data([0xB8, 42, 0, 0, 0, 0xC3])
         ) ? "Disponible (données uniquement)" : "Non disponible"
         let execution = isARM64JITReady ? "Prêt (backend)" : "Inactif"
+        let probe = Data([0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3])
+        let probeResult = runSyntheticX86PreferJIT(probe)
+        let executionTest: String
+        if let probeResult {
+            executionTest = probeResult.result == 42
+                ? (probeResult.usedJIT ? "42 • code JIT exécuté" : "42 • interpréteur utilisé")
+                : "Résultat inattendu : \(probeResult.result)"
+        } else {
+            executionTest = "Échec du test d’exécution"
+        }
         return """
         JIT natif : \(execution)
         Protocole StikDebug : \(protocolStatus)
         Traduction x86 → ARM64 : \(translation)
+        Test réel du backend : \(executionTest)
 
         Attention : la présence du protocole StikDebug ou de code traduit ne prouve pas que StikDebug est attaché ou que des instructions JIT s’exécutent.
         """
