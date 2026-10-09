@@ -495,6 +495,12 @@ struct MaxPS4HomeView: View {
                     } label: {
                         settingButton(icon: "checkmark.shield.fill", title: "Vérifier l’état du JIT")
                     }
+                    Divider().overlay(.white.opacity(0.08))
+                    Button {
+                        jitStatusReport = MaxPS4NativeLinkCheck.stikDebugSafePreflightReport
+                    } label: {
+                        settingButton(icon: "shield.lefthalf.filled", title: "Tester StikDebug sans risque")
+                    }
                     if let jitStatusReport {
                         Text(jitStatusReport)
                             .font(.footnote.monospaced())
