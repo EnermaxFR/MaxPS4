@@ -55,6 +55,40 @@ extern "C" int maxps4_aether_restricted_cpu_dispatch_probe() noexcept {
            failure->Error == EINVAL ? 1 : 0;
 }
 
+// Multi-case integration regression for the actual AetherPS4 backend API.
+// Validates state forwarding, repeatable dispatch, and rejected requests.
+// Still uses MaxPS4's restricted interpreter, not FEXCore or a PS4 loader.
+extern "C" int maxps4_aether_cpu_state_regression() noexcept {
+    Core::NativeGuestCpuBackend backend(&MaxPS4RestrictedExecutor);
+    for (std::uint32_t i = 0; i < 8; ++i) {
+        Core::GuestExecutionRequest request{};
+        request.Rip = 0x1000;
+        request.Rsp = 0x2000 + i * 16;
+        request.Rflags = 0x202 + (std::uint64_t(i) << 8);
+        request.Gpr[0] = 1234;
+        request.Gpr[1] = 0xABC000 + i;
+        request.Gpr[15] = 0xDEF000 + i;
+        const auto outcome = backend.Run(request);
+        const auto* state = std::get_if<Core::GuestExecutionState>(&outcome);
+        if (!state || state->FirstRip != request.Rip ||
+            state->LastRip != request.Rip || state->Rip != 0x100B ||
+            state->Rsp != request.Rsp || state->Rflags != request.Rflags ||
+            state->Gpr[0] != 42 || state->Gpr[1] != request.Gpr[1] ||
+            state->Gpr[15] != request.Gpr[15] ||
+            state->StopReason != Core::GuestStopReason::Returned) return 0;
+    }
+    {
+        Core::GuestExecutionRequest request{};
+        request.Rip = 0x1000;
+        request.Rsp = 0;
+        const auto outcome = backend.Run(request);
+        const auto* failure = std::get_if<Core::GuestExecutionFailure>(&outcome);
+        if (!failure || failure->Error != EINVAL ||
+            failure->Stage != Core::GuestExecutionStage::Mapping) return 0;
+    }
+    return 1;
+}
+
 // Synthetic executor tests the upstream backend's success/result dispatch.
 // It is intentionally not a guest CPU interpreter or a FEXCore JIT.
 static Core::GuestExecutionResult TestExecutor(
