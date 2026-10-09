@@ -303,7 +303,7 @@ jobs:
           # FEXCore's LogManager.h directly includes fmt/format.h.
           # fmt is header-only for this compile-only experiment: do not link
           # macOS Homebrew libraries into the iOS executable.
-          if ! brew --prefix fmt >/dev/null 2>&1; then
+          if ! brew list --versions fmt >/dev/null 2>&1 || ! test -s "$(brew --prefix fmt)/include/fmt/format.h"; then
             brew install fmt
           fi
           FMT_INCLUDE="$(brew --prefix fmt)/include"
