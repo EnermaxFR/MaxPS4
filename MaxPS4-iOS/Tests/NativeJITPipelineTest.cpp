@@ -33,6 +33,15 @@ static bool run(const char* label, const std::uint8_t* input, std::size_t length
 int main() {
     constexpr std::uint8_t add[] = {0xB8,40,0,0,0,0x05,2,0,0,0,0xC3};
     constexpr std::uint8_t loop[] = {0xB8,3,0,0,0,0x2D,1,0,0,0,0x75,0xF9,0xC3};
+    constexpr std::uint8_t xor_mask[] = {0xB8,0xFF,0,0,0,0x35,0xF0,0,0,0,0xC3};
+    constexpr std::uint8_t and_mask[] = {0xB8,0xFF,0,0,0,0x25,0x0F,0,0,0,0xC3};
+    constexpr std::uint8_t or_mask[] = {0xB8,0x01,0,0,0,0x0D,0x10,0,0,0,0xC3};
+    constexpr std::uint8_t large_add[] = {0xB8,0x01,0,0,0,0x05,0x00,0x10,0,0,0xC3};
+    constexpr std::uint8_t cmp_branch[] = {
+        0xB8,7,0,0,0,0x3D,7,0,0,0,0x74,0x05,
+        0xB8,0,0,0,0,0xC3
+    };
+    constexpr std::uint8_t invalid_jump[] = {0xB8,1,0,0,0,0x3D,1,0,0,0,0x74,0x7F,0xC3};
     constexpr std::uint8_t invalid[] = {0x0F,0x05};
     std::uint32_t words[16] = {};
     std::size_t emitted = 0;
@@ -40,6 +49,12 @@ int main() {
     const bool checks =
         run("add", add, sizeof(add), 42) &&
         run("loop", loop, sizeof(loop), 0) &&
+        run("xor", xor_mask, sizeof(xor_mask), 15) &&
+        run("and", and_mask, sizeof(and_mask), 15) &&
+        run("or", or_mask, sizeof(or_mask), 17) &&
+        run("large immediate", large_add, sizeof(large_add), 4097) &&
+        run("comparison/branch", cmp_branch, sizeof(cmp_branch), 7) &&
+        !maxps4_arm64_translate_preview(invalid_jump, sizeof(invalid_jump), words, 16, &emitted) &&
         !maxps4_arm64_translate_preview(invalid, sizeof(invalid), words, 16, &emitted) &&
         !maxps4_arm64_verify_preview(nullptr, 0) &&
         !maxps4_arm64_verify_preview(invalid_words, 2) &&
