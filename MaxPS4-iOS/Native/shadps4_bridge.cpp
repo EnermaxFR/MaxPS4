@@ -1028,6 +1028,42 @@ extern "C" int maxps4_stikdualmap_arm64_execute_suite(int* passed_out) noexcept 
 #endif
 }
 
+// First persistent guest context: retains EAX across separately emitted code
+// blocks. Other registers, flags and guest memory are deliberately not claimed
+// persistent yet. Test keeps the context on the host stack.
+struct MaxPS4GuestBlockContext {
+    std::uint32_t eax = 0;
+    std::uint32_t completed_blocks = 0;
+};
+static int maxps4_execute_guest_block_in_context(
+    MaxPS4GuestBlockContext* context, const std::uint8_t* bytes,
+    std::size_t size) noexcept {
+    if (!context || !bytes || context->completed_blocks >= 64) return -4;
+    std::uint64_t next = 0;
+    const int status = maxps4_stikdualmap_execute_guest_block_with_eax(
+        bytes, size, context->eax, &next);
+    if (status != 1) return status;
+    context->eax = static_cast<std::uint32_t>(next);
+    ++context->completed_blocks;
+    return 1;
+}
+// Three separately generated native blocks share one explicit guest context:
+// set 40, add 1, add 1. This is still only a limited EAX-only context.
+extern "C" int maxps4_stikdualmap_arm64_context_three_blocks_test() noexcept {
+    constexpr std::uint8_t init[] = {0xB8,40,0,0,0,0xC3};
+    constexpr std::uint8_t increment[] = {0x05,1,0,0,0,0xC3};
+    MaxPS4GuestBlockContext context{};
+    const int a = maxps4_execute_guest_block_in_context(&context, init, sizeof(init));
+    if (a != 1) return a;
+    if (context.eax != 40 || context.completed_blocks != 1) return -4;
+    const int b = maxps4_execute_guest_block_in_context(&context, increment, sizeof(increment));
+    if (b != 1) return b;
+    if (context.eax != 41 || context.completed_blocks != 2) return -4;
+    const int c = maxps4_execute_guest_block_in_context(&context, increment, sizeof(increment));
+    if (c != 1) return c;
+    return context.eax == 42 && context.completed_blocks == 3 ? 1 : -4;
+}
+
 // Two separate ARM64 JIT allocations; EAX flows from block A to block B.
 // This verifies EAX continuity only, not yet a full guest register file.
 extern "C" int maxps4_stikdualmap_arm64_two_blocks_test() noexcept {
