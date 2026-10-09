@@ -1195,7 +1195,8 @@ jobs:
         shell: bash
         run: |
           set -e
-          ICON="MaxPS4-iOS/Resources/AppIcon.jpg"
+          ICON="build/OriginalAppIcon.jpg"
+          python3 -c 'import base64,pathlib; pathlib.Path("build/OriginalAppIcon.jpg").write_bytes(base64.b64decode(pathlib.Path("MaxPS4-iOS/Resources/OriginalAppIcon.base64").read_text()))'
           APP="build/Payload/MaxPS4.app"
           test -s "$ICON"
           python3 -m venv build/icon-venv
@@ -1206,7 +1207,7 @@ jobs:
           from PIL import ImageDraw, ImageFont, UnidentifiedImageError
           ImageFile.LOAD_TRUNCATED_IMAGES = True
           try:
-              icon = Image.open("MaxPS4-iOS/Resources/AppIcon.jpg").convert("RGB")
+              icon = Image.open("build/OriginalAppIcon.jpg").convert("RGB")
               icon.load()
               if min(icon.size) < 180:
                   raise ValueError(f"Source logo is too small: {icon.size}")

@@ -26,19 +26,7 @@ struct MaxPS4HomeView: View {
     @State private var selectedGameDetails: MaxPS4Game?
     @State private var detailsReport: String?
     @State private var jitStatusReport: String?
-    @State private var importingPKGHeader = false
-    @State private var showingStikDebugExecutionWarning = false
-    @State private var showingJITSuiteWarning = false
-    @State private var showingJITBranchesWarning = false
-    @State private var showingJITRegistersWarning = false
-    @State private var showingJITMemoryWarning = false
-    @State private var showingJITMultislotWarning = false
-    @State private var showingJITTwoBlocksWarning = false
-    @State private var showingJITThreeBlocksWarning = false
-    @State private var showingJITFullBatchWarning = false
-    @State private var showingIntegratedJITWarning = false
 
-    @AppStorage("maxps4ExperimentalLab") private var experimentalLab = false
     @AppStorage("showFPS") private var showFPS = false
     @AppStorage("networkEnabled") private var networkEnabled = false
 
@@ -68,86 +56,6 @@ struct MaxPS4HomeView: View {
         .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) {
             tabBar
-        }
-        .alert("Backend CPU/JIT intégré — risque de fermeture", isPresented: $showingIntegratedJITWarning) {
-            Button("Annuler", role: .cancel) {}
-            Button("Tester le backend JIT") {
-                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyCheckIntegratedJITBackend()
-            }
-        } message: {
-            Text("Test manuel du sélecteur CPU mode 2 : interpréteur vérifié puis exécution ARM64 générée via StikDebug BRK. Peut fermer MaxPS4 si le débogueur n'est plus actif. N'active pas le JIT pour les jeux PS4.")
-        }
-        .alert("Batterie JIT complète — risque de fermeture", isPresented: $showingJITFullBatchWarning) {
-            Button("Annuler", role: .cancel) {}
-            Button("Lancer les 13 tests") {
-                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteFullBatch()
-            }
-        } message: {
-            Text("Lance 13 vérifications JIT ARM64 à la suite (calculs, branches, registres, mémoire, blocs). Plusieurs interruptions BRK StikDebug : MaxPS4 peut se fermer si le débogueur cesse de répondre.")
-        }
-        .alert("Contexte JIT sur trois blocs — risque de fermeture", isPresented: $showingJITThreeBlocksWarning) {
-            Button("Annuler", role: .cancel) {}
-            Button("Tester les trois blocs") {
-                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteThreeBlockContext()
-            }
-        } message: {
-            Text("Test expérimental avec StikDebug BRK : transmission du registre EAX entre trois blocs ARM64. MaxPS4 peut se fermer si le débogueur n'est plus actif.")
-        }
-        .alert("JIT sur deux blocs — risque de fermeture", isPresented: $showingJITTwoBlocksWarning) {
-            Button("Annuler", role: .cancel) {}
-            Button("Tester les deux blocs") {
-                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteTwoBlocks()
-            }
-        } message: {
-            Text("Deux exécutions JIT ARM64 séparées avec transmission de EAX. Risque de fermeture si StikDebug n'est plus actif.")
-        }
-        .alert("Mémoire JIT étendue — risque de fermeture", isPresented: $showingJITMultislotWarning) {
-            Button("Annuler", role: .cancel) {}
-            Button("Tester les 3 emplacements") {
-                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteMultislotMemory()
-            }
-        } message: {
-            Text("Test natif StikDebug BRK sur trois emplacements de pile. MaxPS4 peut se fermer si le gestionnaire JIT n'est plus actif.")
-        }
-        .alert("Mémoire JIT ARM64 — risque de fermeture", isPresented: $showingJITMemoryWarning) {
-            Button("Annuler", role: .cancel) {}
-            Button("Tester la mémoire") {
-                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteMemory()
-            }
-        } message: {
-            Text("Test JIT via StikDebug BRK : écriture et lecture d'un emplacement de pile invité. MaxPS4 peut se fermer si le débogueur n'est plus actif.")
-        }
-        .alert("Registres JIT ARM64 — risque de fermeture", isPresented: $showingJITRegistersWarning) {
-            Button("Annuler", role: .cancel) {}
-            Button("Tester EAX et ECX") {
-                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteTwoRegisters()
-            }
-        } message: {
-            Text("Test JIT non isolé avec StikDebug : MOV EAX,40 ; MOV ECX,2 ; ADD EAX,ECX ; RET. MaxPS4 peut se fermer si le gestionnaire BRK n'est plus actif.")
-        }
-        .alert("Branchements JIT ARM64 — risque de fermeture", isPresented: $showingJITBranchesWarning) {
-            Button("Annuler", role: .cancel) {}
-            Button("Lancer les 3 tests") {
-                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteBranchSuite()
-            }
-        } message: {
-            Text("Test non isolé via StikDebug BRK : conditions CMP/JZ, TEST/JNZ et boucle SUB/JNZ. MaxPS4 peut se fermer si la session StikDebug cesse de répondre.")
-        }
-        .alert("Suite JIT ARM64 — risque de fermeture", isPresented: $showingJITSuiteWarning) {
-            Button("Annuler", role: .cancel) {}
-            Button("Exécuter les 3 programmes") {
-                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteStikDebugSuite()
-            }
-        } message: {
-            Text("Essai expérimental non isolé : 3 programmes x86-64 sont traduits puis exécutés en ARM64 via BRK StikDebug. MaxPS4 peut se fermer si universal.js cesse de répondre.")
-        }
-        .alert("Essai JIT StikDebug — risque de fermeture", isPresented: $showingStikDebugExecutionWarning) {
-            Button("Annuler", role: .cancel) {}
-            Button("Lancer le test ARM64") {
-                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteStikDebug42()
-            }
-        } message: {
-            Text("Expérience volontaire : envoie BRK #0xf00d et tente d’exécuter le code ARM64 généré. Si universal.js ne gère pas ce trap, MaxPS4 peut se fermer. Aucun jeu PS4 n’est lancé.")
         }
         .alert("Supprimer ce fichier ?", isPresented: Binding(
             get: { gameToDelete != nil },
@@ -395,19 +303,6 @@ struct MaxPS4HomeView: View {
             .preferredColorScheme(.dark)
         }
         .fileImporter(
-            isPresented: $importingPKGHeader,
-            allowedContentTypes: [.data, .item],
-            allowsMultipleSelection: false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else { return }
-                jitStatusReport = MaxPS4OnDeviceJITProbe.inspectImportedPKG(url)
-            case .failure(let error):
-                jitStatusReport = "Import PKG impossible : \(error.localizedDescription)"
-            }
-        }
-        .fileImporter(
             isPresented: $importingGame,
             allowedContentTypes: [.data, .item],
             allowsMultipleSelection: false
@@ -598,158 +493,10 @@ struct MaxPS4HomeView: View {
                         color: MaxPS4NativeLinkCheck.isStikDebugProtocolPresent ? .cyan : .orange
                     )
                     Divider().overlay(.white.opacity(0.08))
-                    Toggle(isOn: $experimentalLab) {
-                        Label("Laboratoire expérimental", systemImage: "flask")
-                            .foregroundStyle(.white)
-                    }
-                    .tint(.cyan)
-                    .padding(.vertical, 18)
-                    .accessibilityHint("Affiche les tests natifs expérimentaux sans activer automatiquement le JIT")
-                    if experimentalLab {
-                        Button {
-                            jitStatusReport = MaxPS4OnDeviceJITProbe.stikAllocatorPreflightReport()
-                                + "\n\n"
-                                + MaxPS4OnDeviceJITProbe.combinedEngineReport()
-                        } label: {
-                            settingButton(icon: "waveform.path.ecg.rectangle", title: "Laboratoire : mémoire et traduction ARM64")
-                        }
-                        Divider().overlay(.white.opacity(0.08))
-                        Button {
-                            jitStatusReport = MaxPS4OnDeviceJITProbe.expandedARM64TranslationReport()
-                        } label: {
-                            settingButton(icon: "testtube.2", title: "Laboratoire : 7 tests de traduction ARM64")
-                        }
-                        Divider().overlay(.white.opacity(0.08))
-                        Button {
-                            jitStatusReport = MaxPS4OnDeviceJITProbe.executablePermissionReport()
-                        } label: {
-                            settingButton(icon: "lock.open", title: "Laboratoire : tester les permissions RX (sans exécution)")
-                        }
-                        Divider().overlay(.white.opacity(0.08))
-                        Button {
-                            jitStatusReport = MaxPS4OnDeviceJITProbe.arm64RXStagingReport()
-                        } label: {
-                            settingButton(icon: "memorychip", title: "Laboratoire : préparer MOV 42 / RET en RX")
-                        }
-                        Divider().overlay(.white.opacity(0.08))
-                        Button {
-                            jitStatusReport = MaxPS4OnDeviceJITProbe.executionIsolationReadinessReport()
-                        } label: {
-                            settingButton(icon: "shield.lefthalf.filled", title: "Laboratoire : vérifier l'isolation de l'exécution ARM64")
-                        }
-                        Divider().overlay(.white.opacity(0.08))
-                        Button {
-                            showingStikDebugExecutionWarning = true
-                        } label: {
-                            settingButton(icon: "bolt.trianglebadge.exclamationmark", title: "EXPÉRIENCE : exécuter ARM64 via StikDebug (BRK)")
-                        }
-                        Divider().overlay(.white.opacity(0.08))
-                        Button {
-                            showingJITSuiteWarning = true
-                        } label: {
-                            settingButton(icon: "cpu.fill", title: "EXPÉRIENCE : JIT réel sur 3 programmes x86-64")
-                        }
-                        Divider().overlay(.white.opacity(0.08))
-                        Button {
-                            showingJITBranchesWarning = true
-                        } label: {
-                            settingButton(icon: "arrow.triangle.branch", title: "EXPÉRIENCE : JIT branchements et boucles (3 tests)")
-                        }
-                        Divider().overlay(.white.opacity(0.08))
-                        Button {
-                            showingJITRegistersWarning = true
-                        } label: {
-                            settingButton(icon: "cpu", title: "EXPÉRIENCE : JIT deux registres EAX / ECX")
-                        }
-                        Divider().overlay(.white.opacity(0.08))
-                        Button {
-                            showingJITMemoryWarning = true
-                        } label: {
-                            settingButton(icon: "memorychip", title: "EXPÉRIENCE : JIT lecture et écriture mémoire")
-                        }
-                        Divider().overlay(.white.opacity(0.08))
-                        Button {
-                            showingJITMultislotWarning = true
-                        } label: {
-                            settingButton(icon: "layers", title: "EXPÉRIENCE : JIT mémoire étendue (3 emplacements)")
-                        }
-                        Divider().overlay(.white.opacity(0.08))
-                        Button {
-                            showingJITTwoBlocksWarning = true
-                        } label: {
-                            settingButton(icon: "workflow", title: "EXPÉRIENCE : JIT deux blocs et état EAX")
-                        }
-                        Divider().overlay(.white.opacity(0.08))
-                        Button {
-                            showingJITThreeBlocksWarning = true
-                        } label: {
-                            settingButton(icon: "workflow", title: "EXPÉRIENCE : contexte JIT sur 3 blocs")
-                        }
-                        Divider().overlay(.white.opacity(0.08))
-                        Button {
-                            showingJITFullBatchWarning = true
-                        } label: {
-                            settingButton(icon: "checklist", title: "EXPÉRIENCE : lancer tous les tests JIT (13)")
-                        }
-                        Divider().overlay(.white.opacity(0.08))
-                        Button {
-                            showingIntegratedJITWarning = true
-                        } label: {
-                            settingButton(icon: "cpu", title: "EXPÉRIENCE : backend CPU avec JIT intégré")
-                        }
-                        Divider().overlay(.white.opacity(0.08))
-                        Button {
-                            jitStatusReport = MaxPS4OnDeviceJITProbe.lastStikDebugAttemptReport()
-                        } label: {
-                            settingButton(icon: "clock.arrow.circlepath", title: "Voir le résultat du dernier essai StikDebug")
-                        }
-                        Divider().overlay(.white.opacity(0.08))
                     Button {
                         jitStatusReport = MaxPS4NativeLinkCheck.jitStatusReport
                     } label: {
                         settingButton(icon: "checkmark.shield.fill", title: "Vérifier l’état du JIT")
-                    }
-                    Divider().overlay(.white.opacity(0.08))
-                    Button {
-                        jitStatusReport = MaxPS4OnDeviceJITProbe.report()
-                    } label: {
-                        settingButton(icon: "iphone", title: "Tester MAP_JIT sur cet iPhone")
-                    }
-                    Divider().overlay(.white.opacity(0.08))
-                    Button {
-                        jitStatusReport = MaxPS4OnDeviceJITProbe.stikAllocatorPreflightReport()
-                    } label: {
-                        settingButton(icon: "shield.checkered", title: "Précontrôle allocateur StikDebug")
-                    }
-                    Divider().overlay(.white.opacity(0.08))
-                    Button {
-                        jitStatusReport = MaxPS4OnDeviceJITProbe.combinedEngineReport()
-                    } label: {
-                        settingButton(icon: "cpu", title: "Tester le CPU invité et la traduction ARM64")
-                    }
-                    Divider().overlay(.white.opacity(0.08))
-                    Button {
-                        jitStatusReport = MaxPS4OnDeviceJITProbe.minimalELFLoaderReport()
-                    } label: {
-                        settingButton(icon: "doc.badge.gearshape", title: "Tester le chargement ELF minimal")
-                    }
-                    Divider().overlay(.white.opacity(0.08))
-                    Button {
-                        jitStatusReport = MaxPS4OnDeviceJITProbe.keroPKGHeaderReport()
-                    } label: {
-                        settingButton(icon: "shippingbox", title: "Tester le lecteur PKG Kero Blaster")
-                    }
-                    Divider().overlay(.white.opacity(0.08))
-                    Button {
-                        importingPKGHeader = true
-                    } label: {
-                        settingButton(icon: "doc.viewfinder", title: "Importer et inspecter un vrai PKG")
-                    }
-                    Divider().overlay(.white.opacity(0.08))
-                    Button {
-                        jitStatusReport = MaxPS4OnDeviceJITProbe.generatedARM64ExecutionReport()
-                    } label: {
-                        settingButton(icon: "bolt.shield.fill", title: "Tester le code ARM64 généré (expérimental)")
                     }
                     Divider().overlay(.white.opacity(0.08))
                     Button {
@@ -795,26 +542,15 @@ struct MaxPS4HomeView: View {
                     }
                     Divider().overlay(.white.opacity(0.08))
                     Button {
-                        guard let bundleID = Bundle.main.bundleIdentifier else {
-                            jitStatusReport = "Impossible de préparer StikDebug : identifiant d’application absent."
+                        guard let bundleID = Bundle.main.bundleIdentifier,
+                              let escaped = bundleID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+                              let url = URL(string: "stikjit://enable-jit?bundle-id=" + escaped) else {
+                            jitStatusReport = "Impossible de préparer le lien StikDebug : identifiant d’application absent."
                             return
                         }
-                        var request = URLComponents()
-                        request.scheme = "stikdebug"
-                        request.host = "enable-jit"
-                        request.queryItems = [
-                            URLQueryItem(name: "bundle-id", value: bundleID),
-                            URLQueryItem(name: "pid", value: String(ProcessInfo.processInfo.processIdentifier)),
-                            URLQueryItem(name: "script-name", value: "universal.js")
-                        ]
-                        guard let url = request.url else {
-                            jitStatusReport = "Impossible de préparer l’URL StikDebug."
-                            return
-                        }
-                        jitStatusReport = "Demande StikDebug envoyée pour MaxPS4 (PID actuel, script universal.js). Ouverture du lien ≠ JIT actif. Retourne dans le Laboratoire pour vérifier l’état de la session."
                         UIApplication.shared.open(url, options: [:]) { opened in
                             if !opened {
-                                jitStatusReport = "StikDebug n’a pas accepté le lien. Ouvre StikDebug manuellement, sélectionne MaxPS4 et universal.js."
+                                jitStatusReport = "StikDebug n’a pas accepté le lien. Ouvre StikDebug manuellement et sélectionne MaxPS4."
                             }
                         }
                     } label: {
@@ -847,7 +583,6 @@ struct MaxPS4HomeView: View {
                     } label: {
                         settingButton(icon: "cpu.fill", title: "Tester l’exécution ARM64 native")
                     }
-                    }
                     if let jitStatusReport {
                         Button {
                             UIPasteboard.general.string = jitStatusReport
@@ -864,12 +599,10 @@ struct MaxPS4HomeView: View {
                 }
 
                 settingsCard {
-                    if experimentalLab {
                     Button {
                         emulator.testBackend()
                     } label: {
                         settingButton(icon: "checkmark.circle.fill", title: "Tester l’intégration")
-                    }
                     }
 
                     Divider().overlay(.white.opacity(0.08))
@@ -909,7 +642,7 @@ struct MaxPS4HomeView: View {
             }
             .font(.system(size: 42, weight: .black, design: .rounded))
 
-            Text("iOS  •  ÉDITION NUIT")
+            Text("iOS  •  ÉDITION NÉON")
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.white.opacity(0.60))
         }
@@ -961,7 +694,7 @@ struct MaxPS4HomeView: View {
     private var systemOverview: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
             overviewTile(icon: "gamecontroller.fill", title: "Jeux", value: "\(emulator.games.count) importés")
-            overviewTile(icon: "externaldrive.fill", title: "Stockage", value: "Local")
+            overviewTile(icon: "internaldrive", title: "Stockage", value: "Local")
             overviewTile(icon: "cpu", title: "CPU", value: emulator.backendReady ? "Connecté" : "Inactif")
             overviewTile(icon: "desktopcomputer", title: "GPU", value: emulator.backendReady ? "Moteur connecté" : "Inactif")
         }
@@ -1000,7 +733,7 @@ struct MaxPS4HomeView: View {
 
                 Text(
                     emulator.backendReady
-                        ? "Pont natif disponible • émulation PS4 inactive"
+                        ? "shadPS4 / FEXCore connecté"
                         : "Interface active • pont natif à connecter"
                 )
                 .font(.subheadline)
@@ -1076,21 +809,10 @@ struct MaxPS4HomeView: View {
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 15)
-                        .fill(Color.cyan.opacity(0.12))
-                    Image(systemName: icon)
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(.cyan)
-                        .symbolRenderingMode(.hierarchical)
-                    // Persistent visible fallback when an unavailable SF Symbol
-                    // name is used on a particular iOS version.
-                    Image(systemName: "square.grid.2x2.fill")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.cyan.opacity(0.52))
-                        .offset(x: 15, y: 15)
-                }
-                .frame(width: 52, height: 52)
+                Image(systemName: icon)
+                    .font(.title2)
+                    .frame(width: 52, height: 52)
+                    .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 15))
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
@@ -1329,23 +1051,22 @@ struct MaxPS4HomeView: View {
     private var heroPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Label("MAXPS4  /  NUIT", systemImage: "moon.stars.fill")
+                Label("MAXPS4  /  CONTROL CENTER", systemImage: "sparkles.rectangle.stack.fill")
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .tracking(2)
                     .foregroundStyle(.cyan)
                 Spacer()
-                Text("ÉDITION NUIT")
+                Text("MaxPS4")
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.55))
             }
-            Text("Dans la légende.")
+            Text("Ta console. Ton univers.")
                 .font(.system(size: 34, weight: .black, design: .rounded))
                 .foregroundStyle(.white)
-            Text("Une interface nocturne. Tes jeux, ton univers.")
+            Text("Bibliothèque locale et laboratoire PS4 sur iPhone")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.66))
             HStack(spacing: 10) {
-                Image(systemName: "moon.stars.fill").foregroundStyle(.white.opacity(0.85))
                 Label("\(emulator.games.count) JEUX", systemImage: "gamecontroller.fill")
                 Spacer()
                 Label("iOS", systemImage: "iphone.gen3")
@@ -1355,7 +1076,7 @@ struct MaxPS4HomeView: View {
             HStack(spacing: 8) {
                 Circle().fill(emulator.backendReady ? Color.green : Color.orange)
                     .frame(width: 7, height: 7)
-                Text(emulator.backendReady ? "Pont natif détecté • jeux PS4 non exécutables" : "Émulation PS4 en développement")
+                Text(emulator.backendReady ? "Backend connecté" : "Émulation PS4 en développement")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.83))
                 Spacer()
@@ -1370,15 +1091,15 @@ struct MaxPS4HomeView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             LinearGradient(colors: [
-                Color(red: 0.025, green: 0.035, blue: 0.13),
-                Color(red: 0.105, green: 0.08, blue: 0.23),
-                Color(red: 0.018, green: 0.025, blue: 0.07)
+                Color(red: 0.07, green: 0.12, blue: 0.28),
+                Color(red: 0.19, green: 0.07, blue: 0.34),
+                Color(red: 0.03, green: 0.06, blue: 0.17)
             ], startPoint: .topLeading, endPoint: .bottomTrailing),
             in: RoundedRectangle(cornerRadius: 28)
         )
         .overlay(RoundedRectangle(cornerRadius: 28)
             .stroke(LinearGradient(colors: [.cyan.opacity(0.8), .purple.opacity(0.65)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.3))
-        .shadow(color: .indigo.opacity(0.32), radius: 24, y: 8)
+        .shadow(color: .purple.opacity(0.22), radius: 20, y: 8)
     }
 
     private var toolsPage: some View {
@@ -1396,7 +1117,7 @@ struct MaxPS4HomeView: View {
                     Text(emulator.deviceDiagnostic)
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.82))
-                    Text("shadPS4 / FEX : moteur PS4 non intégré")
+                    Text("shadPS4 / FEX : " + (emulator.backendReady ? "connecté" : "non intégré"))
                         .font(.caption)
                         .foregroundStyle(emulator.backendReady ? Color.green : Color.orange)
                 }
@@ -1412,7 +1133,7 @@ struct MaxPS4HomeView: View {
                 primaryAction(icon: "square.and.arrow.down.fill", title: "Importer un jeu", subtitle: "Sélectionner un fichier local") {
                     importingGame = true
                 }
-                secondaryAction(icon: "externaldrive.fill", title: "Gestion du stockage", subtitle: "\(emulator.games.count) fichiers enregistrés localement") {
+                secondaryAction(icon: "internaldrive", title: "Gestion du stockage", subtitle: "\(emulator.games.count) fichiers enregistrés localement") {
                     selectedTab = .games
                 }
                 Text("ÉTAT DU MOTEUR")
@@ -1426,7 +1147,7 @@ struct MaxPS4HomeView: View {
                 secondaryAction(icon: "cpu", title: "Diagnostic du moteur", subtitle: "Tester la connexion native") {
                     emulator.testBackend()
                 }
-                secondaryAction(icon: "checkmark.circle.fill", title: "Diagnostic complet (11 tests)", subtitle: "ELF, imports, mémoire, processus, services et bibliothèques") {
+                secondaryAction(icon: "check-check", title: "Diagnostic complet (11 tests)", subtitle: "ELF, imports, mémoire, processus, services et bibliothèques") {
                     emulator.runBatchDiagnostics()
                 }
                 secondaryAction(icon: "doc.text", title: "État du système", subtitle: "Afficher les informations de diagnostic") {
@@ -1437,10 +1158,10 @@ struct MaxPS4HomeView: View {
                     .tracking(1.1)
                     .foregroundStyle(.cyan)
                     .padding(.top, 8)
-                secondaryAction(icon: "doc.text", title: "Tester le chargeur ELF64", subtitle: "Segments simulés • sans exécution PS4") {
+                secondaryAction(icon: "doc.zipper", title: "Tester le chargeur ELF64", subtitle: "Segments simulés • sans exécution PS4") {
                     emulator.testELFLoader()
                 }
-                secondaryAction(icon: "doc.badge.plus", title: "Créer ELF64 de démonstration", subtitle: "Générer un fichier test avec un import libkernel") {
+                secondaryAction(icon: "file-plus", title: "Créer ELF64 de démonstration", subtitle: "Générer un fichier test avec un import libkernel") {
                     emulator.createELFImportDemo()
                 }
                 secondaryAction(icon: "link", title: "Tester ELF64 + bibliothèques", subtitle: "Chargeur ELF64 et import libkernel simulé") {
@@ -1452,10 +1173,10 @@ struct MaxPS4HomeView: View {
                 secondaryAction(icon: "memorychip", title: "Banc de test ELF64 + CPU", subtitle: "Exécuter un ELF synthétique en mémoire invitée") {
                     emulator.runELFCPUBench()
                 }
-                secondaryAction(icon: "play.rectangle", title: "Démarrer l’environnement virtuel", subtitle: "CPU x86-64, mémoire et processus • programme de test") {
+                secondaryAction(icon: "play.rectangle.on.rectangle", title: "Démarrer l’environnement virtuel", subtitle: "CPU x86-64, mémoire et processus • programme de test") {
                     emulator.testVirtualRuntime()
                 }
-                secondaryAction(icon: "arrow.triangle.branch", title: "Tester l’intégration complète", subtitle: "ELF64 → CPU → mémoire • programme synthétique") {
+                secondaryAction(icon: "point.3.connected.trianglepath.dotted", title: "Tester l’intégration complète", subtitle: "ELF64 → CPU → mémoire • programme synthétique") {
                     emulator.testIntegration()
                 }
                 MaxPS4MazeGame()
@@ -1476,16 +1197,16 @@ struct MaxPS4HomeView: View {
                 secondaryAction(icon: "memorychip", title: "Tester la mémoire invitée", subtitle: "Prototype isolé • sans exécution PS4") {
                     emulator.testGuestMemory()
                 }
-                secondaryAction(icon: "memorychip.fill", title: "Tester mémoire virtuelle PS4 (prototype)", subtitle: "Allocation, lecture, protection et libération simulées") {
+                secondaryAction(icon: "memory-stick", title: "Tester mémoire virtuelle PS4 (prototype)", subtitle: "Allocation, lecture, protection et libération simulées") {
                     emulator.testPS4VirtualMemoryService()
                 }
-                secondaryAction(icon: "square.3.layers.3d", title: "Tester mémoire et processus isolés", subtitle: "Deux processus, allocations indépendantes et libération") {
+                secondaryAction(icon: "layers", title: "Tester mémoire et processus isolés", subtitle: "Deux processus, allocations indépendantes et libération") {
                     emulator.testProcessMemoryIsolation()
                 }
-                secondaryAction(icon: "books.vertical", title: "Tester bibliothèques système PS4", subtitle: "Résolution des symboles libkernel simulés") {
+                secondaryAction(icon: "library", title: "Tester bibliothèques système PS4", subtitle: "Résolution des symboles libkernel simulés") {
                     emulator.testPS4LibraryResolver()
                 }
-                secondaryAction(icon: "checkmark.shield.fill", title: "Tester compatibilité PS4 (base)", subtitle: "Symboles système et refus des appels non implémentés") {
+                secondaryAction(icon: "shield-check", title: "Tester compatibilité PS4 (base)", subtitle: "Symboles système et refus des appels non implémentés") {
                     emulator.testPS4CompatibilityScaffold()
                 }
                 secondaryAction(icon: "cpu", title: "Tester les services système simulés", subtitle: "Appels virtuels, mémoire et refus des appels inconnus") {
@@ -1506,11 +1227,11 @@ struct MaxPS4HomeView: View {
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 11)
-        .background(Color(red: 0.018, green: 0.025, blue: 0.075).opacity(0.98),
+        .background(Color(red: 0.035, green: 0.055, blue: 0.14).opacity(0.98),
                     in: RoundedRectangle(cornerRadius: 24))
         .overlay(RoundedRectangle(cornerRadius: 24)
-                    .stroke(.indigo.opacity(0.55), lineWidth: 1))
-        .shadow(color: .indigo.opacity(0.28), radius: 20, y: -3)
+                    .stroke(.cyan.opacity(0.35), lineWidth: 1))
+        .shadow(color: .cyan.opacity(0.17), radius: 17, y: -3)
         .padding(.horizontal, 12)
         .padding(.bottom, 4)
     }
@@ -1596,37 +1317,29 @@ struct MaxPS4HomeView: View {
 
 private struct MaxPS4Background: View {
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.013, green: 0.019, blue: 0.075),
-                        Color(red: 0.060, green: 0.045, blue: 0.15),
-                        Color(red: 0.014, green: 0.018, blue: 0.055)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                Circle()
-                    .fill(Color.indigo.opacity(0.27))
-                    .frame(width: 340, height: 340)
-                    .blur(radius: 75)
-                    .position(x: geometry.size.width * 0.92, y: 85)
-                Circle()
-                    .fill(Color.cyan.opacity(0.12))
-                    .frame(width: 260, height: 260)
-                    .blur(radius: 72)
-                    .position(x: geometry.size.width * 0.04, y: geometry.size.height * 0.76)
-                Image(systemName: "moon.stars.fill")
-                    .font(.system(size: 110, weight: .ultraLight))
-                    .foregroundStyle(.white.opacity(0.055))
-                    .rotationEffect(.degrees(-12))
-                    .position(x: geometry.size.width * 0.87, y: 155)
-            }
-            .frame(width: geometry.size.width, height: geometry.size.height)
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.025, green: 0.018, blue: 0.085),
+                    Color(red: 0.055, green: 0.025, blue: 0.17),
+                    .black
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
             .ignoresSafeArea()
-            .allowsHitTesting(false)
+
+            Circle()
+                .fill(.purple.opacity(0.24))
+                .frame(width: 360, height: 360)
+                .blur(radius: 80)
+                .offset(x: 180, y: -300)
+
+            Circle()
+                .fill(.cyan.opacity(0.08))
+                .frame(width: 260, height: 260)
+                .blur(radius: 70)
+                .offset(x: -180, y: 280)
         }
-        .ignoresSafeArea()
     }
 }
