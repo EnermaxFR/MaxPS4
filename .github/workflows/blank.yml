@@ -310,6 +310,7 @@ jobs:
           test -s "$FMT_INCLUDE/fmt/format.h"
           if xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
               -isysroot "$SDK" -I "$FEX/FEXCore/include" \
+              -I "MaxPS4-iOS/Native/compat/fex_ios" \
               -I "$FEX/FEXCore/Source" -I "$FEX/Source" -I "$FMT_INCLUDE" \
               -c "$SRC" -o build/diagnostics/fexcore-addressing-ios-arm64.o \
               > build/diagnostics/fexcore-ir-compile.log 2>&1; then
