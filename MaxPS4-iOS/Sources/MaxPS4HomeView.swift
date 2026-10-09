@@ -639,15 +639,26 @@ struct MaxPS4HomeView: View {
                     }
                     Divider().overlay(.white.opacity(0.08))
                     Button {
-                        guard let bundleID = Bundle.main.bundleIdentifier,
-                              let escaped = bundleID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-                              let url = URL(string: "stikjit://enable-jit?bundle-id=" + escaped) else {
-                            jitStatusReport = "Impossible de préparer le lien StikDebug : identifiant d’application absent."
+                        guard let bundleID = Bundle.main.bundleIdentifier else {
+                            jitStatusReport = "Impossible de préparer StikDebug : identifiant d’application absent."
                             return
                         }
+                        var request = URLComponents()
+                        request.scheme = "stikdebug"
+                        request.host = "enable-jit"
+                        request.queryItems = [
+                            URLQueryItem(name: "bundle-id", value: bundleID),
+                            URLQueryItem(name: "pid", value: String(ProcessInfo.processInfo.processIdentifier)),
+                            URLQueryItem(name: "script-name", value: "universal.js")
+                        ]
+                        guard let url = request.url else {
+                            jitStatusReport = "Impossible de préparer l’URL StikDebug."
+                            return
+                        }
+                        jitStatusReport = "Demande StikDebug envoyée pour MaxPS4 (PID actuel, script universal.js). Ouverture du lien ≠ JIT actif. Retourne dans le Laboratoire pour vérifier l’état de la session."
                         UIApplication.shared.open(url, options: [:]) { opened in
                             if !opened {
-                                jitStatusReport = "StikDebug n’a pas accepté le lien. Ouvre StikDebug manuellement et sélectionne MaxPS4."
+                                jitStatusReport = "StikDebug n’a pas accepté le lien. Ouvre StikDebug manuellement, sélectionne MaxPS4 et universal.js."
                             }
                         }
                     } label: {
