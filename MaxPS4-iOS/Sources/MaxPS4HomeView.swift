@@ -36,6 +36,7 @@ struct MaxPS4HomeView: View {
     @State private var showingJITTwoBlocksWarning = false
     @State private var showingJITThreeBlocksWarning = false
     @State private var showingJITFullBatchWarning = false
+    @State private var showingIntegratedJITWarning = false
 
     @AppStorage("maxps4ExperimentalLab") private var experimentalLab = false
     @AppStorage("showFPS") private var showFPS = false
@@ -67,6 +68,14 @@ struct MaxPS4HomeView: View {
         .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) {
             tabBar
+        }
+        .alert("Backend CPU/JIT intégré — risque de fermeture", isPresented: $showingIntegratedJITWarning) {
+            Button("Annuler", role: .cancel) {}
+            Button("Tester le backend JIT") {
+                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyCheckIntegratedJITBackend()
+            }
+        } message: {
+            Text("Test manuel du sélecteur CPU mode 2 : interpréteur vérifié puis exécution ARM64 générée via StikDebug BRK. Peut fermer MaxPS4 si le débogueur n'est plus actif. N'active pas le JIT pour les jeux PS4.")
         }
         .alert("Batterie JIT complète — risque de fermeture", isPresented: $showingJITFullBatchWarning) {
             Button("Annuler", role: .cancel) {}
@@ -681,6 +690,12 @@ struct MaxPS4HomeView: View {
                             showingJITFullBatchWarning = true
                         } label: {
                             settingButton(icon: "checklist", title: "EXPÉRIENCE : lancer tous les tests JIT (13)")
+                        }
+                        Divider().overlay(.white.opacity(0.08))
+                        Button {
+                            showingIntegratedJITWarning = true
+                        } label: {
+                            settingButton(icon: "cpu", title: "EXPÉRIENCE : backend CPU avec JIT intégré")
                         }
                         Divider().overlay(.white.opacity(0.08))
                         Button {
