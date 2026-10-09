@@ -432,6 +432,9 @@ private func maxps4_native_jit_arm64_block_checksum(
     _ bytes: UnsafeMutablePointer<Int>?
 ) -> Int32
 
+@_silgen_name("maxps4_aether_guest_backend_probe")
+private func maxps4_aether_guest_backend_probe() -> Int32
+
 @_silgen_name("maxps4_native_jit_rw_alias_probe")
 private func maxps4_native_jit_rw_alias_probe(
     _ bytes: UnsafeMutablePointer<Int>?
@@ -537,6 +540,16 @@ extension MaxPS4NativeLinkCheck {
         Empreinte de diagnostic : \(firstOK ? String(first, radix: 16) : "Indisponible")
         JIT natif : Inactif
         Aucun code généré n’a été exécuté.
+        """
+    }
+
+    static var aetherGuestBackendReport: String {
+        let supported = maxps4_aether_guest_backend_probe() == 1
+        return """
+        Backend CPU réel d’AetherPS4 : \(supported ? "Relié et testé" : "Échec du test")
+        Interface GuestCpuBackend : \(supported ? "Accessible" : "Non disponible")
+        FEXCore JIT : Non encore relié
+        Jeux PS4 : Pas encore exécutables
         """
     }
 
