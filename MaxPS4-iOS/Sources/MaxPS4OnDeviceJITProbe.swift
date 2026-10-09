@@ -15,6 +15,9 @@ private func maxps4NativeMapJITErrnoProbe(_ errorOut: UnsafeMutablePointer<Int32
 @_silgen_name("maxps4_stikdualmap_port_present")
 private func maxps4StikDualMapPortPresent() -> Int32
 
+@_silgen_name("maxps4_stikdualmap_arm64_branch_suite")
+private func maxps4StikDualMapARM64BranchSuite(_ passed: UnsafeMutablePointer<Int32>?) -> Int32
+
 @_silgen_name("maxps4_stikdualmap_arm64_execute_suite")
 private func maxps4StikDualMapARM64ExecuteSuite(_ passed: UnsafeMutablePointer<Int32>?) -> Int32
 
@@ -575,6 +578,23 @@ extension MaxPS4OnDeviceJITProbe {
     // Show the precise readiness gates without branching into RX memory.
     // User-initiated experimental BRK path. The debugger trap can terminate the app.
     // A marker survives a crash/relaunch, without implying that the trap was handled.
+    static func manuallyExecuteBranchSuite() -> String {
+        guard maxps4StikDualMapDebuggerPreflight() == 1 else {
+            return "Branchements JIT non lancés : P_TRACED absent ; aucun BRK envoyé."
+        }
+        UserDefaults.standard.set("suite branchements JIT démarrée — résultat inconnu si fermeture", forKey: "maxps4StikDebugAttempt")
+        var passed: Int32 = 0
+        let status = maxps4StikDualMapARM64BranchSuite(&passed)
+        let details: String
+        if status == 1 {
+            details = "PASS : \(passed)/3 tests natifs ARM64 (CMP/JZ, TEST/JNZ, boucle SUB/JNZ)"
+        } else {
+            details = "ÉCHEC : \(passed)/3 réussis, code \(status). Ne prouve pas un backend PS4 complet."
+        }
+        UserDefaults.standard.set(details, forKey: "maxps4StikDebugAttempt")
+        return "Laboratoire — branchements et boucle JIT\n" + details
+    }
+
     static func manuallyExecuteStikDebugSuite() -> String {
         guard maxps4StikDualMapDebuggerPreflight() == 1 else {
             return "Suite ARM64 non lancée : P_TRACED absent ; aucun BRK envoyé."
