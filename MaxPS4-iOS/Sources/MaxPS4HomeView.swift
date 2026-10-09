@@ -34,6 +34,7 @@ struct MaxPS4HomeView: View {
     @State private var showingJITMemoryWarning = false
     @State private var showingJITMultislotWarning = false
     @State private var showingJITTwoBlocksWarning = false
+    @State private var showingJITThreeBlocksWarning = false
 
     @AppStorage("maxps4ExperimentalLab") private var experimentalLab = false
     @AppStorage("showFPS") private var showFPS = false
@@ -65,6 +66,14 @@ struct MaxPS4HomeView: View {
         .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) {
             tabBar
+        }
+        .alert("Contexte JIT sur trois blocs — risque de fermeture", isPresented: $showingJITThreeBlocksWarning) {
+            Button("Annuler", role: .cancel) {}
+            Button("Tester les trois blocs") {
+                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteThreeBlockContext()
+            }
+        } message: {
+            Text("Test expérimental avec StikDebug BRK : transmission du registre EAX entre trois blocs ARM64. MaxPS4 peut se fermer si le débogueur n'est plus actif.")
         }
         .alert("JIT sur deux blocs — risque de fermeture", isPresented: $showingJITTwoBlocksWarning) {
             Button("Annuler", role: .cancel) {}
@@ -651,6 +660,12 @@ struct MaxPS4HomeView: View {
                             showingJITTwoBlocksWarning = true
                         } label: {
                             settingButton(icon: "workflow", title: "EXPÉRIENCE : JIT deux blocs et état EAX")
+                        }
+                        Divider().overlay(.white.opacity(0.08))
+                        Button {
+                            showingJITThreeBlocksWarning = true
+                        } label: {
+                            settingButton(icon: "workflow", title: "EXPÉRIENCE : contexte JIT sur 3 blocs")
                         }
                         Divider().overlay(.white.opacity(0.08))
                         Button {
