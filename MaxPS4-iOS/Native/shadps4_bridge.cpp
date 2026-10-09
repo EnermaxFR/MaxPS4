@@ -539,6 +539,41 @@ extern "C" int maxps4_native_arm64_jit_ready() noexcept {
     return 0;
 }
 
+// Structural verifier for the restricted ARM64 translation preview.
+// No generated code is executed. Reject unknown instructions and branches
+// outside the block before any future executable-memory handoff.
+extern "C" int maxps4_arm64_verify_preview(
+    const std::uint32_t* words, std::size_t count) noexcept {
+    if (!words || count == 0 || count > 4096 ||
+        words[count - 1] != 0xD65F03C0u) return 0;
+    for (std::size_t i = 0; i < count; ++i) {
+        const std::uint32_t w = words[i];
+        if (w == 0xD65F03C0u) {
+            if (i + 1 != count) return 0;
+        } else if ((w & 0xFFE0001Fu) == 0x52800000u ||
+                   (w & 0xFFE0001Fu) == 0x72A00000u ||
+                   (w & 0xFFE0001Fu) == 0x52800001u ||
+                   (w & 0xFFE0001Fu) == 0x72A00001u ||
+                   w == 0x31000000u || w == 0x71000000u ||
+                   w == 0x2B010000u || w == 0x6B010000u ||
+                   w == 0x4A010000u || w == 0x0A010000u ||
+                   w == 0x2A010000u || w == 0x6A00001Fu ||
+                   w == 0x6B01001Fu || w == 0x6A01001Fu ||
+                   w == 0xD503201Fu) {
+            continue;
+        } else if ((w & 0xFF000010u) == 0x54000000u &&
+                   ((w & 0xFu) == 0 || (w & 0xFu) == 1)) {
+            std::int32_t rel = static_cast<std::int32_t>((w >> 5) & 0x7ffffu);
+            if (rel & 0x40000) rel -= 0x80000;
+            const std::int64_t dest = static_cast<std::int64_t>(i) + rel;
+            if (dest < 0 || dest >= static_cast<std::int64_t>(count)) return 0;
+        } else {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 // Offline x86->AArch64 code emission prototype. Generated instruction words are
 // DATA ONLY: never mapped executable or jumped into. No iOS JIT entitlement implied.
 // Subset: MOV EAX,imm32; ADD/SUB/XOR/AND/OR/CMP/TEST EAX,imm32; bounded forward/backward JZ/JNZ rel8; NOP; RET. Refuse other instructions.
