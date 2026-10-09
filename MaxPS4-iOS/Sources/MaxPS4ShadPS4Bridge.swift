@@ -468,6 +468,26 @@ extension MaxPS4NativeLinkCheck {
 
     /// End-to-end compiler pipeline smoke test. The generated ARM64 words
     /// remain inert data; results are produced by the x86 interpreter.
+    /// Explicit safety gate for future JIT experiments. A debugger hint alone
+    /// cannot authorize executable memory, BRK requests or generated-code calls.
+    static var jitSafetyGateReport: String {
+        let debugger = maxps4_native_debugger_attached()
+        let protocolPresent = isStikDebugProtocolPresent
+        let backendReady = isARM64JITReady
+        let reasons: [String] = [
+            "Débogueur : " + debuggerAttachmentDescription,
+            "Protocole universel : " + (protocolPresent ? "Présent" : "Absent"),
+            "Backend ARM64 exécutable : " + (backendReady ? "Disponible" : "Non implémenté"),
+            "Permission de mémoire exécutable : Non attestée",
+            "Handshake StikDebug : Non implémenté"
+        ]
+        // Never treat P_TRACED or protocol availability as an authorization.
+        let canSafelyExecuteGeneratedCode = false
+        let result = canSafelyExecuteGeneratedCode ? "Autorisé" : "Bloqué — interpréteur uniquement"
+        _ = debugger
+        return (["Sécurité JIT : " + result] + reasons).joined(separator: "\n")
+    }
+
     static var arm64PipelineSelfTestReport: String {
         let programs: [(String, [UInt8], UInt64)] = [
             ("MOV / ADD", [0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3], 42),
