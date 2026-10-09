@@ -15,6 +15,13 @@ private func maxps4NativeMapJITErrnoProbe(_ errorOut: UnsafeMutablePointer<Int32
 @_silgen_name("maxps4_stikdualmap_port_present")
 private func maxps4StikDualMapPortPresent() -> Int32
 
+@_silgen_name("maxps4_native_guest_run_with_backend")
+private func maxps4GuestRunWithBackend(
+    _ code: UnsafePointer<UInt8>?, _ length: Int, _ budget: UInt32,
+    _ mode: Int32, _ usedMode: UnsafeMutablePointer<Int32>?,
+    _ result: UnsafeMutablePointer<UInt64>?
+) -> Int32
+
 @_silgen_name("maxps4_stikdualmap_arm64_full_batch")
 private func maxps4StikDualMapFullBatch(_ passed: UnsafeMutablePointer<Int32>?, _ total: UnsafeMutablePointer<Int32>?) -> Int32
 
@@ -596,6 +603,24 @@ extension MaxPS4OnDeviceJITProbe {
     // Show the precise readiness gates without branching into RX memory.
     // User-initiated experimental BRK path. The debugger trap can terminate the app.
     // A marker survives a crash/relaunch, without implying that the trap was handled.
+    static func manuallyCheckIntegratedJITBackend() -> String {
+        guard maxps4StikDualMapDebuggerPreflight() == 1 else {
+            return "Backend JIT non lancé : P_TRACED absent."
+        }
+        UserDefaults.standard.set("Test backend CPU/JIT en cours — issue inconnue si fermeture", forKey: "maxps4StikDebugAttempt")
+        let guest: [UInt8] = [0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3]
+        var mode: Int32 = -1
+        var result: UInt64 = 0
+        let status = guest.withUnsafeBufferPointer {
+            maxps4GuestRunWithBackend($0.baseAddress, $0.count, 16, 2, &mode, &result)
+        }
+        let report = status == 1 && mode == 2 && result == 42
+            ? "PASS : sélecteur backend CPU → JIT ARM64 réel ; résultat 42, mode utilisé 2"
+            : "ÉCHEC : sélecteur backend CPU/JIT (retour \(status), mode \(mode), résultat \(result))."
+        UserDefaults.standard.set(report, forKey: "maxps4StikDebugAttempt")
+        return "Laboratoire — JIT intégré au backend CPU\n" + report
+    }
+
     static func manuallyExecuteFullBatch() -> String {
         guard maxps4StikDualMapDebuggerPreflight() == 1 else {
             return "Batterie JIT non lancée : P_TRACED absent."
