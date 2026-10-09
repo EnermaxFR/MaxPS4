@@ -608,6 +608,13 @@ extension MaxPS4NativeLinkCheck {
                 0x52800060, 0x72A00000, 0x71000400,
                 0x54FFFFE1, 0xD65F03C0
               ] else { return false }
+        // Reject a jump directly into another conditional branch: NZCV might
+        // be stale if a prior CMP or arithmetic instruction was skipped.
+        let branchToBranch = Data([0xB8, 1, 0, 0, 0,
+                                   0x3D, 1, 0, 0, 0,
+                                   0x74, 2, 0x90, 0x90,
+                                   0x75, 0, 0xC3])
+        guard arm64TranslationPreview(branchToBranch) == nil else { return false }
         // Invalid instruction targets and loops without fresh CMP are rejected.
         let badTarget = Data([0xB8, 42, 0, 0, 0, 0x3D, 42, 0, 0, 0,
                               0x74, 1, 0xB8, 99, 0, 0, 0, 0xC3])
