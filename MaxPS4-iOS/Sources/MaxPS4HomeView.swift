@@ -514,6 +514,12 @@ struct MaxPS4HomeView: View {
                     } label: {
                         settingButton(icon: "lock.shield", title: "Contrôler la sécurité du JIT")
                     }
+                    Divider().overlay(.white.opacity(0.08))
+                    Button {
+                        jitStatusReport = MaxPS4NativeLinkCheck.arm64VerifierAdversarialReport
+                    } label: {
+                        settingButton(icon: "checkmark.shield", title: "Tester les limites du code ARM64")
+                    }
                     if let jitStatusReport {
                         Button {
                             UIPasteboard.general.string = jitStatusReport
