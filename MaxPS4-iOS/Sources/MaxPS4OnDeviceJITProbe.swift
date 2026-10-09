@@ -12,6 +12,9 @@ private func maxps4StikDualMapPortPresent() -> Int32
 @_silgen_name("maxps4_stikdualmap_debugger_preflight")
 private func maxps4StikDualMapDebuggerPreflight() -> Int32
 
+@_silgen_name("maxps4_native_jit_rw_alias_probe")
+private func maxps4StikRWMemoryAliasProbe(_ pageSize: UnsafeMutablePointer<Int>?) -> Int32
+
 @_silgen_name("maxps4_native_pkg_header")
 private func maxps4NativePKGHeader(
     _ data: UnsafePointer<UInt8>?, _ length: Int,
@@ -37,6 +40,12 @@ enum MaxPS4OnDeviceJITProbe {
         default:
             mapDescription = "Indisponible / non pris en charge"
         }
+        // Exercise RW-to-RW aliasing only; never allocate RX or emit BRK.
+        var aliasPageSize = 0
+        let rwAliasWorks = maxps4StikRWMemoryAliasProbe(&aliasPageSize) == 1
+        let aliasDescription = rwAliasWorks
+            ? "RW/RW validé sur \\(aliasPageSize) octets (sans droits exécutables)"
+            : "Échec ou indisponible (aucune page exécutable testée)"
         let attachObserved = maxps4StikDualMapDebuggerPreflight() == 1
         let safeNextStep = attachObserved
             ? "P_TRACED observé, mais le script universal.js reste à confirmer avant tout BRK"
@@ -48,6 +57,7 @@ enum MaxPS4OnDeviceJITProbe {
         État du débogueur : \(debugger)
         Entrées du protocole intégrées : \(protocolPresent ? "Oui" : "Non")
         Allocation mémoire iOS : \(mapDescription)
+        Double mapping sans JIT : \(aliasDescription)
         Étape de vérification : \(safeNextStep)
         Précondition native débogueur : \(maxps4StikDualMapDebuggerPreflight() == 1 ? "Présent (script non confirmé)" : "Absente — test exécutable interdit")
         Test ARM64 via double mapping : Codé en natif, non exposé tant que le BRK reste dangereux
