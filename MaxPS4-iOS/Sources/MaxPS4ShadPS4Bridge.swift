@@ -349,12 +349,12 @@ extension MaxPS4NativeLinkCheck {
 
     /// Requests JIT; the native dispatcher reports whether it actually used it.
     /// Fallback always remains available for synthetic tests.
-    static func runSyntheticX86PreferJIT(_ code: Data) -> (result: UInt64, usedJIT: Bool)? {
+    static func runSyntheticX86PreferJIT(_ code: Data, budget: UInt32 = 64) -> (result: UInt64, usedJIT: Bool)? {
         var output: UInt64 = 0
         var usedMode: Int32 = -1
         let accepted = code.withUnsafeBytes { raw in
             maxps4_native_guest_run_with_backend(
-                raw.bindMemory(to: UInt8.self).baseAddress, code.count, 64,
+                raw.bindMemory(to: UInt8.self).baseAddress, code.count, budget,
                 1, &usedMode, &output
             )
         }
@@ -380,6 +380,16 @@ extension MaxPS4NativeLinkCheck {
     static var executionBackendSelfTest: Bool {
         let program = Data([0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3])
         guard let output = runSyntheticX86PreferJIT(program) else { return false }
+        // A terminating three-iteration loop must stay in interpreter mode.
+        let loop = Data([0xB8, 3, 0, 0, 0, 0x2D, 1, 0, 0, 0,
+                         0x75, 0xF9, 0xC3])
+        guard let loopResult = runSyntheticX86PreferJIT(loop, budget: 12),
+              loopResult.result == 0, !loopResult.usedJIT,
+              runSyntheticX86PreferJIT(loop, budget: 5) == nil else { return false }
+        // A nonterminating branch must be bounded by the execution budget.
+        let infinite = Data([0xB8, 1, 0, 0, 0, 0x3D, 1, 0, 0, 0,
+                             0x74, 0xFE, 0xC3])
+        guard runSyntheticX86PreferJIT(infinite, budget: 12) == nil else { return false }
         return output.result == 42 && !output.usedJIT && !isARM64JITReady && arm64CacheSelfTest
     }
 }
