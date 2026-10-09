@@ -442,7 +442,7 @@ jobs:
           test -s "$JIT_SRC"
           if xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
               -isysroot "$SDK" -I "$FEX/FEXCore/include" \
-              -D MADV_HUGEPAGE=0 -D MADV_NOHUGEPAGE=0 \
+              -D ARCHITECTURE_arm64=1 -D MADV_HUGEPAGE=0 -D MADV_NOHUGEPAGE=0 \
               -I "build/diagnostics/fexcore-generated" \
               -I "MaxPS4-iOS/Native/compat/fex_ios" \
               -I "$FEX/CodeEmitter" -I "$FEX/FEXHeaderUtils" \
@@ -462,7 +462,7 @@ jobs:
           JIT_CORE="$FEX/FEXCore/Source/Interface/Core/JIT/JIT.cpp"
           if xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
               -isysroot "$SDK" -I "$FEX/FEXCore/include" \
-              -D MADV_HUGEPAGE=0 -D MADV_NOHUGEPAGE=0 \
+              -D ARCHITECTURE_arm64=1 -D MADV_HUGEPAGE=0 -D MADV_NOHUGEPAGE=0 \
               -I "build/diagnostics/fexcore-generated" \
               -I "MaxPS4-iOS/Native/compat/fex_ios" \
               -I "$FEX/CodeEmitter" -I "$FEX/FEXHeaderUtils" \
@@ -482,7 +482,7 @@ jobs:
           test -s "$ALU_SRC"
           if xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
               -isysroot "$SDK" -I "$FEX/FEXCore/include" \
-              -D MADV_HUGEPAGE=0 -D MADV_NOHUGEPAGE=0 \
+              -D ARCHITECTURE_arm64=1 -D MADV_HUGEPAGE=0 -D MADV_NOHUGEPAGE=0 \
               -I "build/diagnostics/fexcore-generated" \
               -I "MaxPS4-iOS/Native/compat/fex_ios" \
               -I "$FEX/CodeEmitter" -I "$FEX/FEXHeaderUtils" \
