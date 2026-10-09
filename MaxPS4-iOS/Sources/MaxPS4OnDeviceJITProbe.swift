@@ -185,7 +185,7 @@ enum MaxPS4OnDeviceJITProbe {
                                 ($0 << 8) | UInt32($1)
                             }
                         }
-                        let flags = beTable32(4)
+                        let flags = beTable32(8) // field +4 is filename offset, +8 is flags
                         let offset = UInt64(beTable32(16))
                         let size = UInt64(beTable32(20))
                         if offset > UInt64(total) ||
@@ -194,7 +194,36 @@ enum MaxPS4OnDeviceJITProbe {
                         }
                         if flags & 0x80000000 != 0 { encryptedFlags += 1 }
                     }
-                    entryReport = "Entrées de table lues : \(entries) (IDs initiaux : \(preview.joined(separator: ", ")))\nPlages hors fichier : \(invalidRanges)\nEntrées marquées chiffrées : \(encryptedFlags)"
+                    var signatures: [String] = []
+                    for index in 0..<entries {
+                        let p = index * 32
+                        func word(_ at: Int) -> UInt32 {
+                            table[(p + at)..<(p + at + 4)].reduce(UInt32(0)) {
+                                ($0 << 8) | UInt32($1)
+                            }
+                        }
+                        let ident = word(0)
+                        let offset = UInt64(word(16))
+                        let length = UInt64(word(20))
+                        guard length >= 4, offset <= UInt64(total),
+                              length <= UInt64(total) - offset else { continue }
+                        try handle.seek(toOffset: offset)
+                        let signature = try handle.read(upToCount: 8) ?? Data()
+                        let label: String?
+                        if signature.starts(with: [0, 0x50, 0x53, 0x46]) {
+                            label = "PSF (probable param.sfo)"
+                        } else if signature.starts(with: [0x89, 0x50, 0x4E, 0x47]) {
+                            label = "PNG"
+                        } else if signature.starts(with: [0x7F, 0x45, 0x4C, 0x46]) {
+                            label = "ELF"
+                        } else {
+                            label = nil
+                        }
+                        if let label {
+                            signatures.append(String(format: "%08X", ident) + " : " + label)
+                        }
+                    }
+                    entryReport = "Entrées de table lues : \(entries) (IDs initiaux : \(preview.joined(separator: ", ")))\nPlages hors fichier : \(invalidRanges)\nEntrées marquées chiffrées (flags +8) : \(encryptedFlags)\nSignatures internes reconnues : \(signatures.isEmpty ? "Aucune" : signatures.joined(separator: "; "))"
 
                 } else {
                     entryReport = "Entrées : lecture incomplète"
