@@ -1019,6 +1019,21 @@ extern "C" int maxps4_stikdualmap_arm64_execute_suite(int* passed_out) noexcept 
 #endif
 }
 
+// Synthetic bounded stack-memory regression: write 42, clobber EAX, read 42.
+extern "C" int maxps4_stikdualmap_arm64_memory_test() noexcept {
+    constexpr std::uint8_t guest[] = {
+        0xB8,42,0,0,0, 0x89,0x44,0x24,0xFC,
+        0xB8,0,0,0,0, 0x8B,0x44,0x24,0xFC, 0xC3
+    };
+    std::uint64_t interpreted = 0;
+    if (maxps4_native_guest_x86_run(guest, sizeof(guest), 20, &interpreted) != 1 ||
+        interpreted != 42) return -7;
+    std::uint64_t native = 0;
+    const int status = maxps4_stikdualmap_execute_guest_block(guest, sizeof(guest), &native);
+    if (status != 1) return status;
+    return native == interpreted ? 1 : -4;
+}
+
 // Experimental two-register execution: EAX=40, ECX=2, ADD EAX,ECX, RET.
 extern "C" int maxps4_stikdualmap_arm64_two_register_test() noexcept {
     constexpr std::uint8_t guest[] = {
