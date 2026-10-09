@@ -904,6 +904,17 @@ jobs:
               | tee build/diagnostics/generated-arm64-execution.log
           fi
 
+      - name: Upload generated ARM64 execution proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-generated-ARM64-execution-proof
+          path: |
+            build/diagnostics/generated-arm64-execution.log
+            build/diagnostics/generated-arm64-execution-test
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Swift source typecheck
         shell: bash
         run: |
