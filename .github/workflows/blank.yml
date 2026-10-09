@@ -331,6 +331,44 @@ jobs:
               | tee build/diagnostics/fexcore-ir-status.txt
             head -45 build/diagnostics/fexcore-ir-compile.log
           fi
+          # Replace the Linux-only signal mask guard in the CI copy with
+          # POSIX pthread_sigmask for Darwin. This is a source-porting probe,
+          # not a runtime JIT entitlement or executable-memory workaround.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build/diagnostics/fexcore-upstream/FEXCore/include/FEXCore/Utils/SignalScopeGuards.h")
+          s = p.read_text()
+          start = s.index("class ScopedSignalMasker final {")
+          stop = s.index("\n/**", start)
+          replacement = """class ScopedSignalMasker final {
+          public:
+            explicit ScopedSignalMasker(uint64_t Mask) {
+              sigset_t requested {};
+              sigemptyset(&requested);
+              for (int signal_number = 1; signal_number <= 64; ++signal_number) {
+                if (Mask & (uint64_t{1} << (signal_number - 1))) {
+                  sigaddset(&requested, signal_number);
+                }
+              }
+              Active = pthread_sigmask(SIG_SETMASK, &requested, &OriginalMask) == 0;
+            }
+            ScopedSignalMasker(const ScopedSignalMasker&) = delete;
+            ScopedSignalMasker& operator=(const ScopedSignalMasker&) = delete;
+            ScopedSignalMasker(ScopedSignalMasker&& other)
+              : OriginalMask(other.OriginalMask), Active(other.Active) {
+              other.Active = false;
+            }
+            ~ScopedSignalMasker() {
+              if (Active) pthread_sigmask(SIG_SETMASK, &OriginalMask, nullptr);
+            }
+          private:
+            sigset_t OriginalMask {};
+            bool Active = false;
+          };
+          """
+          s = s[:start] + replacement + s[stop:]
+          p.write_text(s)
+          PY
           # Second real FEXCore JIT-related implementation probe.
           JIT_SRC="$FEX/FEXCore/Source/Interface/Core/JIT/Arm64Relocations.cpp"
           test -s "$JIT_SRC"
