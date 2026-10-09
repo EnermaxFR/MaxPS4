@@ -517,6 +517,7 @@ jobs:
             | xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
                 -DARCHITECTURE_arm64=1 -x c++ -fsyntax-only -
           if xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
+              -ferror-limit=0 -fno-color-diagnostics \
               -isysroot "$SDK" -I "$FEX/FEXCore/include" \
               -DARCHITECTURE_arm64=1 -D MADV_HUGEPAGE=0 -D MADV_NOHUGEPAGE=0 \
               -I "build/diagnostics/fexcore-generated" \
