@@ -80,6 +80,14 @@ int main() {
         reject_invalid_guest(invalid, sizeof(invalid)) &&
         reject_invalid_guest(nullptr, 0) &&
         reject_exhausted_budget() &&
+        ([] {
+            constexpr std::uint8_t ret[] = {0xC3};
+            int used_jit = -1;
+            std::uint64_t result = 0;
+            return maxps4_native_guest_run_with_backend(ret, sizeof(ret), 0, 1,
+                                                        &used_jit, &result) == 0 &&
+                   used_jit == 0;
+        }()) &&
         maxps4_native_arm64_jit_ready() == 0 &&
 #if defined(__aarch64__)
         maxps4_native_arm64_static_execute_probe() == 1;
