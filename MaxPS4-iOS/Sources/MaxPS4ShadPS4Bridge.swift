@@ -443,6 +443,14 @@ private func maxps4_native_jit_writable_page_probe(
     _ pageSize: UnsafeMutablePointer<Int>?
 ) -> Int32
 
+// Inspired by AetherPS4-iOS/Sources/JITSupport.swift (GPL-2.0-or-later).
+// CS_DEBUGGED is an iOS code-signing status, NOT evidence that a JIT ran.
+@_silgen_name("csops")
+private func maxps4_ios_csops(
+    _ pid: Int32, _ operation: Int32,
+    _ buffer: UnsafeMutableRawPointer?, _ size: Int32
+) -> Int32
+
 @_silgen_name("maxps4_native_debugger_attached")
 private func maxps4_native_debugger_attached() -> Int32
 
@@ -454,6 +462,18 @@ private func maxps4_native_arm64_jit_ready() -> Int32
 
 extension MaxPS4NativeLinkCheck {
     static var isARM64JITReady: Bool { maxps4_native_arm64_jit_ready() == 1 }
+    static var codeSigningDebugStatus: String {
+        var flags: UInt32 = 0
+        let rc = withUnsafeMutablePointer(to: &flags) { pointer in
+            maxps4_ios_csops(getpid(), 0, UnsafeMutableRawPointer(pointer),
+                            Int32(MemoryLayout<UInt32>.size))
+        }
+        guard rc == 0 else { return "Indéterminé (csops indisponible)" }
+        return (flags & 0x10000000) != 0
+            ? "CS_DEBUGGED activé (JIT non prouvé)"
+            : "CS_DEBUGGED absent"
+    }
+
     static var debuggerAttachmentDescription: String {
         switch maxps4_native_debugger_attached() {
         case 1: return "Débogueur détecté (identité non vérifiée)"
@@ -477,7 +497,7 @@ extension MaxPS4NativeLinkCheck {
         Passerelle StikDebug : \(isStikDebugProtocolPresent ? "Intégrée" : "Indisponible")
         Traduction ARM64 : \(supported && words != nil ? "Acceptée (" + String(words!.count) + " mots)" : "Refusée")
         Exécution du test : \(fallback?.result == 42 ? (fallback!.usedJIT ? "JIT" : "Interpréteur") : "Échec")
-        Attachement : \(debuggerAttachmentDescription)\n        Connexion StikDebug : Non vérifiée par MaxPS4
+        Attachement : \(debuggerAttachmentDescription)\n        Signature iOS : \(codeSigningDebugStatus)\n        Connexion StikDebug : Non vérifiée par MaxPS4
         Mémoire exécutable : Non testée
 
         Ce test n’émet aucune interruption BRK et ne valide pas encore l’exécution JIT sur cet iPhone.
