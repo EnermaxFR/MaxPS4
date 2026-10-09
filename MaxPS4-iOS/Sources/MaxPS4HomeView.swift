@@ -557,6 +557,12 @@ struct MaxPS4HomeView: View {
                     Text("Ouvre StikDebug pour MaxPS4. Le retour dans l’application ne prouve pas que le JIT natif fonctionne.")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.56))
+                    Divider().overlay(.white.opacity(0.08))
+                    Button {
+                        jitStatusReport = MaxPS4NativeLinkCheck.jitDualMappingReport
+                    } label: {
+                        settingButton(icon: "square.on.square", title: "Tester la double mémoire JIT (RW)")
+                    }
                     if let jitStatusReport {
                         Button {
                             UIPasteboard.general.string = jitStatusReport
