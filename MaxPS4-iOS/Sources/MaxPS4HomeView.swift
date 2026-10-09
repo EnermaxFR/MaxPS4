@@ -524,6 +524,12 @@ struct MaxPS4HomeView: View {
                     }
                     Divider().overlay(.white.opacity(0.08))
                     Button {
+                        jitStatusReport = MaxPS4OnDeviceJITProbe.keroPKGHeaderReport()
+                    } label: {
+                        settingButton(icon: "shippingbox", title: "Tester le lecteur PKG Kero Blaster")
+                    }
+                    Divider().overlay(.white.opacity(0.08))
+                    Button {
                         jitStatusReport = MaxPS4OnDeviceJITProbe.generatedARM64ExecutionReport()
                     } label: {
                         settingButton(icon: "bolt.shield.fill", title: "Tester le code ARM64 généré (expérimental)")
