@@ -533,6 +533,21 @@ jobs:
               | tee build/diagnostics/fexcore-jit-core-status.txt
             head -25 build/diagnostics/fexcore-jit-core-compile.log
           fi
+          # Confirm the produced object is genuinely Mach-O arm64 rather than
+          # accepting an accidental host-architecture compilation.
+          if test -s build/diagnostics/fexcore-jit-core-ios.o; then
+            if xcrun lipo -archs build/diagnostics/fexcore-jit-core-ios.o \
+                | grep -Eq '(^|[[:space:]])arm64([[:space:]]|$)'; then
+              echo "PASS genuine FEXCore JIT.cpp Mach-O arm64 object" \
+                | tee build/diagnostics/fexcore-jit-object-arch-status.txt
+            else
+              echo "BLOCKED JIT.cpp object has wrong architecture" \
+                | tee build/diagnostics/fexcore-jit-object-arch-status.txt
+            fi
+          else
+            echo "BLOCKED no FEXCore JIT.cpp object to verify" \
+              | tee build/diagnostics/fexcore-jit-object-arch-status.txt
+          fi
           # Report unresolved symbols of the genuine JIT object if compilation succeeds.
           # This is a link-dependency inventory, not JIT execution on iOS.
           if test -s build/diagnostics/fexcore-jit-core-ios.o; then
@@ -593,6 +608,9 @@ jobs:
               if test -f build/diagnostics/fexcore-jit-core-status.txt; then
                 cat build/diagnostics/fexcore-jit-core-status.txt
               fi
+              if test -f build/diagnostics/fexcore-jit-object-arch-status.txt; then
+                cat build/diagnostics/fexcore-jit-object-arch-status.txt
+              fi
               if test -f build/diagnostics/fexcore-jit-link-readiness.txt; then
                 cat build/diagnostics/fexcore-jit-link-readiness.txt
               fi
@@ -643,6 +661,7 @@ jobs:
             build/diagnostics/fexcore-jit-macro-errors.log
             build/diagnostics/fexcore-jit-core-status.txt
             build/diagnostics/fexcore-jit-core-compile.log
+            build/diagnostics/fexcore-jit-object-arch-status.txt
             build/diagnostics/fexcore-jit-link-readiness.txt
             build/diagnostics/fexcore-jit-core-undefined-symbols.txt
             build/diagnostics/fexcore-jit-alu-status.txt
