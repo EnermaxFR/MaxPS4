@@ -260,6 +260,20 @@ jobs:
           test -s build/diagnostics/aether-fex-hle-required-symbols.txt
           echo "PASS AetherPS4 FEX HLE bridge cross-compiled; dependencies recorded; linking awaits FEXCore"
 
+      - name: Verify FEXCore upstream source availability (pinned)
+        shell: bash
+        run: |
+          set -euo pipefail
+          FEX_DIR="build/diagnostics/fexcore-upstream"
+          git clone --quiet --no-checkout --filter=blob:none \
+            https://github.com/FEX-Emu/FEX.git "$FEX_DIR"
+          git -C "$FEX_DIR" sparse-checkout init --cone
+          git -C "$FEX_DIR" sparse-checkout set FEXCore Source
+          git -C "$FEX_DIR" checkout --quiet f2b679f6028ce1c38875233aecfcf5d3f8ebecec
+          test -s "$FEX_DIR/FEXCore/include/FEXCore/Core/Context.h"
+          echo "PASS pinned FEXCore source headers available"
+          echo "NOTE: FEXCore is not yet compiled or linked"
+
       - name: Test ARM64 translation and safe interpreter fallback on macOS
         shell: bash
         run: |
