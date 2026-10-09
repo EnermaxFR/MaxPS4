@@ -692,7 +692,10 @@ jobs:
                   > build/diagnostics/fexcore-jit-partial-undefined-symbols.txt \
                   2> build/diagnostics/fexcore-jit-nm-error.log; then
                 if xcrun --find c++filt >/dev/null 2>&1; then
-                  xcrun c++filt < build/diagnostics/fexcore-jit-partial-undefined-symbols.txt \
+                  # Mach-O prefixes each C++ symbol with an extra underscore.
+                  # Remove only that prefix before Itanium ABI demangling.
+                  sed 's/^_//' build/diagnostics/fexcore-jit-partial-undefined-symbols.txt \
+                    | xcrun c++filt \
                     | sort -u > build/diagnostics/fexcore-jit-partial-demangled-symbols.txt
                 else
                   sort -u build/diagnostics/fexcore-jit-partial-undefined-symbols.txt \
