@@ -733,7 +733,7 @@ struct MaxPS4HomeView: View {
 
                 Text(
                     emulator.backendReady
-                        ? "shadPS4 / FEXCore connecté"
+                        ? "Pont natif disponible • émulation PS4 inactive"
                         : "Interface active • pont natif à connecter"
                 )
                 .font(.subheadline)
@@ -1088,7 +1088,7 @@ struct MaxPS4HomeView: View {
             HStack(spacing: 8) {
                 Circle().fill(emulator.backendReady ? Color.green : Color.orange)
                     .frame(width: 7, height: 7)
-                Text(emulator.backendReady ? "Backend connecté" : "Émulation PS4 en développement")
+                Text(emulator.backendReady ? "Pont natif détecté • jeux PS4 non exécutables" : "Émulation PS4 en développement")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.83))
                 Spacer()
@@ -1129,7 +1129,7 @@ struct MaxPS4HomeView: View {
                     Text(emulator.deviceDiagnostic)
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.82))
-                    Text("shadPS4 / FEX : " + (emulator.backendReady ? "connecté" : "non intégré"))
+                    Text("shadPS4 / FEX : moteur PS4 non intégré")
                         .font(.caption)
                         .foregroundStyle(emulator.backendReady ? Color.green : Color.orange)
                 }
