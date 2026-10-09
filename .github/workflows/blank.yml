@@ -496,9 +496,20 @@ jobs:
               build/diagnostics/fexcore-jit-macros.cpp \
               > build/diagnostics/fexcore-jit-defined-macros.txt \
               2> build/diagnostics/fexcore-jit-macro-errors.log || true
-          grep -E '^#define (__aarch64__|__arm64__|ARCHITECTURE_arm64|ARCHITECTURE_x86_64)\\b' \
+          grep -E '^#define (__aarch64__|__arm64__|ARCHITECTURE_arm64|ARCHITECTURE_x86_64)([[:space:]]|$)' \
               build/diagnostics/fexcore-jit-defined-macros.txt \
               | tee build/diagnostics/fexcore-jit-architecture-macros.txt || true
+          # Cross-check what Clang actually defined, not merely the requested -D.
+          if grep -Eq '^#define ARCHITECTURE_arm64[[:space:]]+1([[:space:]]|$)' \
+              build/diagnostics/fexcore-jit-defined-macros.txt \
+              && grep -Eq '^#define __aarch64__[[:space:]]+1([[:space:]]|$)' \
+              build/diagnostics/fexcore-jit-defined-macros.txt; then
+            echo "PASS actual Clang iOS ARM64 macros" \
+              | tee build/diagnostics/fexcore-jit-macro-status.txt
+          else
+            echo "BLOCKED missing iOS ARM64 macros (check Clang preprocessor output)" \
+              | tee build/diagnostics/fexcore-jit-macro-status.txt
+          fi
           JIT_CORE="$FEX/FEXCore/Source/Interface/Core/JIT/JIT.cpp"
           # Check architecture feature macro before probing the real JIT translation unit.
           # Required by SHMStats and member-function-pointer ABI helpers.
@@ -573,6 +584,9 @@ jobs:
                 cat build/diagnostics/fexcore-jit-architecture-macros.txt
                 echo '```'
               fi
+              if test -f build/diagnostics/fexcore-jit-macro-status.txt; then
+                cat build/diagnostics/fexcore-jit-macro-status.txt
+              fi
               if test -f build/diagnostics/fexcore-jit-abi-status.txt; then
                 cat build/diagnostics/fexcore-jit-abi-status.txt
               fi
@@ -621,6 +635,7 @@ jobs:
             build/diagnostics/fexcore-jit-defined-macros.txt
             build/diagnostics/fexcore-jit-architecture-macros.txt
             build/diagnostics/fexcore-jit-macro-errors.log
+            build/diagnostics/fexcore-jit-macro-status.txt
             build/diagnostics/fexcore-jit-abi-status.txt
             build/diagnostics/fexcore-jit-abi-compile.log
             build/diagnostics/fexcore-jit-defined-macros.txt
