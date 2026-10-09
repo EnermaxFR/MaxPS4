@@ -31,6 +31,14 @@ static bool run(const char* label, const std::uint8_t* input, std::size_t length
                 label, emitted, static_cast<unsigned long long>(result));
     return true;
 }
+// Invalid guest bytecode must never be reported as a successful JIT run.
+static bool reject_invalid_guest(const std::uint8_t* input, std::size_t length) {
+    int used_jit = -1;
+    std::uint64_t result = 0;
+    return maxps4_native_guest_run_with_backend(input, length, 64, 1,
+                                                &used_jit, &result) == 0 &&
+           used_jit == 0 && maxps4_native_arm64_jit_ready() == 0;
+}
 int main() {
     constexpr std::uint8_t add[] = {0xB8,40,0,0,0,0x05,2,0,0,0,0xC3};
     constexpr std::uint8_t loop[] = {0xB8,3,0,0,0,0x2D,1,0,0,0,0x75,0xF9,0xC3};
@@ -59,6 +67,8 @@ int main() {
         !maxps4_arm64_translate_preview(invalid, sizeof(invalid), words, 16, &emitted) &&
         !maxps4_arm64_verify_preview(nullptr, 0) &&
         !maxps4_arm64_verify_preview(invalid_words, 2) &&
+        reject_invalid_guest(invalid, sizeof(invalid)) &&
+        reject_invalid_guest(nullptr, 0) &&
         maxps4_native_arm64_jit_ready() == 0 &&
 #if defined(__aarch64__)
         maxps4_native_arm64_static_execute_probe() == 1;
