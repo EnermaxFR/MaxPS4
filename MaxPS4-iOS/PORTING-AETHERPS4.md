@@ -30,3 +30,37 @@ AetherPS4 is GPL-2.0-or-later for primary code, with differently licensed
 third-party components (see upstream LICENSE, LICENSES/, REUSE.toml).
 When actual code is copied, preserve headers, notices, source records and
 GPL requirements. This document is a technical integration plan only.
+
+## Verified StikDebug memory contract (AetherPS4 source review, 2026-10-09)
+
+Source inspected: `src/core/ios/ios_jit_allocator.{h,cpp}` in
+`Leviidev/AetherPS4` (GPL-2.0-or-later).
+
+- Their JIT allocator uses a **fresh debugger-allocated RX region** via
+  `BRK #0xf00d`, register `x16=1`, with `x0=nullptr`, then aliases
+  the region as writable using Darwin `vm_remap`.
+- Their source expressly warns that supplying an existing application's RW
+  address in `x0` fails to establish executable memory reliably.
+  **Do not pass MaxPS4's existing RW staging page to the BRK protocol.**
+- Their implementation documents a recoverable SIGTRAP guard specifically
+  for a failed JIT trap. MaxPS4 presently has no equivalent guard, so it
+  must never invoke its existing naked `maxps4_stikdebug_jit26_prepare_region`
+  from a button or normal app startup.
+- Their iOS mapping API uses `<mach/vm_map.h>` (`vm_remap`,
+  `vm_protect`, `vm_deallocate`) rather than unavailable iOS
+  `mach_vm.h`. Keep `MAP_JIT`, ordinary RW mappings, and debugger RX
+  allocations conceptually separate.
+
+### Integration checkpoints (do not claim achieved prematurely)
+1. Add isolated, bounds-checked RW-alias probe using `vm_remap`
+   without `PROT_EXEC` or `BRK`; validate shared writes and cleanup.
+2. Add a narrowly scoped, opt-in BRK trap and recovery mechanism,
+   tested on device with the real StikDebug Universal JIT Script.
+3. Allocate debugger-owned RX pages (x0=0) and make a RW alias;
+   carefully validate executable permission and code-signing state.
+4. Execute a minimal generated ARM64 function, verify exact return,
+   only then report JIT readiness.
+5. Port and link the full FEXCore guest engine with shadPS4.
+
+The current StikDebug deep link only requests that the debugger open.
+It does not establish JIT memory or make the MaxPS4 guest backend runnable.
