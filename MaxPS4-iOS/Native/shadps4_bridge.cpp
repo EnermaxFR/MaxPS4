@@ -508,6 +508,22 @@ extern "C" int maxps4_native_arm64_static_execute_probe() noexcept {
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
+// On-device MAP_JIT permission probe, deliberately without executing bytes.
+// 1 = allocation succeeded, 0 = denied, -1 = unsupported platform.
+extern "C" int maxps4_native_map_jit_allocation_probe() noexcept {
+#if defined(__APPLE__) && defined(__aarch64__) && defined(MAP_JIT)
+    const long n = sysconf(_SC_PAGESIZE);
+    if (n <= 0 || n > 65536) return 0;
+    void* p = mmap(nullptr, static_cast<std::size_t>(n),
+                   PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0);
+    if (p == MAP_FAILED) return 0;
+    return munmap(p, static_cast<std::size_t>(n)) == 0 ? 1 : 0;
+#else
+    return -1;
+#endif
+}
+
 extern "C" int maxps4_native_jit_writable_page_probe(
     std::size_t* page_size_out) noexcept {
     if (!page_size_out) return 0;
