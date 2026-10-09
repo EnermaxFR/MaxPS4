@@ -502,6 +502,12 @@ struct MaxPS4HomeView: View {
                     } label: {
                         settingButton(icon: "shield.lefthalf.filled", title: "Tester StikDebug sans risque")
                     }
+                    Divider().overlay(.white.opacity(0.08))
+                    Button {
+                        jitStatusReport = MaxPS4NativeLinkCheck.arm64PipelineSelfTestReport
+                    } label: {
+                        settingButton(icon: "cpu.fill", title: "Tester le pipeline ARM64")
+                    }
                     if let jitStatusReport {
                         Button {
                             UIPasteboard.general.string = jitStatusReport
