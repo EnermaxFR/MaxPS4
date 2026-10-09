@@ -993,6 +993,35 @@ extern "C" int maxps4_stikdualmap_arm64_execute_suite(int* passed_out) noexcept 
 #endif
 }
 
+// Opt-in JIT control-flow regression: CMP/JZ, TEST/JNZ and bounded SUB/JNZ loop.
+// Each execution goes through the reusable StikDebug guest block runner.
+extern "C" int maxps4_stikdualmap_arm64_branch_suite(int* passed_out) noexcept {
+    if (!passed_out) return -6;
+    *passed_out = 0;
+#if defined(__APPLE__) && defined(__aarch64__)
+    if (maxps4_native_debugger_attached() != 1) return -1;
+    // mov eax,42; cmp eax,42; jz +5; mov eax,1; ret
+    constexpr std::uint8_t equal[] = {0xB8,42,0,0,0,0x3D,42,0,0,0,0x74,5,0xB8,1,0,0,0,0xC3};
+    // mov eax,42; test eax,42; jnz +5; mov eax,1; ret
+    constexpr std::uint8_t nonzero[] = {0xB8,42,0,0,0,0xA9,42,0,0,0,0x75,5,0xB8,1,0,0,0,0xC3};
+    // mov eax,3; sub eax,1; jnz -7; ret -> 0
+    constexpr std::uint8_t loop[] = {0xB8,3,0,0,0,0x2D,1,0,0,0,0x75,0xF9,0xC3};
+    const std::uint8_t* programs[] = {equal, nonzero, loop};
+    const std::size_t sizes[] = {sizeof(equal), sizeof(nonzero), sizeof(loop)};
+    const std::uint64_t expected[] = {42, 42, 0};
+    for (int i = 0; i < 3; ++i) {
+        std::uint64_t result = 0;
+        const int status = maxps4_stikdualmap_execute_guest_block(programs[i], sizes[i], &result);
+        if (status != 1) return status;
+        if (result != expected[i]) return -4;
+        ++*passed_out;
+    }
+    return 1;
+#else
+    return 0;
+#endif
+}
+
 // Returns 1 only if both the port exists and a debugger is presently observed.
 // It does not claim that the Universal JIT Script is handling traps.
 extern "C" int maxps4_stikdualmap_debugger_preflight() noexcept {
