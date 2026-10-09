@@ -558,6 +558,31 @@ extern "C" int maxps4_native_jit_stage_arm64(
 #endif
 }
 
+// Validate a staged ARM64 block without executing it. Return an explicit
+// digest so device diagnostics can detect changed or corrupted code words.
+// FNV-1a is used only as a deterministic checksum, not a security hash.
+extern "C" int maxps4_native_jit_arm64_block_checksum(
+    const std::uint8_t* guest, std::size_t size,
+    std::uint64_t* checksum, std::size_t* bytes) noexcept {
+    if (!guest || !checksum || !bytes || size == 0 || size > 4096) return 0;
+    *checksum = 0;
+    *bytes = 0;
+    std::uint32_t words[4096] = {};
+    std::size_t count = 0;
+    if (!maxps4_arm64_translate_preview(guest, size, words, 4096, &count) ||
+        !maxps4_arm64_verify_preview(words, count)) return 0;
+    std::uint64_t digest = 14695981039346656037ull;
+    for (std::size_t i = 0; i < count; ++i) {
+        for (unsigned byte = 0; byte < 4; ++byte) {
+            digest ^= (words[i] >> (byte * 8)) & 0xffu;
+            digest *= 1099511628211ull;
+        }
+    }
+    *checksum = digest;
+    *bytes = count * 4;
+    return 1;
+}
+
 // Read-only debugger attachment hint on iOS. A traced process does NOT
 // necessarily have StikDebug's script, JIT permissions or executable pages.
 // Never emit BRK merely to probe whether a debugger exists.
