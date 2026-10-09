@@ -89,6 +89,16 @@ int main() {
                    used_jit == 0;
         }()) &&
         reject_exhausted_budget() &&
+        // Oversized guest programs must be rejected before translation.
+        ([] {
+            std::uint8_t too_large[4097] = {};
+            too_large[0] = 0xC3;
+            int used_jit = -1;
+            std::uint64_t result = 0;
+            return maxps4_native_guest_run_with_backend(too_large, sizeof(too_large),
+                                                        64, 1, &used_jit, &result) == 0 &&
+                   used_jit == 0;
+        }()) &&
         ([] {
             constexpr std::uint8_t ret[] = {0xC3};
             int used_jit = -1;
