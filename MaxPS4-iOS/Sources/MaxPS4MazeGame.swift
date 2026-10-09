@@ -107,7 +107,7 @@ struct MaxPS4MazeGame: View {
 
             HStack(spacing: 24) {
                 Button(paused ? "Reprendre" : "Pause") { paused.toggle() }
-                    .disabled(controlsDisabled)
+                    .disabled(finished)
                 Button("Recommencer") { reset() }
             }
             .font(.subheadline.bold())
@@ -153,7 +153,7 @@ struct MaxPS4MazeGame: View {
                 .frame(width: 54, height: 38)
                 .background(.cyan.opacity(0.17), in: RoundedRectangle(cornerRadius: 10))
         }
-        .disabled(finished)
+        .disabled(controlsDisabled)
         .accessibilityLabel("Déplacer " + (row == -1 ? "haut" : row == 1 ? "bas" : col == -1 ? "gauche" : "droite"))
     }
 
