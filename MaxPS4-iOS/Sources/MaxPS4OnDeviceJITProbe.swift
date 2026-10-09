@@ -6,6 +6,9 @@ private func maxps4NativeMapJITAllocationProbe() -> Int32
 @_silgen_name("maxps4_native_map_jit_errno_probe")
 private func maxps4NativeMapJITErrnoProbe(_ errorOut: UnsafeMutablePointer<Int32>?) -> Int32
 
+@_silgen_name("maxps4_stikdualmap_port_present")
+private func maxps4StikDualMapPortPresent() -> Int32
+
 enum MaxPS4OnDeviceJITProbe {
     static func report() -> String {
         let mapStatus: String
@@ -24,7 +27,7 @@ enum MaxPS4OnDeviceJITProbe {
         \(mapStatus)
         Entitlement get-task-allow : Non lu directement (vérifier dans StikDebug)\n        Méthode StikDebug : la confirmation de demande ne garantit pas le succès de mmap(MAP_JIT)
         Exécution ARM64 générée : Non testée par ce diagnostic
-        FEXCore : Non validé
+        Allocateur AetherPS4/StikDebug : \(maxps4StikDualMapPortPresent() == 1 ? "Code natif intégré, activation non validée" : "Absent")\n        FEXCore : Non validé
 
         Remarque : P_TRACED absent ne signifie pas à lui seul que StikDebug a échoué. MAP_JIT autorisé ne prouve pas une mémoire RX ni une exécution JIT réussie.
         """
