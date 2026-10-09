@@ -506,6 +506,12 @@ struct MaxPS4HomeView: View {
                     }
                     Divider().overlay(.white.opacity(0.08))
                     Button {
+                        jitStatusReport = MaxPS4OnDeviceJITProbe.generatedARM64ExecutionReport()
+                    } label: {
+                        settingButton(icon: "bolt.shield.fill", title: "Tester le code ARM64 généré (expérimental)")
+                    }
+                    Divider().overlay(.white.opacity(0.08))
+                    Button {
                         jitStatusReport = MaxPS4NativeLinkCheck.stikDebugSafePreflightReport
                     } label: {
                         settingButton(icon: "shield.lefthalf.filled", title: "Tester StikDebug sans risque")
