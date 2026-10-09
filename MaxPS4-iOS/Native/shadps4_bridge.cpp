@@ -12,6 +12,38 @@ extern "C" int maxps4_shadps4_utility_probe() noexcept {
 #include <unistd.h>
 #endif
 
+// Read-only PS4 PKG header metadata reader. Does not unpack encrypted content,
+// bypass licensing, or interpret internal entry tables.
+// The first 0x70 bytes suffice for the container signature and content ID.
+extern "C" int maxps4_native_pkg_header(const std::uint8_t* p,
+    std::size_t length, char* content_id, std::size_t capacity,
+    std::uint32_t* revision) noexcept {
+    if (!p || !content_id || !revision || capacity < 37 || length < 0x70)
+        return 0;
+    if (p[0] != 0x7f || p[1] != 'C' || p[2] != 'N' || p[3] != 'T')
+        return 0;
+    // The PS4 PKG content ID occupies 36 bytes at offset 0x40.
+    for (std::size_t i = 0; i < 36; ++i) {
+        const unsigned char c = p[0x40 + i];
+        if (c == 0) {
+            content_id[i] = 0;
+            for (std::size_t j = i + 1; j < 37; ++j) content_id[j] = 0;
+            *revision = (std::uint32_t(p[4]) << 24) |
+                        (std::uint32_t(p[5]) << 16) |
+                        (std::uint32_t(p[6]) << 8) | p[7];
+            return i >= 16 ? 1 : 0;
+        }
+        if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+              c == '_' || c == '-')) return 0;
+        content_id[i] = static_cast<char>(c);
+    }
+    content_id[36] = 0;
+    *revision = (std::uint32_t(p[4]) << 24) |
+                (std::uint32_t(p[5]) << 16) |
+                (std::uint32_t(p[6]) << 8) | p[7];
+    return 1;
+}
+
 // Bounded native executable signature classifier for the future PS4 loader.
 // Returns 1 for ELF64 x86-64, 2 for a possible SELF, 0 otherwise.
 extern "C" int maxps4_native_executable_signature(const std::uint8_t* data,
