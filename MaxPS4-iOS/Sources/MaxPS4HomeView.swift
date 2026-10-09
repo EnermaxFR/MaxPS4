@@ -32,6 +32,7 @@ struct MaxPS4HomeView: View {
     @State private var showingJITBranchesWarning = false
     @State private var showingJITRegistersWarning = false
     @State private var showingJITMemoryWarning = false
+    @State private var showingJITMultislotWarning = false
 
     @AppStorage("maxps4ExperimentalLab") private var experimentalLab = false
     @AppStorage("showFPS") private var showFPS = false
@@ -63,6 +64,14 @@ struct MaxPS4HomeView: View {
         .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) {
             tabBar
+        }
+        .alert("Mémoire JIT étendue — risque de fermeture", isPresented: $showingJITMultislotWarning) {
+            Button("Annuler", role: .cancel) {}
+            Button("Tester les 3 emplacements") {
+                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteMultislotMemory()
+            }
+        } message: {
+            Text("Test natif StikDebug BRK sur trois emplacements de pile. MaxPS4 peut se fermer si le gestionnaire JIT n'est plus actif.")
         }
         .alert("Mémoire JIT ARM64 — risque de fermeture", isPresented: $showingJITMemoryWarning) {
             Button("Annuler", role: .cancel) {}
@@ -621,6 +630,12 @@ struct MaxPS4HomeView: View {
                             showingJITMemoryWarning = true
                         } label: {
                             settingButton(icon: "memorychip", title: "EXPÉRIENCE : JIT lecture et écriture mémoire")
+                        }
+                        Divider().overlay(.white.opacity(0.08))
+                        Button {
+                            showingJITMultislotWarning = true
+                        } label: {
+                            settingButton(icon: "layers", title: "EXPÉRIENCE : JIT mémoire étendue (3 emplacements)")
                         }
                         Divider().overlay(.white.opacity(0.08))
                         Button {
