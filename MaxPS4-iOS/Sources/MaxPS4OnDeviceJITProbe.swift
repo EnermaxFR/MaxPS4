@@ -194,6 +194,42 @@ enum MaxPS4OnDeviceJITProbe {
                         }
                         if flags & 0x80000000 != 0 { encryptedFlags += 1 }
                     }
+                    // Entry 0x200 is the bounded null-terminated filename table.
+                    var names = Data()
+                    for index in 0..<entries {
+                        let position = index * 32
+                        let id = table[position..<(position + 4)].reduce(UInt32(0)) {
+                            ($0 << 8) | UInt32($1)
+                        }
+                        guard id == 0x200 else { continue }
+                        func be32At(_ at: Int) -> UInt32 {
+                            table[(position + at)..<(position + at + 4)].reduce(UInt32(0)) {
+                                ($0 << 8) | UInt32($1)
+                            }
+                        }
+                        let off = UInt64(be32At(16)), length = UInt64(be32At(20))
+                        if length > 0 && length <= 16384 && off <= UInt64(total) &&
+                           length <= UInt64(total) - off {
+                            try handle.seek(toOffset: off)
+                            names = try handle.read(upToCount: Int(length)) ?? Data()
+                        }
+                    }
+                    var resolved: [String] = []
+                    for index in 0..<entries {
+                        let position = index * 32
+                        func be32At(_ at: Int) -> UInt32 {
+                            table[(position + at)..<(position + at + 4)].reduce(UInt32(0)) {
+                                ($0 << 8) | UInt32($1)
+                            }
+                        }
+                        let id = be32At(0), nameOffset = Int(be32At(4))
+                        guard id >= 0x1000, nameOffset > 0,
+                              nameOffset < names.count else { continue }
+                        let bytes = names[nameOffset..<names.count].prefix(while: { $0 != 0 })
+                        guard bytes.count > 0 && bytes.count <= 256,
+                              let path = String(bytes: bytes, encoding: .utf8) else { continue }
+                        resolved.append(String(format: "%08X", id) + " : " + path)
+                    }
                     var signatures: [String] = []
                     var psfDetails: [String] = []
                     for index in 0..<entries {
@@ -260,7 +296,7 @@ enum MaxPS4OnDeviceJITProbe {
                             signatures.append(String(format: "%08X", ident) + " : " + label)
                         }
                     }
-                    entryReport = "Entrées de table lues : \(entries) (IDs initiaux : \(preview.joined(separator: ", ")))\nPlages hors fichier : \(invalidRanges)\nEntrées marquées chiffrées (flags +8) : \(encryptedFlags)\nSignatures internes reconnues : \(signatures.isEmpty ? "Aucune" : signatures.joined(separator: "; "))\nMétadonnées PSF : \(psfDetails.isEmpty ? "Aucune valeur décodée (format à examiner)" : psfDetails.joined(separator: "; "))"
+                    entryReport = "Entrées de table lues : \(entries) (IDs initiaux : \(preview.joined(separator: ", ")))\nPlages hors fichier : \(invalidRanges)\nEntrées marquées chiffrées (flags +8) : \(encryptedFlags)\nSignatures internes reconnues : \(signatures.isEmpty ? "Aucune" : signatures.joined(separator: "; "))\nNoms résolus : \(resolved.isEmpty ? "Aucun" : resolved.joined(separator: "; "))\nMétadonnées PSF : \(psfDetails.isEmpty ? "Aucune valeur décodée (format à examiner)" : psfDetails.joined(separator: "; "))"
 
                 } else {
                     entryReport = "Entrées : lecture incomplète"
@@ -275,7 +311,7 @@ enum MaxPS4OnDeviceJITProbe {
             Révision en-tête : \(revision)
             Lecture : en-tête de 112 octets + table bornée si valide
             \(entryReport)
-            Noms des fichiers / eboot.bin : Non résolus (IDs techniques uniquement)
+            eboot.bin : Non identifié dans les entrées nommées du PKG
             Déchiffrement / exécution PS4 : Non disponibles
             JIT : Non utilisé
             """
