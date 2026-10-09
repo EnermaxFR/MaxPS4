@@ -15,6 +15,9 @@ private func maxps4NativeMapJITErrnoProbe(_ errorOut: UnsafeMutablePointer<Int32
 @_silgen_name("maxps4_stikdualmap_port_present")
 private func maxps4StikDualMapPortPresent() -> Int32
 
+@_silgen_name("maxps4_stikdualmap_arm64_multislot_test")
+private func maxps4StikDualMapMultislotTest() -> Int32
+
 @_silgen_name("maxps4_stikdualmap_arm64_memory_test")
 private func maxps4StikDualMapMemoryTest() -> Int32
 
@@ -584,6 +587,19 @@ extension MaxPS4OnDeviceJITProbe {
     // Show the precise readiness gates without branching into RX memory.
     // User-initiated experimental BRK path. The debugger trap can terminate the app.
     // A marker survives a crash/relaunch, without implying that the trap was handled.
+    static func manuallyExecuteMultislotMemory() -> String {
+        guard maxps4StikDualMapDebuggerPreflight() == 1 else {
+            return "Test mémoire multi-emplacements non lancé : P_TRACED absent."
+        }
+        UserDefaults.standard.set("Test mémoire 3 emplacements lancé — issue inconnue si fermeture", forKey: "maxps4StikDebugAttempt")
+        let status = maxps4StikDualMapMultislotTest()
+        let report = status == 1
+            ? "PASS : trois emplacements mémoire et calculs ; interpréteur et JIT ARM64 retournent 42"
+            : "ÉCHEC : mémoire 3 emplacements (code \(status))."
+        UserDefaults.standard.set(report, forKey: "maxps4StikDebugAttempt")
+        return "Laboratoire — mémoire JIT étendue\n" + report
+    }
+
     static func manuallyExecuteMemory() -> String {
         guard maxps4StikDualMapDebuggerPreflight() == 1 else {
             return "Test mémoire JIT non lancé : P_TRACED absent."
