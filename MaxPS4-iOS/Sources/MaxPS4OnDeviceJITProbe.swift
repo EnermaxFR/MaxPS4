@@ -242,9 +242,9 @@ enum MaxPS4OnDeviceJITProbe {
                     } else {
                         largestGapDescription = largestGaps.joined(separator: "; ")
                     }
-                    let gapReport = "Zones référencées uniques : \\(covered) octets; " +
-                        "zones non référencées : \\(unreferencedBytes) octets; " +
-                        "plus grands intervalles : \\(largestGapDescription)"
+                    let gapReport = "Zones référencées uniques : \(covered) octets; " +
+                        "zones non référencées : \(unreferencedBytes) octets; " +
+                        "plus grands intervalles : \(largestGapDescription)"
                     // Entry 0x200 is the bounded null-terminated filename table.
                     var names = Data()
                     for index in 0..<entries {
