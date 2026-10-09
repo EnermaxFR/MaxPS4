@@ -318,6 +318,7 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
     if (!code || !result || size == 0 || size > 4096 || budget == 0 || budget > 4096) return 0;
     std::uint64_t rax = 0;
     std::uint32_t ecx = 0;
+    std::uint32_t stack_slot = 0;
     std::size_t pc = 0;
     bool zero_flag = false;
     bool flags_valid = false;
@@ -344,6 +345,15 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
                 ecx |= std::uint32_t(code[pc + i]) << (8 * i);
             pc += 4;
             break;
+        }
+        case 0x89: // MOV DWORD PTR [RSP-4], EAX (one bounded guest slot)
+        case 0x8B: { // MOV EAX, DWORD PTR [RSP-4]
+            if (size - pc < 3 || code[pc] != 0x44 ||
+                code[pc + 1] != 0x24 || code[pc + 2] != 0xFC) return 0;
+            pc += 3;
+            if (op == 0x89) stack_slot = static_cast<std::uint32_t>(rax);
+            else rax = stack_slot;
+            break; // x86 MOV does not affect flags.
         }
         case 0x01: { // ADD EAX, ECX (opcode 01 /r, ModRM C8 only)
             if (pc >= size || code[pc++] != 0xC8) return 0;
@@ -1126,6 +1136,8 @@ extern "C" int maxps4_arm64_verify_preview(
                    (w & 0xFFE0001Fu) == 0x72A00002u ||
                    (w & 0xFFC0001Fu) == 0x31000000u ||
                    (w & 0xFFC0001Fu) == 0x71000000u ||
+                   w == 0xB9000BE0u || w == 0xB9400BE0u ||
+                   w == 0xD10043FFu || w == 0x910043FFu ||
                    w == 0x2B010000u || w == 0x2B020000u || w == 0x6B010000u ||
                    w == 0x4A010000u || w == 0x0A010000u ||
                    w == 0x2A010000u || w == 0x6A00001Fu ||
@@ -1155,6 +1167,7 @@ extern "C" int maxps4_arm64_translate_preview(
     if (!guest || !output || !emitted || count == 0 || count > 4096 ||
         capacity == 0 || capacity > 4096) return 0;
     std::size_t pc = 0, n = 0;
+    output[n++] = 0xD10043FFu; // SUB SP,SP,#16; one private 32-bit stack slot
     bool terminated = false;
     bool cmp_ready = false;
     // Record x86 instruction boundaries and resolve conditional targets
@@ -1183,6 +1196,12 @@ extern "C" int maxps4_arm64_translate_preview(
             // MOVZ W0,#lo16; MOVK W0,#hi16,LSL#16
             if (!put(0x52800000u | ((imm & 0xffffu) << 5)) ||
                 !put(0x72A00000u | (((imm >> 16) & 0xffffu) << 5))) return 0;
+        } else if (opcode == 0x89 || opcode == 0x8B) {
+            if (count - pc < 3 || guest[pc] != 0x44 ||
+                guest[pc + 1] != 0x24 || guest[pc + 2] != 0xFC) return 0;
+            pc += 3;
+            // One controlled stack slot, located at SP+8 in a private frame.
+            if (!put(opcode == 0x89 ? 0xB9000BE0u : 0xB9400BE0u)) return 0;
         } else if (opcode == 0xB9) {
             // W2 holds guest ECX; W1 remains an immediate scratch register.
             if (count - pc < 4) return 0;
@@ -1258,7 +1277,7 @@ extern "C" int maxps4_arm64_translate_preview(
         } else if (opcode == 0x90) {
             if (!put(0xD503201Fu)) return 0; // ARM64 NOP
         } else if (opcode == 0xC3) {
-            if (pc != count || !put(0xD65F03C0u)) return 0; // ARM64 RET
+            if (pc != count || !put(0x910043FFu) || !put(0xD65F03C0u)) return 0; // restore SP; RET
             terminated = true;
             break;
         } else return 0;
