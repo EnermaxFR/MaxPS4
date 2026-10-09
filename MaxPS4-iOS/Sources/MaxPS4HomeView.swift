@@ -506,6 +506,12 @@ struct MaxPS4HomeView: View {
                     }
                     Divider().overlay(.white.opacity(0.08))
                     Button {
+                        jitStatusReport = MaxPS4OnDeviceJITProbe.stikAllocatorPreflightReport()
+                    } label: {
+                        settingButton(icon: "shield.checkered", title: "Précontrôle allocateur StikDebug")
+                    }
+                    Divider().overlay(.white.opacity(0.08))
+                    Button {
                         jitStatusReport = MaxPS4OnDeviceJITProbe.generatedARM64ExecutionReport()
                     } label: {
                         settingButton(icon: "bolt.shield.fill", title: "Tester le code ARM64 généré (expérimental)")
