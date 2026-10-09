@@ -539,12 +539,11 @@ jobs:
           dest = Path("build/diagnostics/fexcore-generated/FEXCore/Config/ConfigOptions.inl")
           dest.write_text("\\n".join(lines) + "\\n")
           PY
-          # Fetch the exact upstream unordered_dense submodule dependency.
+          # Reuse unordered_dense fetched in the earlier preparation step.
+          # Re-cloning into the same nonempty directory fails with Git exit 128.
           UNORDERED="build/diagnostics/unordered-dense-upstream"
-          git clone --quiet --no-checkout --filter=blob:none \
-            https://github.com/martinus/unordered_dense.git "$UNORDERED"
-          git -C "$UNORDERED" checkout --quiet 3234af2c03549bc85656bfd3a86993bf1cd8aef1
           test -s "$UNORDERED/include/ankerl/unordered_dense.h"
+          test "$(git -C "$UNORDERED" rev-parse HEAD)" = "3234af2c03549bc85656bfd3a86993bf1cd8aef1"
           # Experimental Darwin adaptation of FEXCore Linux futex mutex, compile probe only.
           # C++20 atomic wait/notify keeps sleeping threads off a busy spin loop.
           python3 - <<'PY'
