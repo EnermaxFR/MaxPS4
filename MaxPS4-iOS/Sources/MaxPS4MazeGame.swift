@@ -29,10 +29,13 @@ struct MaxPS4MazeGame: View {
     @State private var lost = false
     @State private var won = false
     @State private var powerTurns = 0
-    @State private var bestScore = 0
+    @AppStorage("maxps4.maxmaze.bestScore") private var bestScore = 0
+    @State private var paused = false
+    @State private var ghostCombo = 0
     private static let powerCells: Set<Cell> = [Cell(row: 1, column: 7), Cell(row: 7, column: 1)]
 
     private var finished: Bool { lost || won }
+    private var controlsDisabled: Bool { finished || paused }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -45,9 +48,17 @@ struct MaxPS4MazeGame: View {
                     .font(.subheadline.monospacedDigit().bold())
             }
 
-            Text("Ramasse toutes les pastilles et évite le fantôme !")
+            Text("Ramasse les pastilles ! Une super pastille permet de capturer le fantôme.")
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.8))
+
+            HStack(spacing: 10) {
+                Label("\(moves) coups", systemImage: "figure.walk")
+                Spacer()
+                Label("\(pellets.count) pastilles", systemImage: "circle.grid.2x2.fill")
+            }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.white.opacity(0.8))
 
             VStack(spacing: 2) {
                 ForEach(0..<Self.maze.count, id: \.self) { row in
@@ -61,9 +72,13 @@ struct MaxPS4MazeGame: View {
             .frame(maxWidth: .infinity)
 
             if powerTurns > 0 && !finished {
-                Text("SUPER PASTILLE : fantôme ralenti (\(powerTurns) tours)")
+                Text("SUPER PASTILLE : capture le fantôme ! (\(powerTurns) tours)")
                     .foregroundStyle(.cyan)
                     .font(.caption.bold())
+            }
+
+            if paused && !finished {
+                Text("PAUSE").foregroundStyle(.cyan).font(.caption.bold())
             }
 
             if won {
@@ -90,9 +105,14 @@ struct MaxPS4MazeGame: View {
             }
             .frame(maxWidth: .infinity)
 
-            Button("Recommencer") { reset() }
-                .font(.subheadline.bold())
-                .foregroundStyle(.cyan)
+            HStack(spacing: 24) {
+                Button(paused ? "Reprendre" : "Pause") { paused.toggle() }
+                    .disabled(controlsDisabled)
+                Button("Recommencer") { reset() }
+            }
+            .font(.subheadline.bold())
+            .foregroundStyle(.cyan)
+            .frame(maxWidth: .infinity)
 
             Text("Mini-jeu iOS indépendant : il ne lance pas de jeu PS4.")
                 .font(.caption2)
@@ -154,46 +174,62 @@ struct MaxPS4MazeGame: View {
             }
         })
         score = 0
+        paused = false
+        ghostCombo = 0
         powerTurns = 0
         moves = 0
         lost = false
         won = false
     }
 
+    private func captureGhost() {
+        ghostCombo += 1
+        score += 100 * min(ghostCombo, 4)
+        bestScore = max(bestScore, score)
+        ghost = Self.ghostStart
+        if ghost == player { ghost = Self.start }
+    }
+
     private func move(row: Int, col: Int) {
-        guard !finished else { return }
+        guard !controlsDisabled else { return }
         let next = Cell(row: player.row + row, column: player.column + col)
         guard !isWall(next) else { return }
         player = next
         moves += 1
         if pellets.remove(next) != nil {
             if Self.powerCells.contains(next) {
-                powerTurns = 5
+                powerTurns = 7
+                ghostCombo = 0
                 score += 50
             } else {
                 score += 10
             }
             bestScore = max(bestScore, score)
         }
-        if next == ghost { lost = true; return }
+        if next == ghost {
+            if powerTurns > 0 { captureGhost() } else { lost = true; return }
+        }
         if pellets.isEmpty { won = true; return }
-        // Ghost advances every third move so the maze is actually playable.
+        // Powered player is temporarily safe; ghost retreats rather than freezing.
         if powerTurns > 0 {
             powerTurns -= 1
-        } else if moves % 3 == 0 {
+        }
+        if moves % (powerTurns > 0 ? 2 : 3) == 0 {
             let candidates = [
                 Cell(row: ghost.row - 1, column: ghost.column),
                 Cell(row: ghost.row + 1, column: ghost.column),
                 Cell(row: ghost.row, column: ghost.column - 1),
                 Cell(row: ghost.row, column: ghost.column + 1)
             ].filter { !isWall($0) }
-            if let nextGhost = candidates.min(by: {
-                abs($0.row - player.row) + abs($0.column - player.column) <
-                    abs($1.row - player.row) + abs($1.column - player.column)
-            }) {
+            let distance: (Cell) -> Int = { abs($0.row - player.row) + abs($0.column - player.column) }
+            if let nextGhost = (powerTurns > 0
+                ? candidates.max(by: { distance($0) < distance($1) })
+                : candidates.min(by: { distance($0) < distance($1) })) {
                 ghost = nextGhost
             }
-            if ghost == player { lost = true }
+            if ghost == player {
+                if powerTurns > 0 { captureGhost() } else { lost = true }
+            }
         }
     }
 }
