@@ -967,9 +967,10 @@ extern "C" int maxps4_stikdualmap_arm64_execute_42() noexcept {
 // Requires an active StikDebug universal.js session; do not call automatically.
 // status: 1 executed, -1 debugger missing, -2 page invalid, -3 allocation,
 // -4 invalid input, -5 translation/verification failed.
-extern "C" int maxps4_stikdualmap_execute_guest_block_with_eax(
+extern "C" int maxps4_stikdualmap_execute_guest_block_with_registers(
     const std::uint8_t* guest, std::size_t length,
-    std::uint32_t initial_eax, std::uint64_t* result_out) noexcept {
+    std::uint32_t initial_eax, std::uint32_t initial_ecx,
+    std::uint64_t* result_out) noexcept {
     if (!result_out || !guest || length == 0 || length > 256) return -4;
     *result_out = 0;
 #if defined(__APPLE__) && defined(__aarch64__)
@@ -986,8 +987,9 @@ extern "C" int maxps4_stikdualmap_execute_guest_block_with_eax(
     if (maxps4_stikdualmap_allocate(static_cast<std::size_t>(n), &rw, &rx) != 1) return -3;
     std::memcpy(rw, words, count * sizeof(std::uint32_t));
     sys_icache_invalidate(rx, count * sizeof(std::uint32_t));
-    using Function = std::uint32_t (*)(std::uint32_t);
-    *result_out = reinterpret_cast<Function>(rx)(initial_eax);
+    // W0 holds guest EAX. W2 holds guest ECX; W1 is reserved for immediates.
+    using Function = std::uint32_t (*)(std::uint32_t, std::uint32_t, std::uint32_t);
+    *result_out = reinterpret_cast<Function>(rx)(initial_eax, 0, initial_ecx);
     maxps4_stikdualmap_release(rw, rx, static_cast<std::size_t>(n));
     return 1;
 #else
@@ -995,10 +997,37 @@ extern "C" int maxps4_stikdualmap_execute_guest_block_with_eax(
 #endif
 }
 
+extern "C" int maxps4_stikdualmap_execute_guest_block_with_eax(
+    const std::uint8_t* guest, std::size_t length,
+    std::uint32_t initial_eax, std::uint64_t* result_out) noexcept {
+    return maxps4_stikdualmap_execute_guest_block_with_registers(
+        guest, length, initial_eax, 0, result_out);
+}
+
 extern "C" int maxps4_stikdualmap_execute_guest_block(
     const std::uint8_t* guest, std::size_t length,
     std::uint64_t* result_out) noexcept {
     return maxps4_stikdualmap_execute_guest_block_with_eax(guest, length, 0, result_out);
+}
+
+// Two distinct guest registers survive a native block boundary via an
+// explicit host context. EAX is updated; ECX is preserved as a read-only
+// register across blocks. Not a complete mutable guest register file.
+extern "C" int maxps4_stikdualmap_arm64_two_register_blocks_test() noexcept {
+    constexpr std::uint8_t first[] = {0xB8,40,0,0,0,0xC3};
+    constexpr std::uint8_t second[] = {0x01,0xC8,0xC3}; // ADD EAX,ECX
+    std::uint32_t eax = 0;
+    const std::uint32_t ecx = 2;
+    std::uint64_t result = 0;
+    int status = maxps4_stikdualmap_execute_guest_block_with_registers(
+        first, sizeof(first), eax, ecx, &result);
+    if (status != 1) return status;
+    eax = static_cast<std::uint32_t>(result);
+    if (eax != 40) return -4;
+    status = maxps4_stikdualmap_execute_guest_block_with_registers(
+        second, sizeof(second), eax, ecx, &result);
+    if (status != 1) return status;
+    return result == 42 && ecx == 2 ? 1 : -4;
 }
 
 // Manual multi-program native JIT test. Requires the same confirmed StikDebug
