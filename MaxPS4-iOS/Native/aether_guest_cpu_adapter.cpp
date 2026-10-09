@@ -31,6 +31,19 @@ extern "C" int maxps4_aether_guest_backend_probe() noexcept {
     const auto no_handler = no_executor.Run(request);
     const auto* no_syscall = std::get_if<Core::GuestExecutionFailure>(&no_handler);
     if (!no_syscall || no_syscall->Error != ENOSYS) return 0;
+    // A failing executor must preserve the upstream error/stage contract.
+    Core::NativeGuestCpuBackend failing_executor(
+        +[](const Core::GuestExecutionRequest&) -> Core::GuestExecutionResult {
+            return Core::GuestExecutionFailure{
+                .Stage = Core::GuestExecutionStage::Mapping,
+                .Error = EFAULT
+            };
+        });
+    const auto failure = failing_executor.Run(request);
+    const auto* fault = std::get_if<Core::GuestExecutionFailure>(&failure);
+    if (!fault || fault->Stage != Core::GuestExecutionStage::Mapping ||
+        fault->Error != EFAULT) return 0;
+
     request.Rsp = 0x2000;
     request.Gpr[0] = 42;
     Core::NativeGuestCpuBackend test_executor(&TestExecutor);
