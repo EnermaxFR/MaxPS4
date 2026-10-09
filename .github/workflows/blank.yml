@@ -885,6 +885,20 @@ jobs:
           build/diagnostics/maxps4-jit-pipeline-test \
             | tee build/diagnostics/jit-pipeline-results.log
 
+      - name: Run generated ARM64 execution proof on Apple Silicon host
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test "$(uname -m)" != arm64; then
+            echo "SKIPPED generated ARM64 execution: runner is not Apple Silicon" | tee build/diagnostics/generated-arm64-execution.log
+          else
+            clang++ -std=c++17 -Wall -Wextra -Werror \
+              MaxPS4-iOS/Tests/GeneratedARM64ExecutionHostTest.cpp \
+              -o build/diagnostics/generated-arm64-execution-test
+            build/diagnostics/generated-arm64-execution-test \
+              | tee build/diagnostics/generated-arm64-execution.log
+          fi
+
       - name: Swift source typecheck
         shell: bash
         run: |
