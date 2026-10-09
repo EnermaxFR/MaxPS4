@@ -523,8 +523,7 @@ struct MaxPS4HomeView: View {
                             settingButton(icon: "waveform.path.ecg.rectangle", title: "Laboratoire : mémoire et traduction ARM64")
                         }
                         Divider().overlay(.white.opacity(0.08))
-                    }
-                    Divider().overlay(.white.opacity(0.08))
+                        Divider().overlay(.white.opacity(0.08))
                     Button {
                         jitStatusReport = MaxPS4NativeLinkCheck.jitStatusReport
                     } label: {
@@ -657,6 +656,7 @@ struct MaxPS4HomeView: View {
                     } label: {
                         settingButton(icon: "cpu.fill", title: "Tester l’exécution ARM64 native")
                     }
+                    }
                     if let jitStatusReport {
                         Button {
                             UIPasteboard.general.string = jitStatusReport
@@ -673,10 +673,12 @@ struct MaxPS4HomeView: View {
                 }
 
                 settingsCard {
+                    if experimentalLab {
                     Button {
                         emulator.testBackend()
                     } label: {
                         settingButton(icon: "checkmark.circle.fill", title: "Tester l’intégration")
+                    }
                     }
 
                     Divider().overlay(.white.opacity(0.08))
