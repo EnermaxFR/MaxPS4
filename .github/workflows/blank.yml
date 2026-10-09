@@ -487,6 +487,18 @@ jobs:
               | tee build/diagnostics/fexcore-jit-abi-status.txt
             head -20 build/diagnostics/fexcore-jit-abi-compile.log
           fi
+          # Snapshot actual Clang macros using the identical iOS target and FEX flags.
+          # A green IPA build is not proof that this exploratory JIT compiles.
+          printf '#include <FEXCore/Utils/SHMStats.h>\n' > build/diagnostics/fexcore-jit-macros.cpp
+          xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
+              -isysroot "$SDK" -DARCHITECTURE_arm64=1 \
+              -I "$FEX/FEXCore/include" -dM -E \
+              build/diagnostics/fexcore-jit-macros.cpp \
+              > build/diagnostics/fexcore-jit-defined-macros.txt \
+              2> build/diagnostics/fexcore-jit-macro-errors.log || true
+          grep -E '^#define (__aarch64__|__arm64__|ARCHITECTURE_arm64|ARCHITECTURE_x86_64)\\b' \
+              build/diagnostics/fexcore-jit-defined-macros.txt \
+              | tee build/diagnostics/fexcore-jit-architecture-macros.txt || true
           JIT_CORE="$FEX/FEXCore/Source/Interface/Core/JIT/JIT.cpp"
           # Check architecture feature macro before probing the real JIT translation unit.
           # Required by SHMStats and member-function-pointer ABI helpers.
@@ -588,6 +600,9 @@ jobs:
             build/diagnostics/fexcore-arm64-relocations-compile.log
             build/diagnostics/fexcore-jit-abi-status.txt
             build/diagnostics/fexcore-jit-abi-compile.log
+            build/diagnostics/fexcore-jit-defined-macros.txt
+            build/diagnostics/fexcore-jit-architecture-macros.txt
+            build/diagnostics/fexcore-jit-macro-errors.log
             build/diagnostics/fexcore-jit-core-status.txt
             build/diagnostics/fexcore-jit-core-compile.log
             build/diagnostics/fexcore-jit-alu-status.txt
