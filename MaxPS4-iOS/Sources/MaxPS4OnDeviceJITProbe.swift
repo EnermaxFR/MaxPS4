@@ -15,6 +15,9 @@ private func maxps4NativeMapJITErrnoProbe(_ errorOut: UnsafeMutablePointer<Int32
 @_silgen_name("maxps4_stikdualmap_port_present")
 private func maxps4StikDualMapPortPresent() -> Int32
 
+@_silgen_name("maxps4_stikdualmap_arm64_full_batch")
+private func maxps4StikDualMapFullBatch(_ passed: UnsafeMutablePointer<Int32>?, _ total: UnsafeMutablePointer<Int32>?) -> Int32
+
 @_silgen_name("maxps4_stikdualmap_arm64_context_three_blocks_test")
 private func maxps4StikDualMapContextThreeBlocksTest() -> Int32
 
@@ -593,6 +596,21 @@ extension MaxPS4OnDeviceJITProbe {
     // Show the precise readiness gates without branching into RX memory.
     // User-initiated experimental BRK path. The debugger trap can terminate the app.
     // A marker survives a crash/relaunch, without implying that the trap was handled.
+    static func manuallyExecuteFullBatch() -> String {
+        guard maxps4StikDualMapDebuggerPreflight() == 1 else {
+            return "Batterie JIT non lancée : P_TRACED absent."
+        }
+        UserDefaults.standard.set("Batterie JIT démarrée — issue inconnue si fermeture", forKey: "maxps4StikDebugAttempt")
+        var passed: Int32 = 0
+        var total: Int32 = 0
+        let status = maxps4StikDualMapFullBatch(&passed, &total)
+        let report = status == 1
+            ? "PASS : \(passed)/\(total) tests ARM64 natifs ; arithmétique, branches, registres, mémoire et état entre blocs."
+            : "ÉCHEC : \(passed)/\(total) tests ARM64 natifs (code \(status))."
+        UserDefaults.standard.set(report, forKey: "maxps4StikDebugAttempt")
+        return "Laboratoire — batterie JIT complète\n" + report
+    }
+
     static func manuallyExecuteThreeBlockContext() -> String {
         guard maxps4StikDualMapDebuggerPreflight() == 1 else {
             return "Test contexte CPU non lancé : P_TRACED absent."
