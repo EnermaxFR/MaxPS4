@@ -432,6 +432,11 @@ private func maxps4_native_jit_arm64_block_checksum(
     _ bytes: UnsafeMutablePointer<Int>?
 ) -> Int32
 
+@_silgen_name("maxps4_native_jit_rw_alias_probe")
+private func maxps4_native_jit_rw_alias_probe(
+    _ bytes: UnsafeMutablePointer<Int>?
+) -> Int32
+
 @_silgen_name("maxps4_native_jit_stage_arm64")
 private func maxps4_native_jit_stage_arm64(
     _ bytes: UnsafePointer<UInt8>?, _ length: Int,
@@ -532,6 +537,20 @@ extension MaxPS4NativeLinkCheck {
         Empreinte de diagnostic : \(firstOK ? String(first, radix: 16) : "Indisponible")
         JIT natif : Inactif
         Aucun code généré n’a été exécuté.
+        """
+    }
+
+    static var jitDualMappingReport: String {
+        var bytes = 0
+        let status = maxps4_native_jit_rw_alias_probe(&bytes)
+        return """
+        Double vue mémoire iOS (vm_remap) : \(status == 1 ? "Réussie" : "Échec")
+        Page partagée : \(bytes) octets
+        Cohérence des écritures entre deux adresses : \(status == 1 ? "Validée" : "Non validée")
+        Permissions : RW uniquement
+        StikDebug : Aucun appel
+        Exécution ARM64 générée : Non testée
+        JIT : Inactif
         """
     }
 
