@@ -131,6 +131,7 @@ jobs:
             build/diagnostics/aetherps4-upstream/src/core/ios/
             build/diagnostics/aetherps4-dependency-audit.txt
             build/diagnostics/aetherps4-upstream-sha.txt
+            build/diagnostics/fexcore-build-prerequisites.txt
           if-no-files-found: error
           retention-days: 14
 
@@ -172,6 +173,41 @@ jobs:
             build/diagnostics/aether-guest-test.cpp \
             -o build/diagnostics/aether-guest-test
           build/diagnostics/aether-guest-test | tee build/diagnostics/aether-guest-test.log
+
+      - name: Validate pinned FEXCore revision and source prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path("build/diagnostics/aetherps4-upstream")
+          lock = root / "runtime/locks/components.lock.json"
+          # Runtime lock is outside the previous sparse checkout: collect the
+          # pinned revision from AetherPS4's checked-out git tree instead.
+          import subprocess
+          raw = subprocess.check_output(
+              ["git", "-C", str(root), "show",
+               "HEAD:runtime/locks/components.lock.json"], text=True)
+          components = json.loads(raw)["components"]
+          fex = next(c for c in components if c["name"] == "fex")
+          expected = "f2b679f6028ce1c38875233aecfcf5d3f8ebecec"
+          if fex["revision"] != expected:
+              raise SystemExit("Unexpected FEXCore revision: " + fex["revision"])
+          required = [
+              "Common/Config.h", "Common/HostFeatures.h",
+              "FEXCore/Config/Config.h", "FEXCore/Core/Context.h",
+              "Interface/Context/Context.h", "Interface/Core/LookupCache.h"
+          ]
+          report = Path("build/diagnostics/fexcore-build-prerequisites.txt")
+          report.write_text(
+              "FEXCore repository: " + fex["url"] + "\n" +
+              "Revision: " + expected + "\n" +
+              "Required FEXCore headers for AetherPS4 guest engine:\n" +
+              "\n".join(required) + "\n" +
+              "FEXCore compilation: NOT yet attempted.\n")
+          print("PASS FEXCore pin verified:", expected)
+          PY
 
       - name: Test ARM64 translation and safe interpreter fallback on macOS
         shell: bash
