@@ -462,11 +462,17 @@ extern "C" int maxps4_arm64_translate_preview(
             const std::int64_t target = static_cast<std::int64_t>(pc) + offset;
             if (target < 0 || target >= static_cast<std::int64_t>(count) ||
                 fixup_count >= 4096) return 0;
-            // For back edges only, demand a fresh CMP at the target.
-            // This keeps NZCV well-defined on each visit to the branch.
-            if (target < static_cast<std::int64_t>(pc) &&
-                ((guest[target] != 0x3D && guest[target] != 0xA9) || target >= static_cast<std::int64_t>(pc - 2)))
-                return 0;
+            // Back edges must start at an instruction that recomputes ZF.
+            // Arithmetic and logic ops now generate NZCV.Z, permitting
+            // bounded decrement loops such as SUB EAX,1 / JNZ loop.
+            if (target < static_cast<std::int64_t>(pc)) {
+                const std::uint8_t target_op = guest[target];
+                const bool sets_zf = target_op == 0x3D || target_op == 0xA9 ||
+                    target_op == 0x05 || target_op == 0x2D ||
+                    target_op == 0x35 || target_op == 0x25 || target_op == 0x0D;
+                if (!sets_zf || target >= static_cast<std::int64_t>(pc - 2))
+                    return 0;
+            }
             fixups[fixup_count++] = { n, static_cast<std::size_t>(target),
                                        opcode == 0x74 ? 0u : 1u };
             if (!put(0)) return 0;
