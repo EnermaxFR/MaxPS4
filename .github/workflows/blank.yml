@@ -659,6 +659,25 @@ jobs:
             echo "BLOCKED FEXCore JIT archive: required objects missing" \
               | tee build/diagnostics/fexcore-jit-archive-status.txt
           fi
+          # Partial link of the three genuine FEXCore JIT units. Undefined
+          # references remain permitted; this does not make the JIT executable.
+          if grep -q '^PASS FEXCore JIT ARM64 static archive' \
+              build/diagnostics/fexcore-jit-archive-status.txt; then
+            if xcrun ld -r -arch arm64 \
+                -o build/diagnostics/fexcore-jit-partial-link.o \
+                "${JIT_OBJECTS[@]}" \
+                > build/diagnostics/fexcore-jit-partial-link.log 2>&1 \
+                && test -s build/diagnostics/fexcore-jit-partial-link.o; then
+              echo "PASS FEXCore ARM64 partial link (unresolved references allowed)" \
+                | tee build/diagnostics/fexcore-jit-partial-link-status.txt
+            else
+              echo "BLOCKED FEXCore ARM64 partial link; inspect linker log" \
+                | tee build/diagnostics/fexcore-jit-partial-link-status.txt
+            fi
+          else
+            echo "SKIPPED partial link: JIT archive not validated" \
+              | tee build/diagnostics/fexcore-jit-partial-link-status.txt
+          fi
           # Exploratory compile only: do not link until prerequisites are resolved.
           # A blocked FEXCore component must not prevent a working MaxPS4 IPA.
 
@@ -749,6 +768,9 @@ jobs:
             build/diagnostics/fexcore-jit-archive-status.txt
             build/diagnostics/fexcore-jit-archive.log
             build/diagnostics/fexcore-jit-archive-members.txt
+            build/diagnostics/fexcore-jit-partial-link.o
+            build/diagnostics/fexcore-jit-partial-link.log
+            build/diagnostics/fexcore-jit-partial-link-status.txt
             build/diagnostics/fexcore-jit-archive-undefined-symbols.txt
             build/diagnostics/fexcore-jit-core-ios.o
             build/diagnostics/fexcore-jit-alu-ios.o
