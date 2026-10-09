@@ -41,7 +41,10 @@ int main() {
 
     using GeneratedFunction = int (*)();
     const int result = reinterpret_cast<GeneratedFunction>(page)();
-    munmap(page, static_cast<std::size_t>(length));
+    if (munmap(page, static_cast<std::size_t>(length)) != 0) {
+        std::fputs("FAIL: executable page cleanup failed\n", stderr);
+        return 1;
+    }
     if (result != 42) {
         std::fprintf(stderr, "FAIL: generated ARM64 returned %d, expected 42\n", result);
         return 1;
