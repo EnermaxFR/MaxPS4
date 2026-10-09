@@ -635,6 +635,22 @@ extension MaxPS4NativeLinkCheck {
         }
     }
 
+    static var arm64VerifierAdversarialReport: String {
+        let samples: [(String, [UInt32], Bool)] = [
+            ("RET isolé", [0xD65F03C0], true),
+            ("opcode interdit", [0xFFFFFFFF, 0xD65F03C0], false),
+            ("RET au milieu", [0xD65F03C0, 0xD65F03C0], false),
+            ("branche hors limites", [0x54000040, 0xD65F03C0], false),
+            ("branchement valide", [0x54000020, 0xD503201F, 0xD65F03C0], true)
+        ]
+        let lines = samples.map { name, words, expected in
+            let actual = verifyARM64Preview(words)
+            return "\(actual == expected ? "✓" : "✗") \(name)"
+        }
+        return (["Validation structurelle ARM64 (sans exécution)"] + lines)
+            .joined(separator: "\n")
+    }
+
     static var arm64VerifierSelfTest: Bool {
         let guest = Data([0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3])
         guard let words = arm64TranslationPreview(guest),
