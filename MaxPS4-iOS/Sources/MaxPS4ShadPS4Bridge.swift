@@ -425,6 +425,12 @@ private func maxps4_native_arm64_preflight(
     _ code: UnsafePointer<UInt8>?, _ size: Int
 ) -> Int32
 
+@_silgen_name("maxps4_native_jit_stage_arm64")
+private func maxps4_native_jit_stage_arm64(
+    _ bytes: UnsafePointer<UInt8>?, _ length: Int,
+    _ stagedBytes: UnsafeMutablePointer<Int>?
+) -> Int32
+
 @_silgen_name("maxps4_native_jit_writable_page_probe")
 private func maxps4_native_jit_writable_page_probe(
     _ pageSize: UnsafeMutablePointer<Int>?
@@ -476,6 +482,26 @@ extension MaxPS4NativeLinkCheck {
     /// Explicit safety gate for future JIT experiments. A debugger hint alone
     /// cannot authorize executable memory, BRK requests or generated-code calls.
     /// A real iOS VM allocation test, but no executable/JIT permission test.
+    static var jitARM64StagingReport: String {
+        let guest = Data([0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3])
+        var bytes = 0
+        let result = guest.withUnsafeBytes { raw in
+            maxps4_native_jit_stage_arm64(
+                raw.bindMemory(to: UInt8.self).baseAddress, guest.count, &bytes
+            )
+        }
+        return """
+        Stockage du bloc ARM64 en mémoire RW : \(result == 1 ? "Réussi" : "Échec")
+        Taille du bloc : \(bytes) octets
+        Vérification des instructions : \(result == 1 ? "Validée" : "Non validée")
+        Mémoire exécutable : Non demandée
+        StikDebug : Aucune commande envoyée
+        JIT natif : Inactif
+
+        Le code ARM64 est seulement écrit puis relu comme des données.
+        """
+    }
+
     static var jitMemoryPreparationReport: String {
         var bytes: Int = 0
         let ok = maxps4_native_jit_writable_page_probe(&bytes) == 1
