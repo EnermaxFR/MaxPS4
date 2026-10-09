@@ -121,6 +121,19 @@ jobs:
           print("Dependency manifest:", out)
           PY
 
+      - name: Archive pinned AetherPS4 porting sources and dependency report
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-AetherPS4-porting-sources
+          path: |
+            build/diagnostics/aetherps4-upstream/src/core/fex/
+            build/diagnostics/aetherps4-upstream/src/core/guest_cpu/
+            build/diagnostics/aetherps4-upstream/src/core/ios/
+            build/diagnostics/aetherps4-dependency-audit.txt
+            build/diagnostics/aetherps4-upstream-sha.txt
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Test ARM64 translation and safe interpreter fallback on macOS
         shell: bash
         run: |
