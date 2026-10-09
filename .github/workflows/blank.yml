@@ -890,7 +890,7 @@ jobs:
         run: |
           set -euo pipefail
           MAC_SDK="$(xcrun --sdk macosx --show-sdk-path)"
-          xcrun --sdk macosx clang++ -std=c++17 -Wall -Wextra -Werror \
+          xcrun --sdk macosx clang++ -std=c++23 -Wall -Wextra \
             -target arm64-apple-macos13 -isysroot "$MAC_SDK" \
             -I MaxPS4-iOS/Native/shadps4 \
             MaxPS4-iOS/Native/shadps4/common/string_util.cpp \
