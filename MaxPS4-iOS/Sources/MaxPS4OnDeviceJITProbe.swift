@@ -35,6 +35,34 @@ enum MaxPS4OnDeviceJITProbe {
         """
     }
 
+    // CPU + JIT integration regression: actual x86 interpreter result is compared
+    // with the ARM64 translator's validated output bytes (not executed).
+    static func combinedEngineReport() -> String {
+        let cases: [(String, Data, UInt64)] = [
+            ("MOV 42 / RET", Data([0xB8, 42, 0, 0, 0, 0xC3]), 42),
+            ("MOV 40 + ADD 2 / RET", Data([0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3]), 42),
+            ("MOV 50 - SUB 8 / RET", Data([0xB8, 50, 0, 0, 0, 0x2D, 8, 0, 0, 0, 0xC3]), 42)
+        ]
+        var lines = ["MaxPS4 — tests CPU invité / traducteur ARM64"]
+        var passed = 0
+        for (name, code, expected) in cases {
+            let guestResult = MaxPS4NativeLinkCheck.runNativeSyntheticX86(code)
+            let translation = MaxPS4NativeLinkCheck.arm64TranslationPreview(code)
+            let accepted = translation != nil &&
+                MaxPS4NativeLinkCheck.verifyARM64Preview(translation!)
+            let fallback = MaxPS4NativeLinkCheck.runSyntheticX86PreferJIT(code)
+            let ok = guestResult == expected && accepted &&
+                fallback?.result == expected && fallback?.usedJIT == false
+            if ok { passed += 1 }
+            lines.append("\(name) : \(ok ? "PASS" : "FAIL") — CPU \(guestResult.map(String.init) ?? "refusé"), ARM64 \(accepted ? "vérifié (données)" : "non validé"), JIT réellement utilisé : \(fallback?.usedJIT == true ? "oui" : "non")")
+        }
+        lines.append("Tests réussis : \(passed)/\(cases.count)")
+        lines.append("Allocateur AetherPS4/StikDebug : \(maxps4StikDualMapPortPresent() == 1 ? "intégré (non activé)" : "indisponible")")
+        lines.append("Mémoire exécutable et moteur FEXCore : non validés")
+        lines.append("Ces programmes synthétiques ne constituent pas un jeu PS4.")
+        return lines.joined(separator: "\n")
+    }
+
     static func report() -> String {
         let mapStatus: String
         var errorCode: Int32 = 0
