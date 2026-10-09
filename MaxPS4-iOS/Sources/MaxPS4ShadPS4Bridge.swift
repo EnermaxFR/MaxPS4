@@ -358,6 +358,24 @@ extension MaxPS4NativeLinkCheck {
         maxps4_stikdebug_jit26_protocol_available() == 1
     }
 
+    /// Safe preflight only: does not execute BRK, map executable pages, or
+    /// assume a StikDebug debugserver is attached.
+    static var stikDebugSafePreflightReport: String {
+        let sample = Data([0xB8, 42, 0, 0, 0, 0xC3])
+        let supported = isARM64TranslationSupported(sample)
+        let words = arm64TranslationPreview(sample)
+        let fallback = runSyntheticX86PreferJIT(sample)
+        return """
+        Passerelle StikDebug : \(isStikDebugProtocolPresent ? "Intégrée" : "Indisponible")
+        Traduction ARM64 : \(supported && words != nil ? "Acceptée (" + String(words!.count) + " mots)" : "Refusée")
+        Exécution du test : \(fallback?.result == 42 ? (fallback!.usedJIT ? "JIT" : "Interpréteur") : "Échec")
+        Connexion StikDebug : Non vérifiée par MaxPS4
+        Mémoire exécutable : Non testée
+
+        Ce test n’émet aucune interruption BRK et ne valide pas encore l’exécution JIT sur cet iPhone.
+        """
+    }
+
     static var jitStatusReport: String {
         let protocolStatus = isStikDebugProtocolPresent ? "Passerelle intégrée" : "Passerelle absente"
         let translation = isARM64TranslationSupported(
