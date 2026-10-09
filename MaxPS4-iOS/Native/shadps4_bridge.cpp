@@ -524,6 +524,40 @@ extern "C" int maxps4_native_map_jit_allocation_probe() noexcept {
 #endif
 }
 
+// Manual, opt-in execution test, independent of the PS4 guest translator.
+// Return codes: 1 = generated 42 executed; 0 = unsupported; -1 = no debugger;
+// -2 = MAP_JIT allocation denied; -3 = RX transition denied; -4 = wrong result.
+// The function never falls back to precompiled code and never claims FEXCore support.
+extern "C" int maxps4_native_generated_arm64_execute_probe() noexcept {
+#if defined(__APPLE__) && defined(__aarch64__) && defined(MAP_JIT)
+    // Never attempt executable memory without an attached debugger.
+    if (maxps4_native_debugger_attached() != 1) return -1;
+    const long raw_page = sysconf(_SC_PAGESIZE);
+    if (raw_page <= 0 || raw_page > 65536) return 0;
+    const std::size_t page = static_cast<std::size_t>(raw_page);
+    void* p = mmap(nullptr, page, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0);
+    if (p == MAP_FAILED) return -2;
+    // mov w0, #42; ret. Instruction words are emitted into the mapped page,
+    // not compiled into the application binary.
+    constexpr std::uint32_t program[] = {0x52800540u, 0xD65F03C0u};
+    auto* words = static_cast<std::uint32_t*>(p);
+    words[0] = program[0];
+    words[1] = program[1];
+    __builtin___clear_cache(static_cast<char*>(p), static_cast<char*>(p) + sizeof(program));
+    if (mprotect(p, page, PROT_READ | PROT_EXEC) != 0) {
+        (void)munmap(p, page);
+        return -3;
+    }
+    using JitFunction = int (*)();
+    const int result = reinterpret_cast<JitFunction>(p)();
+    (void)munmap(p, page);
+    return result == 42 ? 1 : -4;
+#else
+    return 0;
+#endif
+}
+
 extern "C" int maxps4_native_jit_writable_page_probe(
     std::size_t* page_size_out) noexcept {
     if (!page_size_out) return 0;
