@@ -317,6 +317,7 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
                                             std::uint64_t* result) noexcept {
     if (!code || !result || size == 0 || size > 4096 || budget == 0 || budget > 4096) return 0;
     std::uint64_t rax = 0;
+    std::uint32_t ecx = 0;
     std::size_t pc = 0;
     bool zero_flag = false;
     bool flags_valid = false;
@@ -334,6 +335,21 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
             rax = imm;
             // x86 MOV does not modify RFLAGS (including ZF).
             pc += 4;
+            break;
+        }
+        case 0xB9: { // MOV ECX, imm32
+            if (size - pc < 4) return 0;
+            ecx = 0;
+            for (unsigned i = 0; i < 4; ++i)
+                ecx |= std::uint32_t(code[pc + i]) << (8 * i);
+            pc += 4;
+            break;
+        }
+        case 0x01: { // ADD EAX, ECX (opcode 01 /r, ModRM C8 only)
+            if (pc >= size || code[pc++] != 0xC8) return 0;
+            rax = static_cast<std::uint32_t>(static_cast<std::uint32_t>(rax) + ecx);
+            zero_flag = static_cast<std::uint32_t>(rax) == 0;
+            flags_valid = true;
             break;
         }
         case 0x05: { // ADD EAX, imm32 (wrap at 32 bits)
@@ -1092,9 +1108,11 @@ extern "C" int maxps4_arm64_verify_preview(
                    (w & 0xFFE0001Fu) == 0x72A00000u ||
                    (w & 0xFFE0001Fu) == 0x52800001u ||
                    (w & 0xFFE0001Fu) == 0x72A00001u ||
+                   (w & 0xFFE0001Fu) == 0x52800002u ||
+                   (w & 0xFFE0001Fu) == 0x72A00002u ||
                    (w & 0xFFC0001Fu) == 0x31000000u ||
                    (w & 0xFFC0001Fu) == 0x71000000u ||
-                   w == 0x2B010000u || w == 0x6B010000u ||
+                   w == 0x2B010000u || w == 0x2B020000u || w == 0x6B010000u ||
                    w == 0x4A010000u || w == 0x0A010000u ||
                    w == 0x2A010000u || w == 0x6A00001Fu ||
                    w == 0x6B01001Fu || w == 0x6A01001Fu ||
@@ -1151,6 +1169,19 @@ extern "C" int maxps4_arm64_translate_preview(
             // MOVZ W0,#lo16; MOVK W0,#hi16,LSL#16
             if (!put(0x52800000u | ((imm & 0xffffu) << 5)) ||
                 !put(0x72A00000u | (((imm >> 16) & 0xffffu) << 5))) return 0;
+        } else if (opcode == 0xB9) {
+            // W2 holds guest ECX; W1 remains an immediate scratch register.
+            if (count - pc < 4) return 0;
+            std::uint32_t imm = 0;
+            for (unsigned i = 0; i < 4; ++i)
+                imm |= std::uint32_t(guest[pc+i]) << (i*8);
+            pc += 4;
+            if (!put(0x52800002u | ((imm & 0xffffu) << 5)) ||
+                !put(0x72A00002u | (((imm >> 16) & 0xffffu) << 5))) return 0;
+        } else if (opcode == 0x01) {
+            if (pc >= count || guest[pc++] != 0xC8) return 0;
+            cmp_ready = true;
+            if (!put(0x2B020000u)) return 0; // ADDS W0,W0,W2
         } else if (opcode == 0x05 || opcode == 0x2D) {
             cmp_ready = true; // ADDS/SUBS will set NZCV.Z
             if (count - pc < 4) return 0;
