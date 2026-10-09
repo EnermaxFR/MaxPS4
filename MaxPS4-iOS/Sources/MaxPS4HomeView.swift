@@ -31,6 +31,7 @@ struct MaxPS4HomeView: View {
     @State private var showingJITSuiteWarning = false
     @State private var showingJITBranchesWarning = false
     @State private var showingJITRegistersWarning = false
+    @State private var showingJITMemoryWarning = false
 
     @AppStorage("maxps4ExperimentalLab") private var experimentalLab = false
     @AppStorage("showFPS") private var showFPS = false
@@ -62,6 +63,14 @@ struct MaxPS4HomeView: View {
         .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) {
             tabBar
+        }
+        .alert("Mémoire JIT ARM64 — risque de fermeture", isPresented: $showingJITMemoryWarning) {
+            Button("Annuler", role: .cancel) {}
+            Button("Tester la mémoire") {
+                jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteMemory()
+            }
+        } message: {
+            Text("Test JIT via StikDebug BRK : écriture et lecture d'un emplacement de pile invité. MaxPS4 peut se fermer si le débogueur n'est plus actif.")
         }
         .alert("Registres JIT ARM64 — risque de fermeture", isPresented: $showingJITRegistersWarning) {
             Button("Annuler", role: .cancel) {}
@@ -606,6 +615,12 @@ struct MaxPS4HomeView: View {
                             showingJITRegistersWarning = true
                         } label: {
                             settingButton(icon: "cpu", title: "EXPÉRIENCE : JIT deux registres EAX / ECX")
+                        }
+                        Divider().overlay(.white.opacity(0.08))
+                        Button {
+                            showingJITMemoryWarning = true
+                        } label: {
+                            settingButton(icon: "memorychip", title: "EXPÉRIENCE : JIT lecture et écriture mémoire")
                         }
                         Divider().overlay(.white.opacity(0.08))
                         Button {
