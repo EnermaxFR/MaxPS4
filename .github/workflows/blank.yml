@@ -811,7 +811,8 @@ jobs:
               fexcore-jit-alu-status.txt \
               fexcore-arm64-relocations-status.txt \
               fexcore-jit-archive-status.txt \
-              fexcore-jit-partial-link-status.txt; do
+              fexcore-jit-partial-link-status.txt \
+              fexcore-jit-full-link-status.txt; do
               if test -f "build/diagnostics/$report"; then
                 cat "build/diagnostics/$report"
               else
