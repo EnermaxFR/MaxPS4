@@ -502,7 +502,7 @@ extension MaxPS4NativeLinkCheck {
             let code = Data(bytes)
             let translated = arm64TranslationPreview(code)
             let fallback = runSyntheticX86PreferJIT(code, budget: 64)
-            let ok = translated != nil && fallback?.result == expected &&
+            let ok = translated.map { verifyARM64Preview($0) } == true &&\n                     fallback?.result == expected &&
                      fallback?.usedJIT == false
             summary.append("\(ok ? "✓" : "✗") \(name): \(translated?.count ?? 0) mots ARM64, " +
                            "sortie \(fallback.map { String($0.result) } ?? "échec")")
@@ -599,6 +599,11 @@ extension MaxPS4NativeLinkCheck {
     }
 }
 
+@_silgen_name("maxps4_arm64_verify_preview")
+private func maxps4_arm64_verify_preview(
+    _ words: UnsafePointer<UInt32>?, _ count: Int
+) -> Int32
+
 @_silgen_name("maxps4_arm64_translate_preview")
 private func maxps4_arm64_translate_preview(
     _ guest: UnsafePointer<UInt8>?, _ count: Int,
@@ -622,6 +627,21 @@ extension MaxPS4NativeLinkCheck {
         }
         guard accepted == 1, emitted > 0, emitted <= words.count else { return nil }
         return Array(words.prefix(emitted))
+    }
+
+    static func verifyARM64Preview(_ words: [UInt32]) -> Bool {
+        words.withUnsafeBufferPointer { buffer in
+            maxps4_arm64_verify_preview(buffer.baseAddress, buffer.count) == 1
+        }
+    }
+
+    static var arm64VerifierSelfTest: Bool {
+        let guest = Data([0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3])
+        guard let words = arm64TranslationPreview(guest),
+              verifyARM64Preview(words) else { return false }
+        return !verifyARM64Preview([]) &&
+               !verifyARM64Preview([0xFFFFFFFF, 0xD65F03C0]) &&
+               !verifyARM64Preview([0xD65F03C0, 0xD65F03C0])
     }
 
     static var arm64TranslationPreviewSelfTest: Bool {
