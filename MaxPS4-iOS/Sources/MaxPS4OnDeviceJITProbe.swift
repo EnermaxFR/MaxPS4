@@ -35,14 +35,14 @@ enum MaxPS4OnDeviceJITProbe {
         case 1:
             outcome = "Transition RW → RX acceptée par mprotect (exécution NON testée)"
         case 0:
-            outcome = "Transition RW → RX refusée (errno \\(errorCode))"
+            outcome = "Transition RW → RX refusée (errno \(errorCode))"
         default:
             outcome = "Test indisponible sur cette architecture"
         }
         return """
         Laboratoire MaxPS4 — permissions mémoire JIT
-        \\(outcome)
-        CS_DEBUGGED : \\(MaxPS4NativeLinkCheck.codeSigningDebugStatus)
+        \(outcome)
+        CS_DEBUGGED : \(MaxPS4NativeLinkCheck.codeSigningDebugStatus)
         Aucun BRK StikDebug envoyé.
         Aucun code ARM64 généré exécuté.
         Cette expérience ne prouve pas l'accès au JIT ou à FEXCore.
