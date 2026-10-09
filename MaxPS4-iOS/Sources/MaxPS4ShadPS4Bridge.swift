@@ -99,6 +99,44 @@ extension MaxPS4NativeLinkCheck {
     }
 }
 
+@_silgen_name("maxps4_native_elf_load_layout")
+private func maxps4_native_elf_load_layout(
+    _ data: UnsafePointer<UInt8>?, _ size: Int,
+    _ segments: UnsafeMutablePointer<UInt32>?,
+    _ bytes: UnsafeMutablePointer<UInt64>?
+) -> Int32
+
+extension MaxPS4NativeLinkCheck {
+    static func nativeELFLoadLayout(_ data: Data) -> (segments: UInt32, bytes: UInt64)? {
+        var segments: UInt32 = 0
+        var bytes: UInt64 = 0
+        let accepted = data.withUnsafeBytes { raw in
+            maxps4_native_elf_load_layout(
+                raw.bindMemory(to: UInt8.self).baseAddress, data.count, &segments, &bytes
+            )
+        }
+        return accepted == 1 ? (segments, bytes) : nil
+    }
+
+    static var nativeELFLoadLayoutSelfTest: Bool {
+        var elf = Data(repeating: 0, count: 128)
+        elf.replaceSubrange(0..<7, with: [0x7f, 0x45, 0x4c, 0x46, 2, 1, 1])
+        elf[18] = 0x3e // AMD64
+        elf[32] = 64   // e_phoff
+        elf[54] = 56   // e_phentsize
+        elf[56] = 1    // e_phnum
+        elf[64] = 1    // PT_LOAD
+        elf[64 + 40] = 64 // p_memsz
+        guard let layout = nativeELFLoadLayout(elf),
+              layout.segments == 1, layout.bytes == 64 else { return false }
+        var bad = elf
+        bad[64 + 32] = 65 // p_filesz > p_memsz
+        guard nativeELFLoadLayout(bad) == nil else { return false }
+        return nativeELFLoadLayout(Data(elf.prefix(119))) == nil &&
+               nativeELFLoadLayout(Data()) == nil
+    }
+}
+
 @_silgen_name("maxps4_native_self_segment_count")
 private func maxps4_native_self_segment_count(
     _ bytes: UnsafePointer<UInt8>?, _ count: Int, _ segments: UnsafeMutablePointer<UInt16>?
