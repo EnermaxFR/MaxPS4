@@ -644,7 +644,9 @@ jobs:
                   > build/diagnostics/fexcore-jit-archive-members.txt \
                   && python3 - <<'PY'
           from pathlib import Path
-          actual = set(Path("build/diagnostics/fexcore-jit-archive-members.txt").read_text().splitlines())
+          members = Path("build/diagnostics/fexcore-jit-archive-members.txt").read_text().splitlines()
+          # Apple's ar may expose a ranlib symbol table alongside actual objects.
+          actual = {member for member in members if not member.startswith("__.SYMDEF")}
           expected = {
               "fexcore-jit-core-ios.o",
               "fexcore-jit-alu-ios.o",
