@@ -684,10 +684,11 @@ jobs:
                 && test -s build/diagnostics/fexcore-jit-partial-link.o \
                 && xcrun lipo -archs build/diagnostics/fexcore-jit-partial-link.o \
                   | grep -Eq '(^|[[:space:]])arm64([[:space:]]|$)'; then
-              # Mach-O symbols are underscore-prefixed; nm -j yields names only.
-              # Prefer toolchain c++filt when available and preserve raw names.
+              # Save an accurate symbol inventory from a single nm invocation.
+              # An empty output is valid; a nonzero exit code is a failure.
               if xcrun nm -u -j build/diagnostics/fexcore-jit-partial-link.o \
-                  > build/diagnostics/fexcore-jit-partial-undefined-symbols.txt 2>&1; then
+                  > build/diagnostics/fexcore-jit-partial-undefined-symbols.txt \
+                  2> build/diagnostics/fexcore-jit-nm-error.log; then
                 if xcrun --find c++filt >/dev/null 2>&1; then
                   xcrun c++filt < build/diagnostics/fexcore-jit-partial-undefined-symbols.txt \
                     | sort -u > build/diagnostics/fexcore-jit-partial-demangled-symbols.txt
@@ -695,25 +696,11 @@ jobs:
                   sort -u build/diagnostics/fexcore-jit-partial-undefined-symbols.txt \
                     > build/diagnostics/fexcore-jit-partial-demangled-symbols.txt
                 fi
-              else
-                echo "Symbol inventory unavailable" \
-                  > build/diagnostics/fexcore-jit-partial-demangled-symbols.txt
-              fi
-              if test -s build/diagnostics/fexcore-jit-partial-undefined-symbols.txt \
-                  && ! grep -q '^nm:' build/diagnostics/fexcore-jit-partial-undefined-symbols.txt; then
-                echo "PASS FEXCore ARM64 partial link; unresolved symbol inventory saved" \
+                echo "PASS FEXCore ARM64 partial link; symbol inventory collected" \
                   | tee build/diagnostics/fexcore-jit-partial-link-status.txt
               else
-                # No undefined symbols is a valid outcome after a partial link.
-                # An nm failure must be distinguished from an empty inventory.
-                if xcrun nm -u -j build/diagnostics/fexcore-jit-partial-link.o \
-                    > /dev/null 2> build/diagnostics/fexcore-jit-nm-error.log; then
-                  echo "PASS FEXCore ARM64 partial link; no unresolved symbols reported" \
-                    | tee build/diagnostics/fexcore-jit-partial-link-status.txt
-                else
-                  echo "BLOCKED FEXCore ARM64 symbol inventory; nm failed" \
-                    | tee build/diagnostics/fexcore-jit-partial-link-status.txt
-                fi
+                echo "BLOCKED FEXCore ARM64 symbol inventory; nm failed" \
+                  | tee build/diagnostics/fexcore-jit-partial-link-status.txt
               fi
             else
               echo "BLOCKED FEXCore ARM64 partial link; inspect linker log" \
