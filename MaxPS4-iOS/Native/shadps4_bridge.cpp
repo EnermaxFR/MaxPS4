@@ -554,7 +554,7 @@ extern "C" int maxps4_arm64_verify_preview(
                    (w & 0xFFE0001Fu) == 0x72A00000u ||
                    (w & 0xFFE0001Fu) == 0x52800001u ||
                    (w & 0xFFE0001Fu) == 0x72A00001u ||
-                   w == 0x31000000u || w == 0x71000000u ||
+                   (w & 0xFFC0001Fu) == 0x31000000u ||\n                   (w & 0xFFC0001Fu) == 0x71000000u ||
                    w == 0x2B010000u || w == 0x6B010000u ||
                    w == 0x4A010000u || w == 0x0A010000u ||
                    w == 0x2A010000u || w == 0x6A00001Fu ||
