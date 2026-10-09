@@ -346,8 +346,13 @@ extern "C" int maxps4_native_guest_x86_run(const std::uint8_t* code,
             pc += 4;
             break;
         }
-        case 0x89: // MOV DWORD PTR [RSP-4], EAX (one bounded guest slot)
-        case 0x8B: { // MOV EAX, DWORD PTR [RSP-4]
+        case 0x89: // MOV [RSP+disp8],EAX or MOV EAX,ECX (ModRM C8)
+        case 0x8B: {
+            if (op == 0x89 && pc < size && code[pc] == 0xC8) {
+                ++pc;
+                rax = ecx;
+                break; // MOV EAX,ECX preserves flags.
+            }
             if (size - pc < 3 || code[pc] != 0x44 ||
                 code[pc + 1] != 0x24) return 0;
             const std::uint8_t offset = code[pc + 2];
@@ -1010,6 +1015,24 @@ extern "C" int maxps4_stikdualmap_execute_guest_block(
     return maxps4_stikdualmap_execute_guest_block_with_eax(guest, length, 0, result_out);
 }
 
+// ECX initialization in a first compiled block is returned through EAX
+// (MOV EAX,ECX), then stored in host-owned guest context for a second block.
+// This is an explicit transfer protocol, NOT transparent ECX preservation.
+extern "C" int maxps4_stikdualmap_arm64_ecx_transfer_test() noexcept {
+    constexpr std::uint8_t make_ecx[] = {0xB9,2,0,0,0,0x89,0xC8,0xC3};
+    constexpr std::uint8_t use_ecx[] = {0x01,0xC8,0xC3};
+    std::uint64_t result = 0;
+    int status = maxps4_stikdualmap_execute_guest_block_with_registers(
+        make_ecx, sizeof(make_ecx), 0, 0, &result);
+    if (status != 1) return status;
+    const std::uint32_t ecx = static_cast<std::uint32_t>(result);
+    if (ecx != 2) return -4;
+    status = maxps4_stikdualmap_execute_guest_block_with_registers(
+        use_ecx, sizeof(use_ecx), 40, ecx, &result);
+    if (status != 1) return status;
+    return result == 42 ? 1 : -4;
+}
+
 // Two distinct guest registers survive a native block boundary via an
 // explicit host context. EAX is updated; ECX is preserved as a read-only
 // register across blocks. Not a complete mutable guest register file.
@@ -1064,6 +1087,7 @@ extern "C" int maxps4_stikdualmap_arm64_memory_test() noexcept;
 extern "C" int maxps4_stikdualmap_arm64_multislot_test() noexcept;
 extern "C" int maxps4_stikdualmap_arm64_two_blocks_test() noexcept;
 extern "C" int maxps4_stikdualmap_arm64_two_register_blocks_test() noexcept;
+extern "C" int maxps4_stikdualmap_arm64_ecx_transfer_test() noexcept;
 extern "C" int maxps4_stikdualmap_arm64_context_three_blocks_test() noexcept;
 
 // Manual batch regression of all previously introduced JIT probes.
@@ -1072,7 +1096,7 @@ extern "C" int maxps4_stikdualmap_arm64_context_three_blocks_test() noexcept;
 extern "C" int maxps4_stikdualmap_arm64_full_batch(int* passed_out, int* total_out) noexcept {
     if (!passed_out || !total_out) return -6;
     *passed_out = 0;
-    *total_out = 12; // Original 11 checks and EAX/ECX across blocks.
+    *total_out = 13; // Original 12 checks and explicit ECX transfer.
     if (maxps4_native_debugger_attached() != 1) return -1;
     int passed = 0;
     int status = maxps4_stikdualmap_arm64_execute_suite(&passed);
@@ -1088,7 +1112,8 @@ extern "C" int maxps4_stikdualmap_arm64_full_batch(int* passed_out, int* total_o
         maxps4_stikdualmap_arm64_multislot_test,
         maxps4_stikdualmap_arm64_two_blocks_test,
         maxps4_stikdualmap_arm64_context_three_blocks_test,
-        maxps4_stikdualmap_arm64_two_register_blocks_test
+        maxps4_stikdualmap_arm64_two_register_blocks_test,
+        maxps4_stikdualmap_arm64_ecx_transfer_test
     };
     for (auto test : tests) {
         status = test();
@@ -1303,6 +1328,7 @@ extern "C" int maxps4_arm64_verify_preview(
                    w == 0xB90003E0u || w == 0xB90007E0u || w == 0xB9000BE0u ||
                    w == 0xB94003E0u || w == 0xB94007E0u || w == 0xB9400BE0u ||
                    w == 0xD10043FFu || w == 0x910043FFu ||
+                   w == 0x2A0203E0u ||
                    w == 0x2B010000u || w == 0x2B020000u || w == 0x6B010000u ||
                    w == 0x4A010000u || w == 0x0A010000u ||
                    w == 0x2A010000u || w == 0x6A00001Fu ||
@@ -1362,6 +1388,11 @@ extern "C" int maxps4_arm64_translate_preview(
             if (!put(0x52800000u | ((imm & 0xffffu) << 5)) ||
                 !put(0x72A00000u | (((imm >> 16) & 0xffffu) << 5))) return 0;
         } else if (opcode == 0x89 || opcode == 0x8B) {
+            if (opcode == 0x89 && pc < count && guest[pc] == 0xC8) {
+                ++pc;
+                if (!put(0x2A0203E0u)) return 0; // MOV W0,W2 alias ORR W0,WZR,W2
+                continue;
+            }
             if (count - pc < 3 || guest[pc] != 0x44 ||
                 guest[pc + 1] != 0x24) return 0;
             const std::uint8_t offset = guest[pc + 2];
