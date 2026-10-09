@@ -65,6 +65,26 @@ jobs:
           file build/diagnostics/shadps4-string-util-ios-arm64.o
           xcrun lipo -archs build/diagnostics/shadps4-string-util-ios-arm64.o | grep -w arm64
 
+      - name: Fetch pinned AetherPS4 CPU and iOS JIT source for porting audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/diagnostics/aetherps4-upstream
+          git clone --quiet --no-checkout --filter=blob:none \
+            https://github.com/Leviidev/AetherPS4.git build/diagnostics/aetherps4-upstream
+          cd build/diagnostics/aetherps4-upstream
+          git sparse-checkout init --cone
+          git sparse-checkout set src/core/fex src/core/guest_cpu src/core/ios
+          git checkout --quiet 3347fc13f19860855ce91b66356940989ea6b6a6
+          test -s src/core/fex/fex_guest_engine.cpp
+          test -s src/core/guest_cpu/fex_guest_cpu.cpp
+          test -s src/core/ios/ios_jit_allocator.cpp
+          echo "AetherPS4 pinned revision: $(git rev-parse HEAD)"
+          echo "CPU / FEX / iOS JIT sources resolved for porting audit."
+          echo "NOTE: sources are not yet built or linked into MaxPS4."
+          git -C . rev-parse HEAD > ../aetherps4-upstream-sha.txt
+          rm -rf .git
+
       - name: Test ARM64 translation and safe interpreter fallback on macOS
         shell: bash
         run: |
