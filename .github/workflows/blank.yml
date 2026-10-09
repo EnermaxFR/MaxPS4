@@ -653,14 +653,14 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           base = Path("build/diagnostics/fexcore-upstream")
-          names = ("arm64emitter", "lookupcache")
+          names = ("arm64emitter", "lookupcache", "longjump", "logmanager", "logging")
           matches = sorted(
               str(p) for p in base.rglob("*.cpp")
               if any(name in p.stem.lower() for name in names)
           ) if base.exists() else []
           Path("build/diagnostics/fexcore-missing-components.txt").write_text(
               "\n".join(matches) + ("\n" if matches else
-              "No standalone Arm64Emitter/LookupCache .cpp files found.\n")
+              "No matching ARM64 emitter/cache/jump/logging .cpp files found.\n")
           )
           print(Path("build/diagnostics/fexcore-missing-components.txt").read_text())
           PY
@@ -790,6 +790,7 @@ jobs:
           lines = sorted(set(line.strip() for line in source.read_text().splitlines() if line.strip()))
           groups = {
               "CPUBackend": [], "Arm64Emitter": [], "LookupCache": [],
+              "UncheckedLongJump": [], "LogMan": [],
               "Other FEXCore": [], "External/runtime": [],
           }
           for symbol in lines:
@@ -799,6 +800,10 @@ jobs:
                   group = "Arm64Emitter"
               elif "LookupCache" in symbol:
                   group = "LookupCache"
+              elif "UncheckedLongJump" in symbol:
+                  group = "UncheckedLongJump"
+              elif "LogMan::" in symbol:
+                  group = "LogMan"
               elif "FEXCore" in symbol or "FEX::" in symbol:
                   group = "Other FEXCore"
               else:
