@@ -512,6 +512,12 @@ struct MaxPS4HomeView: View {
                     }
                     Divider().overlay(.white.opacity(0.08))
                     Button {
+                        jitStatusReport = MaxPS4OnDeviceJITProbe.combinedEngineReport()
+                    } label: {
+                        settingButton(icon: "cpu", title: "Tester le CPU invité et la traduction ARM64")
+                    }
+                    Divider().overlay(.white.opacity(0.08))
+                    Button {
                         jitStatusReport = MaxPS4OnDeviceJITProbe.generatedARM64ExecutionReport()
                     } label: {
                         settingButton(icon: "bolt.shield.fill", title: "Tester le code ARM64 généré (expérimental)")
