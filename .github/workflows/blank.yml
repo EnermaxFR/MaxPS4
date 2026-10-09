@@ -511,9 +511,23 @@ jobs:
               if test -f build/diagnostics/fexcore-arm64-relocations-status.txt; then
                 cat build/diagnostics/fexcore-arm64-relocations-status.txt
               fi
+              if test -f build/diagnostics/fexcore-jit-core-status.txt; then
+                cat build/diagnostics/fexcore-jit-core-status.txt
+              fi
               if test -f build/diagnostics/fexcore-jit-alu-status.txt; then
                 cat build/diagnostics/fexcore-jit-alu-status.txt
               fi
+              echo ''
+              echo '### Diagnostics du véritable JIT FEXCore'
+              for unit in jit-core jit-alu arm64-relocations; do
+                log="build/diagnostics/fexcore-${unit}-compile.log"
+                if test -f "$log" && test -s "$log"; then
+                  echo "#### ${unit}"
+                  echo '```text'
+                  grep -m 12 -E 'error:|fatal error:|warning:' "$log" || head -12 "$log"
+                  echo '```'
+                fi
+              done
               echo ''
               echo '### Premières erreurs ou avertissements'
               echo '```text'
@@ -536,6 +550,8 @@ jobs:
             build/diagnostics/fexcore-ir-compile.log
             build/diagnostics/fexcore-arm64-relocations-status.txt
             build/diagnostics/fexcore-arm64-relocations-compile.log
+            build/diagnostics/fexcore-jit-core-status.txt
+            build/diagnostics/fexcore-jit-core-compile.log
             build/diagnostics/fexcore-jit-alu-status.txt
             build/diagnostics/fexcore-jit-alu-compile.log
           if-no-files-found: ignore
