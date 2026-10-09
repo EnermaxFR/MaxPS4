@@ -1,3 +1,9 @@
+@_silgen_name("maxps4_aether_restricted_cpu_dispatch_probe")
+private func aetherRestrictedDispatchProbe() -> Int32
+
+@_silgen_name("maxps4_aether_multi_block_dispatch_probe")
+private func aetherMultiBlockDispatchProbe() -> Int32
+
 import Foundation
 
 /// Capabilities required before a native shadPS4 backend may advertise game launch.
@@ -573,15 +579,7 @@ extension MaxPS4NativeLinkCheck {
         """
     }
 
-    // These functions are implemented by the linked upstream AetherPS4
-    // GuestCpuBackend adapter. They run synthetic, restricted guest bytecode;
-    // they do not establish a PS4 game runtime or a working FEXCore JIT.
-    @_silgen_name("maxps4_aether_restricted_cpu_dispatch_probe")
-    private static func aetherRestrictedDispatchProbe() -> Int32
-
-    @_silgen_name("maxps4_aether_multi_block_dispatch_probe")
-    private static func aetherMultiBlockDispatchProbe() -> Int32
-
+    // The linked upstream CPU interface runs synthetic guest blocks only.
     static var aetherGuestBackendReport: String {
         let supported = maxps4_aether_guest_backend_probe() == 1
         let dispatch = aetherRestrictedDispatchProbe() == 1
