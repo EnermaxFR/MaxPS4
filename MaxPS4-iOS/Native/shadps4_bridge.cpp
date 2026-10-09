@@ -934,6 +934,38 @@ extern "C" int maxps4_stikdualmap_arm64_execute_42() noexcept {
 #endif
 }
 
+// Restricted real JIT block runner for the existing synthetic translator subset.
+// Requires an active StikDebug universal.js session; do not call automatically.
+// status: 1 executed, -1 debugger missing, -2 page invalid, -3 allocation,
+// -4 invalid input, -5 translation/verification failed.
+extern "C" int maxps4_stikdualmap_execute_guest_block(
+    const std::uint8_t* guest, std::size_t length,
+    std::uint64_t* result_out) noexcept {
+    if (!result_out || !guest || length == 0 || length > 256) return -4;
+    *result_out = 0;
+#if defined(__APPLE__) && defined(__aarch64__)
+    if (maxps4_native_debugger_attached() != 1) return -1;
+    const long n = sysconf(_SC_PAGESIZE);
+    if (n <= 0 || n > 65536) return -2;
+    std::uint32_t words[128] = {};
+    std::size_t count = 0;
+    if (maxps4_arm64_translate_preview(guest, length, words, 128, &count) != 1 ||
+        count == 0 || count * sizeof(std::uint32_t) > static_cast<std::size_t>(n) ||
+        maxps4_arm64_verify_preview(words, count) != 1) return -5;
+    void* rw = nullptr;
+    void* rx = nullptr;
+    if (maxps4_stikdualmap_allocate(static_cast<std::size_t>(n), &rw, &rx) != 1) return -3;
+    std::memcpy(rw, words, count * sizeof(std::uint32_t));
+    sys_icache_invalidate(rx, count * sizeof(std::uint32_t));
+    using Function = std::uint32_t (*)();
+    *result_out = reinterpret_cast<Function>(rx)();
+    maxps4_stikdualmap_release(rw, rx, static_cast<std::size_t>(n));
+    return 1;
+#else
+    return 0;
+#endif
+}
+
 // Manual multi-program native JIT test. Requires the same confirmed StikDebug
 // session as execute_42 and may terminate MaxPS4 if the BRK handler disappears.
 // passed_out retains the number completed if a later test fails.
@@ -942,12 +974,6 @@ extern "C" int maxps4_stikdualmap_arm64_execute_suite(int* passed_out) noexcept 
     *passed_out = 0;
 #if defined(__APPLE__) && defined(__aarch64__)
     if (maxps4_native_debugger_attached() != 1) return -1;
-    const long n = sysconf(_SC_PAGESIZE);
-    if (n <= 0 || n > 65536) return -2;
-    const std::size_t page = static_cast<std::size_t>(n);
-    void* rw = nullptr;
-    void* rx = nullptr;
-    if (maxps4_stikdualmap_allocate(page, &rw, &rx) != 1) return -3;
     constexpr std::uint8_t mov[] = {0xB8,42,0,0,0,0xC3};
     constexpr std::uint8_t add[] = {0xB8,40,0,0,0,0x05,2,0,0,0,0xC3};
     constexpr std::uint8_t sub[] = {0xB8,50,0,0,0,0x2D,8,0,0,0,0xC3};
@@ -955,24 +981,12 @@ extern "C" int maxps4_stikdualmap_arm64_execute_suite(int* passed_out) noexcept 
     const std::size_t lengths[] = {sizeof(mov), sizeof(add), sizeof(sub)};
     int status = 1;
     for (int test = 0; test < 3; ++test) {
-        std::uint32_t words[32] = {};
-        std::size_t count = 0;
-        if (maxps4_arm64_translate_preview(programs[test], lengths[test], words, 32, &count) != 1 ||
-            count == 0 || count * sizeof(std::uint32_t) > page ||
-            maxps4_arm64_verify_preview(words, count) != 1) {
-            status = -5;
-            break;
-        }
-        std::memcpy(rw, words, count * sizeof(std::uint32_t));
-        sys_icache_invalidate(rx, count * sizeof(std::uint32_t));
-        using Function = int (*)();
-        if (reinterpret_cast<Function>(rx)() != 42) {
-            status = -4;
-            break;
-        }
+        std::uint64_t value = 0;
+        const int code = maxps4_stikdualmap_execute_guest_block(programs[test], lengths[test], &value);
+        if (code != 1) { status = code; break; }
+        if (value != 42) { status = -4; break; }
         ++*passed_out;
     }
-    maxps4_stikdualmap_release(rw, rx, page);
     return status;
 #else
     return 0;
