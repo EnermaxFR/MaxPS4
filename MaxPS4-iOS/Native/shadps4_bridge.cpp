@@ -364,6 +364,38 @@ extern "C" int maxps4_native_arm64_preflight(
     return translate_or_reuse(code, size) ? 1 : 0;
 }
 
+// StikDebug iOS 26 universal breakpoint ABI.
+// These entry points are intentionally NOT called by the current backend:
+// BRK without the universal.js debugger attached would terminate the app.
+// They provide an app-side protocol surface for a future W^X JIT allocator.
+// Source protocol: StikDebug/StikJIT INTEGRATION.md.
+#if defined(__APPLE__) && defined(__aarch64__)
+extern "C" __attribute__((naked, noinline, optnone))
+void maxps4_stikdebug_jit26_detach() noexcept {
+    __asm__("mov x16, #0\n"
+            "brk #0xf00d\n"
+            "ret");
+}
+
+extern "C" __attribute__((naked, noinline, optnone))
+void* maxps4_stikdebug_jit26_prepare_region(void* address,
+                                             std::size_t length) noexcept {
+    __asm__("mov x16, #1\n"
+            "brk #0xf00d\n"
+            "ret");
+}
+#endif
+
+// A protocol ABI existing in the binary does not mean the debugger attached,
+// that executable memory was prepared, or that a functional recompiler exists.
+extern "C" int maxps4_stikdebug_jit26_protocol_available() noexcept {
+#if defined(__APPLE__) && defined(__aarch64__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
 // Execution backend selection point for an eventual ARM64 dynamic recompiler.
 // iOS code-signing/JIT entitlements must be validated before enabling JIT.
 // No RWX memory allocation or code generation is attempted here.
