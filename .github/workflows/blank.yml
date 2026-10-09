@@ -779,6 +779,31 @@ jobs:
             echo 'Une compilation réussie de Addressing.cpp ne signifie pas que FEXCore ou le JIT sont exécutables.'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Summarize actual FEXCore JIT linking readiness
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Liaison FEXCore ARM64 — état vérifié'
+            for report in \
+              fexcore-jit-core-status.txt \
+              fexcore-jit-alu-status.txt \
+              fexcore-arm64-relocations-status.txt \
+              fexcore-jit-archive-status.txt \
+              fexcore-jit-partial-link-status.txt; do
+              if test -f "build/diagnostics/$report"; then
+                cat "build/diagnostics/$report"
+              else
+                echo "NOT RUN: $report"
+              fi
+            done
+            echo ''
+            if test -f build/diagnostics/fexcore-jit-partial-undefined-symbols.txt; then
+              echo "Symboles externes restants : $(wc -l < build/diagnostics/fexcore-jit-partial-undefined-symbols.txt | tr -d ' ')"
+            fi
+            echo 'Attention : archive et liaison partielle ne signifient pas JIT exécutable sur iOS.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload FEXCore compilation diagnostics
         if: always()
         uses: actions/upload-artifact@v4
