@@ -647,24 +647,47 @@ jobs:
             echo "BLOCKED FEXCore CPUBackend.cpp port; inspect compiler output" \
               | tee build/diagnostics/fexcore-cpu-backend-status.txt
           fi
-          # Discover upstream ARM64 emitter and lookup-cache implementation files.
-          # Record exact paths and compilation prerequisites instead of guessing
-          # filenames or treating the three-object archive as a complete runtime.
+          # Discover and compile real upstream emitter/cache translation units.
+          # Compilation is exploratory: unresolved runtime dependencies remain
+          # visible and no unverified objects are shipped in the IPA.
           python3 - <<'PY'
           from pathlib import Path
-          root = Path("build/diagnostics/fexcore-upstream")
-          candidates = []
-          for base in (Path("build/diagnostics/fexcore-upstream"), Path("build/diagnostics/aetherps4-upstream")):
-              if not base.exists():
-                  continue
-              for path in base.rglob("*.cpp"):
-                  name = path.name.lower()
-                  if "arm64emitter" in name or "lookupcache" in name:
-                      candidates.append(str(path))
-          report = Path("build/diagnostics/fexcore-missing-components.txt")
-          report.write_text("\\n".join(sorted(set(candidates))) + ("\\n" if candidates else "No standalone Arm64Emitter/LookupCache .cpp files located; inspect upstream definitions.\\n"))
-          print(report.read_text())
+          base = Path("build/diagnostics/fexcore-upstream")
+          names = ("arm64emitter", "lookupcache")
+          matches = sorted(
+              str(p) for p in base.rglob("*.cpp")
+              if any(name in p.stem.lower() for name in names)
+          ) if base.exists() else []
+          Path("build/diagnostics/fexcore-missing-components.txt").write_text(
+              "\n".join(matches) + ("\n" if matches else
+              "No standalone Arm64Emitter/LookupCache .cpp files found.\n")
+          )
+          print(Path("build/diagnostics/fexcore-missing-components.txt").read_text())
           PY
+          : > build/diagnostics/fexcore-extra-compile-status.txt
+          FEX_EXTRA_OBJECTS=()
+          extra_index=0
+          while IFS= read -r source; do
+            test -f "$source" || continue
+            output="build/diagnostics/fexcore-extra-${extra_index}-ios.o"
+            log="build/diagnostics/fexcore-extra-${extra_index}-compile.log"
+            if xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
+                -fno-color-diagnostics -isysroot "$SDK" \
+                -DARCHITECTURE_arm64=1 -DMADV_HUGEPAGE=0 -DMADV_NOHUGEPAGE=0 \
+                -I "$FEX/FEXCore/include" \
+                -I "build/diagnostics/fexcore-generated" \
+                -I "MaxPS4-iOS/Native/compat/fex_ios" \
+                -I "$FEX/CodeEmitter" -I "$FEX/FEXHeaderUtils" \
+                -I "$UNORDERED/include" \
+                -I "$FEX/FEXCore/Source" -I "$FEX/Source" -I "$FMT_INCLUDE" \
+                -c "$source" -o "$output" > "$log" 2>&1; then
+              FEX_EXTRA_OBJECTS+=("$output")
+              echo "PASS $source" >> build/diagnostics/fexcore-extra-compile-status.txt
+            else
+              echo "BLOCKED $source (see $log)" >> build/diagnostics/fexcore-extra-compile-status.txt
+            fi
+            extra_index=$((extra_index + 1))
+          done < build/diagnostics/fexcore-missing-components.txt
           # Prepare a real static archive of upstream FEXCore ARM64 JIT objects.
           # Archiving does not resolve external symbols or enable executable memory.
           rm -f build/diagnostics/libMaxPS4FEXJITProbe.a
@@ -673,6 +696,10 @@ jobs:
             build/diagnostics/fexcore-jit-alu-ios.o
             build/diagnostics/fexcore-arm64-relocations-ios.o
           )
+          # Include only successfully compiled upstream emitter/cache objects.
+          if test "${#FEX_EXTRA_OBJECTS[@]}" -gt 0; then
+            JIT_OBJECTS+=("${FEX_EXTRA_OBJECTS[@]}")
+          fi
           # Add the real CPUBackend only when its independent iOS build passed.
           # A failed optional port must not invalidate the proven JIT archive.
           if grep -q '^PASS FEXCore CPUBackend.cpp compiled' \
@@ -702,6 +729,7 @@ jobs:
           cpu_backend = Path("build/diagnostics/fexcore-cpu-backend-status.txt").read_text()
           if cpu_backend.startswith("PASS FEXCore CPUBackend.cpp compiled"):
               expected.append("fexcore-cpu-backend-ios.o")
+          expected += sorted(p.name for p in Path("build/diagnostics").glob("fexcore-extra-*-ios.o"))
           if actual != sorted(expected):
               raise SystemExit(f"Incorrect FEXCore archive members: expected={sorted(expected)}, actual={actual}")
           print(f"PASS {len(expected)} upstream FEXCore ARM64 archive members")
@@ -910,6 +938,8 @@ jobs:
             build/diagnostics/fexcore-cpu-backend-compile.log
             build/diagnostics/fexcore-cpu-backend-status.txt
             build/diagnostics/fexcore-missing-components.txt
+            build/diagnostics/fexcore-extra-compile-status.txt
+            build/diagnostics/fexcore-extra-*-compile.log
             build/diagnostics/fexcore-cpu-backend-ios.o
             build/diagnostics/fexcore-jit-full-link-status.txt
             build/diagnostics/fexcore-ipa-link-status.txt
