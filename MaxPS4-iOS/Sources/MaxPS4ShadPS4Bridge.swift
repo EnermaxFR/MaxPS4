@@ -598,6 +598,16 @@ extension MaxPS4NativeLinkCheck {
                 0x6B01001F, 0x52800C60, 0x72A00000,
                 0x54000020, 0xD65F03C0
               ] else { return false }
+        // Three iterations of SUB EAX,1 / JNZ back to SUB, then RET.
+        // This is a finite arithmetic loop with ZF recomputed each iteration.
+        let decrementLoop = Data([0xB8, 3, 0, 0, 0,
+                                  0x2D, 1, 0, 0, 0,
+                                  0x75, 0xF9, 0xC3])
+        guard runNativeSyntheticX86(decrementLoop) == 0,
+              arm64TranslationPreview(decrementLoop) == [
+                0x52800060, 0x72A00000, 0x71000400,
+                0x54FFFFC1, 0xD65F03C0
+              ] else { return false }
         // Invalid instruction targets and loops without fresh CMP are rejected.
         let badTarget = Data([0xB8, 42, 0, 0, 0, 0x3D, 42, 0, 0, 0,
                               0x74, 1, 0xB8, 99, 0, 0, 0, 0xC3])
