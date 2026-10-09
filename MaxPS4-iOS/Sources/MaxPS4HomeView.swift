@@ -70,11 +70,11 @@ struct MaxPS4HomeView: View {
         }
         .alert("Batterie JIT complète — risque de fermeture", isPresented: $showingJITFullBatchWarning) {
             Button("Annuler", role: .cancel) {}
-            Button("Lancer les 11 tests") {
+            Button("Lancer les 12 tests") {
                 jitStatusReport = MaxPS4OnDeviceJITProbe.manuallyExecuteFullBatch()
             }
         } message: {
-            Text("Lance 11 vérifications JIT ARM64 à la suite (calculs, branches, registres, mémoire, blocs). Plusieurs interruptions BRK StikDebug : MaxPS4 peut se fermer si le débogueur cesse de répondre.")
+            Text("Lance 12 vérifications JIT ARM64 à la suite (calculs, branches, registres, mémoire, blocs). Plusieurs interruptions BRK StikDebug : MaxPS4 peut se fermer si le débogueur cesse de répondre.")
         }
         .alert("Contexte JIT sur trois blocs — risque de fermeture", isPresented: $showingJITThreeBlocksWarning) {
             Button("Annuler", role: .cancel) {}
@@ -680,7 +680,7 @@ struct MaxPS4HomeView: View {
                         Button {
                             showingJITFullBatchWarning = true
                         } label: {
-                            settingButton(icon: "checklist", title: "EXPÉRIENCE : lancer tous les tests JIT (11)")
+                            settingButton(icon: "checklist", title: "EXPÉRIENCE : lancer tous les tests JIT (12)")
                         }
                         Divider().overlay(.white.opacity(0.08))
                         Button {
