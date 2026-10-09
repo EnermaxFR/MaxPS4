@@ -530,6 +530,12 @@ struct MaxPS4HomeView: View {
                             settingButton(icon: "testtube.2", title: "Laboratoire : 7 tests de traduction ARM64")
                         }
                         Divider().overlay(.white.opacity(0.08))
+                        Button {
+                            jitStatusReport = MaxPS4OnDeviceJITProbe.executablePermissionReport()
+                        } label: {
+                            settingButton(icon: "lock.open", title: "Laboratoire : tester les permissions RX (sans exécution)")
+                        }
+                        Divider().overlay(.white.opacity(0.08))
                     Button {
                         jitStatusReport = MaxPS4NativeLinkCheck.jitStatusReport
                     } label: {
