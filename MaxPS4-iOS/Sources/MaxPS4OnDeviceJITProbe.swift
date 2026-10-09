@@ -204,6 +204,41 @@ enum MaxPS4OnDeviceJITProbe {
                             clearDataBytes += size
                         }
                     }
+                    // Merge validated ranges to avoid double-counting overlapping entries.
+                    var ranges: [(UInt64, UInt64)] = []
+                    for index in 0..<entries {
+                        let p = index * 32
+                        func beAt(_ at: Int) -> UInt64 {
+                            UInt64(table[(p + at)..<(p + at + 4)].reduce(UInt32(0)) {
+                                ($0 << 8) | UInt32($1)
+                            })
+                        }
+                        let start = beAt(16), size = beAt(20)
+                        if size > 0 && start <= UInt64(total) &&
+                           size <= UInt64(total) - start {
+                            ranges.append((start, start + size))
+                        }
+                    }
+                    ranges.sort { $0.0 < $1.0 }
+                    var cursor: UInt64 = 0
+                    var covered: UInt64 = 0
+                    var gaps: [(UInt64, UInt64)] = []
+                    for (start, end) in ranges {
+                        if start > cursor { gaps.append((cursor, start)) }
+                        if end > cursor {
+                            covered += end - max(cursor, start)
+                            cursor = end
+                        }
+                    }
+                    if cursor < UInt64(total) { gaps.append((cursor, UInt64(total))) }
+                    let largestGaps = gaps.sorted { ($0.1 - $0.0) > ($1.1 - $1.0) }
+                        .prefix(3).map {
+                            String(format: "0x%llX–0x%llX (%llu octets)", $0.0, $0.1, $0.1 - $0.0)
+                        }
+                    let gapReport = "Zones référencées uniques : " + String(covered) +
+                        " octets; zones non référencées : " + String(UInt64(total) - covered) +
+                        " octets; plus grands intervalles : " +
+                        (largestGaps.isEmpty ? "Aucun" : largestGaps.joined(separator: "; "))
                     // Entry 0x200 is the bounded null-terminated filename table.
                     var names = Data()
                     for index in 0..<entries {
@@ -306,7 +341,7 @@ enum MaxPS4OnDeviceJITProbe {
                             signatures.append(String(format: "%08X", ident) + " : " + label)
                         }
                     }
-                    entryReport = "Entrées de table lues : \(entries) (IDs initiaux : \(preview.joined(separator: ", ")))\nPlages hors fichier : \(invalidRanges)\nEntrées marquées chiffrées (flags +8) : \(encryptedFlags)\nEntrées protégées (ID et taille) : \(encryptedEntries.isEmpty ? "Aucune" : encryptedEntries.joined(separator: "; "))\nTailles déclarées (non dédupliquées) : accessibles \(clearDataBytes) octets; protégées \(protectedDataBytes) octets\nSignatures internes reconnues : \(signatures.isEmpty ? "Aucune" : signatures.joined(separator: "; "))\nNoms résolus : \(resolved.isEmpty ? "Aucun" : resolved.joined(separator: "; "))\nMétadonnées PSF : \(psfDetails.isEmpty ? "Aucune valeur décodée (format à examiner)" : psfDetails.joined(separator: "; "))"
+                    entryReport = "Entrées de table lues : \(entries) (IDs initiaux : \(preview.joined(separator: ", ")))\nPlages hors fichier : \(invalidRanges)\nEntrées marquées chiffrées (flags +8) : \(encryptedFlags)\nEntrées protégées (ID et taille) : \(encryptedEntries.isEmpty ? "Aucune" : encryptedEntries.joined(separator: "; "))\nTailles déclarées (non dédupliquées) : accessibles \(clearDataBytes) octets; protégées \(protectedDataBytes) octets\n\(gapReport)\nSignatures internes reconnues : \(signatures.isEmpty ? "Aucune" : signatures.joined(separator: "; "))\nNoms résolus : \(resolved.isEmpty ? "Aucun" : resolved.joined(separator: "; "))\nMétadonnées PSF : \(psfDetails.isEmpty ? "Aucune valeur décodée (format à examiner)" : psfDetails.joined(separator: "; "))"
 
                 } else {
                     entryReport = "Entrées : lecture incomplète"
