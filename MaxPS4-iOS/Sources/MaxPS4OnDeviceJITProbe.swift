@@ -260,7 +260,7 @@ enum MaxPS4OnDeviceJITProbe {
                             signatures.append(String(format: "%08X", ident) + " : " + label)
                         }
                     }
-                    entryReport = "Entrées de table lues : \(entries) (IDs initiaux : \(preview.joined(separator: ", ")))\nPlages hors fichier : \(invalidRanges)\nEntrées marquées chiffrées (flags +8) : \(encryptedFlags)\nSignatures internes reconnues : \(signatures.isEmpty ? "Aucune" : signatures.joined(separator: "; "))"
+                    entryReport = "Entrées de table lues : \(entries) (IDs initiaux : \(preview.joined(separator: ", ")))\nPlages hors fichier : \(invalidRanges)\nEntrées marquées chiffrées (flags +8) : \(encryptedFlags)\nSignatures internes reconnues : \(signatures.isEmpty ? "Aucune" : signatures.joined(separator: "; "))\nMétadonnées PSF : \(psfDetails.isEmpty ? "Aucune valeur décodée (format à examiner)" : psfDetails.joined(separator: "; "))"
 
                 } else {
                     entryReport = "Entrées : lecture incomplète"
