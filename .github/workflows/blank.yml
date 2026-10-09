@@ -556,6 +556,12 @@ jobs:
               if test -f build/diagnostics/fexcore-arm64-relocations-status.txt; then
                 cat build/diagnostics/fexcore-arm64-relocations-status.txt
               fi
+              if test -f build/diagnostics/fexcore-jit-architecture-macros.txt; then
+                echo '### Macros detectées par Clang (cible iOS arm64)'
+                echo '```text'
+                cat build/diagnostics/fexcore-jit-architecture-macros.txt
+                echo '```'
+              fi
               if test -f build/diagnostics/fexcore-jit-abi-status.txt; then
                 cat build/diagnostics/fexcore-jit-abi-status.txt
               fi
@@ -598,6 +604,9 @@ jobs:
             build/diagnostics/fexcore-ir-compile.log
             build/diagnostics/fexcore-arm64-relocations-status.txt
             build/diagnostics/fexcore-arm64-relocations-compile.log
+            build/diagnostics/fexcore-jit-defined-macros.txt
+            build/diagnostics/fexcore-jit-architecture-macros.txt
+            build/diagnostics/fexcore-jit-macro-errors.log
             build/diagnostics/fexcore-jit-abi-status.txt
             build/diagnostics/fexcore-jit-abi-compile.log
             build/diagnostics/fexcore-jit-defined-macros.txt
