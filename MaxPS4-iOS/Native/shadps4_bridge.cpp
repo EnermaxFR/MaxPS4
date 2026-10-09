@@ -1028,6 +1028,37 @@ extern "C" int maxps4_stikdualmap_arm64_execute_suite(int* passed_out) noexcept 
 #endif
 }
 
+// Manual batch regression of all previously introduced JIT probes.
+// Reports individual synthetic checks completed before the first failure.
+// Multiple BRK-backed generated-code invocations; never run automatically.
+extern "C" int maxps4_stikdualmap_arm64_full_batch(int* passed_out, int* total_out) noexcept {
+    if (!passed_out || !total_out) return -6;
+    *passed_out = 0;
+    *total_out = 11; // Arithmetic (3), branches (3), registers, memory, slots, two/three blocks.
+    if (maxps4_native_debugger_attached() != 1) return -1;
+    int passed = 0;
+    int status = maxps4_stikdualmap_arm64_execute_suite(&passed);
+    *passed_out += passed;
+    if (status != 1) return status;
+    passed = 0;
+    status = maxps4_stikdualmap_arm64_branch_suite(&passed);
+    *passed_out += passed;
+    if (status != 1) return status;
+    const int (*tests[])() noexcept = {
+        maxps4_stikdualmap_arm64_two_register_test,
+        maxps4_stikdualmap_arm64_memory_test,
+        maxps4_stikdualmap_arm64_multislot_test,
+        maxps4_stikdualmap_arm64_two_blocks_test,
+        maxps4_stikdualmap_arm64_context_three_blocks_test
+    };
+    for (auto test : tests) {
+        status = test();
+        if (status != 1) return status;
+        ++*passed_out;
+    }
+    return *passed_out == *total_out ? 1 : -4;
+}
+
 // First persistent guest context: retains EAX across separately emitted code
 // blocks. Other registers, flags and guest memory are deliberately not claimed
 // persistent yet. Test keeps the context on the host stack.
