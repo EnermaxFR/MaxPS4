@@ -642,7 +642,19 @@ jobs:
                 | grep -Eq '(^|[[:space:]])arm64([[:space:]]|$)'; then
               if xcrun ar -t build/diagnostics/libMaxPS4FEXJITProbe.a \
                   > build/diagnostics/fexcore-jit-archive-members.txt \
-                  && test "$(wc -l < build/diagnostics/fexcore-jit-archive-members.txt | tr -d ' ')" -eq 3; then
+                  && python3 - <<'PY'
+          from pathlib import Path
+          actual = set(Path("build/diagnostics/fexcore-jit-archive-members.txt").read_text().splitlines())
+          expected = {
+              "fexcore-jit-core-ios.o",
+              "fexcore-jit-alu-ios.o",
+              "fexcore-arm64-relocations-ios.o",
+          }
+          if actual != expected:
+              raise SystemExit(f"Incorrect FEXCore archive members: missing={sorted(expected - actual)}, extra={sorted(actual - expected)}")
+          print("PASS exact three upstream FEXCore ARM64 archive members")
+          PY
+          then
                 xcrun nm -u build/diagnostics/libMaxPS4FEXJITProbe.a \
                   > build/diagnostics/fexcore-jit-archive-undefined-symbols.txt 2>&1 || true
                 echo "PASS FEXCore JIT ARM64 static archive created; not yet linked" \
