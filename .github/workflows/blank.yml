@@ -526,11 +526,14 @@ jobs:
               -I "$UNORDERED/include" \
               -I "$FEX/FEXCore/Source" -I "$FEX/Source" -I "$FMT_INCLUDE" \
               -c "$JIT_CORE" -o build/diagnostics/fexcore-jit-core-ios.o \
-              > build/diagnostics/fexcore-jit-core-compile.log 2>&1; then
-            echo "PASS FEXCore central JIT.cpp compiled for iOS arm64" \
+              > build/diagnostics/fexcore-jit-core-compile.log 2>&1 \
+              && test -s build/diagnostics/fexcore-jit-core-ios.o \
+              && xcrun lipo -archs build/diagnostics/fexcore-jit-core-ios.o \
+                | grep -Eq '(^|[[:space:]])arm64([[:space:]]|$)'; then
+            echo "PASS FEXCore central JIT.cpp compiled as Mach-O arm64 for iOS" \
               | tee build/diagnostics/fexcore-jit-core-status.txt
           else
-            echo "BLOCKED FEXCore central JIT.cpp; check compiler log" \
+            echo "BLOCKED FEXCore central JIT.cpp; compile or Mach-O arm64 validation failed" \
               | tee build/diagnostics/fexcore-jit-core-status.txt
             head -25 build/diagnostics/fexcore-jit-core-compile.log
           fi
