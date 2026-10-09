@@ -302,6 +302,17 @@ jobs:
           echo "PASS pinned FEXCore source headers available"
           echo "NOTE: FEXCore is not yet compiled or linked"
 
+      - name: Prepare fmt headers before AetherPS4 engine compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! brew list --versions fmt >/dev/null 2>&1 ||
+             ! test -s "$(brew --prefix fmt)/include/fmt/format.h"; then
+            brew install fmt
+          fi
+          test -s "$(brew --prefix fmt)/include/fmt/format.h"
+          echo "PASS fmt headers available before AetherPS4 compile"
+
       - name: Probe real AetherPS4 guest engine and CPU compilation for iOS
         shell: bash
         run: |
