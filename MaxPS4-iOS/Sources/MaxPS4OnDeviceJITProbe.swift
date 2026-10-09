@@ -245,6 +245,30 @@ enum MaxPS4OnDeviceJITProbe {
                     let gapReport = "Zones référencées uniques : \(covered) octets; " +
                         "zones non référencées : \(unreferencedBytes) octets; " +
                         "plus grands intervalles : \(largestGapDescription)"
+                    // Read-only sampling of the largest unreferenced region.
+                    var gapSamples: [String] = []
+                    if let largest = gaps.max(by: { ($0.1 - $0.0) < ($1.1 - $1.0) }) {
+                        let start = largest.0, end = largest.1
+                        let length = end - start
+                        if length >= 64 {
+                            let middle = start + length / 2
+                            let tail = end - 64
+                            for position in [start, middle, tail] {
+                                try handle.seek(toOffset: position)
+                                let bytes = try handle.read(upToCount: 64) ?? Data()
+                                guard bytes.count == 64 else { continue }
+                                let nonzero = bytes.filter { $0 != 0 }.count
+                                let unique = Set(bytes).count
+                                let hex = bytes.prefix(8).map { String(format: "%02X", $0) }
+                                    .joined(separator: " ")
+                                gapSamples.append(String(format: "0x%llX", position) +
+                                    " : " + hex + " ; non-nuls " + String(nonzero) +
+                                    "/64 ; valeurs distinctes " + String(unique))
+                            }
+                        }
+                    }
+                    let gapSampleReport = gapSamples.isEmpty ? "Aucun" :
+                        gapSamples.joined(separator: "; ")
                     // Entry 0x200 is the bounded null-terminated filename table.
                     var names = Data()
                     for index in 0..<entries {
@@ -347,7 +371,7 @@ enum MaxPS4OnDeviceJITProbe {
                             signatures.append(String(format: "%08X", ident) + " : " + label)
                         }
                     }
-                    entryReport = "Entrées de table lues : \(entries) (IDs initiaux : \(preview.joined(separator: ", ")))\nPlages hors fichier : \(invalidRanges)\nEntrées marquées chiffrées (flags +8) : \(encryptedFlags)\nEntrées protégées (ID et taille) : \(encryptedEntries.isEmpty ? "Aucune" : encryptedEntries.joined(separator: "; "))\nTailles déclarées (non dédupliquées) : accessibles \(clearDataBytes) octets; protégées \(protectedDataBytes) octets\n\(gapReport)\nSignatures internes reconnues : \(signatures.isEmpty ? "Aucune" : signatures.joined(separator: "; "))\nNoms résolus : \(resolved.isEmpty ? "Aucun" : resolved.joined(separator: "; "))\nMétadonnées PSF : \(psfDetails.isEmpty ? "Aucune valeur décodée (format à examiner)" : psfDetails.joined(separator: "; "))"
+                    entryReport = "Entrées de table lues : \(entries) (IDs initiaux : \(preview.joined(separator: ", ")))\nPlages hors fichier : \(invalidRanges)\nEntrées marquées chiffrées (flags +8) : \(encryptedFlags)\nEntrées protégées (ID et taille) : \(encryptedEntries.isEmpty ? "Aucune" : encryptedEntries.joined(separator: "; "))\nTailles déclarées (non dédupliquées) : accessibles \(clearDataBytes) octets; protégées \(protectedDataBytes) octets\n\(gapReport)\nÉchantillons de zone non référencée (lecture seule) : \(gapSampleReport)\nSignatures internes reconnues : \(signatures.isEmpty ? "Aucune" : signatures.joined(separator: "; "))\nNoms résolus : \(resolved.isEmpty ? "Aucun" : resolved.joined(separator: "; "))\nMétadonnées PSF : \(psfDetails.isEmpty ? "Aucune valeur décodée (format à examiner)" : psfDetails.joined(separator: "; "))"
 
                 } else {
                     entryReport = "Entrées : lecture incomplète"
