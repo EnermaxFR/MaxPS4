@@ -89,6 +89,15 @@ int main() {
                    used_jit == 0;
         }()) &&
         reject_exhausted_budget() &&
+        // An excessive instruction budget must fail closed without JIT.
+        ([] {
+            constexpr std::uint8_t ret[] = {0xC3};
+            int used_jit = -1;
+            std::uint64_t result = 0;
+            return maxps4_native_guest_run_with_backend(ret, sizeof(ret),
+                                                        4097, 1, &used_jit, &result) == 0 &&
+                   used_jit == 0;
+        }()) &&
         // Oversized guest programs must be rejected before translation.
         ([] {
             std::uint8_t too_large[4097] = {};
