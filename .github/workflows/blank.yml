@@ -344,9 +344,9 @@ jobs:
               cat build/diagnostics/fexcore-ir-status.txt
               echo ''
               echo '### Premières erreurs ou avertissements'
-              echo '\`\`\`text'
+              echo '```text'
               head -30 build/diagnostics/fexcore-ir-compile.log 2>/dev/null || true
-              echo '\`\`\`'
+              echo '```'
             else
               echo 'Test non exécuté.'
             fi
