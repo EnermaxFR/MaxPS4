@@ -137,6 +137,47 @@ extension MaxPS4NativeLinkCheck {
     }
 }
 
+@_silgen_name("maxps4_native_elf_executable_entry")
+private func maxps4_native_elf_executable_entry(
+    _ data: UnsafePointer<UInt8>?, _ size: Int,
+    _ entry: UnsafeMutablePointer<UInt64>?,
+    _ offset: UnsafeMutablePointer<UInt64>?
+) -> Int32
+
+extension MaxPS4NativeLinkCheck {
+    static func nativeELFExecutableEntry(_ data: Data) -> (entry: UInt64, offset: UInt64)? {
+        var entry: UInt64 = 0
+        var offset: UInt64 = 0
+        let ok = data.withUnsafeBytes { raw in
+            maxps4_native_elf_executable_entry(
+                raw.bindMemory(to: UInt8.self).baseAddress, data.count, &entry, &offset
+            )
+        }
+        return ok == 1 ? (entry, offset) : nil
+    }
+
+    static var nativeELFExecutableEntrySelfTest: Bool {
+        var elf = Data(repeating: 0, count: 128)
+        elf.replaceSubrange(0..<7, with: [0x7f, 0x45, 0x4c, 0x46, 2, 1, 1])
+        elf[18] = 0x3e // x86-64
+        elf[24] = 0x04 // Entry VA 4
+        elf[32] = 64 // e_phoff
+        elf[54] = 56
+        elf[56] = 1 // phnum
+        elf[64] = 1 // PT_LOAD
+        elf[68] = 5 // PF_R | PF_X
+        elf[64 + 32] = 16 // p_filesz
+        elf[64 + 40] = 16 // p_memsz
+        guard let valid = nativeELFExecutableEntry(elf),
+              valid.entry == 4, valid.offset == 4 else { return false }
+        elf[68] = 4 // PF_R only: not executable
+        guard nativeELFExecutableEntry(elf) == nil else { return false }
+        elf[68] = 5
+        elf[24] = 20 // Entry outside file-backed segment
+        return nativeELFExecutableEntry(elf) == nil
+    }
+}
+
 @_silgen_name("maxps4_native_self_segment_count")
 private func maxps4_native_self_segment_count(
     _ bytes: UnsafePointer<UInt8>?, _ count: Int, _ segments: UnsafeMutablePointer<UInt16>?
