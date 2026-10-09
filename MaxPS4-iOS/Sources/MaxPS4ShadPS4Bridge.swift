@@ -425,6 +425,11 @@ private func maxps4_native_arm64_preflight(
     _ code: UnsafePointer<UInt8>?, _ size: Int
 ) -> Int32
 
+@_silgen_name("maxps4_native_jit_writable_page_probe")
+private func maxps4_native_jit_writable_page_probe(
+    _ pageSize: UnsafeMutablePointer<Int>?
+) -> Int32
+
 @_silgen_name("maxps4_native_debugger_attached")
 private func maxps4_native_debugger_attached() -> Int32
 
@@ -470,6 +475,21 @@ extension MaxPS4NativeLinkCheck {
     /// remain inert data; results are produced by the x86 interpreter.
     /// Explicit safety gate for future JIT experiments. A debugger hint alone
     /// cannot authorize executable memory, BRK requests or generated-code calls.
+    /// A real iOS VM allocation test, but no executable/JIT permission test.
+    static var jitMemoryPreparationReport: String {
+        var bytes: Int = 0
+        let ok = maxps4_native_jit_writable_page_probe(&bytes) == 1
+        return """
+        Allocation mémoire iOS (RW) : \(ok ? "Réussie" : "Échec")
+        Taille de page : \(ok ? String(bytes) + " octets" : "Indéterminée")
+        Permission d’exécution (RX) : Non testée
+        Préparation StikDebug : Non demandée
+        JIT ARM64 : \(isARM64JITReady ? "Prêt" : "Inactif")
+
+        Une allocation RW réussie ne garantit pas que du code ARM64 généré pourra être exécuté.
+        """
+    }
+
     static var jitSafetyGateReport: String {
         let debugger = maxps4_native_debugger_attached()
         let protocolPresent = isStikDebugProtocolPresent
