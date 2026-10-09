@@ -325,6 +325,28 @@ jobs:
             build/diagnostics/fexcore-generated/fexcore-options.1 \
             build/diagnostics/fexcore-generated/ConfigArgumentLoader.inc
           test -s build/diagnostics/fexcore-generated/FEXCore/Config/ConfigValues.inl
+          # Generate real strenum configuration types from pinned FEXCore JSON.
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          source = Path("build/diagnostics/fexcore-upstream/FEXCore/Source/Interface/Config/Config.json.in")
+          config = json.loads(source.read_text())
+          lines = ["// Generated from the pinned upstream FEXCore Config.json.in", "#ifdef ENUMDEFINES"]
+          for group in config["Options"].values():
+              for name, option in group.items():
+                  if option["Type"] != "strenum":
+                      continue
+                  lines.append("enum class " + name + " : uint64_t {")
+                  lines.append("  OFF = 0,")
+                  for index, key in enumerate(option["Enums"]):
+                      lines.append("  " + key.upper() + " = 1ULL << " + str(index) + ",")
+                  lines.append("};")
+                  lines.append("FEX_DEF_NUM_OPS(" + name + ")")
+          lines.append("#endif")
+          dest = Path("build/diagnostics/fexcore-generated/FEXCore/Config/ConfigOptions.inl")
+          dest.write_text("\\n".join(lines) + "\\n")
+          PY
+          test -s build/diagnostics/fexcore-generated/FEXCore/Config/ConfigOptions.inl
 
       - name: Probe real AetherPS4 guest engine and CPU compilation for iOS
         shell: bash
