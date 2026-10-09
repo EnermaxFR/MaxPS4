@@ -403,6 +403,33 @@ jobs:
             https://github.com/martinus/unordered_dense.git "$UNORDERED"
           git -C "$UNORDERED" checkout --quiet 3234af2c03549bc85656bfd3a86993bf1cd8aef1
           test -s "$UNORDERED/include/ankerl/unordered_dense.h"
+          # Experimental Darwin adaptation of FEXCore Linux futex mutex, compile probe only.
+          # C++20 atomic wait/notify keeps sleeping threads off a busy spin loop.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build/diagnostics/fexcore-upstream/FEXCore/include/FEXCore/Utils/WritePriorityMutex.h")
+          s = p.read_text()
+          s = s.replace("#if !defined(_WIN32)\\n#include <linux/futex.h>", "#if defined(__APPLE__)\\n// Darwin uses C++20 atomic wait/notify below.\\n#elif !defined(_WIN32)\\n#include <linux/futex.h>", 1)
+          start = s.index("private:\\n\\n#if !defined(_WIN32)\\n  void FutexWaitForWriteAvailable")
+          insert = """private:
+
+          #if defined(__APPLE__)
+            void FutexWaitForWriteAvailable(uint32_t expected) {
+              std::atomic_ref<uint32_t>(Futex).wait(expected, std::memory_order_relaxed);
+            }
+            void FutexWaitForReadAvailable(uint32_t expected) {
+              std::atomic_ref<uint32_t>(Futex).wait(expected, std::memory_order_relaxed);
+            }
+            void FutexWakeWriter() {
+              std::atomic_ref<uint32_t>(Futex).notify_all();
+            }
+            void FutexWakeReaders() {
+              std::atomic_ref<uint32_t>(Futex).notify_all();
+            }
+          #elif !defined(_WIN32)"""
+          s = s[:start] + s[start:].replace("private:\\n\\n#if !defined(_WIN32)", insert, 1)
+          p.write_text(s)
+          PY
           # Second real FEXCore JIT-related implementation probe.
           JIT_SRC="$FEX/FEXCore/Source/Interface/Core/JIT/Arm64Relocations.cpp"
           test -s "$JIT_SRC"
