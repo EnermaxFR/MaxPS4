@@ -703,6 +703,10 @@ jobs:
             build/diagnostics/fexcore-jit-core-status.txt
             build/diagnostics/fexcore-jit-core-compile.log
             build/diagnostics/fexcore-jit-core-report.json
+            # Preserve native translation units for dependency/link analysis.
+            build/diagnostics/fexcore-jit-core-ios.o
+            build/diagnostics/fexcore-jit-alu-ios.o
+            build/diagnostics/fexcore-arm64-relocations-ios.o
             build/diagnostics/fexcore-jit-object-arch-status.txt
             build/diagnostics/fexcore-jit-link-readiness.txt
             build/diagnostics/fexcore-jit-core-undefined-symbols.txt
