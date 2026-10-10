@@ -512,6 +512,22 @@ jobs:
           print("PASS Darwin FEXCore signal masking adapted to pthread_sigmask (native probe only)")
           PY
 
+      - name: Select ARM64 cycle counter in pinned FEXCore stats on iOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build/diagnostics/fexcore-upstream/FEXCore/include/FEXCore/Utils/SHMStats.h")
+          code = p.read_text()
+          old = "#ifdef ARCHITECTURE_arm64"
+          new = "#if defined(ARCHITECTURE_arm64) || defined(__aarch64__)"
+          if code.count(old) != 1:
+              raise SystemExit("Unexpected pinned FEXCore cycle-counter conditional")
+          p.write_text(code.replace(old, new, 1))
+          print("PASS FEXCore ARM64 cycle counter branch selected for Apple clang")
+          PY
+
       - name: Adapt pinned AetherPS4 logging API to packaged spdlog
         shell: bash
         run: |
