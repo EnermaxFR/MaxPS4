@@ -1096,6 +1096,29 @@ final class MaxPS4Emulator: ObservableObject {
         }
     }
 
+    // Reusable preflight for the game library and the launch action.
+    // This never claims that an imported package is executable.
+    func launchReadinessReport(for game: MaxPS4Game) -> String {
+        let fileURL = URL(fileURLWithPath: game.localPath)
+        guard fileManager.fileExists(atPath: fileURL.path) else {
+            return "Fichier introuvable : \\(game.fileName). Vérifie les données importées."
+        }
+        if fileURL.pathExtension.lowercased() == "pkg" {
+            return "\\(game.name) : paquet PKG conservé dans la bibliothèque. Installation/exécution PS4 indisponible."
+        }
+        guard let nativeEngine else {
+            return "\\(game.name) : fichier présent, mais le moteur AetherPS4 natif n'est pas relié à l'application."
+        }
+        guard nativeEngine.isReady else {
+            return "\\(game.name) : moteur natif détecté, mais pas prêt à exécuter un jeu."
+        }
+        if let backend = nativeEngine as? any MaxPS4ShadPS4Backend,
+           !backend.capabilities.canLaunchPS4Game {
+            return "\\(game.name) : moteur PS4 incomplet. " + backend.capabilities.diagnostic
+        }
+        return "\\(game.name) : moteur déclaré prêt. Le lancement reste expérimental."
+    }
+
     func launch(_ game: MaxPS4Game) {
         guard fileManager.fileExists(atPath: game.localPath) else {
             status = "Fichier introuvable : \(game.fileName)"
@@ -1103,7 +1126,7 @@ final class MaxPS4Emulator: ObservableObject {
         }
 
         if game.fileName.lowercased().hasSuffix(".pkg") {
-            status = "PKG PS4 sélectionné : importation et identification uniquement • lancement indisponible"
+            status = launchReadinessReport(for: game)
             return
         }
 
