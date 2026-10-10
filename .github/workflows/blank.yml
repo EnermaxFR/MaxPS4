@@ -1321,8 +1321,10 @@ jobs:
 
           # Keep previously compiled upstream modules as link candidates.
           # Each module is accepted only after a strict executable link succeeds.
-          AETHER_MODULES=(ios_jit_allocator psf process memory exception)
+          AETHER_MODULES=(fex_guest_engine fex_guest_cpu ios_jit_allocator psf process memory exception)
           AETHER_ACCEPTED_OBJECTS=()
+          # The upstream guest_cpu.cpp is already linked as a separate object
+          # earlier in this workflow; do not link a duplicate definition.
 
           SWIFT_LINK_CMD=(
             xcrun --sdk iphoneos swiftc
