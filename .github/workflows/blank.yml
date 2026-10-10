@@ -570,6 +570,11 @@ jobs:
           # Match the real packaged spdlog API: log_msg::level and
           # spdlog::level::from_str (rather than custom fork symbols).
           logging = logging.replace("spdlog::level_from_str(", "spdlog::level::from_str(")
+          # spdlog::level is a namespace in packaged spdlog, not a type.
+          # Preserve enum values such as spdlog::level::info; adapt only type positions.
+          logging = logging.replace("std::unordered_map<spdlog::level, LogColor>", "std::unordered_map<spdlog::level::level_enum, LogColor>")
+          logging = logging.replace("spdlog::level default_log_level", "spdlog::level::level_enum default_log_level")
+          logging = logging.replace("std::unordered_map<std::string, spdlog::level>", "std::unordered_map<std::string, spdlog::level::level_enum>")
           impl.write_text(logging)
           sink_header = Path("build/diagnostics/aetherps4-upstream/src/common/logging/log_file_sink.h")
           sink_code = sink_header.read_text()
