@@ -13,6 +13,9 @@ private func maxps4NativeAetherCPUProbe() -> Int32
 @_silgen_name("maxps4_aether_cpu_state_regression")
 private func maxps4AetherCPUStateRegression() -> Int32
 
+@_silgen_name("maxps4_aether_multi_block_dispatch_probe")
+private func maxps4AetherMultiBlockDispatchProbe() -> Int32
+
 
 struct MaxPS4Game: Identifiable, Codable, Equatable {
     let id: UUID
@@ -65,11 +68,14 @@ final class MaxPS4Emulator: ObservableObject {
     func runNativeCPUCheck() {
         let result = maxps4NativeAetherCPUProbe()
         let states = maxps4AetherCPUStateRegression()
+        let blocks = maxps4AetherMultiBlockDispatchProbe()
         status = "AetherPS4 — dispatch restreint : " +
             (result == 1 ? "PASS" : "FAIL (code " + String(result) + ")") +
             " ; conservation de 8 états CPU : " +
             (states == 1 ? "PASS" : "FAIL (code " + String(states) + ")") +
-            ". Tests synthétiques seulement : pas de lancement PS4, ni JIT FEXCore."
+            " ; deux blocs x86 synthétiques et refus des RIP invalides : " +
+            (blocks == 1 ? "PASS" : "FAIL (code " + String(blocks) + ")") +
+            ". Tests limités au moteur de démonstration : pas de jeu PS4 ni JIT FEXCore."
     }
 
     func playGuessingDemo(guess: Int) {
