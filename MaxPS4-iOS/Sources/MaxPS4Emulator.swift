@@ -47,6 +47,24 @@ final class MaxPS4Emulator: ObservableObject {
         nativeEngine?.isReady == true
     }
 
+    var nativeABIVersion: UInt32 { maxps4NativeABIVersion() }
+
+    var nativeDiagnosticReport: String {
+        "MaxPS4 — diagnostic iOS\\n" +
+        "ABI native : " + String(maxps4NativeABIVersion()) + "\\n" +
+        "Capacités natives : " + String(maxps4NativeCapabilities()) + "\\n" +
+        "Backend PS4 prêt : " + String(backendReady) + "\\n" +
+        "JIT FEXCore : non opérationnel\\n" +
+        "Jeux importés : " + String(games.count) + "\\n" +
+        "Dernier résultat : " + status
+    }
+
+    func runNativeCPUCheck() {
+        let result = maxps4NativeAetherCPUProbe()
+        status = "Test CPU AetherPS4 restreint : code " + String(result) +
+            ". Ce test ne lance aucun jeu PS4."
+    }
+
     func playGuessingDemo(guess: Int) {
         do {
             let target = 7
