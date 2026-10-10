@@ -241,6 +241,34 @@ jobs:
           echo "HLE unresolved symbols recorded; linking deferred until dependencies are satisfied."
           head -35 build/diagnostics/aether-hle-unresolved-symbols.txt
 
+      - name: Report AetherPS4 engine compile status in Actions summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## AetherPS4 engine compilation (diagnostic only)"
+            echo ""
+            echo "A green IPA build does not imply playable PS4 games."
+            echo ""
+            if test -s build/diagnostics/aether-full-engine/status.txt; then
+              echo '~~~text'
+              cat build/diagnostics/aether-full-engine/status.txt
+              echo '~~~'
+              echo ""
+              for component in fex_guest_engine fex_guest_cpu; do
+                log="build/diagnostics/aether-full-engine/${component}.log"
+                if test -s "$log" && grep -qE 'fatal error:|error:' "$log"; then
+                  echo "### ${component}: first compiler errors"
+                  echo '~~~text'
+                  grep -m 8 -E 'fatal error:|error:' "$log" || true
+                  echo '~~~'
+                fi
+              done
+            else
+              echo "Guest-engine diagnostic did not run or produced no status file."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Probe real AetherPS4 HLE adapter for executable linkage
         shell: bash
         run: |
