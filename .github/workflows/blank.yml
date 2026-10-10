@@ -683,6 +683,55 @@ jobs:
           print(report.read_text())
           PY
 
+      - name: Compile AetherPS4 guest engine against matching bundled Darwin FEXCore
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="build/diagnostics/aetherps4-upstream"
+          FEX="$ROOT/runtime/sources/fexcore-darwin"
+          OUT="build/diagnostics/aether-full-engine"
+          mkdir -p "$OUT"
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path("build/diagnostics/aetherps4-upstream/runtime/sources/fexcore-darwin")
+          hooks = (root / "FEXCore/include/FEXCore/Utils/AllocatorHooks.h").read_text()
+          context = (root / "FEXCore/Source/Interface/Context/Context.h").read_text()
+          required = {
+              "AllocatorHooks.h": (hooks, ("ScopedJITWriteProtect", "GetWritableAddress", "GetExecutableAddress")),
+              "Context.h": (context, ("OnBufferReusedInPlace", "BeginBufferInvalidationSafepoint", "EndBufferInvalidationSafepoint")),
+          }
+          missing = [name for source, (body, symbols) in required.items() for name in symbols if name not in body]
+          Path("build/diagnostics/aether-full-engine/darwin-jit-contracts.txt").write_text(
+              "Bundled AetherPS4 Darwin FEXCore interface audit\\n" +
+              "\\n".join("MISSING: " + name for name in missing) + "\\n" +
+              ("All six declarations found; compile and runtime still require validation.\\n" if not missing else "")
+          )
+          if missing:
+              raise SystemExit("Bundled FEXCore lacks contracts: " + ", ".join(missing))
+          PY
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          if xcrun --sdk iphoneos clang++ -std=c++23 \
+               -target arm64-apple-ios16.0 -isysroot "$SDK" \
+               -DFMT_HEADER_ONLY=1 -DMADV_HUGEPAGE=0 -DMADV_NOHUGEPAGE=0 \
+               -I "$ROOT/src" \
+               -I "$FEX" -I "$FEX/FEXCore/include" \
+               -I "$FEX/FEXCore/Source" -I "$FEX/Source" \
+               -I "MaxPS4-iOS/Native/compat/fex_ios" \
+               -I "build/diagnostics/unordered-dense-upstream/include" \
+               -I "$(brew --prefix fmt)/include" \
+               -I "$(brew --prefix spdlog)/include" \
+               -I "$(brew --prefix nlohmann-json)/include" \
+               -I "$(brew --prefix boost)/include" \
+               -I "build/diagnostics/robin-map-upstream/include" \
+               -c "$ROOT/src/core/fex/fex_guest_engine.cpp" \
+               -o "$OUT/fex_guest_engine-darwin-fex.o" \
+               > "$OUT/fex_guest_engine-darwin-fex.log" 2>&1; then
+            echo "PASS compiled AetherPS4 guest engine using bundled Darwin FEXCore (link/JIT not verified)"
+          else
+            echo "BLOCKED Darwin FEXCore compilation; inspect diagnostic log"
+            grep -m 12 -E 'error:|fatal error:' "$OUT/fex_guest_engine-darwin-fex.log" || true
+          fi
+
       - name: Probe real AetherPS4 guest engine and CPU compilation for iOS
         shell: bash
         run: |
