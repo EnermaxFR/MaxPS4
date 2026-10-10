@@ -579,17 +579,17 @@ jobs:
           # sinks as a constructor argument. Use genuine synchronous sinks in
           # the iOS port: both stdout and the upstream file sink remain active.
           start = logging.index("void UpdateSinks() {")
-          end = logging.index("\\nvoid UpdateLogLevels(", start)
+          end = logging.index("\nvoid UpdateLogLevels(", start)
           logging = logging[:start] + """void UpdateSinks() {
-    for (auto& [name, logger] : ALL_LOGGERS) {
-        if (!logger) continue;
-        auto& active_sinks = logger->sinks();
-        active_sinks.clear();
-        if (g_console_sink) active_sinks.push_back(g_console_sink);
-        if (g_shad_file_sink) active_sinks.push_back(g_shad_file_sink);
-    }
-}
-""" + logging[end:]
+              for (auto& [name, logger] : ALL_LOGGERS) {
+                  if (!logger) continue;
+                  auto& active_sinks = logger->sinks();
+                  active_sinks.clear();
+                  if (g_console_sink) active_sinks.push_back(g_console_sink);
+                  if (g_shad_file_sink) active_sinks.push_back(g_shad_file_sink);
+              }
+          }
+          """ + logging[end:]
           impl.write_text(logging)
           sink_header = Path("build/diagnostics/aetherps4-upstream/src/common/logging/log_file_sink.h")
           sink_code = sink_header.read_text()
