@@ -1559,17 +1559,27 @@ jobs:
             fi
             trial=("$candidate")
             new_objects=("$candidate")
-            # Link upstream supporting objects only alongside real components.
-            # Do not inject these into the fallback IPA without a successful strict link.
-            if test "$component" = "ios_jit_allocator"; then
-              for support in log thread; do
-                support_object="build/diagnostics/aether-full-engine/${support}.o"
-                if test -s "$support_object"; then
+            # Logging and thread primitives are shared by multiple AetherPS4
+            # components, not just the JIT allocator. Test the real dependency
+            # closure alongside every native module, without exposing unsupported
+            # execution to the Swift UI. An already linked support object must
+            # not be linked twice, or C++ globals will produce duplicate symbols.
+            for support in log thread; do
+              support_object="build/diagnostics/aether-full-engine/${support}.o"
+              if test -s "$support_object"; then
+                already_accepted=false
+                for accepted in "${AETHER_ACCEPTED_OBJECTS[@]}"; do
+                  if test "$accepted" = "$support_object"; then
+                    already_accepted=true
+                    break
+                  fi
+                done
+                if test "$already_accepted" = false; then
                   trial+=("$support_object")
                   new_objects+=("$support_object")
                 fi
-              done
-            fi
+              fi
+            done
             if test "$AETHER_ACCEPTED_COUNT" -gt 0; then
               trial=( "${AETHER_ACCEPTED_OBJECTS[@]}" "${trial[@]}" )
             fi
