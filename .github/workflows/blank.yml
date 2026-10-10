@@ -1323,6 +1323,7 @@ jobs:
           # Each module is accepted only after a strict executable link succeeds.
           AETHER_MODULES=(fex_guest_engine fex_guest_cpu ios_jit_allocator psf process memory exception)
           AETHER_ACCEPTED_OBJECTS=()
+          AETHER_ACCEPTED_COUNT=0
           # The upstream guest_cpu.cpp is already linked as a separate object
           # earlier in this workflow; do not link a duplicate definition.
 
@@ -1356,12 +1357,13 @@ jobs:
               continue
             fi
             trial=("$candidate")
-            if test "${#AETHER_ACCEPTED_OBJECTS[@]}" -gt 0; then
+            if test "$AETHER_ACCEPTED_COUNT" -gt 0; then
               trial=( "${AETHER_ACCEPTED_OBJECTS[@]}" "$candidate" )
             fi
             if "${SWIFT_LINK_CMD[@]}" "${trial[@]}" -lc++ \
                  -o "$OUTPUT" > "build/diagnostics/aether-link-${component}.log" 2>&1; then
               AETHER_ACCEPTED_OBJECTS+=("$candidate")
+              AETHER_ACCEPTED_COUNT=$((AETHER_ACCEPTED_COUNT + 1))
               echo "PASS ${component}: upstream object linked (runtime inactive)" \
                 | tee -a build/diagnostics/aether-module-link-status.txt
             else
@@ -1372,7 +1374,7 @@ jobs:
             fi
             rm -f "$OUTPUT"
           done
-          if test "${#AETHER_ACCEPTED_OBJECTS[@]}" -gt 0; then
+          if test "$AETHER_ACCEPTED_COUNT" -gt 0; then
             SWIFT_LINK_CMD+=("${AETHER_ACCEPTED_OBJECTS[@]}")
           fi
           if test "${#FEXCORE_LINK_ARGS[@]}" -gt 0; then
