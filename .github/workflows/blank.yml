@@ -398,7 +398,11 @@ jobs:
           ROOT="build/diagnostics/aetherps4-upstream"
           mkdir -p build/diagnostics/aether-full-engine
           : > build/diagnostics/aether-full-engine/status.txt
-          for source in src/core/fex/fex_guest_engine.cpp src/core/guest_cpu/fex_guest_cpu.cpp; do
+          for source in \
+            src/core/fex/fex_guest_engine.cpp \
+            src/core/guest_cpu/fex_guest_cpu.cpp \
+            src/core/guest_cpu/guest_cpu.cpp \
+            src/core/ios/ios_jit_allocator.cpp; do
             base="$(basename "$source" .cpp)"
             output="build/diagnostics/aether-full-engine/${base}.o"
             log="build/diagnostics/aether-full-engine/${base}.log"
@@ -424,6 +428,28 @@ jobs:
                 | tee -a build/diagnostics/aether-full-engine/status.txt
             fi
           done
+          # Keep a machine-readable build matrix for the porting steps.
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          d = Path("build/diagnostics/aether-full-engine")
+          sources = [
+              "fex_guest_engine", "fex_guest_cpu", "guest_cpu", "ios_jit_allocator",
+          ]
+          results = []
+          for name in sources:
+              obj = d / (name + ".o")
+              log = d / (name + ".log")
+              results.append({
+                  "component": name,
+                  "compiled": obj.is_file(),
+                  "first_errors": [
+                      line.strip() for line in log.read_text(errors="replace").splitlines()
+                      if "error:" in line
+                  ][:8] if log.exists() else [],
+              })
+          (d / "component-matrix.json").write_text(json.dumps(results, indent=2) + "\\n")
+          PY
           # Surface concrete compiler errors in the job log, not just a
           # generic BLOCKED line hidden inside the diagnostics directory.
           for log in build/diagnostics/aether-full-engine/*.log; do
