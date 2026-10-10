@@ -1117,7 +1117,8 @@ final class MaxPS4Emulator: ObservableObject {
             return "\\(game.name) : paquet PKG conservé dans la bibliothèque. Installation/exécution PS4 indisponible."
         }
         guard let nativeEngine else {
-            return "\\(game.name) : bibliothèque native ABI \\(maxps4NativeABIVersion()) liée ; lancement PS4 indisponible (capacités : \\(maxps4NativeCapabilities())) ; test CPU AetherPS4 : \\(maxps4NativeAetherCPUProbe() == 1 ? "réussi" : "échoué")."
+            let cpuProbeStatus = maxps4NativeAetherCPUProbe() == 1 ? "réussi" : "échoué"
+            return "\\(game.name) : bibliothèque native ABI \\(maxps4NativeABIVersion()) liée ; lancement PS4 indisponible (capacités : \\(maxps4NativeCapabilities())) ; test CPU AetherPS4 : \\(cpuProbeStatus)."
         }
         guard nativeEngine.isReady else {
             return "\\(game.name) : moteur natif détecté, mais pas prêt à exécuter un jeu."
