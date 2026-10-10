@@ -572,6 +572,30 @@ jobs:
             build/diagnostics/fexcore-generated/FEXCore/IR/IRDefines_Dispatch.inc
           test -s build/diagnostics/fexcore-generated/FEXCore/IR/IRDefines.inc
 
+      - name: Adapt optional AetherPS4 diagnostics to pinned FEXCore
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build/diagnostics/aetherps4-upstream/src/core/fex/fex_guest_engine.cpp")
+          source = p.read_text()
+          for fn in ("BachataDumpHostCodeWords", "BachataDescribeHostFaultAddress"):
+              begin = source.index("bool " + fn + "(")
+              end = source.index("\n}\n", begin)
+              fragment = source[begin:end]
+              target = "#if defined(__APPLE__) && TARGET_OS_IPHONE"
+              if target not in fragment:
+                  raise SystemExit("Unexpected pinned diagnostic source: " + fn)
+              source = source[:begin] + fragment.replace(target, "#if 0 // Optional diagnostic unavailable in pinned FEXCore", 1) + source[end:]
+          call = "  return exec.Context->DumpDispatcherStateForDiagnostics(exec.Thread, out_buf, out_buf_size);"
+          if source.count(call) != 1:
+              raise SystemExit("Unexpected pinned dispatcher diagnostic source")
+          source = source.replace(call, "  return false; // Dispatcher snapshot API unavailable in pinned FEXCore.", 1)
+          p.write_text(source)
+          print("PASS optional pinned-FEXCore crash diagnostics guarded")
+          PY
+
       - name: Probe real AetherPS4 guest engine and CPU compilation for iOS
         shell: bash
         run: |
