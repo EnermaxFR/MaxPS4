@@ -65,25 +65,27 @@ jobs:
           file build/diagnostics/shadps4-string-util-ios-arm64.o
           xcrun lipo -archs build/diagnostics/shadps4-string-util-ios-arm64.o | grep -w arm64
 
-      - name: Fetch pinned AetherPS4 CPU and iOS JIT source for porting audit
+      - name: Clone complete pinned AetherPS4 engine into MaxPS4 iOS project
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build/diagnostics/aetherps4-upstream
-          git clone --quiet --no-checkout --filter=blob:none \
-            https://github.com/Leviidev/AetherPS4.git build/diagnostics/aetherps4-upstream
-          cd build/diagnostics/aetherps4-upstream
-          git sparse-checkout init --cone
-          git sparse-checkout set src/core/fex src/core/guest_cpu src/core/ios src/core/libraries src/common
-          git checkout --quiet 3347fc13f19860855ce91b66356940989ea6b6a6
-          test -s src/core/fex/fex_guest_engine.cpp
-          test -s src/core/guest_cpu/fex_guest_cpu.cpp
-          test -s src/core/ios/ios_jit_allocator.cpp
-          echo "AetherPS4 pinned revision: $(git rev-parse HEAD)"
-          echo "CPU / FEX / iOS JIT sources resolved for porting audit."
-          echo "NOTE: sources are not yet built or linked into MaxPS4."
-          git -C . rev-parse HEAD > ../aetherps4-upstream-sha.txt
-          # Keep Git metadata for the audit; avoid macOS runner cleanup races.
+          ENGINE="$GITHUB_WORKSPACE/MaxPS4-iOS/Engine/AetherPS4"
+          mkdir -p "$(dirname "$ENGINE")"
+          git clone --quiet --filter=blob:none \
+            https://github.com/Leviidev/AetherPS4.git "$ENGINE"
+          git -C "$ENGINE" checkout --quiet 3347fc13f19860855ce91b66356940989ea6b6a6
+          # Keep every upstream source folder, not just sparse CPU/JIT sources.
+          test -s "$ENGINE/src/core/fex/fex_guest_engine.cpp"
+          test -s "$ENGINE/src/core/guest_cpu/fex_guest_cpu.cpp"
+          test -s "$ENGINE/src/core/ios/ios_jit_allocator.cpp"
+          test -d "$ENGINE/src/core/libraries"
+          test -d "$ENGINE/src/common"
+          # Preserve existing build probes while they migrate to Engine/.
+          mkdir -p build/diagnostics
+          ln -s "$ENGINE" build/diagnostics/aetherps4-upstream
+          git -C "$ENGINE" rev-parse HEAD > build/diagnostics/aetherps4-upstream-sha.txt
+          echo "Full AetherPS4 source checkout: $ENGINE"
+          echo "This clones code for porting: it does not yet link the full emulator."
 
       - name: Audit AetherPS4 guest CPU integration dependencies
         shell: bash
