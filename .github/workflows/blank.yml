@@ -402,7 +402,11 @@ jobs:
             src/core/fex/fex_guest_engine.cpp \
             src/core/guest_cpu/fex_guest_cpu.cpp \
             src/core/guest_cpu/guest_cpu.cpp \
-            src/core/ios/ios_jit_allocator.cpp; do
+            src/core/ios/ios_jit_allocator.cpp \
+            src/core/file_format/psf.cpp \
+            src/core/libraries/kernel/process.cpp \
+            src/core/libraries/kernel/memory.cpp \
+            src/core/libraries/kernel/threads/exception.cpp; do
             base="$(basename "$source" .cpp)"
             output="build/diagnostics/aether-full-engine/${base}.o"
             log="build/diagnostics/aether-full-engine/${base}.log"
@@ -435,6 +439,7 @@ jobs:
           d = Path("build/diagnostics/aether-full-engine")
           sources = [
               "fex_guest_engine", "fex_guest_cpu", "guest_cpu", "ios_jit_allocator",
+              "psf", "process", "memory", "exception",
           ]
           results = []
           for name in sources:
