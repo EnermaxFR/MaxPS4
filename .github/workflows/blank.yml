@@ -1571,6 +1571,15 @@ jobs:
           xcrun ar rcs build/diagnostics/libmaxps4_native.a \
             build/diagnostics/maxps4_native.o
           xcrun lipo -archs build/diagnostics/libmaxps4_native.a | grep -w arm64
+          # Validate that the IPA's archive exports the native API and
+          # the concrete Aether CPU probe, not merely a successful archive command.
+          xcrun nm -gU build/diagnostics/libmaxps4_native.a > build/diagnostics/maxps4-native-symbols.txt
+          grep -q '_maxps4_native_aether_cpu_probe' build/diagnostics/maxps4-native-symbols.txt
+          grep -q '_maxps4_native_launch' build/diagnostics/maxps4-native-symbols.txt
+          grep -q '_maxps4_native_capabilities' build/diagnostics/maxps4-native-symbols.txt
+          test -s build/diagnostics/aether-guest-adapter-ios-arm64.o
+          xcrun nm -gU build/diagnostics/aether-guest-adapter-ios-arm64.o | grep -q '_maxps4_aether_restricted_cpu_dispatch_probe'
+          echo "PASS versioned native ABI and real upstream Aether guest-CPU adapter symbol validation"
           SWIFT_LINK_CMD=(
             xcrun --sdk iphoneos swiftc
             -target arm64-apple-ios16.0
