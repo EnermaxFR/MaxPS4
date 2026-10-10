@@ -735,6 +735,31 @@ jobs:
           assert (include / "ConfigValues.inl").stat().st_size > 0
           print("PASS generated upstream FEXCore ConfigValues.inl")
           PY
+          # Use the bundled FEXCore's actual generator, not hand-written defaults.
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          import subprocess
+          fex = Path("build/diagnostics/aetherps4-upstream/runtime/sources/fexcore-darwin")
+          config = fex / "FEXCore/Source/Interface/Config/Config.json.in"
+          gen = fex / "FEXCore/Scripts/config_generator.py"
+          include = fex / "FEXCore/include/FEXCore/Config"
+          raw = config.read_text()
+          raw = raw.replace("@CMAKE_INSTALL_FULL_LIBDIR@", "/usr/local/lib")
+          raw = raw.replace("@CMAKE_INSTALL_PREFIX@", "/usr/local")
+          generated = Path("build/diagnostics/aether-full-engine/fex-generated")
+          generated.mkdir(parents=True, exist_ok=True)
+          source = generated / "Config.json"
+          source.write_text(raw)
+          json.loads(raw)
+          subprocess.run(["python3", str(gen), str(source),
+                          str(include / "ConfigValues.inl"),
+                          str(generated / "config.1"),
+                          str(include / "ConfigOptions.inl")], check=True)
+          if not (include / "ConfigValues.inl").stat().st_size:
+              raise SystemExit("FEXCore config generation produced an empty file")
+          print("PASS generated FEXCore ConfigValues.inl and ConfigOptions.inl from upstream")
+          PY
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           if xcrun --sdk iphoneos clang++ -std=c++23 \
                -target arm64-apple-ios16.0 -isysroot "$SDK" \
