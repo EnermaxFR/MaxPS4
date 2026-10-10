@@ -983,6 +983,11 @@ struct MaxPS4HomeView: View {
                         Label("Renommer", systemImage: "pencil")
                     }
                     Button {
+                        inspectionReport = emulator.launchReadinessReport(for: game)
+                    } label: {
+                        Label("Diagnostic de lancement", systemImage: "stethoscope")
+                    }
+                    Button {
                         emulator.inspect(game)
                         inspectionReport = emulator.status
                     } label: {
