@@ -1319,17 +1319,10 @@ jobs:
               | tee build/diagnostics/aether-hle-ipa-link-status.txt
           fi
 
-          # Try linking the real upstream AetherPS4 iOS JIT allocator object.
-          # No runtime activation: safely fall back if it needs more dependencies.
-          AETHER_IOS_JIT_OBJECT=""
-          if test -s build/diagnostics/aether-full-engine/ios_jit_allocator.o; then
-            AETHER_IOS_JIT_OBJECT=build/diagnostics/aether-full-engine/ios_jit_allocator.o
-            echo "CANDIDATE upstream AetherPS4 iOS JIT allocator compiled" \
-              > build/diagnostics/aether-ios-jit-ipa-link-status.txt
-          else
-            echo "BLOCKED upstream AetherPS4 iOS JIT allocator compilation" \
-              > build/diagnostics/aether-ios-jit-ipa-link-status.txt
-          fi
+          # Keep previously compiled upstream modules as link candidates.
+          # Each module is accepted only after a strict executable link succeeds.
+          AETHER_MODULES=(ios_jit_allocator psf process memory exception)
+          AETHER_ACCEPTED_OBJECTS=()
 
           SWIFT_LINK_CMD=(
             xcrun --sdk iphoneos swiftc
@@ -1350,21 +1343,32 @@ jobs:
             SWIFT_LINK_CMD+=("$AETHER_HLE_LINK_OBJECT")
           fi
           OUTPUT=build/Payload/MaxPS4.app/MaxPS4
-          # Attempt an actual executable link of this upstream iOS component,
-          # then revert to the existing stable path when dependencies are absent.
-          if test -n "$AETHER_IOS_JIT_OBJECT"; then
-            if "${SWIFT_LINK_CMD[@]}" "$AETHER_IOS_JIT_OBJECT" -lc++ \
-                 -o "$OUTPUT" > build/diagnostics/aether-ios-jit-ipa-link.log 2>&1; then
-              echo "PASS upstream AetherPS4 iOS JIT allocator linked (not activated)" \
-                > build/diagnostics/aether-ios-jit-ipa-link-status.txt
-              SWIFT_LINK_CMD+=("$AETHER_IOS_JIT_OBJECT")
-            else
-              echo "BLOCKED AetherPS4 iOS JIT allocator link; using existing app" \
-                > build/diagnostics/aether-ios-jit-ipa-link-status.txt
-              grep -m 10 -E 'error:|undefined symbols|Undefined symbols' \
-                build/diagnostics/aether-ios-jit-ipa-link.log || true
-              rm -f "$OUTPUT"
+          # Try multiple genuine AetherPS4 components in one build.
+          # A failed object does not replace the existing working app.
+          : > build/diagnostics/aether-module-link-status.txt
+          for component in "${AETHER_MODULES[@]}"; do
+            candidate="build/diagnostics/aether-full-engine/${component}.o"
+            if ! test -s "$candidate"; then
+              echo "BLOCKED ${component}: compiler object unavailable" \
+                | tee -a build/diagnostics/aether-module-link-status.txt
+              continue
             fi
+            trial=( "${AETHER_ACCEPTED_OBJECTS[@]}" "$candidate" )
+            if "${SWIFT_LINK_CMD[@]}" "${trial[@]}" -lc++ \
+                 -o "$OUTPUT" > "build/diagnostics/aether-link-${component}.log" 2>&1; then
+              AETHER_ACCEPTED_OBJECTS+=("$candidate")
+              echo "PASS ${component}: upstream object linked (runtime inactive)" \
+                | tee -a build/diagnostics/aether-module-link-status.txt
+            else
+              echo "BLOCKED ${component}: unresolved link dependencies" \
+                | tee -a build/diagnostics/aether-module-link-status.txt
+              grep -m 6 -E 'error:|Undefined symbols|undefined symbol|duplicate symbol' \
+                "build/diagnostics/aether-link-${component}.log" || true
+            fi
+            rm -f "$OUTPUT"
+          done
+          if test "${#AETHER_ACCEPTED_OBJECTS[@]}" -gt 0; then
+            SWIFT_LINK_CMD+=("${AETHER_ACCEPTED_OBJECTS[@]}")
           fi
           if test "${#FEXCORE_LINK_ARGS[@]}" -gt 0; then
             if "${SWIFT_LINK_CMD[@]}" "${FEXCORE_LINK_ARGS[@]}" -lc++ \
