@@ -1319,6 +1319,18 @@ jobs:
               | tee build/diagnostics/aether-hle-ipa-link-status.txt
           fi
 
+          # Try linking the real upstream AetherPS4 iOS JIT allocator object.
+          # No runtime activation: safely fall back if it needs more dependencies.
+          AETHER_IOS_JIT_OBJECT=""
+          if test -s build/diagnostics/aether-full-engine/ios_jit_allocator.o; then
+            AETHER_IOS_JIT_OBJECT=build/diagnostics/aether-full-engine/ios_jit_allocator.o
+            echo "CANDIDATE upstream AetherPS4 iOS JIT allocator compiled" \
+              > build/diagnostics/aether-ios-jit-ipa-link-status.txt
+          else
+            echo "BLOCKED upstream AetherPS4 iOS JIT allocator compilation" \
+              > build/diagnostics/aether-ios-jit-ipa-link-status.txt
+          fi
+
           SWIFT_LINK_CMD=(
             xcrun --sdk iphoneos swiftc
             -target arm64-apple-ios16.0
@@ -1338,6 +1350,22 @@ jobs:
             SWIFT_LINK_CMD+=("$AETHER_HLE_LINK_OBJECT")
           fi
           OUTPUT=build/Payload/MaxPS4.app/MaxPS4
+          # Attempt an actual executable link of this upstream iOS component,
+          # then revert to the existing stable path when dependencies are absent.
+          if test -n "$AETHER_IOS_JIT_OBJECT"; then
+            if "${SWIFT_LINK_CMD[@]}" "$AETHER_IOS_JIT_OBJECT" -lc++ \
+                 -o "$OUTPUT" > build/diagnostics/aether-ios-jit-ipa-link.log 2>&1; then
+              echo "PASS upstream AetherPS4 iOS JIT allocator linked (not activated)" \
+                > build/diagnostics/aether-ios-jit-ipa-link-status.txt
+              SWIFT_LINK_CMD+=("$AETHER_IOS_JIT_OBJECT")
+            else
+              echo "BLOCKED AetherPS4 iOS JIT allocator link; using existing app" \
+                > build/diagnostics/aether-ios-jit-ipa-link-status.txt
+              grep -m 10 -E 'error:|undefined symbols|Undefined symbols' \
+                build/diagnostics/aether-ios-jit-ipa-link.log || true
+              rm -f "$OUTPUT"
+            fi
+          fi
           if test "${#FEXCORE_LINK_ARGS[@]}" -gt 0; then
             if "${SWIFT_LINK_CMD[@]}" "${FEXCORE_LINK_ARGS[@]}" -lc++ \
                 -o "$OUTPUT" > build/diagnostics/compile-fexcore.log 2>&1; then
