@@ -363,6 +363,14 @@ jobs:
           fi
           test -s "$(brew --prefix fmt)/include/fmt/format.h"
           echo "PASS fmt headers available before AetherPS4 compile"
+          # AetherPS4 also includes spdlog/details/fmt_helper.h through logging/log.h.
+          # Merely installing fmt is insufficient: spdlog headers must be present.
+          if ! brew list --versions spdlog >/dev/null 2>&1 ||
+             ! test -s "$(brew --prefix spdlog)/include/spdlog/details/fmt_helper.h"; then
+            brew install spdlog
+          fi
+          test -s "$(brew --prefix spdlog)/include/spdlog/details/fmt_helper.h"
+          echo "PASS spdlog headers available before AetherPS4 compile"
 
       - name: Generate FEXCore config for AetherPS4 guest engine probe
         shell: bash
@@ -442,6 +450,7 @@ jobs:
                  -I "MaxPS4-iOS/Native/compat/fex_ios" \
                  -I "build/diagnostics/unordered-dense-upstream/include" \
                  -I "$(brew --prefix fmt)/include" \
+                 -I "$(brew --prefix spdlog)/include" \
                  -c "$ROOT/$source" -o "$output" \
                  > "$log" 2>&1; then
               echo "PASS compile $source (linking and guest execution unverified)" \
