@@ -1399,6 +1399,37 @@ jobs:
           fi
           cat build/diagnostics/compile.log
 
+      - name: Summarize actual AetherPS4 module linkage
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## AetherPS4 — seven native modules"
+            echo ""
+            echo "A green build does not mean Kero Blaster is playable."
+            echo ""
+            if test -s build/diagnostics/aether-module-link-status.txt; then
+              echo '~~~text'
+              cat build/diagnostics/aether-module-link-status.txt
+              echo '~~~'
+            else
+              echo "Native module linker checks did not run."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload AetherPS4 actual linker logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-AetherPS4-native-link-results
+          path: |
+            build/diagnostics/aether-module-link-status.txt
+            build/diagnostics/aether-link-*.log
+            build/diagnostics/aether-ios-jit-ipa-link-status.txt
+            build/diagnostics/fexcore-ipa-link-status.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Verify selected iOS CPU backend linkage
         shell: bash
         run: |
