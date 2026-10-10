@@ -7,6 +7,9 @@ private func maxps4NativeABIVersion() -> UInt32
 @_silgen_name("maxps4_native_capabilities")
 private func maxps4NativeCapabilities() -> UInt32
 
+@_silgen_name("maxps4_native_aether_cpu_probe")
+private func maxps4NativeAetherCPUProbe() -> Int32
+
 
 struct MaxPS4Game: Identifiable, Codable, Equatable {
     let id: UUID
@@ -1114,7 +1117,7 @@ final class MaxPS4Emulator: ObservableObject {
             return "\\(game.name) : paquet PKG conservé dans la bibliothèque. Installation/exécution PS4 indisponible."
         }
         guard let nativeEngine else {
-            return "\\(game.name) : bibliothèque native ABI \\(maxps4NativeABIVersion()) liée à MaxPS4 ; lancement PS4 indisponible (capacités : \\(maxps4NativeCapabilities()))."
+            return "\\(game.name) : bibliothèque native ABI \\(maxps4NativeABIVersion()) liée ; lancement PS4 indisponible (capacités : \\(maxps4NativeCapabilities())) ; test CPU AetherPS4 : \\(maxps4NativeAetherCPUProbe() == 1 ? "réussi" : "échoué")."
         }
         guard nativeEngine.isReady else {
             return "\\(game.name) : moteur natif détecté, mais pas prêt à exécuter un jeu."
