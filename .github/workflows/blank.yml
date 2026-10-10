@@ -596,6 +596,38 @@ jobs:
           print("PASS optional pinned-FEXCore crash diagnostics guarded")
           PY
 
+      - name: Audit AetherPS4 iOS JIT contracts against pinned FEXCore
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path("build/diagnostics")
+          engine = (root / "aetherps4-upstream/src/core/fex/fex_guest_engine.cpp").read_text()
+          allocator = (root / "aetherps4-upstream/src/core/ios/ios_jit_allocator.h").read_text()
+          fex = (root / "fexcore-upstream/FEXCore/include/FEXCore/Utils/AllocatorHooks.h").read_text()
+          expected = (
+              "ScopedJITWriteProtect",
+              "GetWritableAddress",
+              "GetExecutableAddress",
+              "OnBufferReusedInPlace",
+              "BeginBufferInvalidationSafepoint",
+          )
+          lines = ["Pinned AetherPS4 / FEXCore iOS JIT contract audit",
+                   "Source-only checks; no claim of JIT execution or game compatibility."]
+          for name in expected:
+              used = name in engine
+              declared = name in fex
+              state = "AVAILABLE" if declared else "MISSING"
+              lines.append(f"{state}: {name} (AetherPS4 refers to symbol: {used})")
+          for name in ("DualMappedRegion", "rw_addr", "rx_addr"):
+              lines.append(f"{'AVAILABLE' if name in allocator else 'MISSING'}: iOS allocator {name}")
+          report = root / "aether-full-engine/jit-runtime-contracts.txt"
+          report.parent.mkdir(parents=True, exist_ok=True)
+          report.write_text("\\n".join(lines) + "\\n")
+          print(report.read_text())
+          PY
+
       - name: Probe real AetherPS4 guest engine and CPU compilation for iOS
         shell: bash
         run: |
