@@ -1573,6 +1573,7 @@ jobs:
           # Each module is accepted only after a strict executable link succeeds.
           # Compile the genuine upstream Objective-C++ exception adapter,
           # required by Common::Log on Apple platforms.
+          ROOT="build/diagnostics/aetherps4-upstream"
           OBJC_ADAPTER="$ROOT/src/common/logging/objc_exception_describe.mm"
           OBJC_OBJ="build/diagnostics/aether-full-engine/objc_exception_describe.o"
           if test -s "$OBJC_ADAPTER"; then
