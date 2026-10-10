@@ -487,9 +487,13 @@ jobs:
         run: |
           set -euo pipefail
           brew list --versions boost >/dev/null 2>&1 || brew install boost
-          brew list --versions tsl-robin-map >/dev/null 2>&1 || brew install tsl-robin-map
           test -s "$(brew --prefix boost)/include/boost/icl/separate_interval_set.hpp"
-          test -s "$(brew --prefix tsl-robin-map)/include/tsl/robin_map.h"
+          # Tessil robin-map is header-only and is not a Homebrew formula.
+          # Fetch the actual upstream headers rather than brew install an invalid name.
+          ROBIN="build/diagnostics/robin-map-upstream"
+          git clone --quiet --depth 1 https://github.com/Tessil/robin-map.git "$ROBIN"
+          test -s "$ROBIN/include/tsl/robin_map.h"
+          git -C "$ROBIN" rev-parse HEAD > build/diagnostics/robin-map-upstream-sha.txt
           FEX="build/diagnostics/fexcore-upstream"
           mkdir -p build/diagnostics/fexcore-generated/FEXCore/IR
           python3 "$FEX/FEXCore/Scripts/json_ir_generator.py" \
@@ -532,7 +536,7 @@ jobs:
                  -I "$(brew --prefix spdlog)/include" \
                  -I "$(brew --prefix nlohmann-json)/include" \
                  -I "$(brew --prefix boost)/include" \
-                 -I "$(brew --prefix tsl-robin-map)/include" \
+                 -I "build/diagnostics/robin-map-upstream/include" \
                  -c "$ROOT/$source" -o "$output" \
                  > "$log" 2>&1; then
               echo "PASS compile $source (linking and guest execution unverified)" \
