@@ -6,6 +6,7 @@ private enum MaxPS4Tab: Hashable {
     case home
     case games
     case tools
+    case developer
     case settings
 }
 
@@ -48,6 +49,8 @@ struct MaxPS4HomeView: View {
                     library
                 case .tools:
                     toolsPage
+                case .developer:
+                    developerPage
                 case .settings:
                     settings
                 }
@@ -1223,11 +1226,86 @@ struct MaxPS4HomeView: View {
         }
     }
 
+    private var developerPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("DIAGNOSTIC MOTEUR")
+                    .font(.title2.bold())
+                    .foregroundStyle(.cyan)
+                Text("Tests sur l'iPhone • aucun jeu PS4 n'est exécuté par ces contrôles.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                settingsCard {
+                    settingInfoRow(icon: "cpu", title: "Pont natif ARM64",
+                                   value: "ABI " + String(emulator.nativeABIVersion),
+                                   color: emulator.nativeABIVersion == 1 ? .green : .orange)
+                    Divider()
+                    settingInfoRow(icon: "bolt.slash", title: "JIT FEXCore",
+                                   value: "Non opérationnel", color: .orange)
+                    Divider()
+                    settingInfoRow(icon: "gamecontroller", title: "Exécution PS4",
+                                   value: emulator.backendReady ? "Backend prêt" : "Indisponible",
+                                   color: emulator.backendReady ? .green : .orange)
+                }
+                Button {
+                    emulator.runNativeCPUCheck()
+                } label: {
+                    Label("Tester la connexion CPU native", systemImage: "cpu")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cyan)
+                Text("Jeu à diagnostiquer")
+                    .font(.headline)
+                if emulator.games.isEmpty {
+                    Text("Importe un jeu pour afficher son diagnostic de lancement.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(emulator.games) { game in
+                        Button {
+                            emulator.status = emulator.launchReadinessReport(for: game)
+                        } label: {
+                            HStack {
+                                Text(game.name).lineLimit(1)
+                                Spacer()
+                                Image(systemName: "doc.text.magnifyingglass")
+                            }
+                            .padding(12)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.cyan)
+                    }
+                }
+                Text("Journal du dernier test")
+                    .font(.headline)
+                Text(emulator.status)
+                    .font(.system(.footnote, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+                Button {
+                    UIPasteboard.general.string = emulator.nativeDiagnosticReport
+                } label: {
+                    Label("Copier le rapport complet", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(.bordered)
+                .tint(.cyan)
+                Text("Les tests CPU sont limités. Un résultat positif ne signifie pas qu'un jeu PS4 peut démarrer.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+        }
+    }
+
     private var tabBar: some View {
         HStack(spacing: 0) {
             tabButton(.home, icon: "house.fill", title: "Accueil")
             tabButton(.games, icon: "square.grid.2x2.fill", title: "Bibliothèque")
             tabButton(.tools, icon: "square.and.arrow.down.fill", title: "Import")
+            tabButton(.developer, icon: "stethoscope", title: "Diagnostic")
             tabButton(.settings, icon: "gearshape.fill", title: "Paramètres")
         }
         .padding(.horizontal, 9)
