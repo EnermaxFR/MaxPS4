@@ -688,6 +688,8 @@ jobs:
           for source in \
             src/common/logging/log.cpp \
             src/common/thread.cpp \
+            src/common/path_util.cpp \
+            src/core/emulator_settings.cpp \
             src/core/fex/fex_guest_engine.cpp \
             src/core/guest_cpu/fex_guest_cpu.cpp \
             src/core/guest_cpu/guest_cpu.cpp \
@@ -1646,7 +1648,7 @@ jobs:
             # closure alongside every native module, without exposing unsupported
             # execution to the Swift UI. An already linked support object must
             # not be linked twice, or C++ globals will produce duplicate symbols.
-            for support in log thread objc_exception_describe; do
+            for support in log thread objc_exception_describe path_util emulator_settings; do
               support_object="build/diagnostics/aether-full-engine/${support}.o"
               if test -s "$support_object"; then
                 already_accepted=false
