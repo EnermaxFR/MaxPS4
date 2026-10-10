@@ -1568,12 +1568,14 @@ jobs:
               support_object="build/diagnostics/aether-full-engine/${support}.o"
               if test -s "$support_object"; then
                 already_accepted=false
-                for accepted in "${AETHER_ACCEPTED_OBJECTS[@]-}"; do
-                  if test "$accepted" = "$support_object"; then
-                    already_accepted=true
-                    break
-                  fi
-                done
+                if test "$AETHER_ACCEPTED_COUNT" -gt 0; then
+                  for accepted in "${AETHER_ACCEPTED_OBJECTS[@]}"; do
+                    if test "$accepted" = "$support_object"; then
+                      already_accepted=true
+                      break
+                    fi
+                  done
+                fi
                 if test "$already_accepted" = false; then
                   trial+=("$support_object")
                   new_objects+=("$support_object")
