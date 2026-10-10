@@ -650,6 +650,7 @@ jobs:
             log="build/diagnostics/aether-full-engine/${base}.log"
             if xcrun --sdk iphoneos clang++ -std=c++23 \
                  -target arm64-apple-ios16.0 -isysroot "$SDK" \
+                 -DFMT_HEADER_ONLY=1 \
                  -D MADV_HUGEPAGE=0 -D MADV_NOHUGEPAGE=0 \
                  -I "build/diagnostics/fexcore-generated" \
                  -I "$ROOT/src" -I "build/diagnostics/fexcore-upstream" \
