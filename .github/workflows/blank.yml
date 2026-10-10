@@ -278,7 +278,7 @@ jobs:
               cat build/diagnostics/aether-full-engine/status.txt
               echo '~~~'
               echo ""
-              for component in fex_guest_engine fex_guest_cpu; do
+              for component in fex_guest_engine fex_guest_cpu guest_cpu ios_jit_allocator psf process memory exception; do
                 log="build/diagnostics/aether-full-engine/${component}.log"
                 if test -s "$log" && grep -qE 'fatal error:|error:' "$log"; then
                   echo "### ${component}: first compiler errors"
@@ -500,6 +500,10 @@ jobs:
             else
               echo "BLOCKED compile $source; inspect $log for dependencies" \
                 | tee -a build/diagnostics/aether-full-engine/status.txt
+              # Surface the first actionable errors for EVERY component, not just
+              # the guest CPU entries: a green Swift IPA hides these failures.
+              grep -m 5 -E 'fatal error:|error:' "$log" \
+                | tee -a build/diagnostics/aether-full-engine/status.txt || true
             fi
           done
           # Keep a machine-readable build matrix for the porting steps.
