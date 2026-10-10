@@ -1558,6 +1558,7 @@ jobs:
               continue
             fi
             trial=("$candidate")
+            new_objects=("$candidate")
             # Link upstream supporting objects only alongside real components.
             # Do not inject these into the fallback IPA without a successful strict link.
             if test "$component" = "ios_jit_allocator"; then
@@ -1565,15 +1566,16 @@ jobs:
                 support_object="build/diagnostics/aether-full-engine/${support}.o"
                 if test -s "$support_object"; then
                   trial+=("$support_object")
+                  new_objects+=("$support_object")
                 fi
               done
             fi
             if test "$AETHER_ACCEPTED_COUNT" -gt 0; then
-              trial=( "${AETHER_ACCEPTED_OBJECTS[@]}" "$candidate" )
+              trial=( "${AETHER_ACCEPTED_OBJECTS[@]}" "${trial[@]}" )
             fi
             if "${SWIFT_LINK_CMD[@]}" "${trial[@]}" -lc++ \
                  -o "$OUTPUT" > "build/diagnostics/aether-link-${component}.log" 2>&1; then
-              AETHER_ACCEPTED_OBJECTS+=("${trial[@]}")
+              AETHER_ACCEPTED_OBJECTS+=("${new_objects[@]}")
               AETHER_ACCEPTED_COUNT=$((AETHER_ACCEPTED_COUNT + 1))
               echo "PASS ${component}: upstream object linked (runtime inactive)" \
                 | tee -a build/diagnostics/aether-module-link-status.txt
