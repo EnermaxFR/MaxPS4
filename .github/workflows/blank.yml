@@ -1355,7 +1355,10 @@ jobs:
                 | tee -a build/diagnostics/aether-module-link-status.txt
               continue
             fi
-            trial=( "${AETHER_ACCEPTED_OBJECTS[@]}" "$candidate" )
+            trial=("$candidate")
+            if test "${#AETHER_ACCEPTED_OBJECTS[@]}" -gt 0; then
+              trial=( "${AETHER_ACCEPTED_OBJECTS[@]}" "$candidate" )
+            fi
             if "${SWIFT_LINK_CMD[@]}" "${trial[@]}" -lc++ \
                  -o "$OUTPUT" > "build/diagnostics/aether-link-${component}.log" 2>&1; then
               AETHER_ACCEPTED_OBJECTS+=("$candidate")
