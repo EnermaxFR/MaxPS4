@@ -30,6 +30,27 @@ jobs:
         shell: bash
         run: mkdir -p build/diagnostics
 
+      - name: Verify Kero Blaster native launch prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          emulator = Path("MaxPS4-iOS/Sources/MaxPS4Emulator.swift").read_text()
+          required = [
+              "func launch(_ game: MaxPS4Game)",
+              "guard let nativeEngine, nativeEngine.isReady else",
+              "try nativeEngine.launchGame(at:",
+              'moteur natif non connecté',
+          ]
+          missing = [item for item in required if item not in emulator]
+          if missing:
+              raise SystemExit("Kero Blaster launch integration regression: " + repr(missing))
+          print("PASS Kero Blaster launch path is guarded by nativeEngine.isReady")
+          print("NOT PLAYABLE: readiness guard confirms a safe UI handoff only.")
+          print("Full PS4 runtime, graphics, JIT and title-specific execution remain unverified.")
+          PY
+
       - name: Run CPU memory and ELF smoke tests
         shell: bash
         run: |
