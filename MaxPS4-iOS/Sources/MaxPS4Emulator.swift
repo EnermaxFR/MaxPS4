@@ -1111,23 +1111,23 @@ final class MaxPS4Emulator: ObservableObject {
     func launchReadinessReport(for game: MaxPS4Game) -> String {
         let fileURL = URL(fileURLWithPath: game.localPath)
         guard fileManager.fileExists(atPath: fileURL.path) else {
-            return "Fichier introuvable : \\(game.fileName). Vérifie les données importées."
+            return "Fichier introuvable : \(game.fileName). Vérifie les données importées."
         }
         if fileURL.pathExtension.lowercased() == "pkg" {
-            return "\\(game.name) : paquet PKG conservé dans la bibliothèque. Installation/exécution PS4 indisponible."
+            return "\(game.name) : paquet PKG conservé dans la bibliothèque. Installation/exécution PS4 indisponible."
         }
         guard let nativeEngine else {
             let cpuProbeStatus = maxps4NativeAetherCPUProbe() == 1 ? "réussi" : "échoué"
-            return "\\(game.name) : bibliothèque native ABI \\(maxps4NativeABIVersion()) liée ; lancement PS4 indisponible (capacités : \\(maxps4NativeCapabilities())) ; test CPU AetherPS4 : \\(cpuProbeStatus)."
+            return "\(game.name) : bibliothèque native ABI \(maxps4NativeABIVersion()) liée ; lancement PS4 indisponible (capacités : \(maxps4NativeCapabilities())) ; test CPU AetherPS4 : \(cpuProbeStatus)."
         }
         guard nativeEngine.isReady else {
-            return "\\(game.name) : moteur natif détecté, mais pas prêt à exécuter un jeu."
+            return "\(game.name) : moteur natif détecté, mais pas prêt à exécuter un jeu."
         }
         if let backend = nativeEngine as? any MaxPS4ShadPS4Backend,
            !backend.capabilities.canLaunchPS4Game {
-            return "\\(game.name) : moteur PS4 incomplet. " + backend.capabilities.diagnostic
+            return "\(game.name) : moteur PS4 incomplet. " + backend.capabilities.diagnostic
         }
-        return "\\(game.name) : moteur déclaré prêt. Le lancement reste expérimental."
+        return "\(game.name) : moteur déclaré prêt. Le lancement reste expérimental."
     }
 
     func launch(_ game: MaxPS4Game) {
