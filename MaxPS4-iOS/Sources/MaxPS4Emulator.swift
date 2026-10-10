@@ -1,6 +1,13 @@
 import Combine
 import Foundation
 
+@_silgen_name("maxps4_native_abi_version")
+private func maxps4NativeABIVersion() -> UInt32
+
+@_silgen_name("maxps4_native_capabilities")
+private func maxps4NativeCapabilities() -> UInt32
+
+
 struct MaxPS4Game: Identifiable, Codable, Equatable {
     let id: UUID
     let name: String
@@ -1107,7 +1114,7 @@ final class MaxPS4Emulator: ObservableObject {
             return "\\(game.name) : paquet PKG conservé dans la bibliothèque. Installation/exécution PS4 indisponible."
         }
         guard let nativeEngine else {
-            return "\\(game.name) : fichier présent, mais le moteur AetherPS4 natif n'est pas relié à l'application."
+            return "\\(game.name) : bibliothèque native ABI \\(maxps4NativeABIVersion()) liée à MaxPS4 ; lancement PS4 indisponible (capacités : \\(maxps4NativeCapabilities()))."
         }
         guard nativeEngine.isReady else {
             return "\\(game.name) : moteur natif détecté, mais pas prêt à exécuter un jeu."
