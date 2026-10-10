@@ -458,6 +458,29 @@ jobs:
           p.write_text(s)
           PY
 
+      - name: Adapt pinned AetherPS4 logging API to packaged spdlog
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build/diagnostics/aetherps4-upstream/src/common/logging/log.h")
+          code = p.read_text()
+          # The pinned AetherPS4 header assumes a nested source_loc::basename
+          # helper and treats spdlog::level as a type. Current spdlog APIs use
+          # level::level_enum and do not have that basename helper.
+          substitutions = {
+              "to_string_view(spdlog::level lvl)": "to_string_view(spdlog::level::level_enum lvl)",
+              "spdlog::source_loc::basename(__FILE__)": "__FILE__",
+          }
+          for old, new in substitutions.items():
+              if old not in code:
+                  raise SystemExit(f"Cannot patch unexpected AetherPS4 logging API: {old}")
+              code = code.replace(old, new)
+          p.write_text(code)
+          print("PASS pinned AetherPS4 logging API adapted in ephemeral build tree")
+          PY
+
       - name: Probe real AetherPS4 guest engine and CPU compilation for iOS
         shell: bash
         run: |
