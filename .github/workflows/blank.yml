@@ -654,21 +654,27 @@ jobs:
           root = Path("build/diagnostics")
           engine = (root / "aetherps4-upstream/src/core/fex/fex_guest_engine.cpp").read_text()
           allocator = (root / "aetherps4-upstream/src/core/ios/ios_jit_allocator.h").read_text()
-          fex = (root / "fexcore-upstream/FEXCore/include/FEXCore/Utils/AllocatorHooks.h").read_text()
-          expected = (
-              "ScopedJITWriteProtect",
-              "GetWritableAddress",
-              "GetExecutableAddress",
-              "OnBufferReusedInPlace",
-              "BeginBufferInvalidationSafepoint",
-          )
+          hooks = (root / "fexcore-upstream/FEXCore/include/FEXCore/Utils/AllocatorHooks.h").read_text()
+          context_path = root / "fexcore-upstream/FEXCore/Source/Interface/Context/Context.h"
+          context = context_path.read_text() if context_path.is_file() else ""
+          contracts = {
+              "ScopedJITWriteProtect": ("AllocatorHooks.h", hooks),
+              "GetWritableAddress": ("AllocatorHooks.h", hooks),
+              "GetExecutableAddress": ("AllocatorHooks.h", hooks),
+              "OnBufferReusedInPlace": ("Context.h", context),
+              "BeginBufferInvalidationSafepoint": ("Context.h", context),
+              "EndBufferInvalidationSafepoint": ("Context.h", context),
+          }
           lines = ["Pinned AetherPS4 / FEXCore iOS JIT contract audit",
-                   "Source-only checks; no claim of JIT execution or game compatibility."]
-          for name in expected:
+                   "Source declaration presence only; no JIT implementation or game execution proved.",
+                   "Note: ContextImpl contracts must be checked in Context.h, not AllocatorHooks.h."]
+          for name, (source, declarations) in contracts.items():
               used = name in engine
-              declared = name in fex
-              state = "AVAILABLE" if declared else "MISSING"
-              lines.append(f"{state}: {name} (AetherPS4 refers to symbol: {used})")
+              declared = name in declarations
+              state = "DECLARED" if declared else "MISSING"
+              lines.append(f"{state}: {name} in {source} (AetherPS4 refers to symbol: {used})")
+          if not context:
+              lines.append("WARNING: pinned FEXCore Context.h could not be read")
           for name in ("DualMappedRegion", "rw_addr", "rx_addr"):
               lines.append(f"{'AVAILABLE' if name in allocator else 'MISSING'}: iOS allocator {name}")
           report = root / "aether-full-engine/jit-runtime-contracts.txt"
