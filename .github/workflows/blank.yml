@@ -426,6 +426,38 @@ jobs:
           test -s "$UNORDERED/include/ankerl/unordered_dense.h"
           echo "PASS unordered_dense headers available before AetherPS4 compile"
 
+      - name: Prepare Darwin FEXCore mutex before AetherPS4 cross-compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Experimental Darwin adaptation of FEXCore Linux futex mutex, compile probe only.
+          # C++20 atomic wait/notify keeps sleeping threads off a busy spin loop.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build/diagnostics/fexcore-upstream/FEXCore/include/FEXCore/Utils/WritePriorityMutex.h")
+          s = p.read_text()
+          s = s.replace("#if !defined(_WIN32)\n#include <linux/futex.h>", "#if defined(__APPLE__)\n// Darwin uses C++20 atomic wait/notify below.\n#elif !defined(_WIN32)\n#include <linux/futex.h>", 1)
+          start = s.index("private:\n\n#if !defined(_WIN32)\n  void FutexWaitForWriteAvailable")
+          insert = """private:
+
+          #if defined(__APPLE__)
+            void FutexWaitForWriteAvailable(uint32_t expected) {
+              std::atomic_ref<uint32_t>(Futex).wait(expected, std::memory_order_relaxed);
+            }
+            void FutexWaitForReadAvailable(uint32_t expected) {
+              std::atomic_ref<uint32_t>(Futex).wait(expected, std::memory_order_relaxed);
+            }
+            void FutexWakeWriter() {
+              std::atomic_ref<uint32_t>(Futex).notify_all();
+            }
+            void FutexWakeReaders() {
+              std::atomic_ref<uint32_t>(Futex).notify_all();
+            }
+          #elif !defined(_WIN32)"""
+          s = s[:start] + s[start:].replace("private:\n\n#if !defined(_WIN32)", insert, 1)
+          p.write_text(s)
+          PY
+
       - name: Probe real AetherPS4 guest engine and CPU compilation for iOS
         shell: bash
         run: |
@@ -643,33 +675,6 @@ jobs:
           UNORDERED="build/diagnostics/unordered-dense-upstream"
           test -s "$UNORDERED/include/ankerl/unordered_dense.h"
           test "$(git -C "$UNORDERED" rev-parse HEAD)" = "3234af2c03549bc85656bfd3a86993bf1cd8aef1"
-          # Experimental Darwin adaptation of FEXCore Linux futex mutex, compile probe only.
-          # C++20 atomic wait/notify keeps sleeping threads off a busy spin loop.
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("build/diagnostics/fexcore-upstream/FEXCore/include/FEXCore/Utils/WritePriorityMutex.h")
-          s = p.read_text()
-          s = s.replace("#if !defined(_WIN32)\n#include <linux/futex.h>", "#if defined(__APPLE__)\n// Darwin uses C++20 atomic wait/notify below.\n#elif !defined(_WIN32)\n#include <linux/futex.h>", 1)
-          start = s.index("private:\n\n#if !defined(_WIN32)\n  void FutexWaitForWriteAvailable")
-          insert = """private:
-
-          #if defined(__APPLE__)
-            void FutexWaitForWriteAvailable(uint32_t expected) {
-              std::atomic_ref<uint32_t>(Futex).wait(expected, std::memory_order_relaxed);
-            }
-            void FutexWaitForReadAvailable(uint32_t expected) {
-              std::atomic_ref<uint32_t>(Futex).wait(expected, std::memory_order_relaxed);
-            }
-            void FutexWakeWriter() {
-              std::atomic_ref<uint32_t>(Futex).notify_all();
-            }
-            void FutexWakeReaders() {
-              std::atomic_ref<uint32_t>(Futex).notify_all();
-            }
-          #elif !defined(_WIN32)"""
-          s = s[:start] + s[start:].replace("private:\n\n#if !defined(_WIN32)", insert, 1)
-          p.write_text(s)
-          PY
           # Generate IR instruction definitions and dispatch tables from upstream IR.json.
           mkdir -p build/diagnostics/fexcore-generated/FEXCore/IR
           python3 "$FEX/FEXCore/Scripts/json_ir_generator.py" \
@@ -1514,7 +1519,10 @@ jobs:
           ICON="build/OriginalAppIcon.jpg"
           # Prefer the user's exact unmodified JPEG when it has been
           # uploaded to the repository. Never redraw or regenerate the logo.
-          if test -s MaxPS4-iOS/Resources/MaxPS4ExactIcon.jpeg; then
+          if test -s MaxPS4-iOS/Resources/MaxPS4ExactIcon.png; then
+            cp MaxPS4-iOS/Resources/MaxPS4ExactIcon.png "$ICON"
+            echo "ICON_SOURCE=exact-user-PNG"
+          elif test -s MaxPS4-iOS/Resources/MaxPS4ExactIcon.jpeg; then
             cp MaxPS4-iOS/Resources/MaxPS4ExactIcon.jpeg "$ICON"
             echo "ICON_SOURCE=exact-user-JPEG"
           else
