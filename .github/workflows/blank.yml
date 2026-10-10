@@ -458,6 +458,60 @@ jobs:
           p.write_text(s)
           PY
 
+      - name: Port FEXCore scoped signal mask to Darwin pthread API
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build/diagnostics/fexcore-upstream/FEXCore/include/FEXCore/Utils/SignalScopeGuards.h")
+          code = p.read_text()
+          old = """    ::syscall(SYS_rt_sigprocmask, SIG_SETMASK, &Mask, &*OriginalMask, sizeof(*OriginalMask));"""
+          new = """#ifdef __APPLE__
+            sigset_t RequestedMask;
+            sigemptyset(&RequestedMask);
+            for (int signal = 1; signal < NSIG && signal <= 64; ++signal) {
+              if (Mask & (uint64_t{1} << (signal - 1))) {
+                sigaddset(&RequestedMask, signal);
+              }
+            }
+            sigset_t PreviousMask;
+            if (pthread_sigmask(SIG_SETMASK, &RequestedMask, &PreviousMask) == 0) {
+              DarwinOriginalMask = PreviousMask;
+            }
+          #else
+            ::syscall(SYS_rt_sigprocmask, SIG_SETMASK, &Mask, &*OriginalMask, sizeof(*OriginalMask));
+          #endif"""
+          if old not in code:
+              raise SystemExit("Pinned FEXCore signal-mask constructor changed")
+          code = code.replace(old, new, 1)
+          old_dtor = """      ::syscall(SYS_rt_sigprocmask, SIG_SETMASK, &OriginalMask, nullptr, sizeof(*OriginalMask));"""
+          new_dtor = """#ifndef __APPLE__
+                ::syscall(SYS_rt_sigprocmask, SIG_SETMASK, &OriginalMask, nullptr, sizeof(*OriginalMask));
+              #endif"""
+          if old_dtor not in code:
+              raise SystemExit("Pinned FEXCore signal-mask destructor changed")
+          code = code.replace(old_dtor, new_dtor, 1)
+          code = code.replace("    rhs.OriginalMask.reset();", """    rhs.OriginalMask.reset();
+          #ifdef __APPLE__
+            DarwinOriginalMask = rhs.DarwinOriginalMask;
+            rhs.DarwinOriginalMask.reset();
+          #endif""", 1)
+          code = code.replace("  std::optional<uint64_t> OriginalMask {};", """  std::optional<uint64_t> OriginalMask {};
+          #ifdef __APPLE__
+            std::optional<sigset_t> DarwinOriginalMask {};
+          #endif""", 1)
+          code = code.replace("    if (OriginalMask) {\n#ifndef __APPLE__", """#ifdef __APPLE__
+            if (DarwinOriginalMask) {
+              pthread_sigmask(SIG_SETMASK, &*DarwinOriginalMask, nullptr);
+            }
+          #endif
+            if (OriginalMask) {
+          #ifndef __APPLE__""", 1)
+          p.write_text(code)
+          print("PASS Darwin FEXCore signal masking adapted to pthread_sigmask (native probe only)")
+          PY
+
       - name: Adapt pinned AetherPS4 logging API to packaged spdlog
         shell: bash
         run: |
