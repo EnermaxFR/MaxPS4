@@ -575,6 +575,21 @@ jobs:
           logging = logging.replace("std::unordered_map<spdlog::level, LogColor>", "std::unordered_map<spdlog::level::level_enum, LogColor>")
           logging = logging.replace("spdlog::level default_log_level", "spdlog::level::level_enum default_log_level")
           logging = logging.replace("std::unordered_map<std::string, spdlog::level>", "std::unordered_map<std::string, spdlog::level::level_enum>")
+          # Stock spdlog's duplicate filter does not accept a list of child
+          # sinks as a constructor argument. Use genuine synchronous sinks in
+          # the iOS port: both stdout and the upstream file sink remain active.
+          start = logging.index("void UpdateSinks() {")
+          end = logging.index("\\nvoid UpdateLogLevels(", start)
+          logging = logging[:start] + """void UpdateSinks() {
+    for (auto& [name, logger] : ALL_LOGGERS) {
+        if (!logger) continue;
+        auto& active_sinks = logger->sinks();
+        active_sinks.clear();
+        if (g_console_sink) active_sinks.push_back(g_console_sink);
+        if (g_shad_file_sink) active_sinks.push_back(g_shad_file_sink);
+    }
+}
+""" + logging[end:]
           impl.write_text(logging)
           sink_header = Path("build/diagnostics/aetherps4-upstream/src/common/logging/log_file_sink.h")
           sink_code = sink_header.read_text()
@@ -1571,6 +1586,12 @@ jobs:
           xcrun ar rcs build/diagnostics/libmaxps4_native.a \
             build/diagnostics/maxps4_native.o
           xcrun lipo -archs build/diagnostics/libmaxps4_native.a | grep -w arm64
+          # Assert a complete C ABI and its actual upstream CPU dependency.
+          xcrun nm -gU build/diagnostics/libmaxps4_native.a \
+            | grep -q '_maxps4_native_aether_cpu_probe'
+          xcrun nm -gU build/diagnostics/aether-guest-adapter-ios-arm64.o \
+            | grep -q '_maxps4_aether_restricted_cpu_dispatch_probe'
+          echo "PASS native ABI: static library and AetherPS4 CPU adapter symbols available"
           SWIFT_LINK_CMD=(
             xcrun --sdk iphoneos swiftc
             -target arm64-apple-ios16.0
