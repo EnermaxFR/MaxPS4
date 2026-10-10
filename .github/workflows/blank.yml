@@ -1527,7 +1527,7 @@ jobs:
             echo "ICON_SOURCE=exact-user-JPEG"
           else
             python3 -c 'import base64,pathlib; pathlib.Path("build/OriginalAppIcon.jpg").write_bytes(base64.b64decode(pathlib.Path("MaxPS4-iOS/Resources/OriginalAppIcon.base64").read_text()))'
-            echo "ICON_SOURCE=existing-logo (awaiting exact JPEG upload)"
+            echo "ICON_SOURCE=existing-logo (awaiting exact user image upload)"
           fi
           APP="build/Payload/MaxPS4.app"
           test -s "$ICON"
@@ -1535,7 +1535,7 @@ jobs:
           build/icon-venv/bin/python -m pip install --quiet pillow
           build/icon-venv/bin/python - <<'PY'
           from PIL import Image, ImageFile
-          # Prefer the original logo, but do not block IPA builds on a damaged JPEG.
+          # Fail instead of silently shipping a different icon when the exact user PNG is present.
           from PIL import ImageDraw, ImageFont, UnidentifiedImageError
           ImageFile.LOAD_TRUNCATED_IMAGES = True
           try:
@@ -1545,6 +1545,9 @@ jobs:
                   raise ValueError(f"Source logo is too small: {icon.size}")
               print("ICON_SOURCE=original")
           except (UnidentifiedImageError, OSError, ValueError) as error:
+              from pathlib import Path
+              if Path("MaxPS4-iOS/Resources/MaxPS4ExactIcon.png").exists():
+                  raise RuntimeError(f"Exact MaxPS4 PNG could not be decoded: {error}") from error
               print(f"::warning::Original AppIcon.jpg cannot be decoded ({error}); using temporary MaxPS4 icon")
               icon = Image.new("RGB", (1024, 1024), (15, 20, 40))
               draw = ImageDraw.Draw(icon)
