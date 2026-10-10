@@ -709,11 +709,38 @@ jobs:
           if missing:
               raise SystemExit("Bundled FEXCore lacks contracts: " + ", ".join(missing))
           PY
+          # Generate real configuration declarations from the matching upstream
+          # Config.json.in and its unmodified config_generator.py.
+          python3 - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+          fex = Path("build/diagnostics/aetherps4-upstream/runtime/sources/fexcore-darwin/FEXCore")
+          source = fex / "Source/Interface/Config/Config.json.in"
+          generated = Path("build/diagnostics/aether-full-engine/fex-config-generated")
+          include = generated / "FEXCore/Config"
+          include.mkdir(parents=True, exist_ok=True)
+          raw = source.read_text()
+          raw = raw.replace("@CMAKE_INSTALL_FULL_LIBDIR@", "/usr/local/lib")
+          raw = raw.replace("@CMAKE_INSTALL_PREFIX@", "/usr/local")
+          data = json.loads(raw)
+          config = generated / "Config.json"
+          config.write_text(json.dumps(data))
+          subprocess.run([
+              "python3", str(fex / "Scripts/config_generator.py"),
+              str(config), str(include / "ConfigValues.inl"),
+              str(generated / "Config.1"),
+              str(generated / "ConfigOptions.inl"),
+          ], check=True)
+          assert (include / "ConfigValues.inl").stat().st_size > 0
+          print("PASS generated upstream FEXCore ConfigValues.inl")
+          PY
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           if xcrun --sdk iphoneos clang++ -std=c++23 \
                -target arm64-apple-ios16.0 -isysroot "$SDK" \
                -DFMT_HEADER_ONLY=1 -DMADV_HUGEPAGE=0 -DMADV_NOHUGEPAGE=0 \
                -I "$ROOT/src" \
+               -I "$OUT/fex-config-generated" \
                -I "$FEX" -I "$FEX/FEXCore/include" \
                -I "$FEX/FEXCore/Source" -I "$FEX/Source" \
                -I "MaxPS4-iOS/Native/compat/fex_ios" \
