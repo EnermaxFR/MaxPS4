@@ -371,6 +371,13 @@ jobs:
           fi
           test -s "$(brew --prefix spdlog)/include/spdlog/details/fmt_helper.h"
           echo "PASS spdlog headers available before AetherPS4 compile"
+          # emulator_settings.h requires nlohmann/json.hpp during cross-compilation.
+          if ! brew list --versions nlohmann-json >/dev/null 2>&1 ||
+             ! test -s "$(brew --prefix nlohmann-json)/include/nlohmann/json.hpp"; then
+            brew install nlohmann-json
+          fi
+          test -s "$(brew --prefix nlohmann-json)/include/nlohmann/json.hpp"
+          echo "PASS nlohmann/json headers available before AetherPS4 compile"
 
       - name: Generate FEXCore config for AetherPS4 guest engine probe
         shell: bash
@@ -451,6 +458,7 @@ jobs:
                  -I "build/diagnostics/unordered-dense-upstream/include" \
                  -I "$(brew --prefix fmt)/include" \
                  -I "$(brew --prefix spdlog)/include" \
+                 -I "$(brew --prefix nlohmann-json)/include" \
                  -c "$ROOT/$source" -o "$output" \
                  > "$log" 2>&1; then
               echo "PASS compile $source (linking and guest execution unverified)" \
