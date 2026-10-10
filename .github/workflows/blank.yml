@@ -1571,6 +1571,21 @@ jobs:
 
           # Keep previously compiled upstream modules as link candidates.
           # Each module is accepted only after a strict executable link succeeds.
+          # Compile the genuine upstream Objective-C++ exception adapter,
+          # required by Common::Log on Apple platforms.
+          OBJC_ADAPTER="$ROOT/src/common/logging/objc_exception_describe.mm"
+          OBJC_OBJ="build/diagnostics/aether-full-engine/objc_exception_describe.o"
+          if test -s "$OBJC_ADAPTER"; then
+            if xcrun --sdk iphoneos clang++ -std=c++23 -x objective-c++ \
+                 -target arm64-apple-ios16.0 -isysroot "$SDK" \
+                 -I "$ROOT/src" -c "$OBJC_ADAPTER" -o "$OBJC_OBJ" \
+                 > build/diagnostics/aether-full-engine/objc_exception_describe.log 2>&1; then
+              echo "PASS compile upstream Objective-C++ exception adapter"
+            else
+              echo "BLOCKED upstream Objective-C++ exception adapter"
+              head -35 build/diagnostics/aether-full-engine/objc_exception_describe.log
+            fi
+          fi
           AETHER_MODULES=(fex_guest_engine fex_guest_cpu ios_jit_allocator psf process memory exception)
           AETHER_ACCEPTED_OBJECTS=()
           AETHER_ACCEPTED_COUNT=0
@@ -1600,6 +1615,7 @@ jobs:
             -parse-as-library
             -framework SwiftUI
             -framework UIKit
+            -framework Foundation
             MaxPS4-iOS/Sources/*.swift
             build/diagnostics/libmaxps4_native.a
             build/diagnostics/shadps4-string-util-ios-arm64.o
@@ -1629,7 +1645,7 @@ jobs:
             # closure alongside every native module, without exposing unsupported
             # execution to the Swift UI. An already linked support object must
             # not be linked twice, or C++ globals will produce duplicate symbols.
-            for support in log thread; do
+            for support in log thread objc_exception_describe; do
               support_object="build/diagnostics/aether-full-engine/${support}.o"
               if test -s "$support_object"; then
                 already_accepted=false
