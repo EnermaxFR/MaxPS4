@@ -472,6 +472,7 @@ jobs:
           substitutions = {
               "to_string_view(spdlog::level lvl)": "to_string_view(spdlog::level::level_enum lvl)",
               "spdlog::source_loc::basename(__FILE__)": "__FILE__",
+              "level_to_number(lvl)": "static_cast<std::size_t>(lvl)",
           }
           for old, new in substitutions.items():
               if old not in code:
@@ -480,6 +481,22 @@ jobs:
           p.write_text(code)
           print("PASS pinned AetherPS4 logging API adapted in ephemeral build tree")
           PY
+
+      - name: Prepare AetherPS4 supplemental headers and FEXCore generated IR
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew list --versions boost >/dev/null 2>&1 || brew install boost
+          brew list --versions tsl-robin-map >/dev/null 2>&1 || brew install tsl-robin-map
+          test -s "$(brew --prefix boost)/include/boost/icl/separate_interval_set.hpp"
+          test -s "$(brew --prefix tsl-robin-map)/include/tsl/robin_map.h"
+          FEX="build/diagnostics/fexcore-upstream"
+          mkdir -p build/diagnostics/fexcore-generated/FEXCore/IR
+          python3 "$FEX/FEXCore/Scripts/json_ir_generator.py" \
+            "$FEX/FEXCore/Source/Interface/IR/IR.json" \
+            build/diagnostics/fexcore-generated/FEXCore/IR/IRDefines.inc \
+            build/diagnostics/fexcore-generated/FEXCore/IR/IRDefines_Dispatch.inc
+          test -s build/diagnostics/fexcore-generated/FEXCore/IR/IRDefines.inc
 
       - name: Probe real AetherPS4 guest engine and CPU compilation for iOS
         shell: bash
@@ -514,6 +531,8 @@ jobs:
                  -I "$(brew --prefix fmt)/include" \
                  -I "$(brew --prefix spdlog)/include" \
                  -I "$(brew --prefix nlohmann-json)/include" \
+                 -I "$(brew --prefix boost)/include" \
+                 -I "$(brew --prefix tsl-robin-map)/include" \
                  -c "$ROOT/$source" -o "$output" \
                  > "$log" 2>&1; then
               echo "PASS compile $source (linking and guest execution unverified)" \
