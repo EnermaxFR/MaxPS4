@@ -1506,7 +1506,10 @@ jobs:
           ICON="build/OriginalAppIcon.jpg"
           # Prefer the user's exact unmodified JPEG when it has been
           # uploaded to the repository. Never redraw or regenerate the logo.
-          if test -s MaxPS4-iOS/Resources/MaxPS4ExactIcon.jpeg; then
+          if test -s MaxPS4-iOS/Resources/MaxPS4ExactIcon.png; then
+            cp MaxPS4-iOS/Resources/MaxPS4ExactIcon.png "$ICON"
+            echo "ICON_SOURCE=exact-user-PNG"
+          elif test -s MaxPS4-iOS/Resources/MaxPS4ExactIcon.jpeg; then
             cp MaxPS4-iOS/Resources/MaxPS4ExactIcon.jpeg "$ICON"
             echo "ICON_SOURCE=exact-user-JPEG"
           else
