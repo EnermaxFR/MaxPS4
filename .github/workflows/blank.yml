@@ -549,6 +549,26 @@ jobs:
                   raise SystemExit(f"Cannot patch unexpected AetherPS4 logging API: {old}")
               code = code.replace(old, new)
           p.write_text(code)
+          # Upstream uses a custom async_sink absent from stock Homebrew spdlog.
+          # Use the upstream synchronous sink path for iOS compile/link probes.
+          # Keep the upstream repository untouched; patch only this CI checkout.
+          impl = Path("build/diagnostics/aetherps4-upstream/src/common/logging/log.cpp")
+          logging = impl.read_text()
+          required = [
+              "#include <spdlog/sinks/async_sink.h>",
+              "std::initializer_list<spdlog::sink_ptr> async_sink{",
+              "EmulatorSettings.IsLogSync() ? sinks : async_sink",
+          ]
+          for token in required:
+              if token not in logging:
+                  raise SystemExit(f"Unexpected AetherPS4 async logging API: {token}")
+          logging = logging.replace("#include <spdlog/sinks/async_sink.h>", "")
+          begin = logging.index("    std::initializer_list<spdlog::sink_ptr> async_sink{")
+          end = logging.index("    std::initializer_list<spdlog::sink_ptr> dup_filter{", begin)
+          logging = logging[:begin] + logging[end:]
+          logging = logging.replace("EmulatorSettings.IsLogSync() ? sinks : async_sink", "sinks")
+          impl.write_text(logging)
+          print("PASS iOS port uses real synchronous spdlog sinks; unavailable upstream async sink removed")
           print("PASS pinned AetherPS4 logging API adapted in ephemeral build tree")
           PY
 
