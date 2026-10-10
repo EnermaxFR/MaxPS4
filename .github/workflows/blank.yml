@@ -1562,6 +1562,15 @@ jobs:
           # The upstream guest_cpu.cpp is already linked as a separate object
           # earlier in this workflow; do not link a duplicate definition.
 
+          # Compile and archive the versioned native bridge for iOS ARM64.
+          # This ABI is linked into the application, but advertises no PS4
+          # execution until real FEXCore + GPU + HLE prerequisites exist.
+          xcrun --sdk iphoneos clang++ -std=c++17 -target arm64-apple-ios16.0 \
+            -isysroot "$SDK" -c MaxPS4-iOS/Native/maxps4_native.cpp \
+            -o build/diagnostics/maxps4_native.o
+          xcrun ar rcs build/diagnostics/libmaxps4_native.a \
+            build/diagnostics/maxps4_native.o
+          xcrun lipo -archs build/diagnostics/libmaxps4_native.a | grep -w arm64
           SWIFT_LINK_CMD=(
             xcrun --sdk iphoneos swiftc
             -target arm64-apple-ios16.0
@@ -1571,6 +1580,7 @@ jobs:
             -framework SwiftUI
             -framework UIKit
             MaxPS4-iOS/Sources/*.swift
+            build/diagnostics/libmaxps4_native.a
             build/diagnostics/shadps4-string-util-ios-arm64.o
             build/diagnostics/shadps4-bridge-ios-arm64.o
             build/diagnostics/aether-guest-cpu-ios-arm64.o
