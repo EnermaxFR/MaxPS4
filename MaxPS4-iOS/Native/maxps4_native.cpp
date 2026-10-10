@@ -13,5 +13,7 @@ extern "C" int32_t maxps4_native_aether_cpu_probe(void) {
 }
 extern "C" int32_t maxps4_native_launch(const char *path) {
     if (path == nullptr || *path == '\0') return -22; // invalid argument
-    return -38; // execution not implemented, never falsely report success
+    // A real game runner cannot be called until the backend reports capability.
+    if ((maxps4_native_capabilities() & 1u) == 0u) return -38;
+    return -38; // execution is not implemented, never falsely report success
 }
