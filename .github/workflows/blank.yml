@@ -730,7 +730,7 @@ jobs:
               "python3", str(fex / "Scripts/config_generator.py"),
               str(config), str(include / "ConfigValues.inl"),
               str(generated / "Config.1"),
-              str(generated / "ConfigOptions.inl"),
+              str(include / "ConfigOptions.inl"),
           ], check=True)
           assert (include / "ConfigValues.inl").stat().st_size > 0
           print("PASS generated upstream FEXCore ConfigValues.inl")
@@ -739,7 +739,7 @@ jobs:
           # build directory. Keep the pinned upstream checkout immutable and
           # prove that the exact files consumed by Clang are present.
           test -s "$OUT/fex-config-generated/FEXCore/Config/ConfigValues.inl"
-          test -s "$OUT/fex-config-generated/ConfigOptions.inl"
+          test -s "$OUT/fex-config-generated/FEXCore/Config/ConfigOptions.inl"
           echo "PASS bundled Darwin FEXCore generated config headers exist"
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           if xcrun --sdk iphoneos clang++ -std=c++23 \
