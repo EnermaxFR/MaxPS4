@@ -426,6 +426,38 @@ jobs:
           test -s "$UNORDERED/include/ankerl/unordered_dense.h"
           echo "PASS unordered_dense headers available before AetherPS4 compile"
 
+      - name: Prepare Darwin FEXCore mutex before AetherPS4 cross-compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Experimental Darwin adaptation of FEXCore Linux futex mutex, compile probe only.
+          # C++20 atomic wait/notify keeps sleeping threads off a busy spin loop.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build/diagnostics/fexcore-upstream/FEXCore/include/FEXCore/Utils/WritePriorityMutex.h")
+          s = p.read_text()
+          s = s.replace("#if !defined(_WIN32)\n#include <linux/futex.h>", "#if defined(__APPLE__)\n// Darwin uses C++20 atomic wait/notify below.\n#elif !defined(_WIN32)\n#include <linux/futex.h>", 1)
+          start = s.index("private:\n\n#if !defined(_WIN32)\n  void FutexWaitForWriteAvailable")
+          insert = """private:
+
+          #if defined(__APPLE__)
+            void FutexWaitForWriteAvailable(uint32_t expected) {
+              std::atomic_ref<uint32_t>(Futex).wait(expected, std::memory_order_relaxed);
+            }
+            void FutexWaitForReadAvailable(uint32_t expected) {
+              std::atomic_ref<uint32_t>(Futex).wait(expected, std::memory_order_relaxed);
+            }
+            void FutexWakeWriter() {
+              std::atomic_ref<uint32_t>(Futex).notify_all();
+            }
+            void FutexWakeReaders() {
+              std::atomic_ref<uint32_t>(Futex).notify_all();
+            }
+          #elif !defined(_WIN32)"""
+          s = s[:start] + s[start:].replace("private:\n\n#if !defined(_WIN32)", insert, 1)
+          p.write_text(s)
+          PY
+
       - name: Probe real AetherPS4 guest engine and CPU compilation for iOS
         shell: bash
         run: |
@@ -643,33 +675,6 @@ jobs:
           UNORDERED="build/diagnostics/unordered-dense-upstream"
           test -s "$UNORDERED/include/ankerl/unordered_dense.h"
           test "$(git -C "$UNORDERED" rev-parse HEAD)" = "3234af2c03549bc85656bfd3a86993bf1cd8aef1"
-          # Experimental Darwin adaptation of FEXCore Linux futex mutex, compile probe only.
-          # C++20 atomic wait/notify keeps sleeping threads off a busy spin loop.
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("build/diagnostics/fexcore-upstream/FEXCore/include/FEXCore/Utils/WritePriorityMutex.h")
-          s = p.read_text()
-          s = s.replace("#if !defined(_WIN32)\n#include <linux/futex.h>", "#if defined(__APPLE__)\n// Darwin uses C++20 atomic wait/notify below.\n#elif !defined(_WIN32)\n#include <linux/futex.h>", 1)
-          start = s.index("private:\n\n#if !defined(_WIN32)\n  void FutexWaitForWriteAvailable")
-          insert = """private:
-
-          #if defined(__APPLE__)
-            void FutexWaitForWriteAvailable(uint32_t expected) {
-              std::atomic_ref<uint32_t>(Futex).wait(expected, std::memory_order_relaxed);
-            }
-            void FutexWaitForReadAvailable(uint32_t expected) {
-              std::atomic_ref<uint32_t>(Futex).wait(expected, std::memory_order_relaxed);
-            }
-            void FutexWakeWriter() {
-              std::atomic_ref<uint32_t>(Futex).notify_all();
-            }
-            void FutexWakeReaders() {
-              std::atomic_ref<uint32_t>(Futex).notify_all();
-            }
-          #elif !defined(_WIN32)"""
-          s = s[:start] + s[start:].replace("private:\n\n#if !defined(_WIN32)", insert, 1)
-          p.write_text(s)
-          PY
           # Generate IR instruction definitions and dispatch tables from upstream IR.json.
           mkdir -p build/diagnostics/fexcore-generated/FEXCore/IR
           python3 "$FEX/FEXCore/Scripts/json_ir_generator.py" \
@@ -1514,12 +1519,15 @@ jobs:
           ICON="build/OriginalAppIcon.jpg"
           # Prefer the user's exact unmodified JPEG when it has been
           # uploaded to the repository. Never redraw or regenerate the logo.
-          if test -s MaxPS4-iOS/Resources/MaxPS4ExactIcon.jpeg; then
+          if test -s MaxPS4-iOS/Resources/MaxPS4ExactIcon.png; then
+            cp MaxPS4-iOS/Resources/MaxPS4ExactIcon.png "$ICON"
+            echo "ICON_SOURCE=exact-user-PNG"
+          elif test -s MaxPS4-iOS/Resources/MaxPS4ExactIcon.jpeg; then
             cp MaxPS4-iOS/Resources/MaxPS4ExactIcon.jpeg "$ICON"
             echo "ICON_SOURCE=exact-user-JPEG"
           else
             python3 -c 'import base64,pathlib; pathlib.Path("build/OriginalAppIcon.jpg").write_bytes(base64.b64decode(pathlib.Path("MaxPS4-iOS/Resources/OriginalAppIcon.base64").read_text()))'
-            echo "ICON_SOURCE=existing-logo (awaiting exact JPEG upload)"
+            echo "ICON_SOURCE=existing-logo (awaiting exact user image upload)"
           fi
           APP="build/Payload/MaxPS4.app"
           test -s "$ICON"
@@ -1527,7 +1535,7 @@ jobs:
           build/icon-venv/bin/python -m pip install --quiet pillow
           build/icon-venv/bin/python - <<'PY'
           from PIL import Image, ImageFile
-          # Prefer the original logo, but do not block IPA builds on a damaged JPEG.
+          # Fail instead of silently shipping a different icon when the exact user PNG is present.
           from PIL import ImageDraw, ImageFont, UnidentifiedImageError
           ImageFile.LOAD_TRUNCATED_IMAGES = True
           try:
@@ -1537,6 +1545,9 @@ jobs:
                   raise ValueError(f"Source logo is too small: {icon.size}")
               print("ICON_SOURCE=original")
           except (UnidentifiedImageError, OSError, ValueError) as error:
+              from pathlib import Path
+              if Path("MaxPS4-iOS/Resources/MaxPS4ExactIcon.png").exists():
+                  raise RuntimeError(f"Exact MaxPS4 PNG could not be decoded: {error}") from error
               print(f"::warning::Original AppIcon.jpg cannot be decoded ({error}); using temporary MaxPS4 icon")
               icon = Image.new("RGB", (1024, 1024), (15, 20, 40))
               draw = ImageDraw.Draw(icon)
