@@ -1441,8 +1441,21 @@ jobs:
             else
               echo "BLOCKED ${component}: unresolved link dependencies" \
                 | tee -a build/diagnostics/aether-module-link-status.txt
-              grep -m 6 -E 'error:|Undefined symbols|undefined symbol|duplicate symbol' \
-                "build/diagnostics/aether-link-${component}.log" || true
+              # Capture the symbol list, not just the generic clang exit code.
+              python3 - "$component" <<'PY'
+          import pathlib, re, sys
+          component = sys.argv[1]
+          log = pathlib.Path(f"build/diagnostics/aether-link-{component}.log").read_text(errors="replace")
+          lines = log.splitlines()
+          headers = ("Undefined symbols", "duplicate symbol", "ld:", "clang: error:")
+          filtered = [line for line in lines if line.lstrip().startswith(headers) or
+                      "referenced from:" in line or re.match(r'^\s{2,}["\']?_[\w.$]+', line)]
+          output = "\n".join(filtered[:80]) or "\n".join(lines[-50:])
+          path = pathlib.Path(f"build/diagnostics/aether-link-{component}-symbols.txt")
+          path.write_text(output + "\n")
+          print(f"LINK_DIAGNOSTICS {component}: {len(filtered)} relevant linker lines")
+          print(output[:2400])
+          PY
             fi
             rm -f "$OUTPUT"
           done
