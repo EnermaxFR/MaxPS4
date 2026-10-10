@@ -1453,7 +1453,15 @@ jobs:
         run: |
           set -e
           ICON="build/OriginalAppIcon.jpg"
-          python3 -c 'import base64,pathlib; pathlib.Path("build/OriginalAppIcon.jpg").write_bytes(base64.b64decode(pathlib.Path("MaxPS4-iOS/Resources/OriginalAppIcon.base64").read_text()))'
+          # Prefer the user's exact unmodified JPEG when it has been
+          # uploaded to the repository. Never redraw or regenerate the logo.
+          if test -s MaxPS4-iOS/Resources/MaxPS4ExactIcon.jpeg; then
+            cp MaxPS4-iOS/Resources/MaxPS4ExactIcon.jpeg "$ICON"
+            echo "ICON_SOURCE=exact-user-JPEG"
+          else
+            python3 -c 'import base64,pathlib; pathlib.Path("build/OriginalAppIcon.jpg").write_bytes(base64.b64decode(pathlib.Path("MaxPS4-iOS/Resources/OriginalAppIcon.base64").read_text()))'
+            echo "ICON_SOURCE=existing-logo (awaiting exact JPEG upload)"
+          fi
           APP="build/Payload/MaxPS4.app"
           test -s "$ICON"
           python3 -m venv build/icon-venv
