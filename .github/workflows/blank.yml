@@ -787,6 +787,20 @@ jobs:
           else
             echo "BLOCKED FEXCore CPUBackend.cpp port; inspect compiler output" \
               | tee build/diagnostics/fexcore-cpu-backend-status.txt
+            # Surface the first actionable compiler errors in the Actions log and summary.
+            echo "::group::FEXCore CPUBackend.cpp compiler errors"
+            grep -m 15 -E 'fatal error:|error:' \
+              build/diagnostics/fexcore-cpu-backend-compile.log || \
+              tail -30 build/diagnostics/fexcore-cpu-backend-compile.log
+            echo "::endgroup::"
+            {
+              echo "### FEXCore CPUBackend.cpp porting blockers"
+              echo '~~~text'
+              grep -m 15 -E 'fatal error:|error:' \
+                build/diagnostics/fexcore-cpu-backend-compile.log || \
+                tail -30 build/diagnostics/fexcore-cpu-backend-compile.log
+              echo '~~~'
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
           # Discover and compile real upstream emitter/cache translation units.
           # Compilation is exploratory: unresolved runtime dependencies remain
