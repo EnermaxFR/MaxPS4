@@ -1735,6 +1735,15 @@ jobs:
           : > build/diagnostics/aether-module-link-status.txt
           for component in "${AETHER_MODULES[@]}"; do
             candidate="build/diagnostics/aether-full-engine/${component}.o"
+            # Prefer the real guest engine built against the matching Darwin
+            # FEXCore headers. The generic-header probe is known to fail on
+            # six Darwin-only JIT APIs and must not block this link audit.
+            if test "$component" = "fex_guest_engine" &&
+                test -s build/diagnostics/aether-full-engine/fex_guest_engine-darwin-fex.o; then
+              candidate="build/diagnostics/aether-full-engine/fex_guest_engine-darwin-fex.o"
+              echo "LINK_PROBE: using matching Darwin FEXCore guest engine object" \
+                | tee -a build/diagnostics/aether-module-link-status.txt
+            fi
             if ! test -s "$candidate"; then
               echo "BLOCKED ${component}: compiler object unavailable" \
                 | tee -a build/diagnostics/aether-module-link-status.txt
