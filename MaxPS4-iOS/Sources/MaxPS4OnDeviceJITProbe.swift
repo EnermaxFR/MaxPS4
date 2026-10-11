@@ -105,6 +105,29 @@ enum MaxPS4OnDeviceJITProbe {
         """
     }
 
+    // Session marker is intentionally local: it cannot attest to debugserver attachment.
+    private static let diagnosticSessionID = UUID().uuidString
+
+    private static func relaunchObservation() -> String {
+        let defaults = UserDefaults.standard
+        let key = "maxps4.jitPreflight.previousSession"
+        let previous = defaults.string(forKey: key)
+        defaults.set(diagnosticSessionID, forKey: key)
+        let sessionChanged = previous.map { $0 != diagnosticSessionID }
+        let sessionText: String
+        switch sessionChanged {
+        case .some(true): sessionText = "Nouvelle session de processus depuis le dernier diagnostic"
+        case .some(false): sessionText = "Même session de processus que le dernier diagnostic"
+        case .none: sessionText = "Première observation enregistrée"
+        }
+        return """
+        PID du processus actuel : \(ProcessInfo.processInfo.processIdentifier)
+        Session depuis dernier diagnostic : \(sessionText)
+        Temps écoulé depuis démarrage du système : \(Int(ProcessInfo.processInfo.systemUptime)) s
+        Note : une nouvelle session ne prouve ni un crash ni un attachement StikDebug.
+        """
+    }
+
     // Read-only preflight: does not issue BRK, map executable pages or call the allocator.
     static func stikAllocatorPreflightReport() -> String {
         let integrated = maxps4StikDualMapPortPresent() == 1
@@ -134,6 +157,7 @@ enum MaxPS4OnDeviceJITProbe {
             : "Vérifier la connexion debugserver à MaxPS4 dans StikDebug; ne pas lancer BRK"
         return """
         Précontrôle allocateur AetherPS4 / StikDebug (sans BRK)
+        \(relaunchObservation())
         Code dual-mapping compilé : \(integrated ? "Oui" : "Non")
         État signature : \(debugSigning)
         État du débogueur : \(debugger)
@@ -146,6 +170,7 @@ enum MaxPS4OnDeviceJITProbe {
         Protocole source StikDebug : BRK #0xf00d, commande x16=1, arguments x0=0 / x1=taille
         Compatibilité statique : Commande et paramètres concordants avec StikDebug/Scripts/universal.js
         Réponse du serveur debugserver : Non vérifiée (aucune commande envoyée)
+        Important : P_TRACED absent ne prouve pas à lui seul que StikDebug a échoué.
         Universal JIT Script attaché : Non vérifiable par ce test
         Allocation RX via StikDebug : Non tentée
         Alias RW via vm_remap : \(rwAliasWorks ? "Validé en RW/RW (sans RX)" : "Non validé")
