@@ -1353,17 +1353,24 @@ jobs:
           # Adjust only the ephemeral checkout; do not ship fake Linux
           # structures or pretend that prctl/syscalls are implemented.
           FEX_PRCTL="$FEX/FEXCore/include/FEXCore/Utils/PrctlUtils.h"
-          if test -s "$FEX_PRCTL" && grep -Fq '#include <sys/user.h>' "$FEX_PRCTL"; then
+          if test -s "$FEX_PRCTL"; then
             python3 - "$FEX_PRCTL" <<'PY'
           from pathlib import Path
           import sys
           target = Path(sys.argv[1])
           original = target.read_text()
-          old = '#include <sys/user.h>'
-          assert original.count(old) == 1
-          target.write_text(original.replace(old,
-              '#if !defined(__APPLE__)\n#include <sys/user.h>\n#endif'))
-          print("Darwin probe skips Linux sys/user.h; other dependencies remain strict")
+          # Pinned revisions of FEXCore use one or both Linux-only
+          # includes. Darwin has neither sys/prctl.h nor sys/user.h.
+          # Keep upstream constants and all actual runtime references.
+          patched = original
+          for header in ("sys/prctl.h", "sys/user.h"):
+              old = f"#include <{header}>"
+              if old in patched:
+                  patched = patched.replace(old,
+                      f"#if !defined(__APPLE__)\n{old}\n#endif")
+          if patched != original:
+              target.write_text(patched)
+              print("FEXCore Darwin compile probe: guarded Linux-only headers")
           PY
           fi
           # Compile the real CPUBackend implementation required by JIT.cpp.
