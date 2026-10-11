@@ -198,8 +198,10 @@ jobs:
               -I "$FEX/FEXCore/Source" \
               -I "$FEX/Source" -I "$FEX/CodeEmitter" -I "$FEX/FEXHeaderUtils" \
               -I "MaxPS4-iOS/Native/compat/fex_ios" \
-              -fsyntax-only "$SRC" > "$LOG" 2>&1; then
-            echo "PASS actual patched FEXCore MiscOps.cpp iOS ARM64 syntax compilation" | tee build/heavy/fexcore/miscops-ios-status.txt
+              -c "$SRC" -o build/heavy/fexcore/miscops-ios-arm64.o > "$LOG" 2>&1; then
+            test -s build/heavy/fexcore/miscops-ios-arm64.o
+            xcrun lipo -archs build/heavy/fexcore/miscops-ios-arm64.o | grep -qw arm64
+            echo "PASS actual patched FEXCore MiscOps.cpp iOS ARM64 object compilation" | tee build/heavy/fexcore/miscops-ios-status.txt
           else
             echo "BLOCKED actual FEXCore MiscOps.cpp iOS ARM64 syntax compilation; inspect log" | tee build/heavy/fexcore/miscops-ios-status.txt
             head -60 "$LOG"
@@ -261,6 +263,7 @@ jobs:
             build/heavy/fexcore/darwin-linux-compat-summary.txt
             build/heavy/fexcore/miscops-ios-compile.log
             build/heavy/fexcore/miscops-ios-status.txt
+            build/heavy/fexcore/miscops-ios-arm64.o
           if-no-files-found: ignore
 
   shadps4-hle:
