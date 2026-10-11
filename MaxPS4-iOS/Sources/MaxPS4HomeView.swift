@@ -1260,6 +1260,17 @@ struct MaxPS4HomeView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.cyan)
+                Button {
+                    emulator.status = MaxPS4OnDeviceJITProbe.stikAllocatorPreflightReport()
+                } label: {
+                    Label("Diagnostiquer StikDebug / mémoire JIT (sans BRK)", systemImage: "memorychip")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.cyan)
+                Text("Précontrôle uniquement : aucun JIT FEXCore ni jeu PS4 exécuté.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Text("Jeu à diagnostiquer")
                     .font(.headline)
                 if emulator.games.isEmpty {
