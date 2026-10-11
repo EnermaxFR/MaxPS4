@@ -9,12 +9,14 @@ struct MaxPS4FEXDiagnostic: Sendable {
     let backend: String
     let details: String
     let elfMemoryBridgePassed: Bool
+    let elfControlFlowPassed: Bool
     var ps4IntegrationReport: String {
         let jit = succeeded && backend == "FEXCore JIT ARM64"
         return [
             "Intégration PS4 — état réel",
             "\(jit ? "✓" : "✗") CPU x86-64 FEXCore JIT : \(jit ? "test synthétique validé" : "non validé")",
             "\(elfMemoryBridgePassed ? "✓" : "✗") Contrôles ELF synthétique + mémoire invitée : \(elfMemoryBridgePassed ? "tests indépendants réussis" : "échec du test")",
+            "\(elfControlFlowPassed ? "✓" : "✗") ELF → mémoire → CPU prototype : \(elfControlFlowPassed ? "exécution synthétique validée" : "non validé")",
             "◌ Chargeur SELF/ELF PS4 : prototype d’analyse, pas de chargement exécutable complet",
             "✗ Mémoire invitée PS4 : non connectée au contexte FEXCore",
             "✗ Appels système et bibliothèques PS4 : non implémentés",
@@ -29,12 +31,14 @@ struct MaxPS4FEXDiagnostic: Sendable {
         let elfMemoryBridgePassed = MaxPS4ELFLoader.importDemoSelfTest() &&
             MaxPS4GuestMemory.isolationSelfTest() &&
             MaxPS4GuestMemory.wordAccessSelfTest()
+        let elfControlFlowPassed = MaxPS4ELFLoader.controlFlowIntegrationTest()
         var engine: OpaquePointer?
         let opened = maxps4_fex_engine_open(&engine)
         guard opened == 0, let engine else {
             return Self(succeeded: false, result: nil, backend: "Aucun",
                         details: "Création du contexte FEX : erreur \(opened).",
-                        elfMemoryBridgePassed: elfMemoryBridgePassed)
+                        elfMemoryBridgePassed: elfMemoryBridgePassed,
+                        elfControlFlowPassed: elfControlFlowPassed)
         }
         var needsClose = true
         defer { if needsClose { maxps4_fex_engine_close(engine) } }
@@ -102,7 +106,8 @@ struct MaxPS4FEXDiagnostic: Sendable {
 #else
         return Self(succeeded: false, result: nil, backend: "Aucun",
                     details: "Cette ancienne configuration ne contient pas FEXCore. Utiliser la compilation MaxPS4 FEXCore SideStore.",
-                    elfMemoryBridgePassed: false)
+                    elfMemoryBridgePassed: false,
+                    elfControlFlowPassed: false)
 #endif
     }
 }
