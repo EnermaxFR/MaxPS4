@@ -1362,7 +1362,7 @@ jobs:
           old = '#include <sys/user.h>'
           assert original.count(old) == 1
           target.write_text(original.replace(old,
-              '#if !defined(__APPLE__)\\n#include <sys/user.h>\\n#endif'))
+              '#if !defined(__APPLE__)\n#include <sys/user.h>\n#endif'))
           print("Darwin probe skips Linux sys/user.h; other dependencies remain strict")
           PY
           fi
