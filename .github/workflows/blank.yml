@@ -135,6 +135,11 @@ jobs:
             brew install boost
           fi
           test -f "$(brew --prefix boost)/include/boost/asio/steady_timer.hpp"
+          # Use actual upstream magic_enum headers required by shadPS4 IME HLE.
+          MAGIC_ENUM="$RUNNER_TEMP/maxps4-magic_enum"
+          git clone --quiet --depth 1 --branch v0.9.7 \
+            https://github.com/Neargye/magic_enum.git "$MAGIC_ENUM"
+          test -f "$MAGIC_ENUM/include/magic_enum/magic_enum.hpp"
           test -s "$SHAD/src/core/libraries/libs.cpp"
           # This is an actual upstream translation unit, not the existing
           # small shadPS4 utility bridge. It is a non-shipping porting probe.
@@ -143,6 +148,7 @@ jobs:
                -I "$SHAD/src" \
                -I "$(brew --prefix fmt)/include" \
                -I "$(brew --prefix boost)/include" \
+               -I "$MAGIC_ENUM/include" \
                -fsyntax-only "$SHAD/src/core/libraries/libs.cpp" \
                > "$OUT/hle-library-registry-ios.log" 2>&1; then
             echo "PASS real shadPS4 HLE library registry compiles for iOS ARM64 (not linked)" \
