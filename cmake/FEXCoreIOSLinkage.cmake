@@ -13,6 +13,7 @@ function(maxps4_complete_fexcore_linkage)
     # One coherent static FEX runtime lives inside this native library. No
     # generic headers/objects or second FEX shared ABI are loaded alongside it.
     add_library(MaxPS4FEXRuntime SHARED
+      "${NATIVE}/maxps4_jit_memory.cpp"
       "${NATIVE}/maxps4_fex_runtime.cpp"
       "${NATIVE}/maxps4_native.cpp"
       "${NATIVE}/aether_jit_allocator_abi.cpp"
