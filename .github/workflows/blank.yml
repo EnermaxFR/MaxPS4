@@ -1348,6 +1348,24 @@ jobs:
             jit_ops_index=$((jit_ops_index + 1))
           done < build/diagnostics/fexcore-jit-extra-ops-sources.txt
           cat build/diagnostics/fexcore-jit-extra-ops-status.txt
+          # FEXCore's pinned Linux utility header includes Linux-only
+          # <sys/user.h> even though the iOS probe uses the Darwin SDK.
+          # Adjust only the ephemeral checkout; do not ship fake Linux
+          # structures or pretend that prctl/syscalls are implemented.
+          FEX_PRCTL="$FEX/FEXCore/include/FEXCore/Utils/PrctlUtils.h"
+          if test -s "$FEX_PRCTL" && grep -Fq '#include <sys/user.h>' "$FEX_PRCTL"; then
+            python3 - "$FEX_PRCTL" <<'PY'
+          from pathlib import Path
+          import sys
+          target = Path(sys.argv[1])
+          original = target.read_text()
+          old = '#include <sys/user.h>'
+          assert original.count(old) == 1
+          target.write_text(original.replace(old,
+              '#if !defined(__APPLE__)\n#include <sys/user.h>\n#endif'))
+          print("Darwin probe skips Linux sys/user.h; other dependencies remain strict")
+          PY
+          fi
           # Compile the real CPUBackend implementation required by JIT.cpp.
           # Do not fabricate missing symbols or bundle unverified code.
           CPU_BACKEND="$FEX/FEXCore/Source/Interface/Core/CPUBackend.cpp"
@@ -1380,6 +1398,8 @@ jobs:
           matches = sorted(
               str(p) for p in base.rglob("*.cpp")
               if any(name in p.stem.lower() for name in names)
+              # Never compile the Windows-only ntstatus.h dependency for iOS.
+              and "Windows" not in p.parts
           ) if base.exists() else []
           Path("build/diagnostics/fexcore-missing-components.txt").write_text(
               "\n".join(matches) + ("\n" if matches else
