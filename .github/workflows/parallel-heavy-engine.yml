@@ -60,6 +60,30 @@ jobs:
           print("PASS pinned FEXCore ProcessorID Darwin patch applies")
           print("Source check only; this does not compile or execute the JIT")
           PY
+      - name: Probe genuine patched FEXCore MiscOps with iOS ARM64 compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          FEX="build/heavy/fexcore/source"
+          SRC="$FEX/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp"
+          LOG="build/heavy/fexcore/miscops-ios-compile.log"
+          # The preceding job step applies the exact ProcessorID Darwin patch.
+          # A compiler probe, not a fake runtime simulation: missing generated
+          # headers or dependencies must be reported rather than stubbed.
+          if xcrun --sdk iphoneos clang++ -std=c++23 \
+              -target arm64-apple-ios16.0 -isysroot "$SDK" \
+              -DARCHITECTURE_arm64=1 -DMADV_HUGEPAGE=0 -DMADV_NOHUGEPAGE=0 \
+              -I "$FEX/FEXCore/include" \
+              -I "$FEX/FEXCore/Source" \
+              -I "$FEX/Source" -I "$FEX/CodeEmitter" -I "$FEX/FEXHeaderUtils" \
+              -I "MaxPS4-iOS/Native/compat/fex_ios" \
+              -fsyntax-only "$SRC" > "$LOG" 2>&1; then
+            echo "PASS actual patched FEXCore MiscOps.cpp iOS ARM64 syntax compilation" | tee build/heavy/fexcore/miscops-ios-status.txt
+          else
+            echo "BLOCKED actual FEXCore MiscOps.cpp iOS ARM64 syntax compilation; inspect log" | tee build/heavy/fexcore/miscops-ios-status.txt
+            head -60 "$LOG"
+          fi
       - name: Audit Linux-specific dependencies blocking iOS FEXCore port
         shell: bash
         run: |
@@ -112,6 +136,8 @@ jobs:
             build/heavy/fexcore/jit-units.txt
             build/heavy/fexcore/darwin-linux-compat-audit.json
             build/heavy/fexcore/darwin-linux-compat-summary.txt
+            build/heavy/fexcore/miscops-ios-compile.log
+            build/heavy/fexcore/miscops-ios-status.txt
           if-no-files-found: ignore
 
   shadps4-hle:
