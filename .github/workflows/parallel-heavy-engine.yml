@@ -102,6 +102,9 @@ jobs:
           else
             echo "BLOCKED actual FEXCore MiscOps.cpp iOS ARM64 syntax compilation; inspect log" | tee build/heavy/fexcore/miscops-ios-status.txt
             head -60 "$LOG"
+            # Keep reporting failures accurately. Previously this branch
+            # ended successfully and misleadingly painted the job green.
+            exit 1
           fi
       - name: Audit Linux-specific dependencies blocking iOS FEXCore port
         shell: bash
