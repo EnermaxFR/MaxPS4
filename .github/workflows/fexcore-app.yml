@@ -39,6 +39,9 @@ jobs:
           bash scripts/build-fexcore-darwin-ios.sh build/aether-app build/fex-app-host --host-runtime
           swiftc -parse-as-library -D MAXPS4_FEX_APP \
             -import-objc-header MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h \
+            MaxPS4-iOS/Sources/MaxPS4GuestMemory.swift \
+            MaxPS4-iOS/Sources/MaxPS4ELFLoader.swift \
+            MaxPS4-iOS/Sources/MaxPS4CPUPrototype.swift \
             MaxPS4-iOS/Sources/MaxPS4FEXDiagnostic.swift MaxPS4-iOS/Tests/FEXSwiftDiagnosticTest.swift \
             -L build/fex-app-host -lMaxPS4FEXRuntime \
             -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" \
