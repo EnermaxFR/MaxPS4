@@ -31,6 +31,8 @@ std::array<Region, 3> regions {};
 std::mutex lock;
 uint64_t expected_nonce = 0;
 int state = 0, failure = 0;
+int failure_stage = 0, failure_mach = 0, failure_region = -1;
+int active_region = -1;
 size_t page_size = 0;
 
 bool protection(uintptr_t address, size_t bytes, vm_prot_t required) {
@@ -104,6 +106,11 @@ int execute_canary(uintptr_t address) {
     return error;
 }
 int reject_stage(int error, const char* stage, kern_return_t kr = KERN_SUCCESS) {
+    static constexpr const char* stages[] = {"mailbox-status", "rx-address-validation", "rx-address-overlap", "rx-protection-check", "vm-remap", "rw-current-protection", "rw-max-protection", "rx-max-protection", "alias-protection-check", "code-cache-guard-page", "canary-alias-coherence", "canary-execution"};
+    failure_stage = 0;
+    for (int i = 0; i < 12; ++i) if (std::strcmp(stage, stages[i]) == 0) { failure_stage = i + 1; break; }
+    failure_mach = kr;
+    failure_region = active_region;
     os_log_error(OS_LOG_DEFAULT, "MaxPS4 JIT memory rejected at %{public}s: errno=%{public}d kern_return=%{public}d", stage, error, kr);
 
     destroy_regions();
@@ -157,6 +164,7 @@ extern "C" int32_t maxps4_jit_prepare() {
         regions[i] = {0, rx, sizes[i], false};
     }
     for (auto& region : regions) {
+        active_region = static_cast<int>(&region - regions.data());
         if (!protection(region.rx, region.size, VM_PROT_READ | VM_PROT_EXECUTE)) return reject_stage(EACCES, "rx-protection-check");
         vm_address_t rw = 0;
         vm_prot_t current = 0, maximum = 0;
@@ -208,6 +216,9 @@ extern "C" int32_t maxps4_jit_cancel() {
 }
 extern "C" int32_t maxps4_jit_state() { std::lock_guard guard(lock); return state; }
 extern "C" int32_t maxps4_jit_error() { std::lock_guard guard(lock); return failure; }
+extern "C" int32_t maxps4_jit_failure_stage() { std::lock_guard guard(lock); return failure_stage; }
+extern "C" int32_t maxps4_jit_failure_mach() { std::lock_guard guard(lock); return failure_mach; }
+extern "C" int32_t maxps4_jit_failure_region() { std::lock_guard guard(lock); return failure_region; }
 extern "C" void* maxps4_jit_allocate(size_t size) {
     std::lock_guard guard(lock);
     if (state != 2) { errno = EACCES; return nullptr; }
@@ -253,5 +264,8 @@ extern "C" int32_t maxps4_jit_prepare() { return -ENOTSUP; }
 extern "C" int32_t maxps4_jit_cancel() { return 0; }
 extern "C" int32_t maxps4_jit_state() { return 0; }
 extern "C" int32_t maxps4_jit_error() { return 0; }
+extern "C" int32_t maxps4_jit_failure_stage() { return 0; }
+extern "C" int32_t maxps4_jit_failure_mach() { return 0; }
+extern "C" int32_t maxps4_jit_failure_region() { return -1; }
 extern "C" uint32_t maxps4_jit_leases() { return 0; }
 #endif
