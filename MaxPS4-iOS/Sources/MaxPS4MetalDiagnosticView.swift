@@ -124,7 +124,7 @@ struct MaxPS4MetalDiagnosticView: View {
                             Text("Texture").tag(true)
                         }
                         .pickerStyle(.segmented)
-                        .onChange(of: textured) { _, _ in status = "Changement de mode Metal…" }
+                        .onChange(of: textured) { _ in status = "Changement de mode Metal…" }
                         TriangleSurface(device: device,
                             active: running && visible && scenePhase == .active && !failed,
                             textured: textured) { message, error in
