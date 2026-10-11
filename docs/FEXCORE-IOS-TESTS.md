@@ -99,3 +99,33 @@ par le code Darwin de gestion du cache. Ajouter seulement des déclarations,
 des traductions identitaires ou des callbacks vides au générique ne respecte pas
 ce contrat. Il faudra compiler/relier **l'ensemble Darwin correspondant** avant de
 l'intégrer à GuestEngine ; la sonde ABI ne le fait pas.
+
+## Résultat vérifié des corrections de liaison
+
+Sur le commit `45a9930bae918606dc967999a7b6dffbd5b65ae1`, le
+[run 38126286849](https://github.com/EnermaxFR/MaxPS4/actions/runs/38126286849)
+compile les **20 objets iOS ARM64** (12 initiaux + 8 dépendances). Les tests de
+#125, le nouveau test de l'allocateur Darwin et la sonde des six signatures
+Darwin réussissent. Le
+[run 38126286846](https://github.com/EnermaxFR/MaxPS4/actions/runs/38126286846)
+valide aussi ABI CPU, pont natif, frontend Swift et traduction/repli interpréteur.
+
+L'inventaire avant/après résout **43 références** et révèle **42 dépendances
+transitives supplémentaires**, soit 120 imports restants : **102 imports du SDK**
+et **18 symboles FEXCore**. La vraie liaison stricte résout les imports du SDK et
+échoue précisément sur ces 18 symboles :
+
+| Symboles effectivement manquants au linker | Nombre | Propriétaire à porter/compiler |
+| --- | ---: | --- |
+| `Config::Value<bool>::GetIfExists`, `Config::Value<uint64_t>::GetIfExists` | 2 | `Interface/Config/Config.cpp` |
+| `Config::detail::{HIDEHYBRID,DISABLEL2CACHE,DYNAMICL1CACHE,HIDEHYPERVISORBIT,ENABLECODECACHINGWIP,DYNAMICL1CACHEDECREASECOUNTHEURISTIC,DYNAMICL1CACHEINCREASECOUNTHEURISTIC}` | 7 | `Interface/Config/Config.cpp` et ses données générées |
+| `ContextImpl::{CompileBlock,ClearCodeCache,MonoBackpatcherWrite,ThreadRemoveCodeEntryFromJit}` | 4 | `Interface/Context/Context.cpp`, `Interface/Core/Core.cpp` et leur runtime |
+| `Allocator::{VirtualName,mmap,munmap}` | 3 | `Utils/Allocator.cpp` et son backend de mémoire virtuelle Darwin |
+| `CPU::InterpreterOps::GetFallbackHandler` | 1 | `Interface/Core/Interpreter/Fallbacks/InterpreterFallbacks.cpp` et ses dépendances |
+| `Telemetry::TelemetryValues` | 1 | `Utils/Telemetry.cpp` et ses dépendances |
+
+Les noms exacts/signatures, les objets demandeurs et l'erreur du linker sont
+conservés dans `strict-link.log`, dans l'artefact `heavy-fexcore-source-inventory`
+du run ci-dessus. `link-report.json` contient aussi les 120 imports agrégés et
+leurs propriétaires candidats. Ces 18 blocages subsistent ; ils n'ont pas été
+supprimés par des symboles factices ou par une option permissive du linker.
