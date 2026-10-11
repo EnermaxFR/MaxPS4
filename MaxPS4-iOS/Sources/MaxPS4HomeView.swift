@@ -1260,6 +1260,15 @@ struct MaxPS4HomeView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.cyan)
+                Button {
+                    showingFEXDiagnostic = true
+                } label: {
+                    Label("Tester FEXCore", systemImage: "cpu.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cyan)
+                .accessibilityIdentifier("maxps4.testFEXCore")
                 Text("Jeu à diagnostiquer")
                     .font(.headline)
                 if emulator.games.isEmpty {
