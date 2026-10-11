@@ -754,7 +754,8 @@ jobs:
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           if xcrun --sdk iphoneos clang++ -std=c++23 \
                -target arm64-apple-ios16.0 -isysroot "$SDK" \
-               -DFMT_HEADER_ONLY=1 -DMADV_HUGEPAGE=0 -DMADV_NOHUGEPAGE=0 \
+               -DARCHITECTURE_arm64=1 -DFMT_HEADER_ONLY=1 \
+               -DMADV_HUGEPAGE=0 -DMADV_NOHUGEPAGE=0 \
                -I "$ROOT/src" \
                -I "$OUT/fex-config-generated" \
                -I "$FEX" -I "$FEX/FEXCore/include" \
