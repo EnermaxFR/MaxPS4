@@ -94,6 +94,11 @@ if [[ "$RUNTIME" == ON ]]; then
     exit 1
   fi
   if [[ "$SYSTEM" == Darwin ]]; then
-    "$OUT/Bin/maxps4-fex-runtime-test" | tee "$OUT/runtime-tests.txt"
+    if ! "$OUT/Bin/maxps4-fex-runtime-test" 2>&1 | tee "$OUT/runtime-tests.txt"; then
+      xcrun lldb --batch -o run -o 'thread backtrace all' \
+        -- "$OUT/Bin/maxps4-fex-runtime-test" > "$OUT/runtime-backtrace.txt" 2>&1 || true
+      cat "$OUT/runtime-backtrace.txt"
+      exit 1
+    fi
   fi
 fi

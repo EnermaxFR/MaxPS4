@@ -6,6 +6,8 @@
 #include <cstring>
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); return 1; } } while (0)
 int main() {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    std::puts("BEGIN native ABI and real FEX context lifecycle test");
     CHECK(maxps4_fex_engine_open(nullptr) == -EINVAL);
     CHECK(maxps4_fex_engine_stage(nullptr) == 0);
     maxps4_fex_engine_close(nullptr);
@@ -14,6 +16,7 @@ int main() {
     CHECK(maxps4_native_aether_cpu_probe() == 1);
     for (unsigned repeat = 0; repeat != 3; ++repeat) {
         maxps4_fex_engine *first = nullptr, *second = nullptr;
+        std::printf("OPEN contexts cycle=%u\n", repeat);
         CHECK(maxps4_fex_engine_open(&first) == 0 && first);
         CHECK(maxps4_fex_engine_open(&second) == 0 && second);
         CHECK(maxps4_fex_engine_stage(first) == MAXPS4_FEX_CONTEXT_CREATED);
