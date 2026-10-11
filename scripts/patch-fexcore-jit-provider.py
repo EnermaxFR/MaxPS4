@@ -34,7 +34,7 @@ NEW_BACKEND = '''#elif defined(__APPLE__) && TARGET_OS_IPHONE
     // MaxPS4 authorized debugger region provider: native 16 KiB write guard
     // is installed before initialization; no late RX request after detach.
     Ptr = static_cast<uint8_t*>(FEXCore::Allocator::VirtualAlloc(Size, true));
-    if (!Ptr || Ptr == reinterpret_cast<void*>(-1)) throw std::bad_alloc {};
+    LOGMAN_THROW_A_FMT(Ptr && Ptr != reinterpret_cast<void*>(-1), "Couldn't allocate iOS JIT code buffer");
 #else
     Ptr = static_cast<uint8_t*>(FEXCore::Allocator::VirtualAlloc(Size, true));
     LOGMAN_THROW_A_FMT(!!Ptr, "Couldn't allocate code buffer");'''
