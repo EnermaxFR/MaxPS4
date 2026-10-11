@@ -183,6 +183,7 @@ jobs:
             -I "$OUT/unordered-dense/include" \
             -I "$FEX/FEXCore/include" -I "$FEX/FEXCore/Source" \
             -I "$FEX/FEXHeaderUtils" \
+            -I MaxPS4-iOS/Native/compat/fex_ios \
             MaxPS4-iOS/Tests/FEXDarwinPrimitivesTest.cpp \
             -o "$OUT/darwin-primitives-test"
           python3 - <<'PY'
