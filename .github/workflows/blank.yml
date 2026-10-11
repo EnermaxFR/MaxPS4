@@ -145,6 +145,13 @@ jobs:
             brew install nlohmann-json
           fi
           test -f "$(brew --prefix nlohmann-json)/include/nlohmann/json.hpp"
+          # Pinned real SDL3 headers, reused later by the AetherPS4 settings probe.
+          SDL3="build/diagnostics/sdl3-upstream"
+          if ! test -s "$SDL3/include/SDL3/SDL_events.h"; then
+            git clone --quiet --filter=blob:none https://github.com/libsdl-org/SDL.git "$SDL3"
+            git -C "$SDL3" checkout --quiet ea3042350d3aac4b83ae83047185ba703d8f0a5c
+          fi
+          test -s "$SDL3/include/SDL3/SDL_events.h"
           test -s "$SHAD/src/core/libraries/libs.cpp"
           # This is an actual upstream translation unit, not the existing
           # small shadPS4 utility bridge. It is a non-shipping porting probe.
@@ -155,6 +162,7 @@ jobs:
                -I "$(brew --prefix boost)/include" \
                -I "$MAGIC_ENUM/include" \
                -I "$(brew --prefix nlohmann-json)/include" \
+               -I "$SDL3/include" \
                -fsyntax-only "$SHAD/src/core/libraries/libs.cpp" \
                > "$OUT/hle-library-registry-ios.log" 2>&1; then
             echo "PASS real shadPS4 HLE library registry compiles for iOS ARM64 (not linked)" \
