@@ -499,7 +499,7 @@ final class MaxPS4Emulator: ObservableObject {
                 overlap = Data(bytes.suffix(8))
             }
             var lines = [
-                "Sonic Mania — diagnostic de ressources PKG",
+                game.name + " — diagnostic de ressources PKG",
                 "Analyse brute en lecture seule : \(scanned) / \(size) octets",
                 "Aucun déchiffrement ni extraction automatique."
             ]
@@ -673,7 +673,7 @@ final class MaxPS4Emulator: ObservableObject {
                 "Type 0x\(String($0.key, radix: 16)) : \($0.value) entrée(s)"
             }
             status = [
-                "Sonic Mania • état du chargeur PS4",
+                game.name + " • état du chargeur PS4",
                 "Index PKG : \(checked)/\(count) entrées dans les bornes ; invalides : \(invalid)",
                 "Entrées vides : \(emptyEntries)",
                 "Types d’entrées PKG (identifiants bruts) :",
@@ -683,7 +683,7 @@ final class MaxPS4Emulator: ObservableObject {
                 "ELF incompatibles : \(incompatibleELF) ; en-têtes incomplets : \(truncatedHeaders)",
                 "ELF avec table de segments déclarée : \(completeELFHeaders) ; sans table exploitable : \(elfWithoutProgramTable)",
                 "Une table déclarée ne prouve ni son accessibilité ni la possibilité de démarrer le jeu.",
-                "Compatibilité Sonic Mania PS4 : bloquée (SELF/ELF exploitable, exécution ARM64, services PS4 et graphismes manquants).",
+                "Compatibilité " + game.name + " PS4 : bloquée (SELF/ELF exploitable, exécution ARM64, services PS4 et graphismes manquants).",
                 "Ce relevé ne déchiffre pas les entrées et ne détecte pas les exécutables imbriqués.",
                 "Un PKG valide n'est pas un binaire exécutable.",
                 "Démarrage : bloqué tant qu'un SELF/ELF exploitable et les services PS4 sont absents."
@@ -748,7 +748,7 @@ final class MaxPS4Emulator: ObservableObject {
                 }
             }
             status = ([
-                "Sonic Mania • inspection des préfixes PKG",
+                game.name + " • inspection des préfixes PKG",
                 "Entrées valides : \(valid)/\(count)",
                 "Lecture maximale : 4096 octets par entrée ; total \(totalRead) octets",
                 "Signatures possibles : \(findings.count)"
@@ -1067,7 +1067,7 @@ final class MaxPS4Emulator: ObservableObject {
                     && tableOffset <= size && count <= (size - tableOffset) / 32
                 let bodyOK = bodyOffset <= size && bodySize <= size - bodyOffset
                 let details = [
-                    "Sonic Mania / PKG PS4 • tentative de démarrage (lecture seule)",
+                    game.name + " / PKG PS4 • tentative de démarrage (lecture seule)",
                     "1/5 ✅ Signature PKG reconnue",
                     "2/5 " + (tableOK ? "✅" : "❌") + " Table d'entrées : " + String(count) + " entrées, offset 0x" + String(tableOffset, radix: 16),
                     "3/5 " + (bodyOK ? "✅" : "❌") + " Zone de données : offset " + String(bodyOffset) + ", taille " + String(bodySize),
