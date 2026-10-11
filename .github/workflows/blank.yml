@@ -782,6 +782,15 @@ jobs:
           set -euo pipefail
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           ROOT="build/diagnostics/aetherps4-upstream"
+          # Use the real toml11 headers required by upstream emulator_settings.cpp.
+          # Keep the dependency isolated to this diagnostic build.
+          TOML11="build/diagnostics/toml11-upstream"
+          if ! test -s "$TOML11/include/toml.hpp"; then
+            git clone --quiet --depth 1 --branch v4.4.0 \
+              https://github.com/ToruNiina/toml11.git "$TOML11"
+          fi
+          test -s "$TOML11/include/toml.hpp"
+          echo "PASS upstream toml11 headers available for emulator settings"
           mkdir -p build/diagnostics/aether-full-engine
           : > build/diagnostics/aether-full-engine/status.txt
           for source in \
@@ -814,6 +823,7 @@ jobs:
                  -I "$(brew --prefix fmt)/include" \
                  -I "$(brew --prefix spdlog)/include" \
                  -I "$(brew --prefix nlohmann-json)/include" \
+                 -I "$TOML11/include" \
                  -I "$(brew --prefix boost)/include" \
                  -I "build/diagnostics/robin-map-upstream/include" \
                  -c "$ROOT/$source" -o "$output" \
