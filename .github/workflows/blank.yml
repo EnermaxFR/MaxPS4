@@ -86,6 +86,37 @@ jobs:
           file build/diagnostics/shadps4-string-util-ios-arm64.o
           xcrun lipo -archs build/diagnostics/shadps4-string-util-ios-arm64.o | grep -w arm64
 
+      - name: Checkout and audit real shadPS4 engine sources for iOS port
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHAD="$GITHUB_WORKSPACE/MaxPS4-iOS/Engine/shadPS4"
+          git clone --quiet --filter=blob:none \
+            https://github.com/shadps4-emu/shadPS4.git "$SHAD"
+          git -C "$SHAD" checkout --quiet 443f022450f6857256e780daa3d5a14029a748f7
+          test -s "$SHAD/src/core/libraries/libs.cpp"
+          test -s "$SHAD/src/video_core/renderer_vulkan/vk_rasterizer.cpp"
+          mkdir -p build/diagnostics/shadps4-porting
+          git -C "$SHAD" rev-parse HEAD \
+            > build/diagnostics/shadps4-porting/upstream-sha.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path("MaxPS4-iOS/Engine/shadPS4")
+          out = Path("build/diagnostics/shadps4-porting/source-audit.txt")
+          paths = ["src/core/libraries/libs.cpp", "src/video_core/renderer_vulkan/vk_rasterizer.cpp", "src/core", "src/video_core"]
+          out.write_text("shadPS4 upstream source audit - not an iOS port or PS4 boot\n" +
+                         "\n".join(f"{p}: {'PRESENT' if (root / p).exists() else 'MISSING'}" for p in paths) + "\n")
+          print(out.read_text())
+          PY
+          echo "PASS pinned upstream shadPS4 sources checked out (porting only)"
+
+      - name: Upload pinned shadPS4 porting audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-shadPS4-porting-audit
+          path: build/diagnostics/shadps4-porting/
+          retention-days: 14
+
       - name: Clone complete pinned AetherPS4 engine into MaxPS4 iOS project
         shell: bash
         run: |
