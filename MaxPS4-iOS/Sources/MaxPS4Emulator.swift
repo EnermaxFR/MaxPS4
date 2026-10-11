@@ -1127,7 +1127,19 @@ final class MaxPS4Emulator: ObservableObject {
                     try cpu.runLoadedTest(memory: loaded.memory, entry: loaded.entry, length: 11)
                     status = "ELF64 de test exécuté ✅ • \(loaded.segments) segments • RAX=\(cpu.rax) • 2 instructions • environnement PS4 réel absent"
                 } else {
-                    status = "ELF64 chargé ✅ • \(loaded.segments) segments • entrée 0x\(String(loaded.entry, radix: 16)) • instructions non reconnues par le prototype : exécution refusée"
+                    // Read the real imported ELF entry point; never execute these bytes.
+                    let entryBytes = try loaded.memory.fetchInstructionBytes(at: loaded.entry, count: 16)
+                    let hex = entryBytes.map { String(format: "%02X", $0) }.joined(separator: " ")
+                    status = [
+                        game.name + " • ELF64 importé : contrôle avant exécution",
+                        "Fichier : " + game.fileName,
+                        "Segments ELF chargés : " + String(loaded.segments),
+                        "Point d’entrée x86-64 : 0x" + String(loaded.entry, radix: 16),
+                        "16 octets au point d’entrée : " + hex,
+                        "Source : exécutable importé, pas un programme synthétique",
+                        "EXÉCUTION BLOQUÉE : backend CPU/HLE PS4 non opérationnel",
+                        "Instructions réelles exécutées : 0"
+                    ].joined(separator: "\n")
                 }
             } else {
                 status = "Essai moteur : format non pris en charge"
