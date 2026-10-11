@@ -94,7 +94,7 @@ jobs:
           # headers or dependencies must be reported rather than stubbed.
           if xcrun --sdk iphoneos clang++ -std=c++23 \
               -target arm64-apple-ios16.0 -isysroot "$SDK" \
-              -DARCHITECTURE_arm64=1 -DMADV_HUGEPAGE=0 -DMADV_NOHUGEPAGE=0 \
+              -DARCHITECTURE_arm64=1 \
               -I "$GENERATED" \
               -I "$(brew --prefix fmt)/include" \
               -I "build/heavy/fexcore/unordered-dense/include" \
@@ -152,7 +152,7 @@ jobs:
             log="$OUT/$unit-ios-compile.log"
             if xcrun --sdk iphoneos clang++ -std=c++23 \
                 -target arm64-apple-ios16.0 -isysroot "$SDK" \
-                -DARCHITECTURE_arm64=1 -DMADV_HUGEPAGE=0 -DMADV_NOHUGEPAGE=0 \
+                -DARCHITECTURE_arm64=1 \
                 -I "$OUT/generated" -I "$(brew --prefix fmt)/include" \
                 -I "$OUT/unordered-dense/include" \
                 -I "$FEX/FEXCore/include" -I "$FEX/FEXCore/Source" \

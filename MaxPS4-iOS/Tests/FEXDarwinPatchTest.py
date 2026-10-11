@@ -17,6 +17,7 @@ files = (
     'FEXCore/include/FEXCore/Utils/PrctlUtils.h',
     'FEXCore/Source/Interface/Core/CPUBackend.cpp',
     'FEXCore/Source/Interface/Core/JIT/MiscOps.cpp',
+    'FEXCore/include/FEXCore/Utils/AllocatorHooks.h',
 )
 
 
@@ -49,6 +50,10 @@ class DarwinPatchTest(unittest.TestCase):
         self.assertNotIn('SYS_getcpu', darwin)
         self.assertIn('SYS_getcpu', others)
         self.assertIn('#if !defined(_WIN32) && !defined(__APPLE__)\n// MDWE', patched[files[3]])
+        advice = patched[files[5]].split('inline void VirtualTHPControl', 1)[1].split('\n}', 1)[0]
+        darwin_advice, linux_advice = advice.split('#else', 1)
+        self.assertNotIn('::madvise', darwin_advice)
+        self.assertIn('MADV_HUGEPAGE', linux_advice)
         patch.adapt(self.root)
         self.assertEqual(self.contents(), patched)
 

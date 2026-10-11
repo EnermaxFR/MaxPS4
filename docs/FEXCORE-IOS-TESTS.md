@@ -10,6 +10,7 @@ compilation, dans les workflows de diagnostic et de packaging :
 - attente/réveil du mutex par `atomic_ref` pour Darwin, sans en-têtes Linux ou Windows ;
 - masquage POSIX par `pthread_sigmask`, restauration après déplacement et bornes `NSIG` ;
 - identifiant de processeur virtuel constant sur Darwin, sans `TPIDRRO` ni syscall Linux ;
+- conseil de pages énormes Linux désactivé sur Darwin, sans substituer `MADV_NORMAL` ;
 - exclusion des en-têtes Linux et du véritable appel `prctl(PR_GET_MDWE)` sur Apple.
 
 Les branches Linux et Windows restent présentes. Le script vérifie les fragments

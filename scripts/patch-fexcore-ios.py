@@ -103,6 +103,17 @@ private:
         # Header guards alone leave the actual Linux MDWE call undeclared.
         return replace_once(code, "#ifndef _WIN32\n// MDWE", "#if !defined(_WIN32) && !defined(__APPLE__)\n// MDWE")
     edit("FEXCore/Source/Interface/Core/CPUBackend.cpp", backend)
+    def huge_pages(code):
+        original = "  ::madvise(const_cast<void*>(Ptr), Size, Control == THPControl::Enable ? MADV_HUGEPAGE : MADV_NOHUGEPAGE);"
+        return replace_once(code, original, """#if defined(__APPLE__)
+  // Darwin has no Linux transparent-huge-page advice. This optional
+  // optimization is unsupported; do not substitute MADV_NORMAL for it.
+  (void)Ptr;
+  (void)Size;
+  (void)Control;
+#else
+""" + original + "\n#endif")
+    edit("FEXCore/include/FEXCore/Utils/AllocatorHooks.h", huge_pages)
     # Validate every fragment before writing any file, to fail on upstream drift.
     for path, code in changes.items():
         path.write_text(code)
