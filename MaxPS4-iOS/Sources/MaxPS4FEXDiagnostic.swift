@@ -22,6 +22,11 @@ struct MaxPS4FEXDiagnostic: Sendable {
         let cpuidStatus = cpuid.withUnsafeMutableBufferPointer {
             maxps4_fex_engine_cpuid(engine, 0, 0, $0.baseAddress)
         }
+        let debugger = maxps4FEXDebuggerStatus()
+        let vendorBytes = [cpuid[1], cpuid[3], cpuid[2]].flatMap { word in
+            (0..<4).map { UInt8(truncatingIfNeeded: word >> ($0 * 8)) }
+        }
+        let vendor = String(decoding: vendorBytes, as: UTF8.self)
         let initialized = maxps4_fex_engine_initialize(engine)
         var value: UInt64 = 0
         var selected: UInt32 = 0
@@ -47,7 +52,8 @@ struct MaxPS4FEXDiagnostic: Sendable {
         let message = """
         Système : \(ProcessInfo.processInfo.operatingSystemVersionString)
         Runtime FEX Darwin : contexte créé, stade \(maxps4_fex_engine_stage(engine))
-        CPUID FEX : statut \(cpuidStatus), feuille maximale \(cpuid[0])
+        CPUID invité FEX : statut \(cpuidStatus), fournisseur \(vendor), feuille maximale \(cpuid[0])
+        Debugger détecté : \(debugger == 1 ? "oui" : debugger == 0 ? "non" : "inconnu") (pas un droit JIT)
         Initialisation JIT : \(initialized == -Int32(ENOTSUP) ? "indisponible sur iOS (ENOTSUP)" : "statut \(initialized)")
         Exécution x86-64 : statut \(status), résultat \(status == 0 ? String(value) : "absent")
         Backend : \(name)

@@ -33,6 +33,12 @@ jobs:
             -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" \
             -o build/fex-app-host/swift-fex-test
           build/fex-app-host/swift-fex-test | tee build/fex-app-host/swift-diagnostic-tests.txt
+      - name: Check actual native and Swift heap cleanup on macOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          leaks --atExit -- build/fex-app-host/swift-fex-test \
+            | tee build/fex-app-host/swift-diagnostic-leaks.txt
       - name: Build full Xcode application and verified re-signable IPA
         run: bash scripts/build-fexcore-app.sh build/aether-app
       - uses: actions/upload-artifact@v4
