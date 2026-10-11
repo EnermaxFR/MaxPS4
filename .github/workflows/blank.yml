@@ -130,6 +130,7 @@ jobs:
           if xcrun --sdk iphoneos clang++ -std=c++23 \
                -target arm64-apple-ios16.0 -isysroot "$SDK" \
                -I "$SHAD/src" \
+               -I "$(brew --prefix fmt)/include" \
                -fsyntax-only "$SHAD/src/core/libraries/libs.cpp" \
                > "$OUT/hle-library-registry-ios.log" 2>&1; then
             echo "PASS real shadPS4 HLE library registry compiles for iOS ARM64 (not linked)" \
