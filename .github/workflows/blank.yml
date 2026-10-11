@@ -1938,6 +1938,31 @@ jobs:
                   | head -45 || true
               fi
             fi
+            if test "$component" = "fex_guest_engine" &&
+                test -f build/diagnostics/aether-link-fex_guest_engine-with-fexcore.log; then
+              # Quantify which real symbols the partial FEXCore archive fixes.
+              python3 - <<'PY'
+          from pathlib import Path
+          import json, re
+          prefix = Path("build/diagnostics")
+          def unresolved(name):
+              content = (prefix / name).read_text(errors="replace")
+              return set(re.findall(r'^  "([^"]+)", referenced from:', content, re.M))
+          base = unresolved("aether-link-fex_guest_engine.log")
+          with_fex = unresolved("aether-link-fex_guest_engine-with-fexcore.log")
+          report = {
+              "baseline_unresolved_count": len(base),
+              "combined_unresolved_count": len(with_fex),
+              "resolved_by_archive": sorted(base - with_fex),
+              "newly_unresolved_from_archive": sorted(with_fex - base),
+              "still_unresolved": sorted(base & with_fex),
+              "note": "Strict iOS linker diagnostics; no guest execution or JIT activated."
+          }
+          (prefix / "aether-fexcore-link-delta.json").write_text(json.dumps(report, indent=2) + "\n")
+          print("FEXCORE LINK DELTA:", {key: len(report[key]) for key in
+                ("resolved_by_archive", "newly_unresolved_from_archive", "still_unresolved")})
+          PY
+            fi
             rm -f "$OUTPUT"
           done
           if test "$AETHER_ACCEPTED_COUNT" -gt 0; then
@@ -1996,6 +2021,7 @@ jobs:
           path: |
             build/diagnostics/aether-module-link-status.txt
             build/diagnostics/aether-link-*.log
+            build/diagnostics/aether-fexcore-link-delta.json
             build/diagnostics/aether-ios-jit-ipa-link-status.txt
             build/diagnostics/fexcore-ipa-link-status.txt
           if-no-files-found: ignore
