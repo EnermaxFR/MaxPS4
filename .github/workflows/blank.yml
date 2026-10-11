@@ -1386,6 +1386,37 @@ jobs:
                   '#if !defined(__APPLE__)\n#include <sys/prctl.h>\n#endif'))
               print("Guarded CPUBackend Linux-only header for Darwin compile probe")
           PY
+          # Apple kernels do not implement the Linux getcpu SVC used in
+          # FEXCore's ProcessorID IR emitter. Expose one stable virtual CPU
+          # index (CPU 0) until scheduler-aware virtualization exists.
+          # This avoids a dangerous cross-OS raw syscall in generated code.
+          python3 - "$FEX/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp" <<'PY'
+          from pathlib import Path
+          import sys
+          p = Path(sys.argv[1])
+          source = p.read_text()
+          old = '''#ifdef _WIN32
+            else {
+              // If on Windows and TPIDRRO isn't supported (like in wine), then this is a programming error.
+              ERROR_AND_DIE_FMT("Unsupported");
+            }
+          #else'''
+          # Whitespace differs between preprocessor lines and C++ body;
+          # locate the conditional alone, keeping upstream code untouched otherwise.
+          marker = '#ifdef _WIN32\\n  else {'
+          assert source.count(marker) == 1, "Pinned FEXCore ProcessorID changed; review patch"
+          replacement = '''#if defined(__APPLE__)
+            else {
+              // Stable virtual CPU index, not physical CPU topology.
+              // TODO: virtualize per-thread processor IDs for multicore guests.
+              LoadConstant(ARMEmitter::Size::i64Bit, GetReg(Node), 0);
+            }
+          #elif defined(_WIN32)
+            else {'''
+          source = source.replace(marker, replacement)
+          p.write_text(source)
+          print("Darwin ProcessorID no longer emits a Linux SYS_getcpu SVC")
+          PY
           # Compile the real CPUBackend implementation required by JIT.cpp.
           # Do not fabricate missing symbols or bundle unverified code.
           CPU_BACKEND="$FEX/FEXCore/Source/Interface/Core/CPUBackend.cpp"
