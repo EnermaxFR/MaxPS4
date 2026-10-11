@@ -332,6 +332,8 @@ struct MaxPS4HomeView: View {
 
                 homeQuickActions
 
+                jitActivationCard
+
                 backendCard
                 systemOverview
 
@@ -652,6 +654,45 @@ struct MaxPS4HomeView: View {
                 .foregroundStyle(.white.opacity(0.60))
         }
         .padding(.top, 8)
+    }
+
+    private var jitActivationCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "bolt.fill")
+                    .font(.title2)
+                    .foregroundStyle(.yellow)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("ACTIVER LE JIT")
+                        .font(.headline.bold())
+                        .foregroundStyle(.white)
+                    Text("Étape essentielle avant les tests CPU FEXCore")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+                Spacer(minLength: 0)
+            }
+            Text("Active le JIT pour MaxPS4 depuis SideStore ou ton outil JIT compatible, puis reviens dans l’application pour lancer le diagnostic.")
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.85))
+            Button {
+                withAnimation(.easeInOut(duration: 0.22)) { selectedTab = .developer }
+                showingFEXDiagnostic = true
+            } label: {
+                Label("Vérifier le JIT / FEXCore", systemImage: "checkmark.shield.fill")
+                    .font(.subheadline.bold())
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.yellow)
+            .accessibilityIdentifier("maxps4.jitProminentDiagnostic")
+            Text("L’application ne peut pas activer elle-même le JIT. Un test réussi ne garantit pas le lancement de jeux PS4.")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.6))
+        }
+        .padding(18)
+        .background(Color(red: 0.15, green: 0.11, blue: 0.18), in: RoundedRectangle(cornerRadius: 22))
+        .overlay(RoundedRectangle(cornerRadius: 22).stroke(.yellow.opacity(0.65), lineWidth: 1.5))
     }
 
     private var homeQuickActions: some View {
