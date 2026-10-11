@@ -6,6 +6,10 @@
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#endif
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #x); return 1; } } while (0)
 
 int main() {
@@ -82,16 +86,26 @@ int main() {
     CHECK(::waitpid(nx_child, &status, 0) == nx_child);
     CHECK(WIFSIGNALED(status) && (WTERMSIG(status) == SIGSEGV || WTERMSIG(status) == SIGBUS));
     const auto address = reinterpret_cast<uintptr_t>(image.entry_pointer());
-    const size_t page = static_cast<size_t>(::sysconf(_SC_PAGESIZE));
     image.clear();
     CHECK(!image.entry_pointer() && !image.translate(0x10000, 1, 4) && image.segments().empty());
 #if defined(__APPLE__)
-    char resident = 0;
+    // Darwin mincore reports residency, not reliable absence of a VM region.
+    // Query the actual Mach address map instead of using Linux errno semantics.
+    mach_vm_address_t next = address;
+    mach_vm_size_t region_size = 0;
+    vm_region_basic_info_data_64_t info {};
+    mach_msg_type_number_t info_count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object = MACH_PORT_NULL;
+    const kern_return_t query = ::mach_vm_region(mach_task_self(), &next, &region_size,
+        VM_REGION_BASIC_INFO_64, reinterpret_cast<vm_region_info_t>(&info), &info_count, &object);
+    if (object != MACH_PORT_NULL) ::mach_port_deallocate(mach_task_self(), object);
+    CHECK(query == KERN_INVALID_ADDRESS || (query == KERN_SUCCESS && next > address));
 #else
+    const size_t page = static_cast<size_t>(::sysconf(_SC_PAGESIZE));
     unsigned char resident = 0;
-#endif
     CHECK(::mincore(reinterpret_cast<void*>(address / page * page), page,
         &resident) == -1 && errno == ENOMEM);
+#endif
     for (unsigned i = 0; i < 100; ++i) {
         CHECK(image.load(file.data(), file.size(), 3) == 0);
         CHECK(image.entry_pointer()[1] == 40);
