@@ -8,7 +8,9 @@ MaxPS4 est un projet expérimental et indépendant sur iOS. Il n'est **ni dével
 
 shadPS4 : https://github.com/shadps4-emu/shadPS4 — merci à ses auteurs et contributeurs.
 
-Le dépôt MaxPS4 contient à ce jour une interface Swift, des prototypes de chargement ELF et de CPU et une interface de raccordement pour un **futur** moteur natif. **Il ne contient pas encore le moteur C++ shadPS4 et ne sait pas exécuter un jeu PS4.** Il ne faut pas présenter l'application comme un portage shadPS4 complet.
+AetherPS4 : https://github.com/Leviidev/AetherPS4 — ses auteurs conservent les droits et mentions applicables à leurs contributions.
+
+Le dépôt MaxPS4 contient une interface Swift, des prototypes ELF/CPU et des ponts natifs. La CI récupère des sources AetherPS4 pour compiler des composants réels (dont le moteur invité avec les en-têtes FEXCore Darwin), mais leur liaison complète à l'application reste bloquée. La récupération des sources complètes shadPS4 est proposée dans la PR #83 ; elle ne constitue pas à elle seule un portage du noyau ou du GPU. **Aucun jeu PS4 n'est actuellement jouable** et le JIT sur iPhone n'est pas validé. Il ne faut présenter aucun de ces projets comme un portage complet.
 
 ## Licence et redistribution
 
@@ -25,11 +27,16 @@ Le présent document **ne constitue pas une certification juridique**. Un audit 
 
 Aucun jeu commercial, PKG, clé, fichier de firmware PS4 ou contenu protégé de Sony n'est fourni par MaxPS4. Les utilisateurs doivent disposer des droits nécessaires sur leurs propres fichiers. La possession d'un jeu ne règle pas automatiquement toutes les questions légales concernant le déchiffrement, les mesures techniques de protection ou l'extraction selon le droit applicable. Ne pas distribuer de moyens de contournement ni promettre une légalité universelle.
 
+## Distribution de développement hors App Store
+
+Le projet privilégie actuellement les tests par IPA hors App Store. Cela n'exempte **pas** les distributions des obligations de licence, d'attribution, d'accès aux sources correspondantes, de signature ou des restrictions de sécurité d'iOS. Un abonnement Apple Developer ne confère pas automatiquement le droit ou la capacité d'exécuter du JIT sur les appareils iOS. La conformité du produit complet n'est pas certifiée.
+
 ## Limites techniques et transparence
 
 Une compilation iOS réussie n'implique pas que l'émulation soit opérationnelle. Les écrans de scan PKG et les tests ELF/CPU ne prouvent pas qu'un jeu PS4 peut démarrer. L'exécution x86-64 sur ARM64, les services PS4 et le moteur graphique restent à développer et à tester.
 
 Références :
 - https://github.com/shadps4-emu/shadPS4
+- https://github.com/Leviidev/AetherPS4
 - https://github.com/shadps4-emu/shadPS4/blob/main/LICENSE
 - https://www.gnu.org/licenses/old-licenses/gpl-2.0.html

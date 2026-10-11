@@ -1,38 +1,56 @@
-# MaxPS4
+# MaxPS4 — émulateur PS4 expérimental pour iOS
 
-## 💬 Rejoindre le Discord MaxPS4
+[![Plateforme](https://img.shields.io/badge/Plateforme-iOS%20ARM64-222222)](https://github.com/EnermaxFR/MaxPS4)
+[![Statut](https://img.shields.io/badge/Statut-portage%20exp%C3%A9rimental-orange)](https://github.com/EnermaxFR/MaxPS4/actions)
+[![Licence](https://img.shields.io/badge/Licence-GPL--2.0-blue)](LICENSE)
+[![Compatibilit%C3%A9](https://img.shields.io/badge/Jeux%20PS4-non%20jouables%20actuellement-red)](docs/LEGAL-COMPLIANCE.md)
+
+**MaxPS4** est un projet indépendant de recherche et de portage d'émulation PS4 sur iPhone, avec interface SwiftUI, expérimentations ARM64 et intégration progressive de composants issus d'**AetherPS4**, de **FEXCore** et de **shadPS4**.
+
+> **Transparence :** l'application ne sait pas encore lancer un jeu PS4. Un workflow vert, une IPA produite ou un test synthétique réussi ne démontrent ni une émulation PS4 opérationnelle, ni un JIT fonctionnel sur iPhone.
+
+## État vérifié du développement
+
+| Composant | État |
+| --- | --- |
+| Interface iOS, bibliothèque et importation | Prototypes présents ; ne prouvent pas le démarrage d'un jeu |
+| CPU invité AetherPS4 / FEXCore Darwin | Unité `fex_guest_engine.cpp` compilée pour iOS ARM64 dans CI |
+| Liaison native complète AetherPS4 | **Bloquée** par des dépendances et symboles non résolus |
+| shadPS4 | Utilitaires et pont C++ limités ; portage du noyau et du GPU **non réalisé** |
+| FEXCore JIT sur iPhone | **Non opérationnel / non validé sur appareil** |
+| Exécution de jeux PS4 (dont Kero Blaster, Sonic Mania) | **Non prise en charge actuellement** |
+| IPA de développement | Générée par certains workflows ; **ne garantit pas** la fonctionnalité de l'émulateur |
+
+Les sources amont AetherPS4 sont récupérées pendant certains builds CI pour des tests de portage. Le checkout intégral de shadPS4 fait l'objet de [la PR #83](https://github.com/EnermaxFR/MaxPS4/pull/83) et n'est pas équivalent à un moteur compilé pour iOS.
+
+## Objectifs du portage
+
+1. Compiler et relier les véritables composants CPU, mémoire, HLE et exécution native des deux projets.
+2. Adapter les dépendances POSIX/Darwin et les contraintes ARM64 sans simuler les résultats d'émulation.
+3. Étudier le rendu graphique compatible iOS et les prérequis d'exécution du code invité.
+4. Vérifier le fonctionnement réel sur un appareil iOS, avec logs et tests reproductibles.
+
+**La publication sur l'App Store n'est pas un objectif actuel.** La distribution expérimentale par IPA reste soumise aux licences des composants et aux restrictions techniques et de signature iOS ; un compte développeur Apple ne rend pas automatiquement le JIT disponible.
+
+## Conformité et responsabilité
+
+- **Licences** : MaxPS4 indique la [GNU GPL v2.0](LICENSE). Chaque source ou dépendance tierce doit être attribuée, auditée et redistribuée dans le respect de sa propre licence. Aucun audit de conformité complet n'est revendiqué.
+- **Attribution** : contributions et propriété intellectuelle des auteurs originaux conservées. [shadPS4](https://github.com/shadps4-emu/shadPS4) et [AetherPS4](https://github.com/Leviidev/AetherPS4) sont des projets distincts.
+- **Marques** : MaxPS4 est indépendant et **n'est affilié ni à Sony Interactive Entertainment / PlayStation ni aux équipes officielles des projets cités**.
+- **Contenus** : aucun jeu commercial, firmware PS4, clé, contenu chiffré protégé ou fichier PKG non autorisé n'est fourni. Ne publiez que des contenus que vous avez le droit de redistribuer.
+- **Sécurité et honnêteté** : pas de revendication de compatibilité jeu, de JIT actif ou de conformité juridique totale sans preuve technique et examen adapté.
+
+Voir le document détaillé [Conformité, attribution et limites légales](docs/LEGAL-COMPLIANCE.md).
+
+## Builds, contributions et communauté
+
+Consultez les [GitHub Actions](https://github.com/EnermaxFR/MaxPS4/actions) pour distinguer compilation réussie, diagnostics non bloquants et tests sur appareil. Les builds de développement ne sont pas des versions stables de l'émulateur.
+
+Les contributions sont bienvenues via [Issues](https://github.com/EnermaxFR/MaxPS4/issues), [Pull Requests](https://github.com/EnermaxFR/MaxPS4/pulls) et [CONTRIBUTING.md](CONTRIBUTING.md).
 
 [![Discord](https://img.shields.io/badge/Discord-Rejoindre%20MaxPS4-5865F2?logo=discord&logoColor=white)](https://discord.gg/G7BaXN4fd)
 
-**👉 [Rejoindre le serveur Discord MaxPS4](https://discord.gg/G7BaXN4fd)**
+**[Rejoindre le Discord MaxPS4](https://discord.gg/G7BaXN4fd)**
 
-MaxPS4 est un projet expérimental iOS qui prépare une intégration future du moteur open source shadPS4. **Le code C++ de shadPS4 n’est pas encore intégré et aucun jeu PS4 n'est actuellement jouable dans cette application.**
-
-> Projet en développement — la compatibilité des jeux et du core iOS n'est pas garantie.
-
-## Licence
-
-MaxPS4 est distribué sous licence **GNU GPL v2.0 (GPL-2.0)**.
-
-Voir le fichier [LICENSE](LICENSE) et le document de [conformité, attribution et limites légales](docs/LEGAL-COMPLIANCE.md).
-
-Les composants et dépendances tiers restent soumis à leurs licences respectives.
-
-## Crédits
-
-Un grand merci au projet **shadPS4** et à tous ses contributeurs :
-https://github.com/shadps4-emu/shadPS4
-
-MaxPS4 n'est pas un projet officiel de Sony Interactive Entertainment et n'est affilié ni à Sony ou PlayStation, ni à l'équipe officielle shadPS4.
-
-## Contributions
-
-Les contributions sont les bienvenues : corrections de bugs, compatibilité iOS, interface, documentation et tests.
-
-Consultez [CONTRIBUTING.md](CONTRIBUTING.md) avant de proposer une contribution.
-
-Vous pouvez également utiliser les **Issues** et **Pull Requests** de ce dépôt.
-
-### Contenu protégé
-
-Ne publiez pas de jeux PS4 commerciaux, fichiers PKG protégés, clés, firmware ou autre contenu dont vous ne possédez pas les droits de redistribution.
+---
+*Dernière mise à jour documentaire : 11 octobre 2026 — statuts à réévaluer à partir des diagnostics des prochains builds.*
