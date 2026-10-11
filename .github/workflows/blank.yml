@@ -517,91 +517,11 @@ jobs:
           test -s "$UNORDERED/include/ankerl/unordered_dense.h"
           echo "PASS unordered_dense headers available before AetherPS4 compile"
 
-      - name: Prepare Darwin FEXCore mutex before AetherPS4 cross-compilation
+      - name: Prepare pinned FEXCore Darwin sources before compilation
         shell: bash
         run: |
           set -euo pipefail
-          # Experimental Darwin adaptation of FEXCore Linux futex mutex, compile probe only.
-          # C++20 atomic wait/notify keeps sleeping threads off a busy spin loop.
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("build/diagnostics/fexcore-upstream/FEXCore/include/FEXCore/Utils/WritePriorityMutex.h")
-          s = p.read_text()
-          s = s.replace("#if !defined(_WIN32)\n#include <linux/futex.h>", "#if defined(__APPLE__)\n// Darwin uses C++20 atomic wait/notify below.\n#elif !defined(_WIN32)\n#include <linux/futex.h>", 1)
-          start = s.index("private:\n\n#if !defined(_WIN32)\n  void FutexWaitForWriteAvailable")
-          insert = """private:
-
-          #if defined(__APPLE__)
-            void FutexWaitForWriteAvailable(uint32_t expected) {
-              std::atomic_ref<uint32_t>(Futex).wait(expected, std::memory_order_relaxed);
-            }
-            void FutexWaitForReadAvailable(uint32_t expected) {
-              std::atomic_ref<uint32_t>(Futex).wait(expected, std::memory_order_relaxed);
-            }
-            void FutexWakeWriter() {
-              std::atomic_ref<uint32_t>(Futex).notify_all();
-            }
-            void FutexWakeReaders() {
-              std::atomic_ref<uint32_t>(Futex).notify_all();
-            }
-          #elif !defined(_WIN32)"""
-          s = s[:start] + s[start:].replace("private:\n\n#if !defined(_WIN32)", insert, 1)
-          p.write_text(s)
-          PY
-
-      - name: Port FEXCore scoped signal mask to Darwin pthread API
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("build/diagnostics/fexcore-upstream/FEXCore/include/FEXCore/Utils/SignalScopeGuards.h")
-          code = p.read_text()
-          old = """    ::syscall(SYS_rt_sigprocmask, SIG_SETMASK, &Mask, &*OriginalMask, sizeof(*OriginalMask));"""
-          new = """#ifdef __APPLE__
-            sigset_t RequestedMask;
-            sigemptyset(&RequestedMask);
-            for (int signal = 1; signal < NSIG && signal <= 64; ++signal) {
-              if (Mask & (uint64_t{1} << (signal - 1))) {
-                sigaddset(&RequestedMask, signal);
-              }
-            }
-            sigset_t PreviousMask;
-            if (pthread_sigmask(SIG_SETMASK, &RequestedMask, &PreviousMask) == 0) {
-              DarwinOriginalMask = PreviousMask;
-            }
-          #else
-            ::syscall(SYS_rt_sigprocmask, SIG_SETMASK, &Mask, &*OriginalMask, sizeof(*OriginalMask));
-          #endif"""
-          if old not in code:
-              raise SystemExit("Pinned FEXCore signal-mask constructor changed")
-          code = code.replace(old, new, 1)
-          old_dtor = """      ::syscall(SYS_rt_sigprocmask, SIG_SETMASK, &OriginalMask, nullptr, sizeof(*OriginalMask));"""
-          new_dtor = """#ifndef __APPLE__
-                ::syscall(SYS_rt_sigprocmask, SIG_SETMASK, &OriginalMask, nullptr, sizeof(*OriginalMask));
-              #endif"""
-          if old_dtor not in code:
-              raise SystemExit("Pinned FEXCore signal-mask destructor changed")
-          code = code.replace(old_dtor, new_dtor, 1)
-          code = code.replace("    rhs.OriginalMask.reset();", """    rhs.OriginalMask.reset();
-          #ifdef __APPLE__
-            DarwinOriginalMask = rhs.DarwinOriginalMask;
-            rhs.DarwinOriginalMask.reset();
-          #endif""", 1)
-          code = code.replace("  std::optional<uint64_t> OriginalMask {};", """  std::optional<uint64_t> OriginalMask {};
-          #ifdef __APPLE__
-            std::optional<sigset_t> DarwinOriginalMask {};
-          #endif""", 1)
-          code = code.replace("    if (OriginalMask) {\n#ifndef __APPLE__", """#ifdef __APPLE__
-            if (DarwinOriginalMask) {
-              pthread_sigmask(SIG_SETMASK, &*DarwinOriginalMask, nullptr);
-            }
-          #endif
-            if (OriginalMask) {
-          #ifndef __APPLE__""", 1)
-          p.write_text(code)
-          print("PASS Darwin FEXCore signal masking adapted to pthread_sigmask (native probe only)")
-          PY
+          python3 scripts/patch-fexcore-ios.py build/diagnostics/fexcore-upstream
 
       - name: Select ARM64 cycle counter in pinned FEXCore stats on iOS
         shell: bash
@@ -1345,78 +1265,6 @@ jobs:
             jit_ops_index=$((jit_ops_index + 1))
           done < build/diagnostics/fexcore-jit-extra-ops-sources.txt
           cat build/diagnostics/fexcore-jit-extra-ops-status.txt
-          # FEXCore's pinned Linux utility header includes Linux-only
-          # <sys/user.h> even though the iOS probe uses the Darwin SDK.
-          # Adjust only the ephemeral checkout; do not ship fake Linux
-          # structures or pretend that prctl/syscalls are implemented.
-          FEX_PRCTL="$FEX/FEXCore/include/FEXCore/Utils/PrctlUtils.h"
-          if test -s "$FEX_PRCTL"; then
-            python3 - "$FEX_PRCTL" <<'PY'
-          from pathlib import Path
-          import sys
-          target = Path(sys.argv[1])
-          original = target.read_text()
-          # Pinned revisions of FEXCore use one or both Linux-only
-          # includes. Darwin has neither sys/prctl.h nor sys/user.h.
-          # Keep upstream constants and all actual runtime references.
-          patched = original
-          for header in ("sys/prctl.h", "sys/user.h"):
-              old = f"#include <{header}>"
-              if old in patched:
-                  patched = patched.replace(old,
-                      f"#if !defined(__APPLE__)\n{old}\n#endif")
-          if patched != original:
-              target.write_text(patched)
-              print("FEXCore Darwin compile probe: guarded Linux-only headers")
-          PY
-          fi
-          # CPUBackend.cpp itself directly includes Linux-only sys/prctl.h,
-          # independently of PrctlUtils.h. Probe compilation on iOS by
-          # conditionally guarding that include in the ephemeral FEX checkout.
-          FEX_CPU_SOURCE="$FEX/FEXCore/Source/Interface/Core/CPUBackend.cpp"
-          python3 - "$FEX_CPU_SOURCE" <<'PY'
-          from pathlib import Path
-          import sys
-          path = Path(sys.argv[1])
-          text = path.read_text()
-          header = '#include <sys/prctl.h>'
-          if header in text:
-              assert text.count(header) == 1
-              path.write_text(text.replace(header,
-                  '#if !defined(__APPLE__)\n#include <sys/prctl.h>\n#endif'))
-              print("Guarded CPUBackend Linux-only header for Darwin compile probe")
-          PY
-          # Apple kernels do not implement the Linux getcpu SVC used in
-          # FEXCore's ProcessorID IR emitter. Expose one stable virtual CPU
-          # index (CPU 0) until scheduler-aware virtualization exists.
-          # This avoids a dangerous cross-OS raw syscall in generated code.
-          python3 - "$FEX/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp" <<'PY'
-          from pathlib import Path
-          import sys
-          p = Path(sys.argv[1])
-          source = p.read_text()
-          old = '''#ifdef _WIN32
-            else {
-              // If on Windows and TPIDRRO isn't supported (like in wine), then this is a programming error.
-              ERROR_AND_DIE_FMT("Unsupported");
-            }
-          #else'''
-          # Whitespace differs between preprocessor lines and C++ body;
-          # locate the conditional alone, keeping upstream code untouched otherwise.
-          marker = '#ifdef _WIN32\n  else {'
-          assert source.count(marker) == 1, "Pinned FEXCore ProcessorID changed; review patch"
-          replacement = '''#if defined(__APPLE__)
-            else {
-              // Stable virtual CPU index, not physical CPU topology.
-              // TODO: virtualize per-thread processor IDs for multicore guests.
-              LoadConstant(ARMEmitter::Size::i64Bit, GetReg(Node), 0);
-            }
-          #elif defined(_WIN32)
-            else {'''
-          source = source.replace(marker, replacement)
-          p.write_text(source)
-          print("Darwin ProcessorID no longer emits a Linux SYS_getcpu SVC")
-          PY
           # Compile the real CPUBackend implementation required by JIT.cpp.
           # Do not fabricate missing symbols or bundle unverified code.
           CPU_BACKEND="$FEX/FEXCore/Source/Interface/Core/CPUBackend.cpp"

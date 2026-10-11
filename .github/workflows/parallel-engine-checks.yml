@@ -2,6 +2,10 @@ name: MaxPS4 parallel engine smoke checks
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "MaxPS4-iOS/**"
+      - ".github/workflows/parallel-engine-checks.yml"
   push:
     branches: [main]
     paths:
@@ -60,6 +64,16 @@ jobs:
               -c "$src" -o "$obj"
           done
           echo "PASS engine bridge objects compile; FEXCore JIT is NOT activated"
+      - name: Run ARM64 translation and interpreter regression without IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          clang++ -std=c++23 -I MaxPS4-iOS/Native/shadps4 \
+            MaxPS4-iOS/Native/shadps4/common/string_util.cpp \
+            MaxPS4-iOS/Native/shadps4_bridge.cpp \
+            MaxPS4-iOS/Tests/NativeJITPipelineTest.cpp \
+            -o build/parallel/jit/native-jit-test
+          build/parallel/jit/native-jit-test | tee build/parallel/jit/test-results.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
