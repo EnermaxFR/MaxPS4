@@ -26,7 +26,7 @@ jobs:
         run: |
           set -euo pipefail
           git clone --filter=blob:none --no-checkout https://github.com/Leviidev/AetherPS4.git build/aether-link
-          git -C build/aether-link sparse-checkout set runtime/sources/fexcore-darwin src/core/guest_cpu
+          git -C build/aether-link sparse-checkout set runtime/sources/fexcore-darwin src/core/guest_cpu src/core/ios
           git -C build/aether-link checkout 3347fc13f19860855ce91b66356940989ea6b6a6
           brew install ninja
       - name: Build real complete iOS ARM64 shared library with strict linkage

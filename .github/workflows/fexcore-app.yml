@@ -1,0 +1,54 @@
+name: MaxPS4 FEXCore SideStore IPA
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'MaxPS4-iOS/**'
+      - 'scripts/*fexcore*'
+      - 'cmake/FEXCoreIOSLinkage.cmake'
+      - '.github/workflows/fexcore-app.yml'
+permissions:
+  contents: read
+jobs:
+  application:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout coherent pinned runtime
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/Leviidev/AetherPS4.git build/aether-app
+          git -C build/aether-app sparse-checkout set runtime/sources/fexcore-darwin src/core/guest_cpu src/core/ios
+          git -C build/aether-app checkout 3347fc13f19860855ce91b66356940989ea6b6a6
+          brew install ninja xcodegen
+      - name: Preserve native runtime tests and test the real Swift C bridge on macOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/build-fexcore-darwin-ios.sh build/aether-app build/fex-app-host --host-runtime
+          swiftc -parse-as-library -D MAXPS4_FEX_APP \
+            -import-objc-header MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h \
+            MaxPS4-iOS/Sources/MaxPS4FEXDiagnostic.swift MaxPS4-iOS/Tests/FEXSwiftDiagnosticTest.swift \
+            -L build/fex-app-host -lMaxPS4FEXRuntime \
+            -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" \
+            -o build/fex-app-host/swift-fex-test
+          build/fex-app-host/swift-fex-test | tee build/fex-app-host/swift-diagnostic-tests.txt
+      - name: Build full Xcode application and verified re-signable IPA
+        run: bash scripts/build-fexcore-app.sh build/aether-app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-FEXCore-SideStore
+          path: build/MaxPS4-FEXCore-SideStore.ipa
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: MaxPS4-FEXCore-app-diagnostics
+          path: |
+            build/diagnostics/
+            build/fex-app-host/*.txt
+            build/fex-app-host/*.log
+            build/fex-app-ios/*.txt
+            build/fex-app-ios/*.log
+          retention-days: 14
