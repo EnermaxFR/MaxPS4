@@ -66,6 +66,22 @@ jobs:
           set -euo pipefail
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           FEX="build/heavy/fexcore/source"
+          GENERATED="build/heavy/fexcore/generated"
+          mkdir -p "$GENERATED/FEXCore/IR" "$GENERATED/FEXCore/Config"
+          # Use FEXCore's real upstream generators; no placeholder headers.
+          python3 "$FEX/FEXCore/Scripts/json_ir_generator.py" \
+            "$FEX/FEXCore/Source/Interface/IR/IR.json" \
+            "$GENERATED/FEXCore/IR/IRDefines.inc" \
+            "$GENERATED/FEXCore/IR/IRDefines_Dispatch.inc"
+          python3 "$FEX/FEXCore/Scripts/config_generator.py" \
+            "$FEX/FEXCore/Source/Interface/Config/Config.json.in" \
+            "$GENERATED/FEXCore/Config/ConfigValues.inl" \
+            "$GENERATED/fexcore-options.1" \
+            "$GENERATED/ConfigArgumentLoader.inc"
+          if ! brew list --versions fmt >/dev/null 2>&1; then brew install fmt; fi
+          git clone --quiet --no-checkout --filter=blob:none \
+            https://github.com/martinus/unordered_dense.git build/heavy/fexcore/unordered-dense
+          git -C build/heavy/fexcore/unordered-dense checkout --quiet 3234af2c03549bc85656bfd3a86993bf1cd8aef1
           SRC="$FEX/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp"
           LOG="build/heavy/fexcore/miscops-ios-compile.log"
           # The preceding job step applies the exact ProcessorID Darwin patch.
@@ -74,6 +90,9 @@ jobs:
           if xcrun --sdk iphoneos clang++ -std=c++23 \
               -target arm64-apple-ios16.0 -isysroot "$SDK" \
               -DARCHITECTURE_arm64=1 -DMADV_HUGEPAGE=0 -DMADV_NOHUGEPAGE=0 \
+              -I "$GENERATED" \
+              -I "$(brew --prefix fmt)/include" \
+              -I "build/heavy/fexcore/unordered-dense/include" \
               -I "$FEX/FEXCore/include" \
               -I "$FEX/FEXCore/Source" \
               -I "$FEX/Source" -I "$FEX/CodeEmitter" -I "$FEX/FEXHeaderUtils" \
