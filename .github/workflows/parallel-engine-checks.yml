@@ -1,0 +1,93 @@
+name: MaxPS4 parallel engine smoke checks
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "MaxPS4-iOS/**"
+      - ".github/workflows/parallel-engine-checks.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  cpu-native-abi:
+    name: CPU native ABI (iOS ARM64)
+    runs-on: macos-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile actual native CPU ABI
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          mkdir -p build/parallel/cpu
+          xcrun --sdk iphoneos clang++ -std=c++17 \
+            -target arm64-apple-ios16.0 -isysroot "$SDK" \
+            -c MaxPS4-iOS/Native/maxps4_native.cpp \
+            -o build/parallel/cpu/maxps4_native.o
+          xcrun nm -gU build/parallel/cpu/maxps4_native.o \
+            | grep -q '_maxps4_native_aether_cpu_probe'
+          echo "PASS actual native CPU ABI object; NOT a running PS4 guest CPU"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parallel-cpu-native-abi
+          path: build/parallel/cpu
+          if-no-files-found: ignore
+
+  jit-bridge:
+    name: ARM64 engine bridge compilation
+    runs-on: macos-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile real engine bridge and shadPS4 utility
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          mkdir -p build/parallel/jit
+          for src in \
+            MaxPS4-iOS/Native/shadps4/common/string_util.cpp \
+            MaxPS4-iOS/Native/shadps4_bridge.cpp; do
+            obj="build/parallel/jit/$(basename "$src" .cpp).o"
+            xcrun --sdk iphoneos clang++ -std=c++23 \
+              -target arm64-apple-ios16.0 -isysroot "$SDK" \
+              -I MaxPS4-iOS/Native/shadps4 \
+              -c "$src" -o "$obj"
+          done
+          echo "PASS engine bridge objects compile; FEXCore JIT is NOT activated"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parallel-arm64-engine-bridge
+          path: build/parallel/jit
+          if-no-files-found: ignore
+
+  ios-frontend:
+    name: iOS frontend Swift typecheck
+    runs-on: macos-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Typecheck application sources for arm64 iOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          mkdir -p build/parallel/frontend
+          xcrun --sdk iphoneos swiftc \
+            -target arm64-apple-ios16.0 \
+            -sdk "$SDK" -parse-as-library -typecheck \
+            MaxPS4-iOS/Sources/*.swift \
+            2>&1 | tee build/parallel/frontend/typecheck.log
+          echo "PASS Swift frontend typecheck; not an IPA or game launch"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parallel-ios-frontend
+          path: build/parallel/frontend
+          if-no-files-found: ignore
