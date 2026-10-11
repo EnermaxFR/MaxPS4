@@ -1373,6 +1373,22 @@ jobs:
               print("FEXCore Darwin compile probe: guarded Linux-only headers")
           PY
           fi
+          # CPUBackend.cpp itself directly includes Linux-only sys/prctl.h,
+          # independently of PrctlUtils.h. Probe compilation on iOS by
+          # conditionally guarding that include in the ephemeral FEX checkout.
+          FEX_CPU_SOURCE="$FEX/FEXCore/Source/Interface/Core/CPUBackend.cpp"
+          python3 - "$FEX_CPU_SOURCE" <<'PY'
+          from pathlib import Path
+          import sys
+          path = Path(sys.argv[1])
+          text = path.read_text()
+          header = '#include <sys/prctl.h>'
+          if header in text:
+              assert text.count(header) == 1
+              path.write_text(text.replace(header,
+                  '#if !defined(__APPLE__)\n#include <sys/prctl.h>\n#endif'))
+              print("Guarded CPUBackend Linux-only header for Darwin compile probe")
+          PY
           # Compile the real CPUBackend implementation required by JIT.cpp.
           # Do not fabricate missing symbols or bundle unverified code.
           CPU_BACKEND="$FEX/FEXCore/Source/Interface/Core/CPUBackend.cpp"
