@@ -17,7 +17,8 @@ struct MaxPS4FEXDiagnostic: Sendable {
             return Self(succeeded: false, result: nil, backend: "Aucun",
                         details: "Création du contexte FEX : erreur \(opened).")
         }
-        defer { maxps4_fex_engine_close(engine) }
+        var needsClose = true
+        defer { if needsClose { maxps4_fex_engine_close(engine) } }
         var cpuid = [UInt32](repeating: 0, count: 4)
         let cpuidStatus = cpuid.withUnsafeMutableBufferPointer {
             maxps4_fex_engine_cpuid(engine, 0, 0, $0.baseAddress)
@@ -30,35 +31,44 @@ struct MaxPS4FEXDiagnostic: Sendable {
         let initialized = maxps4_fex_engine_initialize(engine)
         var value: UInt64 = 0
         var selected: UInt32 = 0
-        let status: Int32
+        var jitStatus = initialized
+        var status: Int32
         if initialized == 0 {
-            status = maxps4_fex_engine_probe(engine, &value, &selected)
-        } else if initialized == -Int32(ENOTSUP) {
-            // Real bounded interpreter from the existing native bridge, not FEX JIT.
+            jitStatus = maxps4_fex_engine_probe(engine, &value, &selected)
+            status = jitStatus
+        } else { status = initialized }
+        if status != 0 {
+            // Preserve the actual JIT error separately from the interpreter result.
             let code: [UInt8] = [0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3]
             status = code.withUnsafeBufferPointer {
                 maxps4_fex_engine_run(engine, $0.baseAddress, $0.count, 32, &value, &selected)
             }
-        } else {
-            status = initialized // Unexpected initialization failures are never hidden.
         }
+        let stage = maxps4_fex_engine_stage(engine)
+        maxps4_fex_engine_close(engine)
+        needsClose = false
+        let leases = maxps4_jit_leases()
         let name: String
         switch selected {
         case UInt32(MAXPS4_CPU_RESTRICTED_INTERPRETER): name = "Interpréteur natif MaxPS4 (sans JIT FEX)"
         case UInt32(MAXPS4_CPU_FEX_ARM64_JIT): name = "FEXCore JIT ARM64"
         default: name = "Aucun"
         }
-        let passed = status == 0 && cpuidStatus == 0 && value == 42 && selected != 0
+        let passed = status == 0 && cpuidStatus == 0 && value == 42 && selected != 0 && leases == 0
         let message = """
         Système : \(ProcessInfo.processInfo.operatingSystemVersionString)
-        Runtime FEX Darwin : contexte créé, stade \(maxps4_fex_engine_stage(engine))
+        Runtime FEX Darwin : contexte créé, stade \(stage)
         CPUID invité FEX : statut \(cpuidStatus), fournisseur \(vendor), feuille maximale \(cpuid[0])
         Debugger détecté : \(debugger == 1 ? "oui" : debugger == 0 ? "non" : "inconnu") (pas un droit JIT)
-        Initialisation JIT : \(initialized == -Int32(ENOTSUP) ? "indisponible sur iOS (ENOTSUP)" : "statut \(initialized)")
+        Initialisation FEX JIT : statut \(initialized)
+        Exécution FEX JIT : statut \(jitStatus) (0 requis pour un succès JIT)
+        Fournisseur RX/RW : état \(maxps4_jit_state()), erreur \(maxps4_jit_error())
+        Régions encore utilisées après nettoyage : \(leases)
         Exécution x86-64 : statut \(status), résultat \(status == 0 ? String(value) : "absent")
         Backend : \(name)
         Validation : \(passed ? "réussie" : "échec")
-        Le JIT iOS reste verrouillé : aucun fournisseur de mémoire exécutable conforme n'est intégré.
+        \(selected == UInt32(MAXPS4_CPU_FEX_ARM64_JIT) && status == 0 ? "FEX_ARM64_JIT a réellement exécuté le bloc invité." : "Le résultat de repli ne valide pas le JIT FEXCore.")
+        Les régions préparées restent réservées jusqu’à « Libérer la mémoire JIT ».
         La signature SideStore et un debugger ne prouvent pas une autorisation JIT.
         Aucun résultat d'exécution de jeu PS4.
         """
