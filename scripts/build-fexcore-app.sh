@@ -44,7 +44,7 @@ xcodegen generate --spec MaxPS4-iOS/project.yml
 xcodebuild -project MaxPS4-iOS/MaxPS4.xcodeproj -scheme MaxPS4 \
   -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
   -derivedDataPath build/xcode-fex CODE_SIGNING_ALLOWED=NO \
-  CURRENT_PROJECT_VERSION="${GITHUB_RUN_NUMBER:-131}" build \
+  build \
   2>&1 | tee build/diagnostics/fex-app-build.log
 mkdir -p build/Payload
 rm -rf build/Payload/MaxPS4.app
