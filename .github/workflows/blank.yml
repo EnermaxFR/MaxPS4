@@ -1,12 +1,9 @@
 name: Build MaxPS4 iOS IPA
 
+# The IPA is generated on demand only; engine CI runs independently.
+# This avoids packaging an unplayable app for every source-level fix.
 on:
   workflow_dispatch:
-  push:
-    branches: ["main"]
-    paths:
-      - "MaxPS4-iOS/**"
-      - ".github/workflows/blank.yml"
 
 permissions:
   contents: read
