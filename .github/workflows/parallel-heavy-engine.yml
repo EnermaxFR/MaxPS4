@@ -147,6 +147,10 @@ jobs:
           assert code.count(linux_includes) == 1, "Upstream futex include changed"
           code = code.replace(linux_includes,
                               "#if !defined(_WIN32) && !defined(__APPLE__)\n#include <linux/futex.h>")
+          # The original #else selects Windows headers on Apple too.
+          windows_header = "#else\\n#include <synchapi.h>"
+          assert code.count(windows_header) == 1, "Upstream Windows include changed"
+          code = code.replace(windows_header, "#elif defined(_WIN32)\\n#include <synchapi.h>")
           method_marker = "private:\n\n#if !defined(_WIN32)\n  void FutexWaitForWriteAvailable"
           assert code.count(method_marker) == 1, "Upstream futex methods changed"
           apple_methods = """private:
