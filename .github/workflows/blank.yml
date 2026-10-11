@@ -117,6 +117,30 @@ jobs:
           path: build/diagnostics/shadps4-porting/
           retention-days: 14
 
+      - name: Probe real shadPS4 HLE library registry for iOS ARM64
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHAD="MaxPS4-iOS/Engine/shadPS4"
+          OUT="build/diagnostics/shadps4-porting"
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          test -s "$SHAD/src/core/libraries/libs.cpp"
+          # This is an actual upstream translation unit, not the existing
+          # small shadPS4 utility bridge. It is a non-shipping porting probe.
+          if xcrun --sdk iphoneos clang++ -std=c++23 \
+               -target arm64-apple-ios16.0 -isysroot "$SDK" \
+               -I "$SHAD/src" \
+               -fsyntax-only "$SHAD/src/core/libraries/libs.cpp" \
+               > "$OUT/hle-library-registry-ios.log" 2>&1; then
+            echo "PASS real shadPS4 HLE library registry compiles for iOS ARM64 (not linked)" \
+              | tee "$OUT/hle-library-registry-status.txt"
+          else
+            echo "BLOCKED real shadPS4 HLE library registry; inspect missing native dependencies" \
+              | tee "$OUT/hle-library-registry-status.txt"
+            grep -m 12 -E 'error:|fatal error:' "$OUT/hle-library-registry-ios.log" || true
+          fi
+          echo "shadPS4 game execution and JIT remain unavailable"
+
       - name: Clone complete pinned AetherPS4 engine into MaxPS4 iOS project
         shell: bash
         run: |
