@@ -1,13 +1,25 @@
 #include "maxps4_fex_runtime.h"
 #include "maxps4_native.h"
+#include <FEXCore/Utils/AllocatorHooks.h>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); return 1; } } while (0)
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::puts("BEGIN native ABI and real FEX context lifecycle test");
+    // Same allocator implementation embedded in the native runtime. These
+    // sizes/alignments are used by FEX's char and uint32_t containers.
+    for (size_t alignment : {size_t{1}, size_t{4}, size_t{8}, size_t{64}}) {
+        auto* memory = FEXCore::Allocator::aligned_alloc(alignment, 97);
+        CHECK(memory && reinterpret_cast<uintptr_t>(memory) % alignment == 0);
+        std::memset(memory, 0x5A, 97);
+        FEXCore::Allocator::aligned_free(memory);
+    }
+    CHECK(FEXCore::Allocator::aligned_alloc(0, 97) == nullptr);
+    CHECK(FEXCore::Allocator::aligned_alloc(3, 97) == nullptr);
     CHECK(maxps4_fex_engine_open(nullptr) == -EINVAL);
     CHECK(maxps4_fex_engine_stage(nullptr) == 0);
     maxps4_fex_engine_close(nullptr);

@@ -38,6 +38,23 @@ for relative in ('CodeEmitter/CodeEmitter/Buffer.h', 'FEXCore/Source/Utils/ArchH
         raise ValueError(f'Unexpected cache invalidation context: {relative}')
     text = text.replace(old, 'sys_icache_invalidate(Begin, Length);', 1)
     path.write_text('// MaxPS4 Darwin cache API\n#include <libkern/OSCacheControl.h>\n' + text)
+path = root / 'FEXCore/Source/Utils/AllocatorHooks.cpp'
+text = path.read_text()
+if '// MaxPS4 typed Darwin allocation' not in text:
+    old = '  return ::aligned_alloc(a, s);'
+    if text.count(old) != 1:
+        raise ValueError('Unexpected libc-backed aligned_alloc implementation')
+    text = text.replace(old, '''#if defined(__APPLE__)
+  // FEXAlloc requests alignof(char/uint32_t). Darwin requires at least
+  // pointer alignment; POSIX allocation also permits arbitrary byte sizes.
+  if (a == 0 || (a & (a - 1)) != 0) return nullptr;
+  void* Ptr {};
+  const size_t Alignment = a < sizeof(void*) ? sizeof(void*) : a;
+  return ::posix_memalign(&Ptr, Alignment, s) == 0 ? Ptr : nullptr;
+#else
+  return ::aligned_alloc(a, s);
+#endif''', 1)
+    path.write_text('// MaxPS4 typed Darwin allocation\n' + text)
 PY
 cmake -S "$FEX" -B "$OUT" -G Ninja \
   -DCMAKE_SYSTEM_NAME="$SYSTEM" -DCMAKE_SYSTEM_PROCESSOR=arm64 \
@@ -95,7 +112,7 @@ if [[ "$RUNTIME" == ON ]]; then
   fi
   if [[ "$SYSTEM" == Darwin ]]; then
     if ! "$OUT/Bin/maxps4-fex-runtime-test" 2>&1 | tee "$OUT/runtime-tests.txt"; then
-      xcrun lldb --batch -o run -o 'thread backtrace all' \
+      xcrun lldb --batch -o run -k 'thread backtrace all' \
         -- "$OUT/Bin/maxps4-fex-runtime-test" > "$OUT/runtime-backtrace.txt" 2>&1 || true
       cat "$OUT/runtime-backtrace.txt"
       exit 1

@@ -27,7 +27,8 @@ function(maxps4_complete_fexcore_linkage)
     add_executable(maxps4-fex-runtime-test
       "${MAXPS4_ROOT}/MaxPS4-iOS/Tests/FEXRuntimeIntegrationTest.cpp")
     target_compile_features(maxps4-fex-runtime-test PRIVATE cxx_std_23)
-    target_include_directories(maxps4-fex-runtime-test PRIVATE "${NATIVE}")
+    target_include_directories(maxps4-fex-runtime-test PRIVATE "${NATIVE}"
+      "${CMAKE_SOURCE_DIR}/FEXCore/include" "${CMAKE_BINARY_DIR}/include")
     target_link_libraries(maxps4-fex-runtime-test PRIVATE MaxPS4FEXRuntime)
   endif()
 endfunction()
