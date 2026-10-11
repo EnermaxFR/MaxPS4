@@ -43,10 +43,10 @@ jobs:
           from pathlib import Path
           root = Path("build/heavy/fexcore/source/FEXCore")
           patterns = {
-              "SYS_getcpu": re.compile(r"\\bSYS_getcpu\\b"),
-              "sys/prctl.h": re.compile(r"#\\s*include\\s*[<\"]sys/prctl\\.h[>\"]"),
-              "sys/user.h": re.compile(r"#\\s*include\\s*[<\"]sys/user\\.h[>\"]"),
-              "prctl invocation": re.compile(r"\\bprctl\\s*\\("),
+              "SYS_getcpu": re.compile(r"\bSYS_getcpu\b"),
+              "sys/prctl.h": re.compile(r"#\s*include\s*[<\"]sys/prctl\.h[>\"]"),
+              "sys/user.h": re.compile(r"#\s*include\s*[<\"]sys/user\.h[>\"]"),
+              "prctl invocation": re.compile(r"\bprctl\s*\("),
           }
           rows = []
           for path in sorted(root.rglob("*")):
