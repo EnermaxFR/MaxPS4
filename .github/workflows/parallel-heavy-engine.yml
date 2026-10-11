@@ -2,11 +2,17 @@ name: MaxPS4 parallel heavy engine checks
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "MaxPS4-iOS/**"
+      - "scripts/patch-fexcore-ios.py"
+      - ".github/workflows/parallel-heavy-engine.yml"
   push:
     branches: [main]
     paths:
       - "MaxPS4-iOS/**"
       - ".github/workflows/parallel-heavy-engine.yml"
+      - "scripts/patch-fexcore-ios.py"
 
 permissions:
   contents: read
@@ -33,33 +39,13 @@ jobs:
           find "$FEX" -maxdepth 1 -name '*Ops.cpp' -type f | sort > build/heavy/fexcore/jit-units.txt
           test -s build/heavy/fexcore/jit-units.txt
           echo "PASS pinned FEXCore JIT sources present (not compiled or linked)"
-      - name: Verify Darwin ProcessorID source adaptation without IPA
+      - name: Apply shared Darwin adaptations before compilation
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          source = Path("build/heavy/fexcore/source/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp")
-          workflow = Path(".github/workflows/blank.yml").read_text()
-          # Execute exactly the porting script maintained by the main workflow.
-          marker = 'python3 - "$FEX/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp" <<\'PY\'\n'
-          assert workflow.count(marker) == 1, "ProcessorID patch missing or duplicated"
-          patch = workflow.split(marker, 1)[1].split("\n          PY", 1)[0]
-          patch = "\n".join(line[10:] if line.startswith("          ") else line
-                            for line in patch.splitlines())
-          import subprocess
-          result = subprocess.run(["python3", "-c", patch, str(source)],
-                                  capture_output=True, text=True)
-          assert result.returncode == 0, result.stdout + result.stderr
-          content = source.read_text()
-          assert "#if defined(__APPLE__)\n  else {" in content
-          assert "LoadConstant(ARMEmitter::Size::i64Bit, GetReg(Node), 0);" in content
-          assert "#elif defined(_WIN32)\n  else {" in content
-          assert content.count("SYS_getcpu") == 1
-          print("PASS pinned FEXCore ProcessorID Darwin patch applies")
-          print("Source check only; this does not compile or execute the JIT")
-          PY
+          python3 MaxPS4-iOS/Tests/FEXDarwinPatchTest.py build/heavy/fexcore/source
+          python3 scripts/patch-fexcore-ios.py build/heavy/fexcore/source
+
       - name: Probe genuine patched FEXCore MiscOps with iOS ARM64 compiler
         shell: bash
         run: |
@@ -97,88 +83,6 @@ jobs:
           Path(sys.argv[2]).write_text("\n".join(lines) + "\n")
           PY
           test -s "$GENERATED/FEXCore/Config/ConfigOptions.inl"
-          # Darwin has pthread_sigmask, not Linux rt_sigprocmask syscall.
-          # Adapt only the pinned checkout for this iOS compiler probe.
-          python3 - "$FEX/FEXCore/include/FEXCore/Utils/SignalScopeGuards.h" <<'PY'
-          from pathlib import Path
-          import sys
-          path = Path(sys.argv[1])
-          contents = path.read_text()
-          start = contents.index("class ScopedSignalMasker final {")
-          stop = contents.index("\n/**", start)
-          replacement = """class ScopedSignalMasker final {
-          public:
-            explicit ScopedSignalMasker(uint64_t Mask) {
-              sigset_t requested {};
-              sigemptyset(&requested);
-              for (int signal_number = 1; signal_number <= 64; ++signal_number) {
-                if (Mask & (uint64_t{1} << (signal_number - 1))) {
-                  sigaddset(&requested, signal_number);
-                }
-              }
-              Active = pthread_sigmask(SIG_SETMASK, &requested, &OriginalMask) == 0;
-            }
-            ScopedSignalMasker(const ScopedSignalMasker&) = delete;
-            ScopedSignalMasker& operator=(const ScopedSignalMasker&) = delete;
-            ScopedSignalMasker(ScopedSignalMasker&& other)
-              : OriginalMask(other.OriginalMask), Active(other.Active) {
-              other.Active = false;
-            }
-            ~ScopedSignalMasker() {
-              if (Active) pthread_sigmask(SIG_SETMASK, &OriginalMask, nullptr);
-            }
-          private:
-            sigset_t OriginalMask {};
-            bool Active = false;
-          };
-          """
-          path.write_text(contents[:start] + replacement + contents[stop:])
-          PY
-          # iOS has no Linux futex syscall. On the pinned checkout only, use
-          # C++20 atomic wait/notify for the existing 32-bit lock state.
-          # Wake all on unlock to avoid starving a waiter with this full-word
-          # wait; performance and runtime correctness still require testing.
-          python3 - "$FEX/FEXCore/include/FEXCore/Utils/WritePriorityMutex.h" <<'PY'
-          from pathlib import Path
-          import sys
-          path = Path(sys.argv[1])
-          code = path.read_text()
-          linux_includes = "#if !defined(_WIN32)\n#include <linux/futex.h>"
-          assert code.count(linux_includes) == 1, "Upstream futex include changed"
-          code = code.replace(linux_includes,
-                              "#if !defined(_WIN32) && !defined(__APPLE__)\n#include <linux/futex.h>")
-          # The original #else selects Windows headers on Apple too.
-          # Match the exact upstream Windows branch following the Linux-only
-          # include, preserving its inline comments and remaining guards.
-          windows_header = "#else" + chr(10) + "#include <synchapi.h>"
-          assert code.count(windows_header) == 1, "Pinned FEXCore Windows include changed"
-          code = code.replace(
-              windows_header,
-              "#elif defined(_WIN32)" + chr(10) + "#include <synchapi.h>",
-          )
-          method_marker = "private:\n\n#if !defined(_WIN32)\n  void FutexWaitForWriteAvailable"
-          assert code.count(method_marker) == 1, "Upstream futex methods changed"
-          apple_methods = """private:
-          
-          #if defined(__APPLE__)
-            void FutexWaitForWriteAvailable(uint32_t Expected) {
-              std::atomic_ref<uint32_t>(Futex).wait(Expected, std::memory_order_relaxed);
-            }
-            void FutexWaitForReadAvailable(uint32_t Expected) {
-              std::atomic_ref<uint32_t>(Futex).wait(Expected, std::memory_order_relaxed);
-            }
-            void FutexWakeWriter() {
-              std::atomic_ref<uint32_t>(Futex).notify_all();
-            }
-            void FutexWakeReaders() {
-              std::atomic_ref<uint32_t>(Futex).notify_all();
-            }
-          #elif !defined(_WIN32)
-            void FutexWaitForWriteAvailable"""
-          code = code.replace(method_marker, apple_methods)
-          path.write_text(code)
-          print("Apple WritePriorityMutex uses C++20 wait/notify, not Linux SYS_futex")
-          PY
           if ! brew list --versions fmt >/dev/null 2>&1; then brew install fmt; fi
           git clone --quiet --no-checkout --filter=blob:none \
             https://github.com/martinus/unordered_dense.git build/heavy/fexcore/unordered-dense
@@ -228,6 +132,63 @@ jobs:
                     "This is NOT a link success or guest-code execution test.\n")
           (root / "miscops-symbol-summary.txt").write_text(report)
           print(report)
+          PY
+      - name: Compile every real ARM64 JIT unit and CPUBackend without IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          FEX=build/heavy/fexcore/source
+          OUT=build/heavy/fexcore
+          SOURCES=("$FEX"/FEXCore/Source/Interface/Core/JIT/*.cpp
+                   "$FEX/FEXCore/Source/Interface/Core/CPUBackend.cpp")
+          failed=0
+          : > "$OUT/jit-compile-status.txt"
+          for source in "${SOURCES[@]}"; do
+            unit="$(basename "$source" .cpp)"
+            # MiscOps was compiled and inventoried in the previous steps.
+            if test "$unit" = MiscOps; then continue; fi
+            obj="$OUT/$unit-ios-arm64.o"
+            log="$OUT/$unit-ios-compile.log"
+            if xcrun --sdk iphoneos clang++ -std=c++23 \
+                -target arm64-apple-ios16.0 -isysroot "$SDK" \
+                -DARCHITECTURE_arm64=1 -DMADV_HUGEPAGE=0 -DMADV_NOHUGEPAGE=0 \
+                -I "$OUT/generated" -I "$(brew --prefix fmt)/include" \
+                -I "$OUT/unordered-dense/include" \
+                -I "$FEX/FEXCore/include" -I "$FEX/FEXCore/Source" \
+                -I "$FEX/Source" -I "$FEX/CodeEmitter" -I "$FEX/FEXHeaderUtils" \
+                -I MaxPS4-iOS/Native/compat/fex_ios \
+                -c "$source" -o "$obj" > "$log" 2>&1; then
+              test -s "$obj"
+              xcrun lipo -archs "$obj" | grep -qw arm64
+              xcrun nm -u "$obj" > "$OUT/$unit-unresolved-symbols.txt"
+              echo "PASS $unit Mach-O arm64 object" | tee -a "$OUT/jit-compile-status.txt"
+            else
+              failed=$((failed + 1))
+              echo "FAIL $unit (see $log)" | tee -a "$OUT/jit-compile-status.txt"
+              head -40 "$log"
+            fi
+          done
+          # Attempt every unit, then fail the job if any compilation failed.
+          # Object production does not establish complete linkage or iOS JIT.
+          test "$failed" -eq 0
+      - name: Test patched Darwin signal masks and mutex on macOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          FEX=build/heavy/fexcore/source
+          OUT=build/heavy/fexcore
+          clang++ -std=c++23 -pthread -DASSERTIONS_ENABLED=0 \
+            -I "$OUT/generated" -I "$(brew --prefix fmt)/include" \
+            -I "$OUT/unordered-dense/include" \
+            -I "$FEX/FEXCore/include" -I "$FEX/FEXCore/Source" \
+            -I "$FEX/FEXHeaderUtils" \
+            MaxPS4-iOS/Tests/FEXDarwinPrimitivesTest.cpp \
+            -o "$OUT/darwin-primitives-test"
+          python3 - <<'PY'
+          import subprocess
+          subprocess.run(["build/heavy/fexcore/darwin-primitives-test"],
+                         timeout=60, check=True)
           PY
       - name: Audit Linux-specific dependencies blocking iOS FEXCore port
         shell: bash
@@ -287,6 +248,10 @@ jobs:
             build/heavy/fexcore/miscops-unresolved-symbols.txt
             build/heavy/fexcore/miscops-global-symbols.txt
             build/heavy/fexcore/miscops-symbol-summary.txt
+            build/heavy/fexcore/jit-compile-status.txt
+            build/heavy/fexcore/*-ios-compile.log
+            build/heavy/fexcore/*-ios-arm64.o
+            build/heavy/fexcore/*-unresolved-symbols.txt
           if-no-files-found: ignore
 
   shadps4-hle:
