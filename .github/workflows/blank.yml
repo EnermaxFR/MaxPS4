@@ -822,6 +822,15 @@ jobs:
           fi
           test -s "$TOML11/include/toml.hpp"
           echo "PASS upstream toml11 headers available for emulator settings"
+          # Diagnostic-only SDL3 headers: no macOS SDL binary is linked to iOS.
+          SDL3="build/diagnostics/sdl3-upstream"
+          if ! test -s "$SDL3/include/SDL3/SDL_messagebox.h"; then
+            git clone --quiet --filter=blob:none \
+              https://github.com/libsdl-org/SDL.git "$SDL3"
+            git -C "$SDL3" checkout --quiet ea3042350d3aac4b83ae83047185ba703d8f0a5c
+          fi
+          test -s "$SDL3/include/SDL3/SDL_messagebox.h"
+          echo "PASS real SDL3 headers available for AetherPS4 settings compile probe"
           mkdir -p build/diagnostics/aether-full-engine
           : > build/diagnostics/aether-full-engine/status.txt
           for source in \
@@ -855,6 +864,7 @@ jobs:
                  -I "$(brew --prefix spdlog)/include" \
                  -I "$(brew --prefix nlohmann-json)/include" \
                  -I "$TOML11/include" \
+                 -I "$SDL3/include" \
                  -I "$(brew --prefix boost)/include" \
                  -I "build/diagnostics/robin-map-upstream/include" \
                  -c "$ROOT/$source" -o "$output" \
