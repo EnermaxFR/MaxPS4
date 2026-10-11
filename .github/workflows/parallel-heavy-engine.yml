@@ -33,11 +33,46 @@ jobs:
           find "$FEX" -maxdepth 1 -name '*Ops.cpp' -type f | sort > build/heavy/fexcore/jit-units.txt
           test -s build/heavy/fexcore/jit-units.txt
           echo "PASS pinned FEXCore JIT sources present (not compiled or linked)"
+      - name: Audit Linux-specific dependencies blocking iOS FEXCore port
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+          root = Path("build/heavy/fexcore/source/FEXCore")
+          patterns = {
+              "SYS_getcpu": re.compile(r"\\bSYS_getcpu\\b"),
+              "sys/prctl.h": re.compile(r"#\\s*include\\s*[<\"]sys/prctl\\.h[>\"]"),
+              "sys/user.h": re.compile(r"#\\s*include\\s*[<\"]sys/user\\.h[>\"]"),
+              "prctl invocation": re.compile(r"\\bprctl\\s*\\("),
+          }
+          rows = []
+          for path in sorted(root.rglob("*")):
+              if path.suffix not in (".cpp", ".cc", ".c", ".h", ".hpp") or not path.is_file():
+                  continue
+              for number, line in enumerate(path.read_text(errors="replace").splitlines(), 1):
+                  for category, pattern in patterns.items():
+                      if pattern.search(line):
+                          rows.append({"file": str(path.relative_to(root)), "line": number,
+                                       "category": category, "source": line.strip()[:240]})
+          out = Path("build/heavy/fexcore")
+          (out / "darwin-linux-compat-audit.json").write_text(
+              json.dumps({"upstream_commit": "f2b679f6028ce1c38875233aecfcf5d3f8ebecec",
+                          "findings": rows}, indent=2) + "\\n")
+          print("Linux-to-iOS migration findings:", len(rows))
+          for row in rows[:30]:
+              print(f'{row["file"]}:{row["line"]}: {row["category"]}: {row["source"]}')
+          print("Audit only: compiling and linking a complete FEXCore iOS backend still required")
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: heavy-fexcore-source-inventory
-          path: build/heavy/fexcore/jit-units.txt
+          path: |
+            build/heavy/fexcore/jit-units.txt
+            build/heavy/fexcore/darwin-linux-compat-audit.json
           if-no-files-found: ignore
 
   shadps4-hle:
