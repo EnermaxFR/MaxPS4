@@ -209,6 +209,26 @@ jobs:
             # ended successfully and misleadingly painted the job green.
             exit 1
           fi
+      - name: Inventory real ARM64 MiscOps object unresolved symbols
+        shell: bash
+        run: |
+          set -euo pipefail
+          OBJ=build/heavy/fexcore/miscops-ios-arm64.o
+          test -s "$OBJ"
+          xcrun nm -u "$OBJ" | sort -u > build/heavy/fexcore/miscops-unresolved-symbols.txt
+          xcrun nm -g "$OBJ" > build/heavy/fexcore/miscops-global-symbols.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path("build/heavy/fexcore")
+          unresolved = (root / "miscops-unresolved-symbols.txt").read_text().splitlines()
+          defined = (root / "miscops-global-symbols.txt").read_text().splitlines()
+          report = ("FEXCore MiscOps.cpp / Mach-O arm64 object symbol inventory\n"
+                    f"Unresolved symbol lines: {len(unresolved)}\n"
+                    f"Global symbol lines: {len(defined)}\n"
+                    "This is NOT a link success or guest-code execution test.\n")
+          (root / "miscops-symbol-summary.txt").write_text(report)
+          print(report)
+          PY
       - name: Audit Linux-specific dependencies blocking iOS FEXCore port
         shell: bash
         run: |
@@ -264,6 +284,9 @@ jobs:
             build/heavy/fexcore/miscops-ios-compile.log
             build/heavy/fexcore/miscops-ios-status.txt
             build/heavy/fexcore/miscops-ios-arm64.o
+            build/heavy/fexcore/miscops-unresolved-symbols.txt
+            build/heavy/fexcore/miscops-global-symbols.txt
+            build/heavy/fexcore/miscops-symbol-summary.txt
           if-no-files-found: ignore
 
   shadps4-hle:
