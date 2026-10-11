@@ -36,16 +36,26 @@ int active_region = -1;
 size_t page_size = 0;
 
 bool protection(uintptr_t address, size_t bytes, vm_prot_t required) {
-    vm_address_t base = address;
-    vm_size_t size = 0;
-    vm_region_basic_info_data_64_t info {};
-    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
-    mach_port_t object = MACH_PORT_NULL;
-    const auto kr = vm_region_64(mach_task_self(), &base, &size,
-        VM_REGION_BASIC_INFO_64, reinterpret_cast<vm_region_info_t>(&info), &count, &object);
-    if (object != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), object);
-    return kr == KERN_SUCCESS && base == address && size >= bytes &&
-        info.protection == required;
+    // vm_region_64 describes one VM entry, not necessarily the entire RX pool.
+    // Verify every contiguous subregion without relaxing W^X or accepting gaps.
+    if (!bytes || address > UINTPTR_MAX - bytes) return false;
+    const uintptr_t end = address + bytes;
+    uintptr_t cursor = address;
+    while (cursor < end) {
+        vm_address_t base = static_cast<vm_address_t>(cursor);
+        vm_size_t size = 0;
+        vm_region_basic_info_data_64_t info {};
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object = MACH_PORT_NULL;
+        const auto kr = vm_region_64(mach_task_self(), &base, &size,
+            VM_REGION_BASIC_INFO_64, reinterpret_cast<vm_region_info_t>(&info), &count, &object);
+        if (object != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), object);
+        if (kr != KERN_SUCCESS || base > cursor || size == 0 ||
+            base > UINTPTR_MAX - size || base + size <= cursor ||
+            info.protection != required) return false;
+        cursor = base + size;
+    }
+    return true;
 }
 void destroy_regions() {
     for (auto& region : regions) {
