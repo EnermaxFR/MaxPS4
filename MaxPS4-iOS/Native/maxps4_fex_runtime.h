@@ -24,6 +24,10 @@ int32_t maxps4_fex_engine_cpuid(maxps4_fex_engine *engine, uint32_t leaf,
 // No interpreter fallback within this function.
 int32_t maxps4_fex_engine_probe(maxps4_fex_engine *engine, uint64_t *result,
                               uint32_t *backend);
+// Four fixed arithmetic probes (0 add, 1 subtract, 2 double, 3 shift).
+// All require a live initialized FEXCore JIT; never fall back to interpreter.
+int32_t maxps4_fex_engine_probe_case(maxps4_fex_engine *engine, uint32_t test_case,
+                                    uint64_t *result, uint32_t *backend);
 // Existing bounded interpreter fallback; never describes its output as FEX JIT.
 // Caller keeps engine alive during calls and serializes close against them.
 int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine, const uint8_t *code,
