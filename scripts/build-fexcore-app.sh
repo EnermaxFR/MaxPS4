@@ -64,7 +64,7 @@ codesign -d --entitlements :- build/Payload/MaxPS4.app > build/diagnostics/fex-a
 xcrun nm -u build/Payload/MaxPS4.app/MaxPS4 > build/diagnostics/fex-app-imports.txt
 xcrun otool -L build/Payload/MaxPS4.app/MaxPS4 > build/diagnostics/fex-app-libraries.txt
 xcrun nm -gU "$FRAMEWORK/MaxPS4FEXRuntime" > build/diagnostics/fex-app-runtime-exports.txt
-for symbol in maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_run maxps4_jit_begin maxps4_jit_cancel; do
+for symbol in maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_run maxps4_fex_engine_run_elf maxps4_jit_begin maxps4_jit_cancel; do
   grep -q "_${symbol}$" build/diagnostics/fex-app-imports.txt
   grep -q "_${symbol}$" build/diagnostics/fex-app-runtime-exports.txt
 done
