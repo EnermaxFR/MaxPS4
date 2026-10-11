@@ -60,7 +60,18 @@ jobs:
           out = Path("build/heavy/fexcore")
           (out / "darwin-linux-compat-audit.json").write_text(
               json.dumps({"upstream_commit": "f2b679f6028ce1c38875233aecfcf5d3f8ebecec",
-                          "findings": rows}, indent=2) + "\\n")
+                          "findings": rows}, indent=2) + "\n")
+          # Ensure artifacts are machine-readable before uploading them.
+          import collections
+          report_path = out / "darwin-linux-compat-audit.json"
+          report = json.loads(report_path.read_text())
+          assert report["findings"] == rows
+          summary = collections.Counter(entry["category"] for entry in rows)
+          (out / "darwin-linux-compat-summary.txt").write_text(
+              "FEXCore Linux dependencies for iOS porting (source inventory only)\n"
+              + "\n".join(f"{category}: {count}" for category, count in sorted(summary.items()))
+              + "\n"
+          )
           print("Linux-to-iOS migration findings:", len(rows))
           for row in rows[:30]:
               print(f'{row["file"]}:{row["line"]}: {row["category"]}: {row["source"]}')
@@ -73,6 +84,7 @@ jobs:
           path: |
             build/heavy/fexcore/jit-units.txt
             build/heavy/fexcore/darwin-linux-compat-audit.json
+            build/heavy/fexcore/darwin-linux-compat-summary.txt
           if-no-files-found: ignore
 
   shadps4-hle:
