@@ -4,6 +4,9 @@ import MetalKit
 private final class TriangleRenderer: NSObject, MTKViewDelegate {
     private let queue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
+    private let texturedPipeline: MTLRenderPipelineState
+    private let checkerboard: MTLTexture
+    var textured = false
     private var elapsed: TimeInterval = 0
     private var previousTime: TimeInterval?
     private var reportedFrame = false
@@ -16,6 +19,8 @@ private final class TriangleRenderer: NSObject, MTKViewDelegate {
         }
         self.queue = queue
         pipeline = try MaxPS4MetalPipeline.make(device: device)
+        texturedPipeline = try MaxPS4MetalPipeline.makeTextured(device: device)
+        checkerboard = try MaxPS4MetalPipeline.makeCheckerboard(device: device)
         self.report = report
         super.init()
     }
@@ -35,11 +40,13 @@ private final class TriangleRenderer: NSObject, MTKViewDelegate {
         previousTime = now
         var uniforms = MaxPS4MetalPipeline.uniforms(elapsed: elapsed,
             width: Double(view.drawableSize.width), height: Double(view.drawableSize.height))
-        encoder.setRenderPipelineState(pipeline)
+        encoder.setRenderPipelineState(textured ? texturedPipeline : pipeline)
+        if textured { encoder.setFragmentTexture(checkerboard, index: 0) }
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<SIMD3<Float>>.stride, index: 0)
-        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: textured ? 6 : 3)
         encoder.endEncoding()
         command.present(drawable)
+        let mode = textured ? "Texture" : "Triangle"
         let first = !reportedFrame
         reportedFrame = true
         command.addCompletedHandler { [weak self] buffer in
@@ -48,7 +55,7 @@ private final class TriangleRenderer: NSObject, MTKViewDelegate {
                 if let error {
                     view?.isPaused = true
                     self?.report("Erreur GPU : \(error)", true)
-                } else if first { self?.report("Triangle rendu — commande Metal terminée", false) }
+                } else if first { self?.report("\(mode) rendue — commande Metal terminée", false) }
             }
         }
         command.commit()
@@ -58,6 +65,7 @@ private final class TriangleRenderer: NSObject, MTKViewDelegate {
 private struct TriangleSurface: UIViewRepresentable {
     let device: MTLDevice
     let active: Bool
+    let textured: Bool
     let report: (String, Bool) -> Void
 
     final class Coordinator {
@@ -80,6 +88,7 @@ private struct TriangleSurface: UIViewRepresentable {
     }
     func updateUIView(_ view: MTKView, context: Context) {
         context.coordinator.renderer?.report = report
+        context.coordinator.renderer?.textured = textured
         view.isPaused = !active || context.coordinator.renderer == nil
         if !active { context.coordinator.renderer?.pause() }
     }
@@ -96,6 +105,7 @@ struct MaxPS4MetalDiagnosticView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var device = MTLCreateSystemDefaultDevice()
     @State private var running = false
+    @State private var textured = false
     @State private var visible = false
     @State private var failed = false
     @State private var status = "Prêt — rendu arrêté"
@@ -105,11 +115,18 @@ struct MaxPS4MetalDiagnosticView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     Text("Prototype GPU Apple Metal").font(.headline)
-                    Text("Test de rendu natif sur iPhone. Ce triangle n’est pas une émulation GPU PS4 : commandes GCN, traduction des shaders et mémoire graphique PS4 restent à développer.")
+                    Text("Test de rendu natif sur iPhone. Le triangle et la texture ne sont pas une émulation GPU PS4 : commandes GCN, traduction des shaders et mémoire graphique PS4 restent à développer.")
                     Text(device.map { "Metal disponible : \($0.name)" } ?? "Metal indisponible sur cet appareil")
                         .accessibilityIdentifier("maxps4.metalAvailability")
                     if let device {
+                        Picker("Démonstration", selection: $textured) {
+                            Text("Triangle").tag(false)
+                            Text("Texture").tag(true)
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: textured) { _, _ in status = "Changement de mode Metal…" }
                         TriangleSurface(device: device,
+                            textured: textured,
                             active: running && visible && scenePhase == .active && !failed) { message, error in
                                 if running || error { status = message }
                                 failed = error
@@ -117,7 +134,7 @@ struct MaxPS4MetalDiagnosticView: View {
                             }
                             .frame(height: 300)
                             .clipShape(RoundedRectangle(cornerRadius: 16))
-                        Button(running ? "Arrêter le triangle" : "Démarrer le triangle") {
+                        Button(running ? "Arrêter le rendu" : "Démarrer le rendu") {
                             running.toggle()
                             status = running ? "Soumission du rendu Metal…" : "Rendu arrêté"
                         }
