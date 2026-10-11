@@ -130,6 +130,11 @@ jobs:
             brew install fmt
           fi
           test -f "$(brew --prefix fmt)/include/fmt/base.h"
+          # shadPS4's kernel equeue uses Boost.Asio headers.
+          if ! test -f "$(brew --prefix boost)/include/boost/asio/steady_timer.hpp"; then
+            brew install boost
+          fi
+          test -f "$(brew --prefix boost)/include/boost/asio/steady_timer.hpp"
           test -s "$SHAD/src/core/libraries/libs.cpp"
           # This is an actual upstream translation unit, not the existing
           # small shadPS4 utility bridge. It is a non-shipping porting probe.
@@ -137,6 +142,7 @@ jobs:
                -target arm64-apple-ios16.0 -isysroot "$SDK" \
                -I "$SHAD/src" \
                -I "$(brew --prefix fmt)/include" \
+               -I "$(brew --prefix boost)/include" \
                -fsyntax-only "$SHAD/src/core/libraries/libs.cpp" \
                > "$OUT/hle-library-registry-ios.log" 2>&1; then
             echo "PASS real shadPS4 HLE library registry compiles for iOS ARM64 (not linked)" \
