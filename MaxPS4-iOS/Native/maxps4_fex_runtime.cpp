@@ -4,16 +4,57 @@
 #include <FEXCore/Core/Context.h>
 #include <FEXCore/Core/SignalDelegator.h>
 #include <TargetConditionals.h>
+#include <FEXCore/Core/CoreState.h>
+#include <FEXCore/Core/X86Enums.h>
+#include <FEXCore/Debug/InternalThreadState.h>
+#include <FEXCore/HLE/SyscallHandler.h>
+#include <array>
+#include <cstring>
+#include <sys/mman.h>
+#include <unistd.h>
 #include <cerrno>
 #include <mutex>
 #include <new>
 
 extern "C" int maxps4_native_guest_x86_run(const uint8_t*, size_t, uint32_t,
                                            uint64_t*) noexcept;
+namespace {
+// Anonymous immutable guest memory, not a PS4 or Linux syscall ABI.
+// A syscall has no permitted host effect and returns the real ENOSYS error.
+class ProbeAddressSpace final : public FEXCore::HLE::SyscallHandler {
+public:
+    ProbeAddressSpace() { OSABI = FEXCore::HLE::SyscallOSABI::OS_GENERIC; }
+    uintptr_t begin = 0;
+    size_t size = 0;
+    uint64_t HandleSyscall(FEXCore::Core::CpuStateFrame*, FEXCore::HLE::SyscallArguments*) override {
+        return static_cast<uint64_t>(-ENOSYS);
+    }
+    FEXCore::HLE::ExecutableRangeInfo QueryGuestExecutableRange(
+        FEXCore::Core::InternalThreadState*, uint64_t address) override {
+        if (begin && address >= begin && address - begin < size) return {begin, size, false};
+        return {0, 0, false};
+    }
+    std::optional<FEXCore::ExecutableFileSectionInfo> LookupExecutableFileSection(
+        FEXCore::Core::InternalThreadState*, uint64_t) override {
+        return std::nullopt; // Anonymous mapping has no executable file section.
+    }
+};
+class Mapping final {
+public:
+    Mapping(size_t bytes, int protection) : size(bytes), address(
+        ::mmap(nullptr, bytes, protection, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)) {}
+    ~Mapping() { if (address != MAP_FAILED) ::munmap(address, size); }
+    Mapping(const Mapping&) = delete;
+    Mapping& operator=(const Mapping&) = delete;
+    size_t size;
+    void* address;
+};
+}
 struct maxps4_fex_engine {
     // This real FEX configuration holder installs no process signal handlers.
-    // It outlives the context. Guest execution is deliberately not exposed yet.
+    // It outlives the context. Only the fixed no-fault probe may execute.
     FEXCore::SignalDelegator signals;
+    ProbeAddressSpace probe;
     fextl::unique_ptr<FEXCore::Context::Context> context;
     int32_t stage = MAXPS4_FEX_CONTEXT_CREATED;
 };
@@ -69,6 +110,9 @@ extern "C" int32_t maxps4_fex_engine_initialize(maxps4_fex_engine *engine) {
 #else
     if (engine->stage == MAXPS4_FEX_DISPATCHER_INITIALIZED) return 0;
     engine->context->SetSignalDelegator(&engine->signals);
+    // Only the fixed HLT-terminated probe is exposed, never arbitrary guest code.
+    engine->context->SetSyscallHandler(&engine->probe);
+    engine->context->EnableExitOnHLT();
     errno = 0;
     if (!engine->context->InitCore()) return -(errno ? errno : ENOMEM);
     engine->stage = MAXPS4_FEX_DISPATCHER_INITIALIZED;
@@ -105,4 +149,65 @@ extern "C" int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine,
     }
     *backend = MAXPS4_CPU_RESTRICTED_INTERPRETER;
     return 0;
+}
+
+extern "C" int32_t maxps4_fex_engine_probe(maxps4_fex_engine *engine,
+                                          uint64_t *result, uint32_t *backend) {
+    if (result) *result = 0;
+    if (backend) *backend = 0;
+    if (!engine || !result || !backend) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+#if TARGET_OS_IPHONE
+    return -ENOTSUP;
+#else
+    if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
+    const long host_page = ::sysconf(_SC_PAGESIZE);
+    if (host_page <= 0) return -EIO;
+    const size_t page = static_cast<size_t>(host_page);
+    constexpr uint8_t code[] = {0xB8,40,0,0,0,0x05,2,0,0,0,0xF4};
+    Mapping guest(page, PROT_READ | PROT_WRITE);
+    Mapping stack(3 * page, PROT_NONE);
+    constexpr size_t callret_size = FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE;
+    Mapping callret(callret_size + 2 * page, PROT_NONE);
+    if (guest.address == MAP_FAILED || stack.address == MAP_FAILED || callret.address == MAP_FAILED)
+        return -(errno ? errno : ENOMEM);
+    auto* stack_base = static_cast<uint8_t*>(stack.address) + page;
+    auto* callret_base = static_cast<uint8_t*>(callret.address) + page;
+    if (::mprotect(stack_base, page, PROT_READ | PROT_WRITE) != 0 ||
+        ::mprotect(callret_base, callret_size, PROT_READ | PROT_WRITE) != 0) return -errno;
+    std::memcpy(guest.address, code, sizeof(code));
+    if (::mprotect(guest.address, page, PROT_READ) != 0) return -errno;
+    std::array<FEXCore::Core::CPUState::gdt_segment, 32> gdt {};
+    engine->probe.begin = reinterpret_cast<uintptr_t>(guest.address);
+    engine->probe.size = page;
+    struct ClearRange {
+        ProbeAddressSpace& space;
+        ~ClearRange() { space.begin = 0; space.size = 0; }
+    } clear_range {engine->probe};
+    auto* thread = engine->context->CreateThread(engine->probe.begin,
+        reinterpret_cast<uintptr_t>(stack_base) + page - 16);
+    if (!thread) return -ENOMEM;
+    struct DestroyThread {
+        FEXCore::Context::Context* context;
+        FEXCore::Core::InternalThreadState* thread;
+        ~DestroyThread() { context->DestroyThread(thread); }
+    } destroy {engine->context.get(), thread};
+    auto& state = thread->CurrentFrame->State;
+    thread->CallRetStackBase = callret_base;
+    state.callret_sp = reinterpret_cast<uintptr_t>(callret_base) + callret_size / 4;
+    state.segment_arrays[FEXCore::Core::CPUState::SEGMENT_ARRAY_INDEX_GDT] = gdt.data();
+    state.segment_arrays[FEXCore::Core::CPUState::SEGMENT_ARRAY_INDEX_LDT] = gdt.data();
+    state.cs_idx = FEXCore::Core::CPUState::DEFAULT_USER_CS << 3;
+    auto* segment = FEXCore::Core::CPUState::GetSegmentFromIndex(state, state.cs_idx);
+    FEXCore::Core::CPUState::SetGDTBase(segment, 0);
+    FEXCore::Core::CPUState::SetGDTLimit(segment, 0xF'FFFFU);
+    segment->L = 1;
+    segment->D = 0;
+    state.cs_cached = FEXCore::Core::CPUState::CalculateGDTBase(*segment);
+    engine->context->ExecuteThread(thread);
+    if (state.gregs[FEXCore::X86State::REG_RAX] != 42) return -EIO;
+    *result = state.gregs[FEXCore::X86State::REG_RAX];
+    *backend = MAXPS4_CPU_FEX_ARM64_JIT;
+    return 0;
+#endif
 }

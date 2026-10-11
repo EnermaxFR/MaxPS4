@@ -25,6 +25,9 @@ int main() {
     CHECK(maxps4_fex_engine_stage(nullptr) == 0);
     maxps4_fex_engine_close(nullptr);
     CHECK(maxps4_fex_engine_initialize(nullptr) == -EINVAL);
+    uint64_t probe_result = 99; uint32_t probe_backend = 99;
+    CHECK(maxps4_fex_engine_probe(nullptr, &probe_result, &probe_backend) == -EINVAL);
+    CHECK(probe_result == 0 && probe_backend == 0);
     CHECK(maxps4_native_capabilities() == 0);
     CHECK(maxps4_native_launch("probe") == -38);
     CHECK(maxps4_native_aether_cpu_probe() == 1);
@@ -35,14 +38,29 @@ int main() {
         CHECK(maxps4_fex_engine_open(&second) == 0 && second);
         CHECK(maxps4_fex_engine_stage(first) == MAXPS4_FEX_CONTEXT_CREATED);
 #if TARGET_OS_IPHONE
+        CHECK(maxps4_fex_engine_probe(first, &probe_result, &probe_backend) == -ENOTSUP);
+        CHECK(probe_result == 0 && probe_backend == 0);
         CHECK(maxps4_fex_engine_initialize(first) == -ENOTSUP);
         CHECK(maxps4_fex_engine_stage(first) == MAXPS4_FEX_CONTEXT_CREATED);
 #else
+        CHECK(maxps4_fex_engine_probe(first, &probe_result, &probe_backend) == -EAGAIN);
+        CHECK(probe_result == 0 && probe_backend == 0);
         CHECK(maxps4_fex_engine_initialize(first) == 0);
         CHECK(maxps4_fex_engine_stage(first) == MAXPS4_FEX_DISPATCHER_INITIALIZED);
         CHECK(maxps4_fex_engine_initialize(first) == 0);
         CHECK(maxps4_fex_engine_initialize(second) == 0);
         std::puts("PASS real InitCore dispatcher initialized twice without reallocation");
+#endif
+#if !TARGET_OS_IPHONE
+        CHECK(maxps4_fex_engine_probe(first, nullptr, &probe_backend) == -EINVAL);
+        CHECK(probe_backend == 0);
+        for (unsigned probe = 0; probe != 2; ++probe) {
+            std::printf("BEGIN real FEX ARM64 JIT fixed guest probe cycle=%u attempt=%u\n", repeat, probe);
+            CHECK(maxps4_fex_engine_probe(first, &probe_result, &probe_backend) == 0);
+            CHECK(probe_result == 42 && probe_backend == MAXPS4_CPU_FEX_ARM64_JIT);
+            std::printf("PASS real FEX ARM64 JIT guest RAX=%llu backend=%u\n",
+                static_cast<unsigned long long>(probe_result), probe_backend);
+        }
 #endif
         uint32_t cpuid[4]{};
         CHECK(maxps4_fex_engine_cpuid(first, 0, 0, cpuid) == 0);
@@ -68,5 +86,5 @@ int main() {
         CHECK(maxps4_fex_engine_cpuid(second, 0, 0, nullptr) == -EINVAL);
         maxps4_fex_engine_close(second);
     }
-    std::puts("PASS real FEX context lifecycle/CPUID and explicit interpreter fallback; FEX JIT NOT executed");
+    std::puts("PASS real FEX context lifecycle/CPUID and explicit interpreter fallback; device JIT NOT tested");
 }

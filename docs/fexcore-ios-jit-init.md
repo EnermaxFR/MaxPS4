@@ -3,8 +3,9 @@
 Branche `codex/fexcore-ios-jit-init`, issue de `main` au commit
 `2d99a4f4152b260d3588fe6072407bde3685074f` (PR #128 fusionnée).
 Fork Darwin AetherPS4 inchangé : `3347fc13f19860855ce91b66356940989ea6b6a6`.
-Cette étape initialise réellement le dispatcher sur macOS ARM64. Elle ne crée
-pas encore de thread invité et n'exécute pas de code x86 dans FEX.
+Cette étape initialise réellement le dispatcher sur macOS ARM64 et ajoute une
+sonde fixe x86-64 via CreateThread/ExecuteThread. La nouvelle sonde attend encore
+sa validation CI ; aucun résultat appareil n'est annoncé.
 
 ## Contrat et ressources
 
@@ -16,7 +17,8 @@ La fermeture doit toujours être sérialisée par l'appelant avec toutes les op�
 Le `SignalDelegator` fourni par FEX lui-même conserve les adresses émises par
 le dispatcher : aucun faux gestionnaire de signaux n'est ajouté. Il n'installe
 aucun handler OS, ne restaure aucun contexte après faute et ne rend pas
-l'exécution invitée sûre. Son stockage précède le contexte et lui survit.
+l'exécution invitée arbitraire sûre. La sonde fixe ne comporte ni accès invité
+aux données, ni syscall, ni thunk, ni boucle et ne dépend d'aucun signal invité. Son stockage précède le contexte et lui survit.
 La destruction du contexte libère son dispatcher avant l'arrêt de la configuration.
 Le repli existant continue à indiquer `MAXPS4_CPU_RESTRICTED_INTERPRETER`.
 Ni le stade 2 ni le résultat 42 de ce repli ne prouvent une exécution FEX JIT.
@@ -50,24 +52,39 @@ Le garde macOS s'applique au thread écrivain. L'alias RW iOS ne justifie pas
 un passage arbitraire RWX ni un remplacement identité de RW/RX.
 Les tailles de page hôte et invitée doivent rester distinctes (16 Kio/4 Kio).
 
-## Première exécution invitée à préparer
+## Sonde d'exécution réelle, distincte de l'interpréteur
 
-Le futur test FEX, distinct de `maxps4_fex_engine_run`, utilisera uniquement :
+`maxps4_fex_engine_probe` n'accepte aucun code utilisateur. Elle exécute uniquement
 `B8 28 00 00 00 05 02 00 00 00 F4` (`mov eax,40; add eax,2; hlt`).
-Le HLT est une sortie contrôlée après `EnableExitOnHLT`, pas un RET avec pile
-invitée indéfinie. La mémoire des octets invités n'a pas besoin de PROT_EXEC.
-Avant d'exposer ce test : fournir un contrat de syscalls rejetant explicitement
-les opérations non prises en charge (jamais une réussite factice), limiter
-`QueryGuestExecutableRange` à l'allocation invitée réelle, configurer GDT/état
-CPU, pile invitée et pile call/ret FEX avec gardes. Ensuite `CreateThread`,
-`ExecuteThread`, lire RAX=42 et RIP, puis `DestroyThread` avant de libérer les piles
-et le contexte. `CreateThread` initialise le compilateur et le backend ARM64 :
-il exige un SyscallHandler réel et ne désigne pas l'interpréteur de MaxPS4.
+Elle requiert le stade 2 (`-EAGAIN` sinon), retourne `-ENOTSUP` sur iOS, et ne
+bascule jamais vers l'interpréteur. `EnableExitOnHLT` est appelé avant InitCore :
+le dispatcher émet alors une sortie qui restaure la pile hôte et retourne,
+plutôt qu'une faute nécessitant un handler SIGSEGV. Le résultat est lu dans
+le véritable état RAX du thread invité, vérifié égal à 42 et marqué
+`MAXPS4_CPU_FEX_ARM64_JIT` seulement après le retour d'ExecuteThread.
 
-Aucun `SmokeSyscallHandler` d'Aether n'est copié : il retourne artificiellement
-0 pour tout syscall et annonce toute la mémoire comme exécutable. Aucun backend
-JIT n'est annoncé par la présente API. L'initialisation du dispatcher est l'étape
-intermédiaire vérifiable livrée ici, plutôt qu'une exécution simulée.
+Le contrat `ProbeAddressSpace` décrit uniquement l'allocation anonyme en lecture
+seule, refuse les plages inconnues, signale correctement l'absence de section de
+fichier et retourne ENOSYS pour les syscalls, sans exécuter d'opération hôte.
+Il ne prétend pas implémenter l'ABI syscall PS4/Linux. Contrairement au helper
+SmokeSyscallHandler d'Aether, aucune réussite factice ni plage mémoire globale
+exécutable n'est annoncée. Il n'est pas destiné à un programme invité arbitraire.
+
+La page contenant les octets x86 est RW lors de la copie puis R, jamais RX/RWX.
+La pile invitée et la pile call/ret FEX possèdent chacune deux gardes PROT_NONE,
+avec taille de page issue de sysconf. GDT, CS 64 bits et callret_sp sont initialisés.
+CreateThread crée le vrai compilateur/backend ARM64. Une garde détruit le thread
+avant les piles, GDT et mémoire invitée ; la plage du fournisseur est ensuite
+retirée. Les mêmes opérations peuvent être répétées. Le fournisseur demeure
+valide jusqu'à destruction du contexte. Les appels sont sérialisés et aucune
+exécution invitée parallèle n'est permise. Les échecs mmap/mprotect retournent
+une erreur et nettoient les mappings acquis. Les assertions/OOM internes de
+FEX et les signaux fatals ne sont pas transformés en fausses réussites.
+
+La matrice macOS demande six exécutions (deux par contexte sur trois cycles),
+des erreurs de stade/arguments et le nettoyage avec réouverture du runtime.
+Le fallback historique mov/add/RET reste testé séparément et indique toujours
+le backend interpréteur. Ces deux résultats 42 ont des chemins différents.
 
 ## Protocole iPhone physique
 
@@ -99,8 +116,14 @@ réussies ; ancien binaire de régression du pipeline natif réussi (7 programme
 ARM64 traité comme données). `bash -n` et `git diff --check` réussis.
 L'hôte Linux n'a pas Xcode : les builds macOS/iOS et l'exécution réelle de
 `InitCore` sont demandés à la matrice CI existante, sans retirer de tests.
-Les résultats CI, commits et artefacts seront ajoutés après exécution.
+Premier commit `c279af781c825f7f95d3f0f280baffb75582859d` : initialisation réelle
+macOS validée (3 cycles / 2 contextes) et liaison iOS réussie dans
+[38130371641](https://github.com/EnermaxFR/MaxPS4/actions/runs/38130371641).
+Smoke [38130371582](https://github.com/EnermaxFR/MaxPS4/actions/runs/38130371582)
+et heavy [38130371557](https://github.com/EnermaxFR/MaxPS4/actions/runs/38130371557)
+réussis. Les résultats de la sonde, commits et artefacts seront ajoutés après
+sa validation. Ce premier commit n'exécutait pas encore de bloc invité.
 
 Blocages prioritaires : fournisseur JIT iOS conforme ; délégation Darwin OS et
-safepoints ; SyscallHandler invité borné et piles/contextes ; exécution du bloc
+safepoints pour du code arbitraire ; ABI syscalls PS4 ; validation du bloc
 sur hôte puis appareil ; intégration de cette bibliothèque au packaging applicatif.
