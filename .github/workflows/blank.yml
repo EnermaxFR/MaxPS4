@@ -1340,7 +1340,7 @@ jobs:
                 -I "$FEX/Source" -I "$FMT_INCLUDE" \
                 -c "$ops_source" -o "$ops_output" > "$ops_log" 2>&1; then
               echo "PASS $ops_source" >> build/diagnostics/fexcore-jit-extra-ops-status.txt
-              printf '%s\\n' "$ops_output" >> build/diagnostics/fexcore-jit-extra-ops-objects.txt
+              printf '%s\n' "$ops_output" >> build/diagnostics/fexcore-jit-extra-ops-objects.txt
             else
               echo "BLOCKED $ops_source (see $ops_log)" \
                 >> build/diagnostics/fexcore-jit-extra-ops-status.txt
