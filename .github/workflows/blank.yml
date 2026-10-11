@@ -124,6 +124,12 @@ jobs:
           SHAD="MaxPS4-iOS/Engine/shadPS4"
           OUT="build/diagnostics/shadps4-porting"
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          # Homebrew prefix can exist even when the fmt formula is not installed.
+          # Install real upstream fmt headers before the native HLE compile probe.
+          if ! test -f "$(brew --prefix fmt)/include/fmt/base.h"; then
+            brew install fmt
+          fi
+          test -f "$(brew --prefix fmt)/include/fmt/base.h"
           test -s "$SHAD/src/core/libraries/libs.cpp"
           # This is an actual upstream translation unit, not the existing
           # small shadPS4 utility bridge. It is a non-shipping porting probe.
