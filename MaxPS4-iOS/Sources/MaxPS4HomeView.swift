@@ -647,7 +647,7 @@ struct MaxPS4HomeView: View {
             }
             .font(.system(size: 42, weight: .black, design: .rounded))
 
-            Text("VOS JEUX • VOTRE UNIVERS")
+            Text("AU-DESSUS DES NUAGES • MAXPS4")
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.white.opacity(0.60))
         }
@@ -1061,7 +1061,7 @@ struct MaxPS4HomeView: View {
     private var heroPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Label("MAXPS4  /  CONTROL CENTER", systemImage: "sparkles.rectangle.stack.fill")
+                Label("MAXPS4  /  ÉDITION NOCTURNE", systemImage: "moon.stars.fill")
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .tracking(2)
                     .foregroundStyle(.cyan)
@@ -1070,10 +1070,10 @@ struct MaxPS4HomeView: View {
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.55))
             }
-            Text("Vos jeux sur iPhone")
+            Text("Dans la légende")
                 .font(.system(size: 34, weight: .black, design: .rounded))
                 .foregroundStyle(.white)
-            Text("Bibliothèque, import et outils dans un seul espace.")
+            Text("Un univers nocturne pour votre bibliothèque et vos diagnostics.")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.66))
             HStack(spacing: 10) {
@@ -1101,9 +1101,9 @@ struct MaxPS4HomeView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             LinearGradient(colors: [
-                Color(red: 0.07, green: 0.12, blue: 0.28),
-                Color(red: 0.19, green: 0.07, blue: 0.34),
-                Color(red: 0.03, green: 0.06, blue: 0.17)
+                Color(red: 0.025, green: 0.045, blue: 0.10),
+                Color(red: 0.11, green: 0.075, blue: 0.20),
+                Color(red: 0.015, green: 0.02, blue: 0.06)
             ], startPoint: .topLeading, endPoint: .bottomTrailing),
             in: RoundedRectangle(cornerRadius: 28)
         )
@@ -1417,8 +1417,8 @@ private struct MaxPS4Background: View {
         ZStack {
             LinearGradient(
                 colors: [
-                    Color(red: 0.025, green: 0.018, blue: 0.085),
-                    Color(red: 0.055, green: 0.025, blue: 0.17),
+                    Color(red: 0.012, green: 0.025, blue: 0.07),
+                    Color(red: 0.055, green: 0.04, blue: 0.12),
                     .black
                 ],
                 startPoint: .topLeading,
@@ -1427,7 +1427,7 @@ private struct MaxPS4Background: View {
             .ignoresSafeArea()
 
             Circle()
-                .fill(.purple.opacity(0.24))
+                .fill(.purple.opacity(0.18))
                 .frame(width: 360, height: 360)
                 .blur(radius: 80)
                 .offset(x: 180, y: -300)
