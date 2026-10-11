@@ -6,6 +6,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
+#include <array>
+#include <csignal>
+#include <pthread.h>
 #include <TargetConditionals.h>
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); return 1; } } while (0)
 int main() {
@@ -31,6 +34,12 @@ int main() {
     CHECK(maxps4_native_capabilities() == 0);
     CHECK(maxps4_native_launch("probe") == -38);
     CHECK(maxps4_native_aether_cpu_probe() == 1);
+    constexpr std::array signal_numbers {SIGILL, SIGSEGV, SIGBUS, SIGTRAP};
+    std::array<struct sigaction, signal_numbers.size()> original_actions {};
+    for (size_t i = 0; i < signal_numbers.size(); ++i)
+        CHECK(::sigaction(signal_numbers[i], nullptr, &original_actions[i]) == 0);
+    sigset_t original_mask {};
+    CHECK(::pthread_sigmask(SIG_SETMASK, nullptr, &original_mask) == 0);
     for (unsigned repeat = 0; repeat != 3; ++repeat) {
         maxps4_fex_engine *first = nullptr, *second = nullptr;
         std::printf("OPEN contexts cycle=%u\n", repeat);
@@ -85,6 +94,20 @@ int main() {
         CHECK(maxps4_fex_engine_run(nullptr, block, sizeof(block), 32, &result, &backend) == -EINVAL);
         CHECK(maxps4_fex_engine_cpuid(second, 0, 0, nullptr) == -EINVAL);
         maxps4_fex_engine_close(second);
+        for (size_t i = 0; i < signal_numbers.size(); ++i) {
+            struct sigaction action {};
+            CHECK(::sigaction(signal_numbers[i], nullptr, &action) == 0);
+            CHECK(action.sa_handler == original_actions[i].sa_handler);
+            CHECK(action.sa_flags == original_actions[i].sa_flags);
+            for (int signal = 1; signal < NSIG; ++signal)
+                CHECK(::sigismember(&action.sa_mask, signal) ==
+                      ::sigismember(&original_actions[i].sa_mask, signal));
+        }
+        sigset_t mask {};
+        CHECK(::pthread_sigmask(SIG_SETMASK, nullptr, &mask) == 0);
+        for (int signal = 1; signal < NSIG; ++signal)
+            CHECK(::sigismember(&mask, signal) == ::sigismember(&original_mask, signal));
+        std::puts("PASS runtime cleanup preserves host signal handlers and mask");
     }
     std::puts("PASS real FEX context lifecycle/CPUID and explicit interpreter fallback; device JIT NOT tested");
 }

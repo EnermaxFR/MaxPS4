@@ -10,6 +10,8 @@
 #include <FEXCore/HLE/SyscallHandler.h>
 #include <array>
 #include <cstring>
+#include <cstdio>
+#include <cstdlib>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <cerrno>
@@ -43,7 +45,12 @@ class Mapping final {
 public:
     Mapping(size_t bytes, int protection) : size(bytes), address(
         ::mmap(nullptr, bytes, protection, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)) {}
-    ~Mapping() { if (address != MAP_FAILED) ::munmap(address, size); }
+    ~Mapping() {
+        if (address != MAP_FAILED && ::munmap(address, size) != 0) {
+            std::fprintf(stderr, "FEX probe mapping cleanup failed: errno=%d\n", errno);
+            std::abort();
+        }
+    }
     Mapping(const Mapping&) = delete;
     Mapping& operator=(const Mapping&) = delete;
     size_t size;
@@ -166,11 +173,12 @@ extern "C" int32_t maxps4_fex_engine_probe(maxps4_fex_engine *engine,
     const size_t page = static_cast<size_t>(host_page);
     constexpr uint8_t code[] = {0xB8,40,0,0,0,0x05,2,0,0,0,0xF4};
     Mapping guest(page, PROT_READ | PROT_WRITE);
+    if (guest.address == MAP_FAILED) return -errno;
     Mapping stack(3 * page, PROT_NONE);
+    if (stack.address == MAP_FAILED) return -errno;
     constexpr size_t callret_size = FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE;
     Mapping callret(callret_size + 2 * page, PROT_NONE);
-    if (guest.address == MAP_FAILED || stack.address == MAP_FAILED || callret.address == MAP_FAILED)
-        return -(errno ? errno : ENOMEM);
+    if (callret.address == MAP_FAILED) return -errno;
     auto* stack_base = static_cast<uint8_t*>(stack.address) + page;
     auto* callret_base = static_cast<uint8_t*>(callret.address) + page;
     if (::mprotect(stack_base, page, PROT_READ | PROT_WRITE) != 0 ||

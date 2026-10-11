@@ -4,8 +4,8 @@ Branche `codex/fexcore-ios-jit-init`, issue de `main` au commit
 `2d99a4f4152b260d3588fe6072407bde3685074f` (PR #128 fusionnée).
 Fork Darwin AetherPS4 inchangé : `3347fc13f19860855ce91b66356940989ea6b6a6`.
 Cette étape initialise réellement le dispatcher sur macOS ARM64 et ajoute une
-sonde fixe x86-64 via CreateThread/ExecuteThread. La nouvelle sonde attend encore
-sa validation CI ; aucun résultat appareil n'est annoncé.
+sonde fixe x86-64 via CreateThread/ExecuteThread. Six exécutions réelles de la
+sonde ont réussi sur macOS ARM64 ; aucun résultat appareil n'est annoncé.
 
 ## Contrat et ressources
 
@@ -78,10 +78,10 @@ avant les piles, GDT et mémoire invitée ; la plage du fournisseur est ensuite
 retirée. Les mêmes opérations peuvent être répétées. Le fournisseur demeure
 valide jusqu'à destruction du contexte. Les appels sont sérialisés et aucune
 exécution invitée parallèle n'est permise. Les échecs mmap/mprotect retournent
-une erreur et nettoient les mappings acquis. Les assertions/OOM internes de
-FEX et les signaux fatals ne sont pas transformés en fausses réussites.
+une erreur et nettoient les mappings acquis. Une erreur inattendue de munmap déclenche un diagnostic fatal, jamais une
+réussite silencieuse du nettoyage. Les assertions/OOM internes de FEX et les signaux fatals ne sont pas transformés en fausses réussites.
 
-La matrice macOS demande six exécutions (deux par contexte sur trois cycles),
+La matrice macOS vérifie six exécutions (deux par contexte sur trois cycles),
 des erreurs de stade/arguments et le nettoyage avec réouverture du runtime.
 Le fallback historique mov/add/RET reste testé séparément et indique toujours
 le backend interpréteur. Ces deux résultats 42 ont des chemins différents.
@@ -121,8 +121,22 @@ macOS validée (3 cycles / 2 contextes) et liaison iOS réussie dans
 [38130371641](https://github.com/EnermaxFR/MaxPS4/actions/runs/38130371641).
 Smoke [38130371582](https://github.com/EnermaxFR/MaxPS4/actions/runs/38130371582)
 et heavy [38130371557](https://github.com/EnermaxFR/MaxPS4/actions/runs/38130371557)
-réussis. Les résultats de la sonde, commits et artefacts seront ajoutés après
-sa validation. Ce premier commit n'exécutait pas encore de bloc invité.
+réussis. Ce premier commit n'exécutait pas encore de bloc invité.
+
+Commit sonde `5e246ae8890be097982f38e281fcf9a3d9fa9205` :
+[38130688595](https://github.com/EnermaxFR/MaxPS4/actions/runs/38130688595)
+réussi dans les deux jobs macOS/iOS. Le log macOS contient six lignes
+`PASS real FEX ARM64 JIT guest RAX=42 backend=2`, entre 10:07:06.795 et
+10:07:06.799 UTC le 11 octobre 2026. Trois cycles de création/destruction,
+CPUID GenuineIntel leaf=22, repli interprété, arguments invalides et erreurs
+avant initialisation réussis. Smoke
+[38130688435](https://github.com/EnermaxFR/MaxPS4/actions/runs/38130688435)
+et heavy [38130688432](https://github.com/EnermaxFR/MaxPS4/actions/runs/38130688432)
+réussis. Les nouveaux tests de préservation des quatre handlers OS et du masque
+courant, après exécution et fermeture, sont ajoutés dans le commit suivant.
+Le chemin réel d'échec mmap de la fabrique n'a pas été forcé par injection :
+les tests du patch vérifient sa structure et la propagation, pas un refus OS réel.
+Aucun symbole n'est remplacé pour provoquer une fausse réussite.
 
 Blocages prioritaires : fournisseur JIT iOS conforme ; délégation Darwin OS et
 safepoints pour du code arbitraire ; ABI syscalls PS4 ; validation du bloc
