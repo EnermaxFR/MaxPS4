@@ -8,6 +8,7 @@ on:
       - '.github/workflows/fexcore-ios-linkage.yml'
       - 'MaxPS4-iOS/Native/**'
       - 'MaxPS4-iOS/Tests/FEXRuntimeIntegrationTest.cpp'
+      - 'MaxPS4-iOS/Tests/FEXDispatcherInitPatchTest.py'
 permissions:
   contents: read
 jobs:
