@@ -152,6 +152,11 @@ jobs:
             git -C "$SDL3" checkout --quiet ea3042350d3aac4b83ae83047185ba703d8f0a5c
           fi
           test -s "$SDL3/include/SDL3/SDL_events.h"
+          # Real libusb headers for shadPS4 USB HLE; do not link macOS binaries into iOS.
+          if ! test -f "$(brew --prefix libusb)/include/libusb-1.0/libusb.h"; then
+            brew install libusb
+          fi
+          test -f "$(brew --prefix libusb)/include/libusb-1.0/libusb.h"
           test -s "$SHAD/src/core/libraries/libs.cpp"
           # This is an actual upstream translation unit, not the existing
           # small shadPS4 utility bridge. It is a non-shipping porting probe.
@@ -163,6 +168,7 @@ jobs:
                -I "$MAGIC_ENUM/include" \
                -I "$(brew --prefix nlohmann-json)/include" \
                -I "$SDL3/include" \
+               -I "$(brew --prefix libusb)/include/libusb-1.0" \
                -fsyntax-only "$SHAD/src/core/libraries/libs.cpp" \
                > "$OUT/hle-library-registry-ios.log" 2>&1; then
             echo "PASS real shadPS4 HLE library registry compiles for iOS ARM64 (not linked)" \
