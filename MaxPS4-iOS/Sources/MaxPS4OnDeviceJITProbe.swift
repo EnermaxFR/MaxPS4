@@ -611,7 +611,9 @@ enum MaxPS4OnDeviceJITProbe {
         Débogueur / P_TRACED : \(MaxPS4NativeLinkCheck.debuggerAttachmentDescription)
         Protocole StikDebug intégré : \(MaxPS4NativeLinkCheck.isStikDebugProtocolPresent ? "Oui" : "Non")
         \(mapStatus)
-        Entitlement get-task-allow : Non lu directement (vérifier dans StikDebug)\n        Méthode StikDebug : la confirmation de demande ne garantit pas le succès de mmap(MAP_JIT)
+        Entitlement get-task-allow : Non lu directement (auditer la signature après resignature SideStore)\n        Méthode StikDebug : la confirmation de demande ne garantit pas le succès de mmap(MAP_JIT)
+        MAP_JIT local et double mapping AetherPS4 : deux mécanismes distincts ; EPERM ne diagnostique pas le protocole BRK.
+        Gestionnaire du trap : Non validé ; entrées BRK bloquées.
         Exécution ARM64 générée : Non testée par ce diagnostic
         Allocateur AetherPS4/StikDebug : \(maxps4StikDualMapPortPresent() == 1 ? "Code natif intégré, activation non validée" : "Absent")\n        FEXCore : Non validé
 

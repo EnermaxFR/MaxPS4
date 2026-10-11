@@ -8,4 +8,4 @@ Il s'agit d'une désactivation explicite, indépendante de la réussite du scrip
 
 Étapes : (1) ajouter une capacité d'allocateur iOS réellement détectée ; (2) conserver le refus explicite tant qu'elle est absente ; (3) instrumenter l'échec exact des mappings et distinguer errno des codes Mach ; (4) tester sur appareil avec IPA signée ; (5) seulement ensuite activer le chemin FEXCore.
 
-Le `-13` vu sur appareil peut venir d'une autre couche ; le `-ENOTSUP` de ce fichier vaut normalement `-95` sur Darwin. Ne pas les confondre.
+Le `-13` vu sur appareil peut venir d'une autre couche ; le `-ENOTSUP` de ce fichier vaut `-45` sur Darwin (`-95` sur Linux). Ne pas les confondre.
