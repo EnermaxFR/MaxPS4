@@ -744,9 +744,9 @@ jobs:
           # Generate the IR headers with the *matching bundled Darwin FEXCore*
           # generator, not the separately pinned generic FEXCore checkout.
           mkdir -p "$OUT/fex-config-generated/FEXCore/IR"
-          python3 "$FEX/FEXCore/Scripts/json_ir_generator.py" \\
-            "$FEX/FEXCore/Source/Interface/IR/IR.json" \\
-            "$OUT/fex-config-generated/FEXCore/IR/IRDefines.inc" \\
+          python3 "$FEX/FEXCore/Scripts/json_ir_generator.py" \
+            "$FEX/FEXCore/Source/Interface/IR/IR.json" \
+            "$OUT/fex-config-generated/FEXCore/IR/IRDefines.inc" \
             "$OUT/fex-config-generated/FEXCore/IR/IRDefines_Dispatch.inc"
           test -s "$OUT/fex-config-generated/FEXCore/IR/IRDefines.inc"
           test -s "$OUT/fex-config-generated/FEXCore/IR/IRDefines_Dispatch.inc"
