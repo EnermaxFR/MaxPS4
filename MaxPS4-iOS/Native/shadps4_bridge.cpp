@@ -6,6 +6,9 @@ extern "C" int maxps4_shadps4_utility_probe() noexcept {
     return Common::ToLower("MAXPS4") == "maxps4" ? 1 : 0;
 }
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -871,7 +874,13 @@ extern "C" int maxps4_native_debugger_attached() noexcept {
 // Returns 1 only when separate RX and RW aliases were created.
 extern "C" int maxps4_stikdualmap_allocate(
     std::size_t bytes, void** rw_out, void** rx_out) noexcept {
-#if defined(__APPLE__) && defined(__aarch64__)
+#if defined(MAXPS4_PLATFORM_JIT_ONLY) && TARGET_OS_IPHONE
+    // Shipping FEX app: debugger attachment is not an OS JIT authorization.
+    // Refuse the experimental BRK allocator; do not invoke an external protocol.
+    if (rw_out) *rw_out = nullptr;
+    if (rx_out) *rx_out = nullptr;
+    return 0;
+#elif defined(__APPLE__) && defined(__aarch64__)
     if (!rw_out || !rx_out) return 0;
     *rw_out = nullptr;
     *rx_out = nullptr;

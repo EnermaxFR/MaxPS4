@@ -10,6 +10,7 @@ function(maxps4_complete_fexcore_linkage)
     add_library(MaxPS4FEXRuntime SHARED
       "${NATIVE}/maxps4_fex_runtime.cpp"
       "${NATIVE}/maxps4_native.cpp"
+      "${NATIVE}/aether_jit_allocator_abi.cpp"
       "${NATIVE}/aether_guest_cpu_adapter.cpp"
       "${NATIVE}/shadps4_bridge.cpp"
       "${NATIVE}/shadps4/common/string_util.cpp"
@@ -17,7 +18,8 @@ function(maxps4_complete_fexcore_linkage)
       "${CMAKE_SOURCE_DIR}/Source/Common/HostFeatures.cpp"
       "${CMAKE_SOURCE_DIR}/Source/Common/CPUInfo.cpp")
     target_compile_features(MaxPS4FEXRuntime PRIVATE cxx_std_23)
-    target_compile_definitions(MaxPS4FEXRuntime PRIVATE ARCHITECTURE_arm64=1)
+    target_compile_definitions(MaxPS4FEXRuntime PRIVATE
+      ARCHITECTURE_arm64=1 MAXPS4_PLATFORM_JIT_ONLY=1)
     target_include_directories(MaxPS4FEXRuntime PRIVATE
       "${NATIVE}" "${NATIVE}/shadps4" "${MAXPS4_AETHER_SOURCE}/src"
       "${CMAKE_BINARY_DIR}/generated")

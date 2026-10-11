@@ -17,11 +17,24 @@
 | CPU invité AetherPS4 / FEXCore Darwin | Unité `fex_guest_engine.cpp` compilée pour iOS ARM64 dans CI |
 | Liaison native complète AetherPS4 | **Bloquée** par des dépendances et symboles non résolus |
 | shadPS4 | Utilitaires et pont C++ limités ; portage du noyau et du GPU **non réalisé** |
+| Runtime FEXCore Darwin | Liaison iOS ARM64 et contexte natif validés ; bloc x86-64 via JIT testé sur macOS ARM64 |
 | FEXCore JIT sur iPhone | **Non opérationnel / non validé sur appareil** |
 | Exécution de jeux PS4 (dont Kero Blaster, Sonic Mania) | **Non prise en charge actuellement** |
 | IPA de développement | Générée par certains workflows ; **ne garantit pas** la fonctionnalité de l'émulateur |
 
 Les sources amont AetherPS4 sont récupérées pendant certains builds CI pour des tests de portage. Le checkout intégral de shadPS4 fait l'objet de [la PR #83](https://github.com/EnermaxFR/MaxPS4/pull/83) et n'est pas équivalent à un moteur compilé pour iOS.
+
+## IPA FEXCore pour SideStore
+
+Le workflow [MaxPS4 FEXCore SideStore IPA](https://github.com/EnermaxFR/MaxPS4/actions/workflows/fexcore-app.yml)
+compile l’application Xcode et embarque le véritable runtime Darwin. Télécharger
+l’artefact **MaxPS4-FEXCore-SideStore**, extraire l’IPA, puis la faire signer par
+SideStore. Dans MaxPS4 : **Diagnostic → Tester FEXCore** affiche contexte, CPUID,
+résultat, erreurs et backend réel. Sur iOS, le calcul 40 + 2 utilise actuellement
+l’interpréteur natif et le JIT FEX reste indisponible.
+
+Voir [installation, signature, validations et limites iOS 27.2](docs/fexcore-app-sidestore.md).
+La compilation ARM64 ne remplace pas une installation et un test sur iPhone.
 
 ## Objectifs du portage
 
