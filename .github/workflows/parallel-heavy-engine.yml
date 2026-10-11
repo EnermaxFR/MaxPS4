@@ -134,6 +134,42 @@ jobs:
           """
           path.write_text(contents[:start] + replacement + contents[stop:])
           PY
+          # iOS has no Linux futex syscall. On the pinned checkout only, use
+          # C++20 atomic wait/notify for the existing 32-bit lock state.
+          # Wake all on unlock to avoid starving a waiter with this full-word
+          # wait; performance and runtime correctness still require testing.
+          python3 - "$FEX/FEXCore/include/FEXCore/Utils/WritePriorityMutex.h" <<'PY'
+          from pathlib import Path
+          import sys
+          path = Path(sys.argv[1])
+          code = path.read_text()
+          linux_includes = "#if !defined(_WIN32)\n#include <linux/futex.h>"
+          assert code.count(linux_includes) == 1, "Upstream futex include changed"
+          code = code.replace(linux_includes,
+                              "#if !defined(_WIN32) && !defined(__APPLE__)\n#include <linux/futex.h>")
+          method_marker = "private:\n\n#if !defined(_WIN32)\n  void FutexWaitForWriteAvailable"
+          assert code.count(method_marker) == 1, "Upstream futex methods changed"
+          apple_methods = """private:
+
+#if defined(__APPLE__)
+  void FutexWaitForWriteAvailable(uint32_t Expected) {
+    std::atomic_ref<uint32_t>(Futex).wait(Expected, std::memory_order_relaxed);
+  }
+  void FutexWaitForReadAvailable(uint32_t Expected) {
+    std::atomic_ref<uint32_t>(Futex).wait(Expected, std::memory_order_relaxed);
+  }
+  void FutexWakeWriter() {
+    std::atomic_ref<uint32_t>(Futex).notify_all();
+  }
+  void FutexWakeReaders() {
+    std::atomic_ref<uint32_t>(Futex).notify_all();
+  }
+#elif !defined(_WIN32)
+  void FutexWaitForWriteAvailable"""
+          code = code.replace(method_marker, apple_methods)
+          path.write_text(code)
+          print("Apple WritePriorityMutex uses C++20 wait/notify, not Linux SYS_futex")
+          PY
           if ! brew list --versions fmt >/dev/null 2>&1; then brew install fmt; fi
           git clone --quiet --no-checkout --filter=blob:none \
             https://github.com/martinus/unordered_dense.git build/heavy/fexcore/unordered-dense
