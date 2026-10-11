@@ -168,18 +168,25 @@ extern "C" int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine,
     return 0;
 }
 
-extern "C" int32_t maxps4_fex_engine_probe(maxps4_fex_engine *engine,
-                                          uint64_t *result, uint32_t *backend) {
+extern "C" int32_t maxps4_fex_engine_probe_case(maxps4_fex_engine *engine,
+                                          uint32_t test_case, uint64_t *result, uint32_t *backend) {
     if (result) *result = 0;
     if (backend) *backend = 0;
-    if (!engine || !result || !backend) return -EINVAL;
+    if (!engine || !result || !backend || test_case > 3) return -EINVAL;
     std::lock_guard lock(runtime_lock);
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
     try {
     const long host_page = ::sysconf(_SC_PAGESIZE);
     if (host_page <= 0) return -EIO;
     const size_t page = static_cast<size_t>(host_page);
-    constexpr uint8_t code[] = {0xB8,40,0,0,0,0x05,2,0,0,0,0xF4};
+    // Four fixed, HLT-terminated x86-64 blocks; no caller-supplied guest code.
+    constexpr std::array<std::array<uint8_t, 11>, 4> probes {{
+        {{0xB8,40,0,0,0,0x05,2,0,0,0,0xF4}}, // add: 40 + 2
+        {{0xB8,50,0,0,0,0x2D,8,0,0,0,0xF4}}, // sub: 50 - 8
+        {{0xB8,21,0,0,0,0x01,0xC0,0xF4,0x90,0x90,0x90}}, // add eax,eax
+        {{0xB8,84,0,0,0,0xD1,0xE8,0xF4,0x90,0x90,0x90}}, // shr eax,1
+    }};
+    const auto& code = probes[test_case];
     Mapping guest(page, PROT_READ | PROT_WRITE);
     if (guest.address == MAP_FAILED) return -errno;
     Mapping stack(3 * page, PROT_NONE);
@@ -191,7 +198,7 @@ extern "C" int32_t maxps4_fex_engine_probe(maxps4_fex_engine *engine,
     auto* callret_base = static_cast<uint8_t*>(callret.address) + page;
     if (::mprotect(stack_base, page, PROT_READ | PROT_WRITE) != 0 ||
         ::mprotect(callret_base, callret_size, PROT_READ | PROT_WRITE) != 0) return -errno;
-    std::memcpy(guest.address, code, sizeof(code));
+    std::memcpy(guest.address, code.data(), code.size());
     if (::mprotect(guest.address, page, PROT_READ) != 0) return -errno;
     std::array<FEXCore::Core::CPUState::gdt_segment, 32> gdt {};
     engine->probe.begin = reinterpret_cast<uintptr_t>(guest.address);
@@ -226,4 +233,8 @@ extern "C" int32_t maxps4_fex_engine_probe(maxps4_fex_engine *engine,
     *backend = MAXPS4_CPU_FEX_ARM64_JIT;
     return 0;
     } catch (const std::bad_alloc&) { return -ENOMEM; }
+}
+
+extern "C" int32_t maxps4_fex_engine_probe(maxps4_fex_engine* engine, uint64_t* result, uint32_t* backend) {
+    return maxps4_fex_engine_probe_case(engine, 0, result, backend);
 }
