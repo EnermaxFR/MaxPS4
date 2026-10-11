@@ -150,22 +150,22 @@ jobs:
           method_marker = "private:\n\n#if !defined(_WIN32)\n  void FutexWaitForWriteAvailable"
           assert code.count(method_marker) == 1, "Upstream futex methods changed"
           apple_methods = """private:
-
-#if defined(__APPLE__)
-  void FutexWaitForWriteAvailable(uint32_t Expected) {
-    std::atomic_ref<uint32_t>(Futex).wait(Expected, std::memory_order_relaxed);
-  }
-  void FutexWaitForReadAvailable(uint32_t Expected) {
-    std::atomic_ref<uint32_t>(Futex).wait(Expected, std::memory_order_relaxed);
-  }
-  void FutexWakeWriter() {
-    std::atomic_ref<uint32_t>(Futex).notify_all();
-  }
-  void FutexWakeReaders() {
-    std::atomic_ref<uint32_t>(Futex).notify_all();
-  }
-#elif !defined(_WIN32)
-  void FutexWaitForWriteAvailable"""
+          
+          #if defined(__APPLE__)
+            void FutexWaitForWriteAvailable(uint32_t Expected) {
+              std::atomic_ref<uint32_t>(Futex).wait(Expected, std::memory_order_relaxed);
+            }
+            void FutexWaitForReadAvailable(uint32_t Expected) {
+              std::atomic_ref<uint32_t>(Futex).wait(Expected, std::memory_order_relaxed);
+            }
+            void FutexWakeWriter() {
+              std::atomic_ref<uint32_t>(Futex).notify_all();
+            }
+            void FutexWakeReaders() {
+              std::atomic_ref<uint32_t>(Futex).notify_all();
+            }
+          #elif !defined(_WIN32)
+            void FutexWaitForWriteAvailable"""
           code = code.replace(method_marker, apple_methods)
           path.write_text(code)
           print("Apple WritePriorityMutex uses C++20 wait/notify, not Linux SYS_futex")
