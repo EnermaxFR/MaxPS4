@@ -12,6 +12,9 @@ int32_t maxps4_jit_prepare(void);
 int32_t maxps4_jit_cancel(void);
 int32_t maxps4_jit_state(void); // 0 idle, 1 waiting, 2 ready, 3 failed
 int32_t maxps4_jit_error(void);
+int32_t maxps4_jit_failure_stage(void); // 0 unknown; 1..12 documented in Swift diagnostic
+int32_t maxps4_jit_failure_mach(void);
+int32_t maxps4_jit_failure_region(void); // -1 before per-region checks
 uint32_t maxps4_jit_leases(void);
 void *maxps4_jit_allocate(size_t size);
 int32_t maxps4_jit_free(void *write, size_t size);
