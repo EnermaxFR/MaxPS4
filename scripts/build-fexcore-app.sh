@@ -48,6 +48,11 @@ xcodebuild -project MaxPS4-iOS/MaxPS4.xcodeproj -scheme MaxPS4 \
 mkdir -p build/Payload
 rm -rf build/Payload/MaxPS4.app
 cp -R build/xcode-fex/Build/Products/Release-iphoneos/MaxPS4.app build/Payload/
+# Xcode strips development Headers/Modules during embedding. Re-seal the exact
+# shipped framework, then verify it; SideStore will replace this ad-hoc identity.
+EMBEDDED=build/Payload/MaxPS4.app/Frameworks/MaxPS4FEXRuntime.framework
+codesign --force --sign - "$EMBEDDED"
+codesign --verify --strict --verbose=2 "$EMBEDDED"
 # Xcode's selected sources must call the real opaque ABI, not a legacy build path.
 xcrun nm -u build/Payload/MaxPS4.app/MaxPS4 > build/diagnostics/fex-app-imports.txt
 xcrun otool -L build/Payload/MaxPS4.app/MaxPS4 > build/diagnostics/fex-app-libraries.txt

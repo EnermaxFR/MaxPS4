@@ -47,6 +47,9 @@ def verify(path):
         assert metadata['CFBundleIdentifier'] == 'com.enermaxfr.maxps4'
         assert metadata['CFBundlePackageType'] == 'APPL'
         assert tuple(map(int, metadata['MinimumOSVersion'].split('.'))) <= (27, 2)
+        for name in (prefix + 'MaxPS4', framework + 'MaxPS4FEXRuntime'):
+            assert ipa.getinfo(name).external_attr >> 16 & 0o111, 'Mach-O must be executable'
+        assert prefix + 'Assets.car' in ipa.namelist(), 'Original icon asset missing'
         main = ipa.read(prefix + 'MaxPS4')
         runtime = ipa.read(framework + 'MaxPS4FEXRuntime')
         kind, libraries, _, imports, _ = macho(main)

@@ -38,7 +38,7 @@ jobs:
         run: |
           set -euo pipefail
           leaks --atExit -- build/fex-app-host/swift-fex-test \
-            | tee build/fex-app-host/swift-diagnostic-leaks.txt
+            2>&1 | tee build/fex-app-host/swift-diagnostic-leaks.txt
       - name: Build full Xcode application and verified re-signable IPA
         run: bash scripts/build-fexcore-app.sh build/aether-app
       - uses: actions/upload-artifact@v4
