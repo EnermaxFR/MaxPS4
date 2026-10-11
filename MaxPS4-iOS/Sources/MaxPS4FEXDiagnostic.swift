@@ -19,7 +19,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
             "✗ GPU / rendu PS4 : non connecté",
             "Lancement d’un jeu PS4 : indisponible",
             "Le succès du JIT ne valide pas un jeu PS4."
-        ].joined(separator: "\\n")
+        ].joined(separator: "\n")
     }
 
     static func run() -> Self {
