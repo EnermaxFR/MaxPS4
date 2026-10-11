@@ -7,7 +7,11 @@ extern "C" {
 // Opaque engine: no FEX C++ types cross the native/Swift boundary.
 typedef struct maxps4_fex_engine maxps4_fex_engine;
 enum { MAXPS4_CPU_RESTRICTED_INTERPRETER = 1 };
-enum { MAXPS4_FEX_CONTEXT_CREATED = 1 }; // Not InitCore/JIT ready.
+enum { MAXPS4_FEX_CONTEXT_CREATED = 1, MAXPS4_FEX_DISPATCHER_INITIALIZED = 2 };
+// Creates the real executable dispatcher on macOS; does not execute guest code.
+// iOS returns -ENOTSUP until a supported executable-memory contract is supplied.
+// Repeated initialization succeeds without allocating another dispatcher.
+int32_t maxps4_fex_engine_initialize(maxps4_fex_engine *engine);
 // Returns 0 or a negative errno. Engine owns its real FEX context/configuration.
 int32_t maxps4_fex_engine_open(maxps4_fex_engine **out);
 void maxps4_fex_engine_close(maxps4_fex_engine *engine);

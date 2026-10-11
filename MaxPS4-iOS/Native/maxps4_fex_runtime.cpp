@@ -2,6 +2,8 @@
 #include "Common/HostFeatures.h"
 #include <FEXCore/Config/Config.h>
 #include <FEXCore/Core/Context.h>
+#include <FEXCore/Core/SignalDelegator.h>
+#include <TargetConditionals.h>
 #include <cerrno>
 #include <mutex>
 #include <new>
@@ -9,7 +11,11 @@
 extern "C" int maxps4_native_guest_x86_run(const uint8_t*, size_t, uint32_t,
                                            uint64_t*) noexcept;
 struct maxps4_fex_engine {
+    // This real FEX configuration holder installs no process signal handlers.
+    // It outlives the context. Guest execution is deliberately not exposed yet.
+    FEXCore::SignalDelegator signals;
     fextl::unique_ptr<FEXCore::Context::Context> context;
+    int32_t stage = MAXPS4_FEX_CONTEXT_CREATED;
 };
 namespace {
 // FEX configuration is process-global. This adapter owns it until the last
@@ -41,8 +47,7 @@ extern "C" int32_t maxps4_fex_engine_open(maxps4_fex_engine **out) {
         release_config_if_unused();
         return -ENOMEM;
     }
-    // InitCore creates executable dispatcher memory. Do not invoke it until
-    // signal delegation and the iPhone RW/RX session lifecycle are integrated.
+    // InitCore is explicit; opening a context never enables guest execution.
     ++engines;
     *out = engine;
     return 0;
@@ -54,8 +59,25 @@ extern "C" void maxps4_fex_engine_close(maxps4_fex_engine *engine) {
     --engines;
     release_config_if_unused();
 }
+extern "C" int32_t maxps4_fex_engine_initialize(maxps4_fex_engine *engine) {
+    if (!engine) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+#if TARGET_OS_IPHONE
+    // The pinned allocator calls BreakpointJIT, not an OS-provided JIT allocator.
+    // Do not load it or attempt allocation without a supported device contract.
+    return -ENOTSUP;
+#else
+    if (engine->stage == MAXPS4_FEX_DISPATCHER_INITIALIZED) return 0;
+    engine->context->SetSignalDelegator(&engine->signals);
+    errno = 0;
+    if (!engine->context->InitCore()) return -(errno ? errno : ENOMEM);
+    engine->stage = MAXPS4_FEX_DISPATCHER_INITIALIZED;
+    return 0;
+#endif
+}
 extern "C" int32_t maxps4_fex_engine_stage(const maxps4_fex_engine *engine) {
-    return engine ? MAXPS4_FEX_CONTEXT_CREATED : 0;
+    std::lock_guard lock(runtime_lock);
+    return engine ? engine->stage : 0;
 }
 extern "C" int32_t maxps4_fex_engine_cpuid(maxps4_fex_engine *engine,
                                           uint32_t leaf, uint32_t subleaf,

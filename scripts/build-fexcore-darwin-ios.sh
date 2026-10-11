@@ -23,6 +23,8 @@ if [[ "${3:-}" == --host-runtime ]]; then
   SYSTEM=Darwin
   DEPLOYMENT=15.0
 fi
+python3 -B "$ROOT/MaxPS4-iOS/Tests/FEXDispatcherInitPatchTest.py" "$FEX"
+python3 -B "$ROOT/scripts/patch-fexcore-dispatcher-init.py" "$FEX"
 # Patch only the disposable dependency checkout. No replacement symbols are defined.
 python3 - "$FEX" <<'PY'
 from pathlib import Path

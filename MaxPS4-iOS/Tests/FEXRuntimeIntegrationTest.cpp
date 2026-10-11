@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
+#include <TargetConditionals.h>
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); return 1; } } while (0)
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -23,6 +24,7 @@ int main() {
     CHECK(maxps4_fex_engine_open(nullptr) == -EINVAL);
     CHECK(maxps4_fex_engine_stage(nullptr) == 0);
     maxps4_fex_engine_close(nullptr);
+    CHECK(maxps4_fex_engine_initialize(nullptr) == -EINVAL);
     CHECK(maxps4_native_capabilities() == 0);
     CHECK(maxps4_native_launch("probe") == -38);
     CHECK(maxps4_native_aether_cpu_probe() == 1);
@@ -32,6 +34,16 @@ int main() {
         CHECK(maxps4_fex_engine_open(&first) == 0 && first);
         CHECK(maxps4_fex_engine_open(&second) == 0 && second);
         CHECK(maxps4_fex_engine_stage(first) == MAXPS4_FEX_CONTEXT_CREATED);
+#if TARGET_OS_IPHONE
+        CHECK(maxps4_fex_engine_initialize(first) == -ENOTSUP);
+        CHECK(maxps4_fex_engine_stage(first) == MAXPS4_FEX_CONTEXT_CREATED);
+#else
+        CHECK(maxps4_fex_engine_initialize(first) == 0);
+        CHECK(maxps4_fex_engine_stage(first) == MAXPS4_FEX_DISPATCHER_INITIALIZED);
+        CHECK(maxps4_fex_engine_initialize(first) == 0);
+        CHECK(maxps4_fex_engine_initialize(second) == 0);
+        std::puts("PASS real InitCore dispatcher initialized twice without reallocation");
+#endif
         uint32_t cpuid[4]{};
         CHECK(maxps4_fex_engine_cpuid(first, 0, 0, cpuid) == 0);
         // Real FEX virtual CPU leaf, not an adapter-supplied fake CPUID response.
