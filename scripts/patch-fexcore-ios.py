@@ -114,6 +114,47 @@ private:
 #else
 """ + original + "\n#endif")
     edit("FEXCore/include/FEXCore/Utils/AllocatorHooks.h", huge_pages)
+    def cache(code):
+        code = replace_once(code, "#include <type_traits>", "#include <type_traits>\n#if defined(__APPLE__)\n#include <libkern/OSCacheControl.h>\n#endif")
+        old = "    __builtin___clear_cache(static_cast<char*>(Begin), static_cast<char*>(Begin) + Length);"
+        return replace_once(code, old, """#if defined(__APPLE__)
+    // Darwin exports sys_icache_invalidate; Linux's __clear_cache symbol
+    // is not provided by the iPhoneOS runtime.
+    sys_icache_invalidate(Begin, Length);
+#else
+""" + old + "\n#endif")
+    edit("CodeEmitter/CodeEmitter/Buffer.h", cache)
+
+    def libc_allocator(code):
+        code = replace_once(code, "  return ::memalign(align, s);", """#if defined(__APPLE__)
+  // POSIX requires at least pointer alignment. FEX's typed allocator
+  // also requests alignof(char), so normalize smaller valid alignments.
+  if (align == 0 || (align & (align - 1)) != 0) return nullptr;
+  void* Ptr {};
+  const size_t Alignment = align < sizeof(void*) ? sizeof(void*) : align;
+  return ::posix_memalign(&Ptr, Alignment, s) == 0 ? Ptr : nullptr;
+#else
+  return ::memalign(align, s);
+#endif""")
+        code = replace_once(code, "  return ::valloc(size);", """#if defined(__APPLE__)
+  void* Ptr {};
+  return ::posix_memalign(&Ptr, static_cast<size_t>(::getpagesize()), size) == 0 ? Ptr : nullptr;
+#else
+  return ::valloc(size);
+#endif""")
+        return replace_once(code, "  return ::malloc_usable_size(ptr);", """#if defined(__APPLE__)
+  return ::malloc_size(ptr);
+#else
+  return ::malloc_usable_size(ptr);
+#endif""")
+    edit("FEXCore/Source/Utils/AllocatorHooks.cpp", libc_allocator)
+
+    def cpuid(code):
+        code = replace_once(code, "#include <FEXHeaderUtils/Syscalls.h>",
+                            "#if !defined(__APPLE__)\n#include <FEXHeaderUtils/Syscalls.h>\n#endif")
+        return replace_once(code, "  FHU::Syscalls::getcpu(&CPU, nullptr);",
+                            "#if !defined(__APPLE__)\n  FHU::Syscalls::getcpu(&CPU, nullptr);\n#endif")
+    edit("FEXCore/Source/Interface/Core/CPUID.cpp", cpuid)
     # Validate every fragment before writing any file, to fail on upstream drift.
     for path, code in changes.items():
         path.write_text(code)
