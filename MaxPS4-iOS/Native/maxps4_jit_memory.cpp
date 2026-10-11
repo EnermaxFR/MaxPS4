@@ -153,28 +153,29 @@ extern "C" int32_t maxps4_jit_prepare() {
         const auto rx = static_cast<uintptr_t>(mailbox.rx[i]);
         if (!rx || rx % page_size || rx > UINTPTR_MAX - sizes[i]) return reject_stage(EINVAL, "rx-address-validation");
         for (size_t j = 0; j < i; ++j)
-            if (rx < regions[j].rx + regions[j].size && regions[j].rx < rx + sizes[i]) return reject(EINVAL);
+            if (rx < regions[j].rx + regions[j].size && regions[j].rx < rx + sizes[i]) return reject_stage(EINVAL, "rx-address-overlap");
         regions[i] = {0, rx, sizes[i], false};
     }
     for (auto& region : regions) {
-        if (!protection(region.rx, region.size, VM_PROT_READ | VM_PROT_EXECUTE)) return reject(EACCES);
+        if (!protection(region.rx, region.size, VM_PROT_READ | VM_PROT_EXECUTE)) return reject_stage(EACCES, "rx-protection-check");
         vm_address_t rw = 0;
         vm_prot_t current = 0, maximum = 0;
         auto kr = vm_remap(mach_task_self(), &rw, region.size, 0, VM_FLAGS_ANYWHERE,
             mach_task_self(), region.rx, FALSE, &current, &maximum, VM_INHERIT_NONE);
-        if (kr != KERN_SUCCESS) return reject(EACCES);
+        if (kr != KERN_SUCCESS) return reject_stage(EACCES, "vm-remap", kr);
         region.rw = rw;
         // Lower both ceilings: NEVER turn the executable alias writable.
         kr = vm_protect(mach_task_self(), rw, region.size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
-        if (kr != KERN_SUCCESS) return reject(EACCES);
+        if (kr != KERN_SUCCESS) return reject_stage(EACCES, "rw-current-protection", kr);
         kr = vm_protect(mach_task_self(), rw, region.size, TRUE, VM_PROT_READ | VM_PROT_WRITE);
-        if (kr != KERN_SUCCESS) return reject(EACCES);
+        if (kr != KERN_SUCCESS) return reject_stage(EACCES, "rw-max-protection", kr);
         kr = vm_protect(mach_task_self(), region.rx, region.size, TRUE, VM_PROT_READ | VM_PROT_EXECUTE);
-        if (kr != KERN_SUCCESS || !protection(rw, region.size, VM_PROT_READ | VM_PROT_WRITE) ||
-            !protection(region.rx, region.size, VM_PROT_READ | VM_PROT_EXECUTE)) return reject(EACCES);
+        if (kr != KERN_SUCCESS) return reject_stage(EACCES, "rx-max-protection", kr);
+        if (!protection(rw, region.size, VM_PROT_READ | VM_PROT_WRITE) ||
+            !protection(region.rx, region.size, VM_PROT_READ | VM_PROT_EXECUTE)) return reject_stage(EACCES, "alias-protection-check");
     }
     if (vm_protect(mach_task_self(), regions[1].rw + regions[1].size - page_size,
-        page_size, FALSE, VM_PROT_NONE) != KERN_SUCCESS) return reject(EACCES);
+        page_size, FALSE, VM_PROT_NONE) != KERN_SUCCESS) return reject_stage(EACCES, "code-cache-guard-page");
     // A native-memory test, NOT the guest/FEX test or evidence of FEX success.
     const uint32_t code[] = {0x52800540U, 0xD65F03C0U}; // mov w0,#42; ret
     auto& canary = regions[2];
