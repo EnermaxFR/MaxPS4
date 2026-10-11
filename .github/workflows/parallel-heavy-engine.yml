@@ -1,0 +1,79 @@
+name: MaxPS4 parallel heavy engine checks
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "MaxPS4-iOS/**"
+      - ".github/workflows/parallel-heavy-engine.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  fexcore-source:
+    name: FEXCore upstream ARM64 source verification
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned FEXCore source and check JIT units
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/heavy/fexcore
+          git clone --quiet --no-checkout --filter=blob:none https://github.com/FEX-Emu/FEX.git build/heavy/fexcore/source
+          git -C build/heavy/fexcore/source sparse-checkout init --cone
+          git -C build/heavy/fexcore/source sparse-checkout set FEXCore Source CodeEmitter FEXHeaderUtils
+          git -C build/heavy/fexcore/source checkout --quiet f2b679f6028ce1c38875233aecfcf5d3f8ebecec
+          FEX=build/heavy/fexcore/source/FEXCore/Source/Interface/Core/JIT
+          test -s "$FEX/JIT.cpp"
+          test -s "$FEX/ALUOps.cpp"
+          find "$FEX" -maxdepth 1 -name '*Ops.cpp' -type f | sort > build/heavy/fexcore/jit-units.txt
+          test -s build/heavy/fexcore/jit-units.txt
+          echo "PASS pinned FEXCore JIT sources present (not compiled or linked)"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heavy-fexcore-source-inventory
+          path: build/heavy/fexcore/jit-units.txt
+          if-no-files-found: ignore
+
+  shadps4-hle:
+    name: shadPS4 real HLE registry iOS compile
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe actual shadPS4 HLE translation unit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/heavy/hle
+          SHAD=MaxPS4-iOS/Engine/shadPS4
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          for formula in fmt boost nlohmann-json libusb; do
+            if ! brew list --versions "$formula" >/dev/null 2>&1; then brew install "$formula"; fi
+          done
+          git clone --quiet --depth 1 --branch v0.9.7 https://github.com/Neargye/magic_enum.git "$RUNNER_TEMP/maxps4-heavy-magic-enum"
+          git clone --quiet --filter=blob:none https://github.com/libsdl-org/SDL.git "$RUNNER_TEMP/maxps4-heavy-sdl3"
+          git -C "$RUNNER_TEMP/maxps4-heavy-sdl3" checkout --quiet ea3042350d3aac4b83ae83047185ba703d8f0a5c
+          xcrun --sdk iphoneos clang++ -std=c++23 -target arm64-apple-ios16.0 \
+            -isysroot "$SDK" -fsyntax-only \
+            -I "$SHAD/src" \
+            -I "$(brew --prefix fmt)/include" \
+            -I "$(brew --prefix boost)/include" \
+            -I "$(brew --prefix nlohmann-json)/include" \
+            -I "$(brew --prefix libusb)/include/libusb-1.0" \
+            -I "$RUNNER_TEMP/maxps4-heavy-magic-enum/include" \
+            -I "$RUNNER_TEMP/maxps4-heavy-sdl3/include" \
+            "$SHAD/src/core/libraries/libs.cpp" \
+            2>&1 | tee build/heavy/hle/compile.log
+          echo "PASS shadPS4 HLE registry syntax compile; not linked into IPA"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heavy-shadps4-hle-compile
+          path: build/heavy/hle
+          if-no-files-found: ignore
