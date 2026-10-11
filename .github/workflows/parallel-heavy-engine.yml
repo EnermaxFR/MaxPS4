@@ -5,14 +5,14 @@ on:
   pull_request:
     paths:
       - "MaxPS4-iOS/**"
-      - "scripts/patch-fexcore-ios.py"
+      - "scripts/*fex*.py"
       - ".github/workflows/parallel-heavy-engine.yml"
   push:
     branches: [main]
     paths:
       - "MaxPS4-iOS/**"
       - ".github/workflows/parallel-heavy-engine.yml"
-      - "scripts/patch-fexcore-ios.py"
+      - "scripts/*fex*.py"
 
 permissions:
   contents: read
@@ -43,6 +43,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 MaxPS4-iOS/Tests/FEXDiagnosticsTest.py
           python3 MaxPS4-iOS/Tests/FEXDarwinPatchTest.py build/heavy/fexcore/source
           python3 scripts/patch-fexcore-ios.py build/heavy/fexcore/source
 
@@ -191,6 +192,146 @@ jobs:
           subprocess.run(["build/heavy/fexcore/darwin-primitives-test"],
                          timeout=60, check=True)
           PY
+      - name: Compile real link dependencies and measure remaining symbols
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          FEX=build/heavy/fexcore/source
+          OUT=build/heavy/fexcore
+          CORE_OBJECTS=("$OUT"/*-ios-arm64.o)
+          xcrun nm -g "${CORE_OBJECTS[@]}" > "$OUT/link-before.nm"
+          # CPUID consumes the real upstream git_version.h template.
+          python3 - "$FEX" "$OUT/generated" <<'PYCODE'
+          import subprocess, sys
+          from pathlib import Path
+          source, generated = map(Path, sys.argv[1:])
+          revision = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
+          template = (source / "FEXCore/include/git_version.h.in").read_text()
+          template = template.replace("@GIT_HASH_ARRAY@", ", ".join("0x" + revision[i:i+2] for i in range(0, 40, 2)))
+          version = subprocess.check_output(["git", "-C", str(source), "describe", "--always", "--abbrev=7"], text=True).strip()
+          assert len(version) + 1 < 32, "CPUID version must fit the upstream 32-byte leaf"
+          template = template.replace("@GIT_DESCRIBE_STRING@", version)
+          (generated / "git_version.h").write_text(template)
+          PYCODE
+          SOURCES=(
+            Interface/Core/ArchHelpers/Arm64Emitter.cpp
+            Interface/Core/LookupCache.cpp
+            Interface/Core/CPUID.cpp
+            Utils/LongJump.cpp
+            Utils/LogManager.cpp
+            Utils/ForcedAssert.cpp
+            Utils/SpinWaitLock.cpp
+            Utils/AllocatorHooks.cpp
+          )
+          DEPENDENCY_OBJECTS=()
+          failed=0
+          : > "$OUT/link-dependencies-status.txt"
+          for relative in "${SOURCES[@]}"; do
+            unit="$(basename "$relative" .cpp)"
+            obj="$OUT/dependency-$unit-ios-arm64.o"
+            log="$OUT/dependency-$unit-ios-compile.log"
+            # fmt implementations must target iOS. Never link Homebrew's
+            # macOS libfmt into an iOS object; compile its real headers.
+            if xcrun --sdk iphoneos clang++ -std=c++23 \
+                -target arm64-apple-ios16.0 -isysroot "$SDK" \
+                -DARCHITECTURE_arm64=1 -DFMT_HEADER_ONLY=1 \
+                -I "$OUT/generated" -I "$(brew --prefix fmt)/include" \
+                -I "$OUT/unordered-dense/include" -I "$FEX/FEXCore/include" \
+                -I "$FEX/FEXCore/Source" -I "$FEX/Source" \
+                -I "$FEX/CodeEmitter" -I "$FEX/FEXHeaderUtils" \
+                -I MaxPS4-iOS/Native/compat/fex_ios \
+                -c "$FEX/FEXCore/Source/$relative" -o "$obj" > "$log" 2>&1; then
+              test -s "$obj"
+              xcrun lipo -archs "$obj" | grep -qw arm64
+              DEPENDENCY_OBJECTS+=("$obj")
+              echo "PASS $relative Mach-O arm64" | tee -a "$OUT/link-dependencies-status.txt"
+            else
+              failed=$((failed + 1))
+              echo "FAIL $relative (see $log)" | tee -a "$OUT/link-dependencies-status.txt"
+              head -40 "$log"
+            fi
+          done
+          test "$failed" -eq 0
+          xcrun ld -r -arch arm64 -o "$OUT/jit-with-dependencies.o" \
+            "${CORE_OBJECTS[@]}" "${DEPENDENCY_OBJECTS[@]}" > "$OUT/partial-link.log" 2>&1
+          test -s "$OUT/jit-with-dependencies.o"
+          xcrun lipo -archs "$OUT/jit-with-dependencies.o" | grep -qw arm64
+          xcrun nm -g "$OUT/jit-with-dependencies.o" > "$OUT/link-after.nm"
+          python3 scripts/fexcore-link-report.py "$OUT/link-before.nm" "$OUT/link-after.nm" \
+            "$OUT/link-report.json" --demangler "$(xcrun --find c++filt)"
+          python3 - "$OUT/link-report.json" <<'PYCODE'
+          import json, sys
+          from pathlib import Path
+          report = json.loads(Path(sys.argv[1]).read_text())
+          covered = ("FEXCore::CPU::CPUBackend", "FEXCore::CPU::Arm64JITCore::Op_",
+                     "FEXCore::CPU::Arm64Emitter", "FEXCore::LookupCache", "FEXCore::GuestToHostMap",
+                     "FEXCore::UncheckedLongJump", "FEXCore::CPUIDEmu", "FEXCore::Assert::",
+                     "FEXCore::Utils::SpinWaitLock", "LogMan::", "fmt::", "__clear_cache")
+          unexpected = [row["demangled"] for row in report["remaining"]
+                        if any(family in row["demangled"] for family in covered)]
+          assert not unexpected, unexpected
+          assert report["resolved"], "No real symbol dependency was resolved"
+          print("PASS covered implementations resolved; other runtime dependencies remain explicit")
+          PYCODE
+          # This strict linker probe permits no missing symbols. Its BLOCKED
+          # result is a diagnostic, separate from the regression gate above.
+          if bash scripts/link-fexcore-ios.sh "$OUT"; then
+            echo "PASS strict iOS link (runtime JIT not tested)" | tee "$OUT/strict-link-status.txt"
+          else
+            echo "BLOCKED complete iOS link; see strict-link.log and link-report.json" \
+              | tee "$OUT/strict-link-status.txt"
+            head -60 "$OUT/strict-link.log"
+          fi
+          cat "$OUT/strict-link-status.txt" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Dependency regression success is not complete FEXCore linkage or device JIT execution.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Test real Darwin libc allocator without executable allocations
+        shell: bash
+        run: |
+          set -euo pipefail
+          FEX=build/heavy/fexcore/source
+          OUT=build/heavy/fexcore
+          clang++ -std=c++23 -I "$FEX/FEXCore/include" \
+            -I "$(brew --prefix fmt)/include" \
+            -I MaxPS4-iOS/Native/compat/fex_ios \
+            "$FEX/FEXCore/Source/Utils/AllocatorHooks.cpp" \
+            MaxPS4-iOS/Tests/FEXDarwinAllocatorTest.cpp -o "$OUT/darwin-allocator-test"
+          "$OUT/darwin-allocator-test"
+      - name: Compare AetherPS4 Darwin contracts with a matching iOS ABI probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=build/heavy/fexcore
+          AETHER="$OUT/aether-source"
+          git clone --quiet --no-checkout --filter=blob:none https://github.com/Leviidev/AetherPS4.git "$AETHER"
+          git -C "$AETHER" sparse-checkout init --cone
+          git -C "$AETHER" sparse-checkout set src/core/fex runtime/sources/fexcore-darwin
+          git -C "$AETHER" checkout --quiet 3347fc13f19860855ce91b66356940989ea6b6a6
+          python3 scripts/audit-fex-darwin-contracts.py "$OUT/source" "$AETHER" "$OUT/darwin-contracts.json"
+          DARWIN="$AETHER/runtime/sources/fexcore-darwin"
+          GENERATED="$OUT/darwin-generated"
+          mkdir -p "$GENERATED/FEXCore/Config" "$GENERATED/FEXCore/IR"
+          python3 "$DARWIN/FEXCore/Scripts/config_generator.py" \
+            "$DARWIN/FEXCore/Source/Interface/Config/Config.json.in" \
+            "$GENERATED/FEXCore/Config/ConfigValues.inl" "$GENERATED/Config.1" \
+            "$GENERATED/FEXCore/Config/ConfigOptions.inl"
+          python3 "$DARWIN/FEXCore/Scripts/json_ir_generator.py" \
+            "$DARWIN/FEXCore/Source/Interface/IR/IR.json" \
+            "$GENERATED/FEXCore/IR/IRDefines.inc" "$GENERATED/FEXCore/IR/IRDefines_Dispatch.inc"
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          # The entire include set comes from this matching Darwin checkout.
+          # Do not combine its ContextImpl ABI with generic JIT objects.
+          xcrun --sdk iphoneos clang++ -std=c++23 \
+            -target arm64-apple-ios16.0 -isysroot "$SDK" -DARCHITECTURE_arm64=1 \
+            -I "$GENERATED" -I "$(brew --prefix fmt)/include" \
+            -I "$OUT/unordered-dense/include" -I "$DARWIN/FEXCore/include" \
+            -I "$DARWIN/FEXCore/Source" -I "$DARWIN/Source" \
+            -I "$DARWIN/CodeEmitter" -I "$DARWIN/FEXHeaderUtils" \
+            -I MaxPS4-iOS/Native/compat/fex_ios \
+            -c MaxPS4-iOS/Tests/FEXDarwinContractsProbe.cpp \
+            -o "$OUT/darwin-contracts-ios-arm64.o"
+          xcrun lipo -archs "$OUT/darwin-contracts-ios-arm64.o" | grep -qw arm64
+          echo "PASS six bundled Darwin contracts compiled for iOS ARM64; not linked to generic FEXCore"
       - name: Audit Linux-specific dependencies blocking iOS FEXCore port
         shell: bash
         run: |
@@ -253,6 +394,16 @@ jobs:
             build/heavy/fexcore/*-ios-compile.log
             build/heavy/fexcore/*-ios-arm64.o
             build/heavy/fexcore/*-unresolved-symbols.txt
+            build/heavy/fexcore/link-*.nm
+            build/heavy/fexcore/link-report.json
+            build/heavy/fexcore/link-*.txt
+            build/heavy/fexcore/jit-with-dependencies.o
+            build/heavy/fexcore/fexcore-link-probe.dylib
+            build/heavy/fexcore/link-dependencies-status.txt
+            build/heavy/fexcore/partial-link.log
+            build/heavy/fexcore/strict-link.log
+            build/heavy/fexcore/strict-link-status.txt
+            build/heavy/fexcore/darwin-contracts.json
           if-no-files-found: ignore
 
   shadps4-hle:
