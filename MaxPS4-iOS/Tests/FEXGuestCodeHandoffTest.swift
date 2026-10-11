@@ -33,7 +33,8 @@ struct FEXGuestCodeHandoffTest {
         } catch MaxPS4GuestMemory.MemoryError.accessDenied {}
 
         try memory.protect(at: 0x1000, size: snapshot.bytes.count, permissions: [.read, .execute])
-        precondition(try MaxPS4FEXGuestCodeHandoff.snapshot(memory: memory, entry: 0x1000).bytes == snapshot.bytes)
+        let checked = try MaxPS4FEXGuestCodeHandoff.snapshot(memory: memory, entry: 0x1000)
+        precondition(checked.bytes == snapshot.bytes)
         print("PASS guest RX snapshot and strict backend transport boundary; native FEX mapping NOT tested")
     }
 }
