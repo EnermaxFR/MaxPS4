@@ -29,7 +29,7 @@ function(maxps4_complete_fexcore_linkage)
     target_compile_features(maxps4-fex-runtime-test PRIVATE cxx_std_23)
     target_include_directories(maxps4-fex-runtime-test PRIVATE "${NATIVE}"
       "${CMAKE_SOURCE_DIR}/FEXCore/include" "${CMAKE_BINARY_DIR}/include")
-    target_link_libraries(maxps4-fex-runtime-test PRIVATE MaxPS4FEXRuntime)
+    target_link_libraries(maxps4-fex-runtime-test PRIVATE MaxPS4FEXRuntime fmt::fmt)
   endif()
 endfunction()
 cmake_language(DEFER CALL maxps4_complete_fexcore_linkage)
