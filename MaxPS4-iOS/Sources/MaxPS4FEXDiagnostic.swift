@@ -14,7 +14,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
         return [
             "Intégration PS4 — état réel",
             "\(jit ? "✓" : "✗") CPU x86-64 FEXCore JIT : \(jit ? "test synthétique validé" : "non validé")",
-            "\(elfMemoryBridgePassed ? "✓" : "✗") ELF synthétique → mémoire invitée : \(elfMemoryBridgePassed ? "validé sans exécution" : "échec du test")",
+            "\(elfMemoryBridgePassed ? "✓" : "✗") Contrôles ELF synthétique + mémoire invitée : \(elfMemoryBridgePassed ? "tests indépendants réussis" : "échec du test")",
             "◌ Chargeur SELF/ELF PS4 : prototype d’analyse, pas de chargement exécutable complet",
             "✗ Mémoire invitée PS4 : non connectée au contexte FEXCore",
             "✗ Appels système et bibliothèques PS4 : non implémentés",
