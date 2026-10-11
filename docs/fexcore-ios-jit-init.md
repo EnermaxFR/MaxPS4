@@ -18,7 +18,8 @@ Le `SignalDelegator` fourni par FEX lui-même conserve les adresses émises par
 le dispatcher : aucun faux gestionnaire de signaux n'est ajouté. Il n'installe
 aucun handler OS, ne restaure aucun contexte après faute et ne rend pas
 l'exécution invitée arbitraire sûre. La sonde fixe ne comporte ni accès invité
-aux données, ni syscall, ni thunk, ni boucle et ne dépend d'aucun signal invité. Son stockage précède le contexte et lui survit.
+aux données, ni syscall, ni thunk, ni boucle et ne dépend d'aucun signal invité.
+Le stockage du délégateur précède le contexte et lui survit.
 La destruction du contexte libère son dispatcher avant l'arrêt de la configuration.
 Le repli existant continue à indiquer `MAXPS4_CPU_RESTRICTED_INTERPRETER`.
 Ni le stade 2 ni le résultat 42 de ce repli ne prouvent une exécution FEX JIT.
@@ -78,8 +79,10 @@ avant les piles, GDT et mémoire invitée ; la plage du fournisseur est ensuite
 retirée. Les mêmes opérations peuvent être répétées. Le fournisseur demeure
 valide jusqu'à destruction du contexte. Les appels sont sérialisés et aucune
 exécution invitée parallèle n'est permise. Les échecs mmap/mprotect retournent
-une erreur et nettoient les mappings acquis. Une erreur inattendue de munmap déclenche un diagnostic fatal, jamais une
-réussite silencieuse du nettoyage. Les assertions/OOM internes de FEX et les signaux fatals ne sont pas transformés en fausses réussites.
+une erreur et nettoient les mappings acquis. Une erreur inattendue de munmap
+déclenche un diagnostic fatal, jamais une réussite silencieuse du nettoyage.
+Les assertions/OOM internes de FEX et les signaux fatals ne sont pas transformés
+en fausses réussites.
 
 La matrice macOS vérifie six exécutions (deux par contexte sur trois cycles),
 des erreurs de stade/arguments et le nettoyage avec réouverture du runtime.
@@ -140,4 +143,79 @@ Aucun symbole n'est remplacé pour provoquer une fausse réussite.
 
 Blocages prioritaires : fournisseur JIT iOS conforme ; délégation Darwin OS et
 safepoints pour du code arbitraire ; ABI syscalls PS4 ; validation du bloc
-sur hôte puis appareil ; intégration de cette bibliothèque au packaging applicatif.
+sur appareil ; intégration de cette bibliothèque au packaging applicatif.
+Le déploiement minimal 18 du runtime doit être pris en compte lors de cette intégration.
+
+
+## Résultat final du code et artefacts vérifiés
+
+Commit de code final : `d7a1eb946b967b6d4c6185f264f07422e2ef5495`.
+
+| Validation | Résultat | Exécution |
+|---|---|---|
+| Darwin macOS ARM64, strict linkage + InitCore + six blocs x86 via JIT | Réussi | [38131040384](https://github.com/EnermaxFR/MaxPS4/actions/runs/38131040384) |
+| Préservation SIGILL/SIGSEGV/SIGBUS/SIGTRAP et masques après trois fermetures | Réussi | même job host-runtime |
+| iOS ARM64, compilation et liaison runtime/harness | Réussi, exécution non effectuée | même run, job ios-runtime |
+| Smoke existant | Réussi | [38131040377](https://github.com/EnermaxFR/MaxPS4/actions/runs/38131040377) |
+| Heavy existant | Réussi | [38131040429](https://github.com/EnermaxFR/MaxPS4/actions/runs/38131040429) |
+| iPhone, allocation JIT/exécution/signaux | Non exécuté ; ENOTSUP explicite dans le code | Aucun appareil |
+| Refus OS réel de l'allocation du dispatcher / OOM FEX | Non provoqué | Limite de validation |
+
+Échec intermédiaire : le commit `c9bb40a` n'a pas compilé le nouveau test des
+masques dans [38130871449](https://github.com/EnermaxFR/MaxPS4/actions/runs/38130871449).
+Darwin définit sigismember comme macro ; le préfixe `::` rendait son expansion
+invalide. `d7a1eb9` corrige les appels sans retirer ni désactiver le test.
+Le log final comporte six `PASS real FEX ARM64 JIT guest RAX=42 backend=2`
+et trois `PASS runtime cleanup preserves host signal handlers and mask`.
+Le contrôle des échecs d'allocation par les tests de patch est structurel :
+il ne remplace pas un test de refus/OOM réel et aucune injection de faux symbole
+n'a été utilisée.
+
+Artefacts Actions du code final : `11699335442` (host-runtime) et
+`11698293744` (ios-runtime), téléchargeables depuis le run 38131040384.
+Chaque archive contient les bibliothèques FEX statique et dynamique, le pont
+`libMaxPS4FEXRuntime.dylib`, `Bin/maxps4-fex-runtime-test`, les manifests/symboles,
+commandes de compilation et logs. Aucun fichier généré n'est commité.
+L'artefact iOS a été téléchargé et inspecté à nouveau sur l'hôte Linux :
+Mach-O ARM64, MH_NOUNDEFS, LC_BUILD_VERSION iOS 18.0 ; seules dépendances
+chargées libSystem.B.dylib/libc++.1.dylib ; aucun second FEX partagé.
+230 imports SDK, zéro import non résolu FEXCore/LogMan/maxps4.
+Exports réels présents : `_maxps4_fex_engine_initialize`, `_maxps4_fex_engine_probe`.
+SHA-256 du pont iOS :
+`3fe19d5d7653ac65ac4f2f8ac3551b4fd70d1ae21c83dc9707565cee9199ddf1`.
+Ces imports SDK restent affichés par nm -u dans une bibliothèque correctement
+liée ; ils ne sont pas des symboles FEX manquants.
+
+## Commandes reproductibles
+
+```sh
+python3 -B MaxPS4-iOS/Tests/FEXDispatcherInitPatchTest.py /path/AetherPS4/runtime/sources/fexcore-darwin
+python3 -B MaxPS4-iOS/Tests/FEXDarwinPatchTest.py /path/FEX-pristine
+python3 -B MaxPS4-iOS/Tests/FEXDiagnosticsTest.py
+bash -n scripts/build-fexcore-darwin-ios.sh
+bash scripts/build-fexcore-darwin-ios.sh /path/AetherPS4 build/fex-host --host-runtime
+bash scripts/build-fexcore-darwin-ios.sh /path/AetherPS4 build/fex-ios --runtime
+git diff --check
+```
+
+Utiliser deux checkouts jetables épinglés si les builds host/iOS sont simultanés.
+Le script applique les patchs avant CMake, construit explicitement le harness
+et l'exécute seulement sur macOS. La cible iOS ne nécessite pas de signature.
+Les workflows smoke/heavy existants sont exécutés par la PR, sans génération d'IPA.
+Le nombre de fichiers .ipa dans /workspace et dans l'archive iOS est zéro.
+
+## Commits de correction
+
+| Commit | Modification |
+|---|---|
+| `c279af781c825f7f95d3f0f280baffb75582859d` | InitCore réel, fabrique vérifiée, stade explicite et verrou iOS |
+| `5e246ae8890be097982f38e281fcf9a3d9fa9205` | Sonde JIT fixe, contrat invité borné, piles/GDT/RAII et tests |
+| `c9bb40a54bd058859cc0b53d311e6459afbddee8` | Nettoyage contrôlé et tests de préservation des signaux |
+| `d7a1eb946b967b6d4c6185f264f07422e2ef5495` | Compatibilité macro sigismember Darwin |
+
+Huit fichiers changés : ABI/implémentation native, test d'intégration existant,
+nouveau test de patch, nouveau patch de fabrique, invocation build, filtre CI,
+présent rapport. Travail sur branche dédiée uniquement ; aucun commit de fusion.
+PR [#129](https://github.com/EnermaxFR/MaxPS4/pull/129), sans fusion automatique.
+Le dernier commit documentaire complète ce rapport ; les résultats CI de son
+SHA seront également consignés dans la description de la PR.
