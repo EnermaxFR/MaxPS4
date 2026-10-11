@@ -100,13 +100,13 @@ int main() {
             CHECK(action.sa_handler == original_actions[i].sa_handler);
             CHECK(action.sa_flags == original_actions[i].sa_flags);
             for (int signal = 1; signal < NSIG; ++signal)
-                CHECK(::sigismember(&action.sa_mask, signal) ==
-                      ::sigismember(&original_actions[i].sa_mask, signal));
+                CHECK(sigismember(&action.sa_mask, signal) ==
+                      sigismember(&original_actions[i].sa_mask, signal));
         }
         sigset_t mask {};
         CHECK(::pthread_sigmask(SIG_SETMASK, nullptr, &mask) == 0);
         for (int signal = 1; signal < NSIG; ++signal)
-            CHECK(::sigismember(&mask, signal) == ::sigismember(&original_mask, signal));
+            CHECK(sigismember(&mask, signal) == sigismember(&original_mask, signal));
         std::puts("PASS runtime cleanup preserves host signal handlers and mask");
     }
     std::puts("PASS real FEX context lifecycle/CPUID and explicit interpreter fallback; device JIT NOT tested");
