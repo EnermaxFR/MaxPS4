@@ -8,6 +8,19 @@ struct MaxPS4FEXDiagnostic: Sendable {
     let result: UInt64?
     let backend: String
     let details: String
+    var ps4IntegrationReport: String {
+        let jit = succeeded && backend == "FEXCore JIT ARM64"
+        return [
+            "Intégration PS4 — état réel",
+            "\(jit ? "✓" : "✗") CPU x86-64 FEXCore JIT : \(jit ? "test synthétique validé" : "non validé")",
+            "◌ Chargeur SELF/ELF PS4 : prototype d’analyse, pas de chargement exécutable complet",
+            "✗ Mémoire invitée PS4 : non connectée au contexte FEXCore",
+            "✗ Appels système et bibliothèques PS4 : non implémentés",
+            "✗ GPU / rendu PS4 : non connecté",
+            "Lancement d’un jeu PS4 : indisponible",
+            "Le succès du JIT ne valide pas un jeu PS4."
+        ].joined(separator: "\\n")
+    }
 
     static func run() -> Self {
 #if MAXPS4_FEX_APP
