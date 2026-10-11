@@ -52,6 +52,12 @@ jobs:
           set -euo pipefail
           mkdir -p build/heavy/hle
           SHAD=MaxPS4-iOS/Engine/shadPS4
+          # The full IPA workflow downloads this upstream source separately;
+          # independent jobs have fresh workspaces and must fetch it themselves.
+          git clone --quiet --filter=blob:none \
+            https://github.com/shadps4-emu/shadPS4.git "$SHAD"
+          git -C "$SHAD" checkout --quiet 443f022450f6857256e780daa3d5a14029a748f7
+          test -s "$SHAD/src/core/libraries/libs.cpp"
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           for formula in fmt boost nlohmann-json libusb; do
             if ! brew list --versions "$formula" >/dev/null 2>&1; then brew install "$formula"; fi
