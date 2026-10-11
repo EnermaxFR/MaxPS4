@@ -44,6 +44,17 @@ cmake -S "$FEX" -B "$OUT" -G Ninja \
   -DOVERRIDE_HASH=f2b679f6028ce1c38875233aecfcf5d3f8ebecec \
   2>&1 | tee "$OUT/configure.log"
 cmake --build "$OUT" --target FEXCore_shared --parallel 3 --verbose 2>&1 | tee "$OUT/build-link.log"
+python3 - "$OUT" <<'PY'
+import json, sys
+from pathlib import Path
+out = Path(sys.argv[1])
+commands = json.loads((out / 'compile_commands.json').read_text())
+sources = sorted({row['file'].split('/fexcore-darwin/')[-1] for row in commands
+                  if '/fexcore-darwin/FEXCore/Source/' in row['file']})
+assert len([p for p in sources if '/JIT/' in p]) == 11
+assert 'FEXCore/Source/Interface/Core/CPUBackend.cpp' in sources
+(out / 'source-manifest.txt').write_text('\n'.join(sources) + '\n')
+PY
 LIB="$OUT/FEXCore/Source/libFEXCore.dylib"
 test -s "$LIB"
 file "$LIB" | tee "$OUT/mach-o.txt"
@@ -53,7 +64,7 @@ xcrun nm -gU "$LIB" > "$OUT/defined.txt"
 xcrun otool -L "$LIB" > "$OUT/libraries.txt"
 xcrun otool -Iv "$LIB" > "$OUT/indirect.txt"
 # A strict dylib may retain SDK imports; FEXCore imports must all be defined.
-if xcrun nm -u "$LIB" | grep -E '__ZN(K)?7FEXCore|__ZN6LogMan'; then
+if xcrun nm -u "$LIB" | grep -E 'FEXCore|LogMan'; then
   echo 'Unresolved FEXCore runtime import' >&2
   exit 1
 fi
