@@ -209,7 +209,9 @@ jobs:
           revision = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
           template = (source / "FEXCore/include/git_version.h.in").read_text()
           template = template.replace("@GIT_HASH_ARRAY@", ", ".join("0x" + revision[i:i+2] for i in range(0, 40, 2)))
-          template = template.replace("@GIT_DESCRIBE_STRING@", revision)
+          version = subprocess.check_output(["git", "-C", str(source), "describe", "--always", "--abbrev=7"], text=True).strip()
+          assert len(version) + 1 < 32, "CPUID version must fit the upstream 32-byte leaf"
+          template = template.replace("@GIT_DESCRIBE_STRING@", version)
           (generated / "git_version.h").write_text(template)
           PYCODE
           SOURCES=(
