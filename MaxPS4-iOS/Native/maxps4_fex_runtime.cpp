@@ -113,6 +113,7 @@ extern "C" int32_t maxps4_fex_engine_initialize(maxps4_fex_engine *engine) {
 #if TARGET_OS_IPHONE
     // The pinned allocator calls BreakpointJIT, not an OS-provided JIT allocator.
     // Do not load it or attempt allocation without a supported device contract.
+    std::fprintf(stderr, "MaxPS4 FEX JIT: InitCore blocked on iPhone: supported JIT allocation contract not established; returning -ENOTSUP (%d). StikDebug script success is not proof of executable mappings.\n", ENOTSUP);
     return -ENOTSUP;
 #else
     if (engine->stage == MAXPS4_FEX_DISPATCHER_INITIALIZED) return 0;
@@ -165,6 +166,7 @@ extern "C" int32_t maxps4_fex_engine_probe(maxps4_fex_engine *engine,
     if (!engine || !result || !backend) return -EINVAL;
     std::lock_guard lock(runtime_lock);
 #if TARGET_OS_IPHONE
+    std::fprintf(stderr, "MaxPS4 FEX JIT: probe blocked on iPhone: FEX JIT not initialized; returning -ENOTSUP (%d).\n", ENOTSUP);
     return -ENOTSUP;
 #else
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
