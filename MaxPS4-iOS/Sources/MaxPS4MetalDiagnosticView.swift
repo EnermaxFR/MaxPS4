@@ -36,7 +36,7 @@ private final class TriangleRenderer: NSObject, MTKViewDelegate {
         var uniforms = MaxPS4MetalPipeline.uniforms(elapsed: elapsed,
             width: Double(view.drawableSize.width), height: Double(view.drawableSize.height))
         encoder.setRenderPipelineState(pipeline)
-        encoder.setVertexBytes(&uniforms, length: MemoryLayout<SIMD2<Float>>.stride, index: 0)
+        encoder.setVertexBytes(&uniforms, length: MemoryLayout<SIMD3<Float>>.stride, index: 0)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         encoder.endEncoding()
         command.present(drawable)
@@ -111,7 +111,7 @@ struct MaxPS4MetalDiagnosticView: View {
                     if let device {
                         TriangleSurface(device: device,
                             active: running && visible && scenePhase == .active && !failed) { message, error in
-                                status = message
+                                if running || error { status = message }
                                 failed = error
                                 if error { running = false }
                             }

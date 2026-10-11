@@ -8,7 +8,7 @@ Le passage en arrière-plan suspend le rendu ; le retour reprend sans saut tempo
 La taille du drawable détermine le ratio pour préserver la géométrie après rotation.
 
 L’absence de périphérique désactive le rendu avec un message explicite. Les erreurs
- de création du pipeline, de file/encodeur et d’exécution GPU sont affichées sans
+de création du pipeline, de file/encodeur et d’exécution GPU sont affichées sans
 forcer de déballage optionnel dans le moteur. Une erreur GPU arrête le test ; fermer
 et rouvrir le diagnostic recrée les ressources.
 

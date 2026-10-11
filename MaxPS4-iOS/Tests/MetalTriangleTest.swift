@@ -6,8 +6,8 @@ struct MetalTriangleTest {
     static func main() throws {
         let portrait = MaxPS4MetalPipeline.uniforms(elapsed: 0, width: 100, height: 200)
         let landscape = MaxPS4MetalPipeline.uniforms(elapsed: 1, width: 200, height: 100)
-        precondition(portrait == SIMD2<Float>(0, 2))
-        precondition(landscape == SIMD2<Float>(1, 0.5))
+        precondition(portrait == SIMD3<Float>(0, 1, 0.5))
+        precondition(landscape == SIMD3<Float>(1, 0.5, 1))
         precondition(MaxPS4MetalPipeline.uniforms(elapsed: 100, width: 0, height: 0).y.isFinite)
         precondition(MaxPS4MetalPipeline.uniforms(elapsed: 2 * .pi, width: 100, height: 100).x == 0)
         print("PASS animation and resize uniforms")
@@ -32,7 +32,7 @@ struct MetalTriangleTest {
             let encoder = command.makeRenderCommandEncoder(descriptor: pass)!
             var u = MaxPS4MetalPipeline.uniforms(elapsed: angle, width: 64, height: 64)
             encoder.setRenderPipelineState(pipeline)
-            encoder.setVertexBytes(&u, length: MemoryLayout<SIMD2<Float>>.stride, index: 0)
+            encoder.setVertexBytes(&u, length: MemoryLayout<SIMD3<Float>>.stride, index: 0)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             encoder.endEncoding()
             command.commit()
