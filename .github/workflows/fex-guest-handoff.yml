@@ -1,0 +1,27 @@
+name: FEX guest RX handoff tests
+on:
+  pull_request:
+    paths:
+      - 'MaxPS4-iOS/Sources/MaxPS4FEXGuestCodeHandoff.swift'
+      - 'MaxPS4-iOS/Tests/FEXGuestCodeHandoffTest.swift'
+      - '.github/workflows/fex-guest-handoff.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  handoff:
+    runs-on: macos-14
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run guest RX handoff tests
+        run: |
+          set -euo pipefail
+          swiftc MaxPS4-iOS/Sources/MaxPS4GuestMemory.swift \
+            MaxPS4-iOS/Sources/MaxPS4ELFLoader.swift \
+            MaxPS4-iOS/Sources/MaxPS4CPUPrototype.swift \
+            MaxPS4-iOS/Sources/MaxPS4SyntheticELFFEXBridge.swift \
+            MaxPS4-iOS/Sources/MaxPS4FEXGuestCodeHandoff.swift \
+            MaxPS4-iOS/Tests/FEXGuestCodeHandoffTest.swift \
+            -o "$RUNNER_TEMP/fex-guest-handoff-test"
+          "$RUNNER_TEMP/fex-guest-handoff-test"
