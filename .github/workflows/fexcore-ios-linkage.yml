@@ -46,4 +46,4 @@ jobs:
             build/fexcore-darwin-ios/FEXCore/Source/libFEXCore.dylib
             build/fexcore-darwin-ios/FEXCore/Source/libFEXCore.a
             build/fexcore-darwin-ios/libMaxPS4FEXRuntime.dylib
-            build/fexcore-darwin-ios/maxps4-fex-runtime-test
+            build/fexcore-darwin-ios/Bin/maxps4-fex-runtime-test

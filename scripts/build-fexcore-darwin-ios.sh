@@ -83,7 +83,7 @@ if xcrun nm -u "$LIB" | grep -E 'FEXCore|LogMan'; then
   echo 'Unresolved FEXCore runtime import' >&2
   exit 1
 fi
-echo 'PASS complete strict iOS ARM64 Darwin linkage; device execution NOT tested' | tee "$OUT/link-status.txt"
+echo "PASS complete strict $SYSTEM ARM64 Darwin linkage; device execution NOT tested" | tee "$OUT/link-status.txt"
 if [[ "$RUNTIME" == ON ]]; then
   NATIVE="$OUT/libMaxPS4FEXRuntime.dylib"
   file "$NATIVE" > "$OUT/native-mach-o.txt"
@@ -94,6 +94,6 @@ if [[ "$RUNTIME" == ON ]]; then
     exit 1
   fi
   if [[ "$SYSTEM" == Darwin ]]; then
-    "$OUT/maxps4-fex-runtime-test" | tee "$OUT/runtime-tests.txt"
+    "$OUT/Bin/maxps4-fex-runtime-test" | tee "$OUT/runtime-tests.txt"
   fi
 fi
