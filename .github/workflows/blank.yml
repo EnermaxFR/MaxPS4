@@ -741,6 +741,16 @@ jobs:
           test -s "$OUT/fex-config-generated/FEXCore/Config/ConfigValues.inl"
           test -s "$OUT/fex-config-generated/FEXCore/Config/ConfigOptions.inl"
           echo "PASS bundled Darwin FEXCore generated config headers exist"
+          # Generate the IR headers with the *matching bundled Darwin FEXCore*
+          # generator, not the separately pinned generic FEXCore checkout.
+          mkdir -p "$OUT/fex-config-generated/FEXCore/IR"
+          python3 "$FEX/FEXCore/Scripts/json_ir_generator.py" \\
+            "$FEX/FEXCore/Source/Interface/IR/IR.json" \\
+            "$OUT/fex-config-generated/FEXCore/IR/IRDefines.inc" \\
+            "$OUT/fex-config-generated/FEXCore/IR/IRDefines_Dispatch.inc"
+          test -s "$OUT/fex-config-generated/FEXCore/IR/IRDefines.inc"
+          test -s "$OUT/fex-config-generated/FEXCore/IR/IRDefines_Dispatch.inc"
+          echo "PASS bundled Darwin FEXCore generated IR headers exist"
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           if xcrun --sdk iphoneos clang++ -std=c++23 \
                -target arm64-apple-ios16.0 -isysroot "$SDK" \
