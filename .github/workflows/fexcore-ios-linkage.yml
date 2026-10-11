@@ -1,0 +1,36 @@
+name: FEXCore complete Darwin iOS linkage
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'scripts/*fexcore*'
+      - 'cmake/FEXCoreIOSLinkage.cmake'
+      - '.github/workflows/fexcore-ios-linkage.yml'
+permissions:
+  contents: read
+jobs:
+  complete-ios-link:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned coherent Darwin sources and bundled dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/Leviidev/AetherPS4.git build/aether-link
+          git -C build/aether-link sparse-checkout set runtime/sources/fexcore-darwin
+          git -C build/aether-link checkout 3347fc13f19860855ce91b66356940989ea6b6a6
+          brew install ninja
+      - name: Build real complete iOS ARM64 shared library with strict linkage
+        run: bash scripts/build-fexcore-darwin-ios.sh build/aether-link build/fexcore-darwin-ios
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fexcore-complete-darwin-ios-linkage
+          path: |
+            build/fexcore-darwin-ios/*.log
+            build/fexcore-darwin-ios/*.txt
+            build/fexcore-darwin-ios/compile_commands.json
+            build/fexcore-darwin-ios/FEXCore/Source/libFEXCore.dylib
+            build/fexcore-darwin-ios/FEXCore/Source/libFEXCore.a

@@ -18,6 +18,9 @@ files = (
     'FEXCore/Source/Interface/Core/CPUBackend.cpp',
     'FEXCore/Source/Interface/Core/JIT/MiscOps.cpp',
     'FEXCore/include/FEXCore/Utils/AllocatorHooks.h',
+    'CodeEmitter/CodeEmitter/Buffer.h',
+    'FEXCore/Source/Utils/AllocatorHooks.cpp',
+    'FEXCore/Source/Interface/Core/CPUID.cpp',
 )
 
 
@@ -54,6 +57,12 @@ class DarwinPatchTest(unittest.TestCase):
         darwin_advice, linux_advice = advice.split('#else', 1)
         self.assertNotIn('::madvise', darwin_advice)
         self.assertIn('MADV_HUGEPAGE', linux_advice)
+        cache = patched[files[6]].split('static void ClearICache', 1)[1].split('\n  }', 1)[0]
+        darwin_cache, linux_cache = cache.split('#else', 1)
+        self.assertIn('sys_icache_invalidate', darwin_cache)
+        self.assertNotIn('__builtin___clear_cache', darwin_cache)
+        self.assertIn('__builtin___clear_cache', linux_cache)
+        self.assertIn('align < sizeof(void*) ? sizeof(void*) : align', patched[files[7]])
         patch.adapt(self.root)
         self.assertEqual(self.contents(), patched)
 
@@ -64,6 +73,19 @@ class DarwinPatchTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             patch.adapt(self.root)
         self.assertEqual(before, self.contents())
+
+    def test_duplicate_structural_context_fails_without_partial_writes(self):
+        for relative, marker in ((files[1], 'class ScopedSignalMasker final {'),
+                                 (files[4], 'DEF_OP(ProcessorID) {')):
+            with self.subTest(relative=relative):
+                target = self.root / relative
+                original = target.read_text()
+                target.write_text(original + '\n' + marker + '\n')
+                before = self.contents()
+                with self.assertRaises(ValueError):
+                    patch.adapt(self.root)
+                self.assertEqual(before, self.contents())
+                target.write_text(original)
 
 
 unittest.main()
