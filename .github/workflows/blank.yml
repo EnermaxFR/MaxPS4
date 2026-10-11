@@ -1403,7 +1403,7 @@ jobs:
           #else'''
           # Whitespace differs between preprocessor lines and C++ body;
           # locate the conditional alone, keeping upstream code untouched otherwise.
-          marker = '#ifdef _WIN32\\n  else {'
+          marker = '#ifdef _WIN32\n  else {'
           assert source.count(marker) == 1, "Pinned FEXCore ProcessorID changed; review patch"
           replacement = '''#if defined(__APPLE__)
             else {
