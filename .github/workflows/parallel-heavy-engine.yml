@@ -33,6 +33,33 @@ jobs:
           find "$FEX" -maxdepth 1 -name '*Ops.cpp' -type f | sort > build/heavy/fexcore/jit-units.txt
           test -s build/heavy/fexcore/jit-units.txt
           echo "PASS pinned FEXCore JIT sources present (not compiled or linked)"
+      - name: Verify Darwin ProcessorID source adaptation without IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          source = Path("build/heavy/fexcore/source/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp")
+          workflow = Path(".github/workflows/blank.yml").read_text()
+          # Execute exactly the porting script maintained by the main workflow.
+          marker = 'python3 - "$FEX/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp" <<\'PY\'\n'
+          assert workflow.count(marker) == 1, "ProcessorID patch missing or duplicated"
+          patch = workflow.split(marker, 1)[1].split("\n          PY", 1)[0]
+          patch = "\n".join(line[10:] if line.startswith("          ") else line
+                            for line in patch.splitlines())
+          import subprocess
+          result = subprocess.run(["python3", "-c", patch, str(source)],
+                                  capture_output=True, text=True)
+          assert result.returncode == 0, result.stdout + result.stderr
+          content = source.read_text()
+          assert "#if defined(__APPLE__)\n  else {" in content
+          assert "LoadConstant(ARMEmitter::Size::i64Bit, GetReg(Node), 0);" in content
+          assert "#elif defined(_WIN32)\n  else {" in content
+          assert content.count("SYS_getcpu") == 1
+          print("PASS pinned FEXCore ProcessorID Darwin patch applies")
+          print("Source check only; this does not compile or execute the JIT")
+          PY
       - name: Audit Linux-specific dependencies blocking iOS FEXCore port
         shell: bash
         run: |
