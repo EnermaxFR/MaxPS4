@@ -1917,6 +1917,27 @@ jobs:
           print(output[:2400])
           PY
             fi
+            # For the genuine guest engine, test whether the partially built
+            # FEXCore archive resolves more symbols. Diagnostic only: this
+            # does not select an unverified archive for the shipping IPA.
+            if test "$component" = "fex_guest_engine" &&
+                test -s build/diagnostics/libMaxPS4FEXJITProbe.a; then
+              rm -f "$OUTPUT"
+              if "${SWIFT_LINK_CMD[@]}" "${trial[@]}" \
+                   -Xlinker -force_load \
+                   -Xlinker build/diagnostics/libMaxPS4FEXJITProbe.a \
+                   -lc++ -o "$OUTPUT" \
+                   > build/diagnostics/aether-link-fex_guest_engine-with-fexcore.log 2>&1; then
+                echo "PASS isolated guest engine + partial FEXCore archive link (not activated)" \
+                  | tee build/diagnostics/aether-link-fexcore-closure-status.txt
+              else
+                echo "BLOCKED isolated guest engine + partial FEXCore archive link" \
+                  | tee build/diagnostics/aether-link-fexcore-closure-status.txt
+                grep -E 'Undefined symbols|^  "[^"]+"|^ld:|^clang: error:' \
+                  build/diagnostics/aether-link-fex_guest_engine-with-fexcore.log \
+                  | head -45 || true
+              fi
+            fi
             rm -f "$OUTPUT"
           done
           if test "$AETHER_ACCEPTED_COUNT" -gt 0; then
