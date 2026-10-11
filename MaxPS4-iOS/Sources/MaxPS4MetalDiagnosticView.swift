@@ -7,6 +7,7 @@ private final class TriangleRenderer: NSObject, MTKViewDelegate {
     private let texturedPipeline: MTLRenderPipelineState
     private let checkerboard: MTLTexture
     private let alternateCheckerboard: MTLTexture
+    private let quadVertices: MTLBuffer
     var renderMode = 0
     private var elapsed: TimeInterval = 0
     private var previousTime: TimeInterval?
@@ -23,6 +24,7 @@ private final class TriangleRenderer: NSObject, MTKViewDelegate {
         texturedPipeline = try MaxPS4MetalPipeline.makeTextured(device: device)
         checkerboard = try MaxPS4MetalPipeline.makeCheckerboard(device: device)
         alternateCheckerboard = try MaxPS4MetalPipeline.makeCheckerboard(device: device, alternate: true)
+        quadVertices = try MaxPS4MetalPipeline.makeQuadVertexBuffer(device: device)
         self.report = report
         super.init()
     }
@@ -44,13 +46,25 @@ private final class TriangleRenderer: NSObject, MTKViewDelegate {
             width: Double(view.drawableSize.width), height: Double(view.drawableSize.height))
         encoder.setRenderPipelineState(renderMode == 0 ? pipeline : texturedPipeline)
         if renderMode != 0 {
-            encoder.setFragmentTexture(renderMode == 1 ? checkerboard : alternateCheckerboard, index: 0)
+            encoder.setVertexBuffer(quadVertices, offset: 0, index: 1)
         }
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<SIMD3<Float>>.stride, index: 0)
-        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: renderMode == 0 ? 3 : 6)
+        if renderMode == 0 {
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        } else {
+            // Two separate objects, two texture bindings and two GPU draw commands.
+            var left = SIMD2<Float>(-0.43, 0)
+            encoder.setVertexBytes(&left, length: MemoryLayout<SIMD2<Float>>.stride, index: 2)
+            encoder.setFragmentTexture(checkerboard, index: 0)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
+            var right = SIMD2<Float>(0.43, 0)
+            encoder.setVertexBytes(&right, length: MemoryLayout<SIMD2<Float>>.stride, index: 2)
+            encoder.setFragmentTexture(alternateCheckerboard, index: 0)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
+        }
         encoder.endEncoding()
         command.present(drawable)
-        let mode = renderMode == 0 ? "Triangle" : (renderMode == 1 ? "Texture bleue" : "Texture orange")
+        let mode = renderMode == 0 ? "Triangle" : "Deux rectangles texturés"
         let first = !reportedFrame
         reportedFrame = true
         command.addCompletedHandler { [weak self] buffer in
@@ -125,8 +139,7 @@ struct MaxPS4MetalDiagnosticView: View {
                     if let device {
                         Picker("Démonstration", selection: $renderMode) {
                             Text("Triangle").tag(0)
-                            Text("Bleu").tag(1)
-                            Text("Orange").tag(2)
+                            Text("Deux textures").tag(1)
                         }
                         .pickerStyle(.segmented)
                         .onChange(of: renderMode) { _ in status = "Changement de mode Metal…" }
