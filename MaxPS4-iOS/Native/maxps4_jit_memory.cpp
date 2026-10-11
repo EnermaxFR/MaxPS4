@@ -1,6 +1,7 @@
 #include "maxps4_jit_memory.h"
 #include <TargetConditionals.h>
 #include <cerrno>
+#include <os/log.h>
 #if TARGET_OS_IPHONE || defined(MAXPS4_TEST_DARWIN_JIT_POOL)
 #include <mach/mach.h>
 #include <mach/vm_map.h>
@@ -102,7 +103,9 @@ int execute_canary(uintptr_t address) {
     }
     return error;
 }
-int reject(int error) {
+int reject_stage(int error, const char* stage, kern_return_t kr = KERN_SUCCESS) {
+    os_log_error(OS_LOG_DEFAULT, "MaxPS4 JIT memory rejected at %{public}s: errno=%{public}d kern_return=%{public}d", stage, error, kr);
+
     destroy_regions();
     state = 3;
     failure = error;
@@ -142,13 +145,13 @@ extern "C" int32_t maxps4_jit_prepare() {
     if (state != 1) return -EACCES;
     if (mailbox.nonce != expected_nonce) return -EAGAIN;
     std::atomic_thread_fence(std::memory_order_acquire);
-    if (mailbox.status != 1) return reject(EACCES);
+    if (mailbox.status != 1) return reject_stage(EACCES, "mailbox-status");
     const std::array sizes {size_t{16384}, size_t{16 * 1024 * 1024}, page_size};
     // Claim ALL addresses before attempting remaps, so rollback releases every
     // debugger-owned RX allocation even if the first remap is denied.
     for (size_t i = 0; i < regions.size(); ++i) {
         const auto rx = static_cast<uintptr_t>(mailbox.rx[i]);
-        if (!rx || rx % page_size || rx > UINTPTR_MAX - sizes[i]) return reject(EINVAL);
+        if (!rx || rx % page_size || rx > UINTPTR_MAX - sizes[i]) return reject_stage(EINVAL, "rx-address-validation");
         for (size_t j = 0; j < i; ++j)
             if (rx < regions[j].rx + regions[j].size && regions[j].rx < rx + sizes[i]) return reject(EINVAL);
         regions[i] = {0, rx, sizes[i], false};
@@ -176,11 +179,11 @@ extern "C" int32_t maxps4_jit_prepare() {
     const uint32_t code[] = {0x52800540U, 0xD65F03C0U}; // mov w0,#42; ret
     auto& canary = regions[2];
     std::memcpy(reinterpret_cast<void*>(canary.rw), code, sizeof(code));
-    if (std::memcmp(reinterpret_cast<void*>(canary.rx), code, sizeof(code)) != 0) return reject(EIO);
+    if (std::memcmp(reinterpret_cast<void*>(canary.rx), code, sizeof(code)) != 0) return reject_stage(EIO, "canary-alias-coherence");
     sys_icache_invalidate(reinterpret_cast<void*>(canary.rw), sizeof(code));
     sys_icache_invalidate(reinterpret_cast<void*>(canary.rx), sizeof(code));
     const int error = execute_canary(canary.rx);
-    if (error) return reject(error);
+    if (error) return reject_stage(error, "canary-execution");
     // The canary isn't needed by FEX and must not remain allocated.
     if (vm_deallocate(mach_task_self(), canary.rw, canary.size) != KERN_SUCCESS ||
         vm_deallocate(mach_task_self(), canary.rx, canary.size) != KERN_SUCCESS) std::abort();
