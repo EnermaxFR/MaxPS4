@@ -1314,6 +1314,40 @@ jobs:
               | tee build/diagnostics/fexcore-jit-alu-status.txt
             head -30 build/diagnostics/fexcore-jit-alu-compile.log
           fi
+          # Compile genuine additional ARM64 JIT operations implementations.
+          # JIT.cpp and ALUOps.cpp alone leave numerous Arm64JITCore::Op_*
+          # methods undefined. Select actual upstream *Ops.cpp files rather
+          # than inventing implementations or simply silencing the linker.
+          JIT_OPS_DIR="$FEX/FEXCore/Source/Interface/Core/JIT"
+          find "$JIT_OPS_DIR" -maxdepth 1 -type f -name '*Ops.cpp' \
+            ! -name ALUOps.cpp | sort \
+            > build/diagnostics/fexcore-jit-extra-ops-sources.txt
+          : > build/diagnostics/fexcore-jit-extra-ops-status.txt
+          : > build/diagnostics/fexcore-jit-extra-ops-objects.txt
+          jit_ops_index=0
+          while IFS= read -r ops_source; do
+            test -s "$ops_source" || continue
+            ops_output="build/diagnostics/fexcore-jit-ops-${jit_ops_index}-ios.o"
+            ops_log="build/diagnostics/fexcore-jit-ops-${jit_ops_index}-compile.log"
+            if xcrun --sdk iphoneos clang++ -std=c++23 \
+                -target arm64-apple-ios16.0 -fno-color-diagnostics -isysroot "$SDK" \
+                -DARCHITECTURE_arm64=1 -DMADV_HUGEPAGE=0 -DMADV_NOHUGEPAGE=0 \
+                -I "$FEX/FEXCore/include" \
+                -I "build/diagnostics/fexcore-generated" \
+                -I "MaxPS4-iOS/Native/compat/fex_ios" \
+                -I "$FEX/CodeEmitter" -I "$FEX/FEXHeaderUtils" \
+                -I "$UNORDERED/include" -I "$FEX/FEXCore/Source" \
+                -I "$FEX/Source" -I "$FMT_INCLUDE" \
+                -c "$ops_source" -o "$ops_output" > "$ops_log" 2>&1; then
+              echo "PASS $ops_source" >> build/diagnostics/fexcore-jit-extra-ops-status.txt
+              printf '%s\\n' "$ops_output" >> build/diagnostics/fexcore-jit-extra-ops-objects.txt
+            else
+              echo "BLOCKED $ops_source (see $ops_log)" \
+                >> build/diagnostics/fexcore-jit-extra-ops-status.txt
+            fi
+            jit_ops_index=$((jit_ops_index + 1))
+          done < build/diagnostics/fexcore-jit-extra-ops-sources.txt
+          cat build/diagnostics/fexcore-jit-extra-ops-status.txt
           # Compile the real CPUBackend implementation required by JIT.cpp.
           # Do not fabricate missing symbols or bundle unverified code.
           CPU_BACKEND="$FEX/FEXCore/Source/Interface/Core/CPUBackend.cpp"
@@ -1387,6 +1421,11 @@ jobs:
             build/diagnostics/fexcore-jit-alu-ios.o
             build/diagnostics/fexcore-arm64-relocations-ios.o
           )
+          # Add compiled JIT operation units to the real archive. Missing
+          # units stay visible in diagnostics rather than being stubbed.
+          while IFS= read -r ops_object; do
+            test -s "$ops_object" && JIT_OBJECTS+=("$ops_object")
+          done < build/diagnostics/fexcore-jit-extra-ops-objects.txt
           # Include only successfully compiled upstream emitter/cache objects.
           if test "${#FEX_EXTRA_OBJECTS[@]}" -gt 0; then
             JIT_OBJECTS+=("${FEX_EXTRA_OBJECTS[@]}")
@@ -1422,6 +1461,8 @@ jobs:
               expected.append("fexcore-cpu-backend-ios.o")
           manifest = Path("build/diagnostics/fexcore-extra-objects.txt").read_text().splitlines()
           expected += sorted(Path(path).name for path in manifest)
+          ops_manifest = Path("build/diagnostics/fexcore-jit-extra-ops-objects.txt").read_text().splitlines()
+          expected += sorted(Path(path).name for path in ops_manifest)
           if actual != sorted(expected):
               raise SystemExit(f"Incorrect FEXCore archive members: expected={sorted(expected)}, actual={actual}")
           print(f"PASS {len(expected)} upstream FEXCore ARM64 archive members")
@@ -1674,6 +1715,10 @@ jobs:
             build/diagnostics/fexcore-jit-partial-undefined-symbols.txt
             build/diagnostics/fexcore-jit-partial-demangled-symbols.txt
             build/diagnostics/fexcore-unresolved-families.json
+            build/diagnostics/fexcore-jit-extra-ops-sources.txt
+            build/diagnostics/fexcore-jit-extra-ops-status.txt
+            build/diagnostics/fexcore-jit-extra-ops-objects.txt
+            build/diagnostics/fexcore-jit-ops-*-compile.log
             build/diagnostics/fexcore-jit-nm-error.log
             build/diagnostics/fexcore-jit-archive-undefined-symbols.txt
             build/diagnostics/fexcore-jit-core-ios.o
