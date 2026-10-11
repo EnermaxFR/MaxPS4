@@ -1,0 +1,485 @@
+Inventaire du diagnostic générique : CI 38126286849, commit 45a9930.
+FEX f2b679f6028ce1c38875233aecfcf5d3f8ebecec ; SDK iPhoneOS, arm64-apple-ios16.0.
+120 imports agrégés : 102 imports SDK résolus par la liaison stricte, 18 blocages FEXCore.
+La cible Darwin complète utilise une ABI distincte ; consulter son propre artefact CI.
+
+symbole | nom démanglé | objets demandeurs | origine | propriétaire attendu
+__Unwind_Resume | _Unwind_Resume | dependency-LookupCache-ios-arm64.o,AtomicOps-ios-arm64.o,dependency-LogManager-ios-arm64.o,Arm64Relocations-ios-arm64.o,ALUOps-ios-arm64.o,miscops-ios-arm64.o,MemoryOps-ios-arm64.o,dependency-CPUID-ios-arm64.o,JIT-ios-arm64.o,BranchOps-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZN7FEXCore3CPU14InterpreterOps18GetFallbackHandlerEPKNS_2IR11IROp_HeaderEPNS0_12FallbackInfoE | FEXCore::CPU::InterpreterOps::GetFallbackHandler(FEXCore::IR::IROp_Header const*, FEXCore::CPU::FallbackInfo*) | JIT-ios-arm64.o | FEXCore implementation | FEXCore/Source/Interface/Core/Interpreter/Fallbacks/InterpreterFallbacks.cpp
+__ZN7FEXCore6Config5ValueIbE11GetIfExistsENS0_12ConfigOptionEb | FEXCore::Config::Value<bool>::GetIfExists(FEXCore::Config::ConfigOption, bool) | dependency-LookupCache-ios-arm64.o,dependency-Arm64Emitter-ios-arm64.o,dependency-CPUID-ios-arm64.o,CPUBackend-ios-arm64.o | FEXCore implementation | FEXCore/Source/Interface/Config/Config.cpp
+__ZN7FEXCore6Config5ValueIyE11GetIfExistsENS0_12ConfigOptionEy | FEXCore::Config::Value<unsigned long long>::GetIfExists(FEXCore::Config::ConfigOption, unsigned long long) | dependency-LookupCache-ios-arm64.o | FEXCore implementation | FEXCore/Source/Interface/Config/Config.cpp
+__ZN7FEXCore6Config6detail10HIDEHYBRIDE | FEXCore::Config::detail::HIDEHYBRID | dependency-CPUID-ios-arm64.o | FEXCore implementation | FEXCore/Source/Interface/Config/Config.cpp
+__ZN7FEXCore6Config6detail14DISABLEL2CACHEE | FEXCore::Config::detail::DISABLEL2CACHE | dependency-LookupCache-ios-arm64.o | FEXCore implementation | FEXCore/Source/Interface/Config/Config.cpp
+__ZN7FEXCore6Config6detail14DYNAMICL1CACHEE | FEXCore::Config::detail::DYNAMICL1CACHE | dependency-LookupCache-ios-arm64.o | FEXCore implementation | FEXCore/Source/Interface/Config/Config.cpp
+__ZN7FEXCore6Config6detail17HIDEHYPERVISORBITE | FEXCore::Config::detail::HIDEHYPERVISORBIT | dependency-CPUID-ios-arm64.o | FEXCore implementation | FEXCore/Source/Interface/Config/Config.cpp
+__ZN7FEXCore6Config6detail20ENABLECODECACHINGWIPE | FEXCore::Config::detail::ENABLECODECACHINGWIP | dependency-Arm64Emitter-ios-arm64.o,CPUBackend-ios-arm64.o | FEXCore implementation | FEXCore/Source/Interface/Config/Config.cpp
+__ZN7FEXCore6Config6detail36DYNAMICL1CACHEDECREASECOUNTHEURISTICE | FEXCore::Config::detail::DYNAMICL1CACHEDECREASECOUNTHEURISTIC | dependency-LookupCache-ios-arm64.o | FEXCore implementation | FEXCore/Source/Interface/Config/Config.cpp
+__ZN7FEXCore6Config6detail36DYNAMICL1CACHEINCREASECOUNTHEURISTICE | FEXCore::Config::detail::DYNAMICL1CACHEINCREASECOUNTHEURISTIC | dependency-LookupCache-ios-arm64.o | FEXCore implementation | FEXCore/Source/Interface/Config/Config.cpp
+__ZN7FEXCore7Context11ContextImpl12CompileBlockEPNS_4Core13CpuStateFrameEyy | FEXCore::Context::ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame*, unsigned long long, unsigned long long) | JIT-ios-arm64.o | FEXCore context/runtime | FEXCore/Source/Interface/Context/Context.cpp,FEXCore/Source/Interface/Core/Core.cpp
+__ZN7FEXCore7Context11ContextImpl14ClearCodeCacheEPNS_4Core19InternalThreadStateEb | FEXCore::Context::ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState*, bool) | JIT-ios-arm64.o | FEXCore context/runtime | FEXCore/Source/Interface/Context/Context.cpp,FEXCore/Source/Interface/Core/Core.cpp
+__ZN7FEXCore7Context11ContextImpl20MonoBackpatcherWriteEPNS_4Core13CpuStateFrameEhyy | FEXCore::Context::ContextImpl::MonoBackpatcherWrite(FEXCore::Core::CpuStateFrame*, unsigned char, unsigned long long, unsigned long long) | JIT-ios-arm64.o | FEXCore context/runtime | FEXCore/Source/Interface/Context/Context.cpp,FEXCore/Source/Interface/Core/Core.cpp
+__ZN7FEXCore7Context11ContextImpl28ThreadRemoveCodeEntryFromJitEPNS_4Core13CpuStateFrameEy | FEXCore::Context::ContextImpl::ThreadRemoveCodeEntryFromJit(FEXCore::Core::CpuStateFrame*, unsigned long long) | JIT-ios-arm64.o | FEXCore context/runtime | FEXCore/Source/Interface/Context/Context.cpp,FEXCore/Source/Interface/Core/Core.cpp
+__ZN7FEXCore9Allocator11VirtualNameEPKcPvm | FEXCore::Allocator::VirtualName(char const*, void*, unsigned long) | dependency-LookupCache-ios-arm64.o,CPUBackend-ios-arm64.o | FEXCore virtual memory | FEXCore/Source/Utils/Allocator.cpp,FEXCore/Source/Utils/Allocator/64BitAllocator.cpp
+__ZN7FEXCore9Allocator4mmapE | FEXCore::Allocator::mmap | dependency-LookupCache-ios-arm64.o,CPUBackend-ios-arm64.o | FEXCore virtual memory | FEXCore/Source/Utils/Allocator.cpp,FEXCore/Source/Utils/Allocator/64BitAllocator.cpp
+__ZN7FEXCore9Allocator6munmapE | FEXCore::Allocator::munmap | dependency-LookupCache-ios-arm64.o,CPUBackend-ios-arm64.o | FEXCore virtual memory | FEXCore/Source/Utils/Allocator.cpp,FEXCore/Source/Utils/Allocator/64BitAllocator.cpp
+__ZN7FEXCore9Telemetry15TelemetryValuesE | FEXCore::Telemetry::TelemetryValues | CPUBackend-ios-arm64.o | FEXCore implementation | FEXCore/Source/Utils/Telemetry.cpp
+__ZNKSt13runtime_error4whatEv | std::runtime_error::what() const | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNKSt3__119__shared_weak_count13__get_deleterERKSt9type_info | std::__1::__shared_weak_count::__get_deleter(std::type_info const&) const | CPUBackend-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNKSt3__16locale9has_facetERNS0_2idE | std::__1::locale::has_facet(std::__1::locale::id&) const | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNKSt3__16locale9use_facetERNS0_2idE | std::__1::locale::use_facet(std::__1::locale::id&) const | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNKSt9exception4whatEv | std::exception::what() const | VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt11logic_errorC2EPKc | std::logic_error::logic_error(char const*) | dependency-LookupCache-ios-arm64.o,AtomicOps-ios-arm64.o,dependency-LogManager-ios-arm64.o,Arm64Relocations-ios-arm64.o,ALUOps-ios-arm64.o,miscops-ios-arm64.o,MemoryOps-ios-arm64.o,dependency-CPUID-ios-arm64.o,JIT-ios-arm64.o,BranchOps-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt12length_errorD1Ev | std::length_error::~length_error() | dependency-LookupCache-ios-arm64.o,AtomicOps-ios-arm64.o,dependency-LogManager-ios-arm64.o,Arm64Relocations-ios-arm64.o,ALUOps-ios-arm64.o,miscops-ios-arm64.o,MemoryOps-ios-arm64.o,dependency-CPUID-ios-arm64.o,JIT-ios-arm64.o,BranchOps-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt13runtime_errorC2EPKc | std::runtime_error::runtime_error(char const*) | dependency-LogManager-ios-arm64.o,JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt13runtime_errorD2Ev | std::runtime_error::~runtime_error() | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt14overflow_errorD1Ev | std::overflow_error::~overflow_error() | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt19bad_optional_accessD1Ev | std::bad_optional_access::~bad_optional_access() | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt20bad_array_new_lengthC1Ev | std::bad_array_new_length::bad_array_new_length() | dependency-LookupCache-ios-arm64.o,AtomicOps-ios-arm64.o,dependency-LogManager-ios-arm64.o,Arm64Relocations-ios-arm64.o,ALUOps-ios-arm64.o,miscops-ios-arm64.o,MemoryOps-ios-arm64.o,dependency-CPUID-ios-arm64.o,JIT-ios-arm64.o,BranchOps-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt20bad_array_new_lengthD1Ev | std::bad_array_new_length::~bad_array_new_length() | dependency-LookupCache-ios-arm64.o,AtomicOps-ios-arm64.o,dependency-LogManager-ios-arm64.o,Arm64Relocations-ios-arm64.o,ALUOps-ios-arm64.o,miscops-ios-arm64.o,MemoryOps-ios-arm64.o,dependency-CPUID-ios-arm64.o,JIT-ios-arm64.o,BranchOps-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__112__next_primeEm | std::__1::__next_prime(unsigned long) | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6__initEmc | std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>>::__init(unsigned long, char) | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6assignEmc | std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>>::assign(unsigned long, char) | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC1ERKS5_ | std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>>::basic_string(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>> const&) | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEED1Ev | std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>>::~basic_string() | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__119__shared_weak_count14__release_weakEv | std::__1::__shared_weak_count::__release_weak() | JIT-ios-arm64.o,CPUBackend-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__119__shared_weak_countD2Ev | std::__1::__shared_weak_count::~__shared_weak_count() | CPUBackend-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__120__libcpp_atomic_waitEPVKvx | std::__1::__libcpp_atomic_wait(void const volatile*, long long) | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__123__cxx_atomic_notify_allEPVKv | std::__1::__cxx_atomic_notify_all(void const volatile*) | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__123__libcpp_atomic_monitorEPVKv | std::__1::__libcpp_atomic_monitor(void const volatile*) | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__13pmr15memory_resourceD2Ev | std::__1::pmr::memory_resource::~memory_resource() | dependency-LookupCache-ios-arm64.o,CPUBackend-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__15alignEmmRPvRm | std::__1::align(unsigned long, unsigned long, void*&, unsigned long&) | dependency-LookupCache-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__15mutex4lockEv | std::__1::mutex::lock() | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__15mutex6unlockEv | std::__1::mutex::unlock() | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__16chrono12steady_clock3nowEv | std::__1::chrono::steady_clock::now() | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__16chrono12system_clock3nowEv | std::__1::chrono::system_clock::now() | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__16locale5facet16__on_zero_sharedEv | std::__1::locale::facet::__on_zero_shared() | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__16locale5facetD2Ev | std::__1::locale::facet::~facet() | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__16localeC1ERKS0_ | std::__1::locale::locale(std::__1::locale const&) | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__16localeC1Ev | std::__1::locale::locale() | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__16localeD1Ev | std::__1::locale::~locale() | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt3__18numpunctIcE2idE | std::__1::numpunct<char>::id | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt9bad_allocC1Ev | std::bad_alloc::bad_alloc() | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt9bad_allocD1Ev | std::bad_alloc::~bad_alloc() | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZNSt9exceptionD2Ev | std::exception::~exception() | VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZSt9terminatev | std::terminate() | dependency-LookupCache-ios-arm64.o,AtomicOps-ios-arm64.o,dependency-LogManager-ios-arm64.o,Arm64Relocations-ios-arm64.o,ALUOps-ios-arm64.o,miscops-ios-arm64.o,MemoryOps-ios-arm64.o,dependency-CPUID-ios-arm64.o,JIT-ios-arm64.o,BranchOps-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTINSt3__119__shared_weak_countE | typeinfo for std::__1::__shared_weak_count | CPUBackend-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTINSt3__13pmr15memory_resourceE | typeinfo for std::__1::pmr::memory_resource | dependency-LookupCache-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTINSt3__16locale5facetE | typeinfo for std::__1::locale::facet | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTISt12length_error | typeinfo for std::length_error | dependency-LookupCache-ios-arm64.o,AtomicOps-ios-arm64.o,dependency-LogManager-ios-arm64.o,Arm64Relocations-ios-arm64.o,ALUOps-ios-arm64.o,miscops-ios-arm64.o,MemoryOps-ios-arm64.o,dependency-CPUID-ios-arm64.o,JIT-ios-arm64.o,BranchOps-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTISt13runtime_error | typeinfo for std::runtime_error | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTISt14overflow_error | typeinfo for std::overflow_error | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTISt19bad_optional_access | typeinfo for std::bad_optional_access | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTISt20bad_array_new_length | typeinfo for std::bad_array_new_length | dependency-LookupCache-ios-arm64.o,AtomicOps-ios-arm64.o,dependency-LogManager-ios-arm64.o,Arm64Relocations-ios-arm64.o,ALUOps-ios-arm64.o,miscops-ios-arm64.o,MemoryOps-ios-arm64.o,dependency-CPUID-ios-arm64.o,JIT-ios-arm64.o,BranchOps-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTISt9bad_alloc | typeinfo for std::bad_alloc | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTISt9exception | typeinfo for std::exception | VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTVN10__cxxabiv117__class_type_infoE | vtable for __cxxabiv1::__class_type_info | JIT-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTVN10__cxxabiv120__si_class_type_infoE | vtable for __cxxabiv1::__si_class_type_info | dependency-LookupCache-ios-arm64.o,dependency-LogManager-ios-arm64.o,JIT-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTVN10__cxxabiv121__vmi_class_type_infoE | vtable for __cxxabiv1::__vmi_class_type_info | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTVNSt3__114__shared_countE | vtable for std::__1::__shared_count | dependency-LogManager-ios-arm64.o,CPUBackend-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTVNSt3__119__shared_weak_countE | vtable for std::__1::__shared_weak_count | CPUBackend-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTVNSt3__13pmr15memory_resourceE | vtable for std::__1::pmr::memory_resource | dependency-LookupCache-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTVNSt3__16locale5facetE | vtable for std::__1::locale::facet | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTVSt12length_error | vtable for std::length_error | dependency-LookupCache-ios-arm64.o,AtomicOps-ios-arm64.o,dependency-LogManager-ios-arm64.o,Arm64Relocations-ios-arm64.o,ALUOps-ios-arm64.o,miscops-ios-arm64.o,MemoryOps-ios-arm64.o,dependency-CPUID-ios-arm64.o,JIT-ios-arm64.o,BranchOps-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTVSt14overflow_error | vtable for std::overflow_error | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTVSt19bad_optional_access | vtable for std::bad_optional_access | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZTVSt9exception | vtable for std::exception | JIT-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZdlPv | operator delete(void*) | dependency-LookupCache-ios-arm64.o,dependency-LogManager-ios-arm64.o,JIT-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZdlPvSt11align_val_t | operator delete(void*, std::align_val_t) | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__Znwm | operator new(unsigned long) | dependency-LookupCache-ios-arm64.o,AtomicOps-ios-arm64.o,dependency-LogManager-ios-arm64.o,Arm64Relocations-ios-arm64.o,ALUOps-ios-arm64.o,miscops-ios-arm64.o,MemoryOps-ios-arm64.o,dependency-CPUID-ios-arm64.o,JIT-ios-arm64.o,BranchOps-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+__ZnwmSt11align_val_t | operator new(unsigned long, std::align_val_t) | dependency-LookupCache-ios-arm64.o,AtomicOps-ios-arm64.o,dependency-LogManager-ios-arm64.o,Arm64Relocations-ios-arm64.o,ALUOps-ios-arm64.o,miscops-ios-arm64.o,MemoryOps-ios-arm64.o,dependency-CPUID-ios-arm64.o,JIT-ios-arm64.o,BranchOps-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+___cxa_allocate_exception | __cxa_allocate_exception | dependency-LookupCache-ios-arm64.o,AtomicOps-ios-arm64.o,dependency-LogManager-ios-arm64.o,Arm64Relocations-ios-arm64.o,ALUOps-ios-arm64.o,miscops-ios-arm64.o,MemoryOps-ios-arm64.o,dependency-CPUID-ios-arm64.o,JIT-ios-arm64.o,BranchOps-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+___cxa_begin_catch | __cxa_begin_catch | dependency-LookupCache-ios-arm64.o,AtomicOps-ios-arm64.o,dependency-LogManager-ios-arm64.o,Arm64Relocations-ios-arm64.o,ALUOps-ios-arm64.o,miscops-ios-arm64.o,MemoryOps-ios-arm64.o,dependency-CPUID-ios-arm64.o,JIT-ios-arm64.o,BranchOps-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+___cxa_end_catch | __cxa_end_catch | dependency-LookupCache-ios-arm64.o,JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+___cxa_free_exception | __cxa_free_exception | dependency-LookupCache-ios-arm64.o,AtomicOps-ios-arm64.o,dependency-LogManager-ios-arm64.o,Arm64Relocations-ios-arm64.o,ALUOps-ios-arm64.o,miscops-ios-arm64.o,MemoryOps-ios-arm64.o,dependency-CPUID-ios-arm64.o,JIT-ios-arm64.o,BranchOps-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+___cxa_pure_virtual | __cxa_pure_virtual | CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+___cxa_throw | __cxa_throw | dependency-LookupCache-ios-arm64.o,AtomicOps-ios-arm64.o,dependency-LogManager-ios-arm64.o,Arm64Relocations-ios-arm64.o,ALUOps-ios-arm64.o,miscops-ios-arm64.o,MemoryOps-ios-arm64.o,dependency-CPUID-ios-arm64.o,JIT-ios-arm64.o,BranchOps-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+___divti3 | __divti3 | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+___dynamic_cast | __dynamic_cast | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+___gxx_personality_v0 | __gxx_personality_v0 | dependency-LookupCache-ios-arm64.o,AtomicOps-ios-arm64.o,dependency-LogManager-ios-arm64.o,Arm64Relocations-ios-arm64.o,ALUOps-ios-arm64.o,miscops-ios-arm64.o,MemoryOps-ios-arm64.o,dependency-CPUID-ios-arm64.o,JIT-ios-arm64.o,BranchOps-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+___modti3 | __modti3 | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+___stack_chk_fail | __stack_chk_fail | dependency-LookupCache-ios-arm64.o,dependency-LogManager-ios-arm64.o,miscops-ios-arm64.o,dependency-Arm64Emitter-ios-arm64.o,MemoryOps-ios-arm64.o,JIT-ios-arm64.o,BranchOps-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+___stack_chk_guard | __stack_chk_guard | dependency-LookupCache-ios-arm64.o,dependency-LogManager-ios-arm64.o,miscops-ios-arm64.o,dependency-Arm64Emitter-ios-arm64.o,MemoryOps-ios-arm64.o,JIT-ios-arm64.o,BranchOps-ios-arm64.o,CPUBackend-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+___stderrp | __stderrp | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+___udivti3 | __udivti3 | dependency-LogManager-ios-arm64.o,JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+___umodti3 | __umodti3 | dependency-LogManager-ios-arm64.o,JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_abort | abort | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_aligned_alloc | aligned_alloc | dependency-AllocatorHooks-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_bzero | bzero | dependency-LookupCache-ios-arm64.o,JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_calloc | calloc | dependency-AllocatorHooks-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_fprintf | fprintf | dependency-LogManager-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_free | free | dependency-LogManager-ios-arm64.o,dependency-AllocatorHooks-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_getpagesize | getpagesize | dependency-AllocatorHooks-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_madvise | madvise | dependency-LookupCache-ios-arm64.o,JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_malloc | malloc | dependency-LogManager-ios-arm64.o,dependency-AllocatorHooks-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_malloc_size | malloc_size | dependency-AllocatorHooks-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_memcmp | memcmp | dependency-LogManager-ios-arm64.o,JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_memcpy | memcpy | dependency-LookupCache-ios-arm64.o,AtomicOps-ios-arm64.o,dependency-LogManager-ios-arm64.o,Arm64Relocations-ios-arm64.o,ALUOps-ios-arm64.o,miscops-ios-arm64.o,MemoryOps-ios-arm64.o,dependency-CPUID-ios-arm64.o,JIT-ios-arm64.o,BranchOps-ios-arm64.o,CPUBackend-ios-arm64.o,dependency-LongJump-ios-arm64.o,VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_memmove | memmove | dependency-LogManager-ios-arm64.o,dependency-CPUID-ios-arm64.o,JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_memset | memset | dependency-LogManager-ios-arm64.o,Arm64Relocations-ios-arm64.o,JIT-ios-arm64.o,BranchOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_mprotect | mprotect | CPUBackend-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_posix_memalign | posix_memalign | dependency-AllocatorHooks-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_pthread_mutex_lock | pthread_mutex_lock | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_pthread_mutex_unlock | pthread_mutex_unlock | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_realloc | realloc | dependency-AllocatorHooks-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_strcmp | strcmp | VectorOps-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_strlen | strlen | dependency-LogManager-ios-arm64.o,dependency-CPUID-ios-arm64.o,JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+_sys_icache_invalidate | sys_icache_invalidate | JIT-ios-arm64.o | SDK/runtime import; validate with linker | iPhoneOS libc++, libSystem and compiler runtime
+
+43 références anciennes résolues :
+__ZN6LogMan3Msg8MFmtImplENS_11DebugLevelsEPKcRKN3fmt3v1217basic_format_argsINS5_7contextEEE
+__ZN7FEXCore11LookupCache12ClearL2CacheERKNS_24LookupCacheBaseLockTokenE
+__ZN7FEXCore11LookupCache22ClearThreadLocalCachesERKNS_25LookupCacheWriteLockTokenE
+__ZN7FEXCore14GuestToHostMapC1Ev
+__ZN7FEXCore17UncheckedLongJump7SetJumpERNS0_7JumpBufE
+__ZN7FEXCore17UncheckedLongJump8LongJumpERKNS0_7JumpBufEy
+__ZN7FEXCore3CPU12Arm64Emitter12LoadConstantEN10ARMEmitter4SizeENS2_8RegisterEyNS1_7PadTypeEi
+__ZN7FEXCore3CPU12Arm64Emitter14FillStaticRegsENS1_20FillStaticRegOptionsE
+__ZN7FEXCore3CPU12Arm64Emitter14PopDynamicRegsEv
+__ZN7FEXCore3CPU12Arm64Emitter15PushDynamicRegsEN10ARMEmitter8RegisterE
+__ZN7FEXCore3CPU12Arm64Emitter15SpillStaticRegsEN10ARMEmitter8RegisterENS1_21SpillStaticRegOptionsE
+__ZN7FEXCore3CPU12Arm64Emitter23PopCalleeSavedRegistersEv
+__ZN7FEXCore3CPU12Arm64Emitter8Align16BEv
+__ZN7FEXCore3CPU12Arm64EmitterC2EPNS_7Context11ContextImplEPvm
+__ZN7FEXCore5Utils12SpinWaitLock21CycleCounterFrequencyE
+__ZN7FEXCore6Assert12ForcedAssertEv
+__ZN7FEXCore9Allocator12aligned_freeEPv
+__ZN7FEXCore9Allocator13aligned_allocEmm
+__ZN7FEXCore9Allocator4freeEPv
+__ZN7FEXCore9Allocator6mallocEm
+__ZNK7FEXCore8CPUIDEmu11Function_0hEj
+__ZNK7FEXCore8CPUIDEmu12Function_01hEj
+__ZNK7FEXCore8CPUIDEmu12Function_02hEj
+__ZNK7FEXCore8CPUIDEmu12Function_04hEj
+__ZNK7FEXCore8CPUIDEmu12Function_06hEj
+__ZNK7FEXCore8CPUIDEmu12Function_07hEj
+__ZNK7FEXCore8CPUIDEmu12Function_0DhEj
+__ZNK7FEXCore8CPUIDEmu12Function_15hEj
+__ZNK7FEXCore8CPUIDEmu12Function_1AhEj
+__ZNK7FEXCore8CPUIDEmu12Function_24hEj
+__ZNK7FEXCore8CPUIDEmu14XCRFunction_0hEv
+__ZNK7FEXCore8CPUIDEmu17Function_ReservedEj
+__ZNK7FEXCore8CPUIDEmu19Function_4000_0000hEj
+__ZNK7FEXCore8CPUIDEmu19Function_4000_0001hEj
+__ZNK7FEXCore8CPUIDEmu19Function_8000_0000hEj
+__ZNK7FEXCore8CPUIDEmu19Function_8000_0001hEj
+__ZNK7FEXCore8CPUIDEmu19Function_8000_0002hEj
+__ZNK7FEXCore8CPUIDEmu19Function_8000_0003hEj
+__ZNK7FEXCore8CPUIDEmu19Function_8000_0004hEj
+__ZNK7FEXCore8CPUIDEmu19Function_8000_0006hEj
+__ZNK7FEXCore8CPUIDEmu19Function_8000_0007hEj
+__ZNK7FEXCore8CPUIDEmu19Function_8000_0008hEj
+__ZNK7FEXCore8CPUIDEmu19Function_8000_0019hEj
+
+42 nouvelles dépendances transitives :
+__ZN7FEXCore6Config5ValueIyE11GetIfExistsENS0_12ConfigOptionEy
+__ZN7FEXCore6Config6detail10HIDEHYBRIDE
+__ZN7FEXCore6Config6detail14DISABLEL2CACHEE
+__ZN7FEXCore6Config6detail14DYNAMICL1CACHEE
+__ZN7FEXCore6Config6detail17HIDEHYPERVISORBITE
+__ZN7FEXCore6Config6detail36DYNAMICL1CACHEDECREASECOUNTHEURISTICE
+__ZN7FEXCore6Config6detail36DYNAMICL1CACHEINCREASECOUNTHEURISTICE
+__ZNKSt13runtime_error4whatEv
+__ZNKSt3__16locale9has_facetERNS0_2idE
+__ZNKSt3__16locale9use_facetERNS0_2idE
+__ZNSt13runtime_errorD2Ev
+__ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6__initEmc
+__ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6assignEmc
+__ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC1ERKS5_
+__ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEED1Ev
+__ZNSt3__15alignEmmRPvRm
+__ZNSt3__16locale5facet16__on_zero_sharedEv
+__ZNSt3__16locale5facetD2Ev
+__ZNSt3__16localeC1ERKS0_
+__ZNSt3__16localeC1Ev
+__ZNSt3__16localeD1Ev
+__ZNSt3__18numpunctIcE2idE
+__ZNSt9bad_allocC1Ev
+__ZNSt9bad_allocD1Ev
+__ZTINSt3__13pmr15memory_resourceE
+__ZTINSt3__16locale5facetE
+__ZTISt13runtime_error
+__ZTISt9bad_alloc
+__ZTVNSt3__13pmr15memory_resourceE
+__ZTVNSt3__16locale5facetE
+__ZdlPvSt11align_val_t
+___stderrp
+_abort
+_aligned_alloc
+_calloc
+_fprintf
+_free
+_getpagesize
+_malloc
+_malloc_size
+_posix_memalign
+_realloc
+
+Journal brut de la liaison stricte générique :
+ld: warning: -undefined error is deprecated
+Undefined symbols for architecture arm64:
+  "FEXCore::CPU::InterpreterOps::GetFallbackHandler(FEXCore::IR::IROp_Header const*, FEXCore::CPU::FallbackInfo*)", referenced from:
+      FEXCore::CPU::Arm64JITCore::Op_Unhandled(FEXCore::IR::IROp_Header const*, FEXCore::IR::OrderedNode*) in JIT-ios-arm64.o
+  "FEXCore::Config::Value<bool>::GetIfExists(FEXCore::Config::ConfigOption, bool)", referenced from:
+      FEXCore::Config::Value<bool>::Value<bool>(FEXCore::Config::ConfigOption, bool) in CPUBackend-ios-arm64.o
+  "FEXCore::Config::Value<unsigned long long>::GetIfExists(FEXCore::Config::ConfigOption, unsigned long long)", referenced from:
+      FEXCore::Config::Value<unsigned long long>::Value<unsigned long long>(FEXCore::Config::ConfigOption, unsigned long long) in dependency-LookupCache-ios-arm64.o
+  "FEXCore::Config::detail::HIDEHYBRID", referenced from:
+      FEXCore::Config::detail::ConfigOptionInfo<(FEXCore::Config::ConfigOption)7>::Default() in dependency-CPUID-ios-arm64.o
+  "FEXCore::Config::detail::DISABLEL2CACHE", referenced from:
+      FEXCore::Config::detail::ConfigOptionInfo<(FEXCore::Config::ConfigOption)16>::Default() in dependency-LookupCache-ios-arm64.o
+  "FEXCore::Config::detail::DYNAMICL1CACHE", referenced from:
+      FEXCore::Config::detail::ConfigOptionInfo<(FEXCore::Config::ConfigOption)17>::Default() in dependency-LookupCache-ios-arm64.o
+  "FEXCore::Config::detail::HIDEHYPERVISORBIT", referenced from:
+      FEXCore::Config::detail::ConfigOptionInfo<(FEXCore::Config::ConfigOption)50>::Default() in dependency-CPUID-ios-arm64.o
+  "FEXCore::Config::detail::ENABLECODECACHINGWIP", referenced from:
+      FEXCore::Config::detail::ConfigOptionInfo<(FEXCore::Config::ConfigOption)2>::Default() in CPUBackend-ios-arm64.o
+  "FEXCore::Config::detail::DYNAMICL1CACHEDECREASECOUNTHEURISTIC", referenced from:
+      FEXCore::Config::detail::ConfigOptionInfo<(FEXCore::Config::ConfigOption)19>::Default() in dependency-LookupCache-ios-arm64.o
+  "FEXCore::Config::detail::DYNAMICL1CACHEINCREASECOUNTHEURISTIC", referenced from:
+      FEXCore::Config::detail::ConfigOptionInfo<(FEXCore::Config::ConfigOption)18>::Default() in dependency-LookupCache-ios-arm64.o
+  "FEXCore::Context::ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame*, unsigned long long, unsigned long long)", referenced from:
+      FEXCore::CPU::Arm64JITCore::ExitFunctionLink(FEXCore::Core::CpuStateFrame*, FEXCore::Context::ExitFunctionLinkData*) in JIT-ios-arm64.o
+  "FEXCore::Context::ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState*, bool)", referenced from:
+      FEXCore::CPU::Arm64JITCore::CompileCode(unsigned long long, unsigned long long, bool, FEXCore::IR::IRListView const*, FEXCore::Core::DebugData*, bool) in JIT-ios-arm64.o
+  "FEXCore::Context::ContextImpl::MonoBackpatcherWrite(FEXCore::Core::CpuStateFrame*, unsigned char, unsigned long long, unsigned long long)", referenced from:
+      FEXCore::CPU::Arm64JITCore::Arm64JITCore(FEXCore::Context::ContextImpl*, FEXCore::Core::InternalThreadState*) in JIT-ios-arm64.o
+  "FEXCore::Context::ContextImpl::ThreadRemoveCodeEntryFromJit(FEXCore::Core::CpuStateFrame*, unsigned long long)", referenced from:
+      FEXCore::CPU::Arm64JITCore::Arm64JITCore(FEXCore::Context::ContextImpl*, FEXCore::Core::InternalThreadState*) in JIT-ios-arm64.o
+  "FEXCore::Allocator::VirtualName(char const*, void*, unsigned long)", referenced from:
+      FEXCore::CPU::CodeBuffer::CodeBuffer(unsigned long) in CPUBackend-ios-arm64.o
+      FEXCore::LookupCache::LookupCache(FEXCore::Context::ContextImpl*) in dependency-LookupCache-ios-arm64.o
+      FEXCore::LookupCache::LookupCache(FEXCore::Context::ContextImpl*) in dependency-LookupCache-ios-arm64.o
+      fextl::pmr::named_monotonic_page_buffer_resource::AllocateNewBuffer(unsigned long, unsigned long) in dependency-LookupCache-ios-arm64.o
+  "FEXCore::Allocator::mmap", referenced from:
+      FEXCore::Allocator::VirtualAlloc(unsigned long, bool, bool) in CPUBackend-ios-arm64.o
+  "FEXCore::Allocator::munmap", referenced from:
+      FEXCore::Allocator::VirtualFree(void*, unsigned long) in CPUBackend-ios-arm64.o
+  "FEXCore::Telemetry::TelemetryValues", referenced from:
+      FEXCore::Telemetry::GetTelemetryValue(FEXCore::Telemetry::TelemetryType) in CPUBackend-ios-arm64.o
+ld: symbol(s) not found for architecture arm64
+clang++: error: linker command failed with exit code 1 (use -v to see invocation)
+
+
+Validation cible Darwin complète : commit 4f168823a0b7e574861cbe3ba7b334d151ecfc45,
+run 38127386275, artifact 11697593593.
+18/18 symboles bloquants génériques sont définis dans le dylib réel.
+Aucun import FEXCore/LogMan non résolu. Les 208 imports dynamiques sont liés
+strictement au SDK iPhoneOS (libSystem/libc++), non des blocages de liaison.
+Artefact : FEXCore/Source/libFEXCore.dylib ; SHA256
+77342b7544a4c86e4c8a7f489cb56fccb211057e09bce35e29d21657320ba218.
+
+Liste exhaustive nm -u de la cible Darwin complète :
+__Unwind_Resume
+__ZNKSt13runtime_error4whatEv
+__ZNKSt3__119__shared_weak_count13__get_deleterERKSt9type_info
+__ZNKSt3__16locale9has_facetERNS0_2idE
+__ZNKSt3__16locale9use_facetERNS0_2idE
+__ZNKSt3__18ios_base6getlocEv
+__ZNSt13runtime_errorC1EPKc
+__ZNSt13runtime_errorC2EPKc
+__ZNSt13runtime_errorD1Ev
+__ZNSt13runtime_errorD2Ev
+__ZNSt3__112__next_primeEm
+__ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6__initEPKcm
+__ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6__initEmc
+__ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6assignEmc
+__ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC1ERKS5_
+__ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEED1Ev
+__ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEaSERKS5_
+__ZNSt3__112system_errorC1ENS_10error_codeEPKc
+__ZNSt3__112system_errorC1ENS_10error_codeERKNS_12basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEE
+__ZNSt3__112system_errorD1Ev
+__ZNSt3__113basic_istreamIcNS_11char_traitsIcEEE4readEPcl
+__ZNSt3__113basic_istreamIcNS_11char_traitsIcEEE6sentryC1ERS3_b
+__ZNSt3__113basic_istreamIcNS_11char_traitsIcEEED0Ev
+__ZNSt3__113basic_istreamIcNS_11char_traitsIcEEED1Ev
+__ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEE3putEc
+__ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEE5flushEv
+__ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEE6sentryC1ERS3_
+__ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEE6sentryD1Ev
+__ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEED0Ev
+__ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEED1Ev
+__ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEED2Ev
+__ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEElsEj
+__ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEElsEm
+__ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEElsEt
+__ZNSt3__114basic_iostreamIcNS_11char_traitsIcEEED0Ev
+__ZNSt3__114basic_iostreamIcNS_11char_traitsIcEEED1Ev
+__ZNSt3__114basic_iostreamIcNS_11char_traitsIcEEED2Ev
+__ZNSt3__115basic_streambufIcNS_11char_traitsIcEEE4syncEv
+__ZNSt3__115basic_streambufIcNS_11char_traitsIcEEE5imbueERKNS_6localeE
+__ZNSt3__115basic_streambufIcNS_11char_traitsIcEEE5uflowEv
+__ZNSt3__115basic_streambufIcNS_11char_traitsIcEEE6setbufEPcl
+__ZNSt3__115basic_streambufIcNS_11char_traitsIcEEE6xsgetnEPcl
+__ZNSt3__115basic_streambufIcNS_11char_traitsIcEEE6xsputnEPKcl
+__ZNSt3__115basic_streambufIcNS_11char_traitsIcEEE9showmanycEv
+__ZNSt3__115basic_streambufIcNS_11char_traitsIcEEEC2Ev
+__ZNSt3__115basic_streambufIcNS_11char_traitsIcEEED2Ev
+__ZNSt3__115system_categoryEv
+__ZNSt3__116generic_categoryEv
+__ZNSt3__118condition_variableD1Ev
+__ZNSt3__119__shared_mutex_base11lock_sharedEv
+__ZNSt3__119__shared_mutex_base13unlock_sharedEv
+__ZNSt3__119__shared_mutex_base4lockEv
+__ZNSt3__119__shared_mutex_base6unlockEv
+__ZNSt3__119__shared_mutex_baseC1Ev
+__ZNSt3__119__shared_weak_count14__release_weakEv
+__ZNSt3__119__shared_weak_count4lockEv
+__ZNSt3__119__shared_weak_countD2Ev
+__ZNSt3__120__throw_system_errorEiPKc
+__ZNSt3__122__libcpp_verbose_abortEPKcz
+__ZNSt3__13pmr15memory_resourceD2Ev
+__ZNSt3__15alignEmmRPvRm
+__ZNSt3__15ctypeIcE2idE
+__ZNSt3__15mutex4lockEv
+__ZNSt3__15mutex6unlockEv
+__ZNSt3__15mutexD1Ev
+__ZNSt3__16chrono12steady_clock3nowEv
+__ZNSt3__16chrono12system_clock3nowEv
+__ZNSt3__16locale5facet16__on_zero_sharedEv
+__ZNSt3__16locale5facetD2Ev
+__ZNSt3__16localeC1ERKS0_
+__ZNSt3__16localeC1Ev
+__ZNSt3__16localeD1Ev
+__ZNSt3__18ios_base4initEPv
+__ZNSt3__18ios_base5clearEj
+__ZNSt3__18numpunctIcE2idE
+__ZNSt3__18numpunctIwE2idE
+__ZNSt3__19basic_iosIcNS_11char_traitsIcEEED2Ev
+__ZNSt9bad_allocC1Ev
+__ZNSt9bad_allocD1Ev
+__ZSt9terminatev
+__ZTINSt3__112system_errorE
+__ZTINSt3__113basic_istreamIcNS_11char_traitsIcEEEE
+__ZTINSt3__113basic_ostreamIcNS_11char_traitsIcEEEE
+__ZTINSt3__114basic_iostreamIcNS_11char_traitsIcEEEE
+__ZTINSt3__115basic_streambufIcNS_11char_traitsIcEEEE
+__ZTINSt3__119__shared_weak_countE
+__ZTINSt3__13pmr15memory_resourceE
+__ZTINSt3__16locale5facetE
+__ZTISt13runtime_error
+__ZTISt9bad_alloc
+__ZTVN10__cxxabiv117__class_type_infoE
+__ZTVN10__cxxabiv120__si_class_type_infoE
+__ZTVN10__cxxabiv121__vmi_class_type_infoE
+__ZTVNSt3__114__shared_countE
+__ZTVNSt3__119__shared_weak_countE
+__ZTVNSt3__13pmr15memory_resourceE
+__ZTVNSt3__16locale5facetE
+__ZTVNSt3__18ios_baseE
+__ZTVNSt3__19basic_iosIcNS_11char_traitsIcEEEE
+__ZThn16_NSt3__114basic_iostreamIcNS_11char_traitsIcEEED0Ev
+__ZThn16_NSt3__114basic_iostreamIcNS_11char_traitsIcEEED1Ev
+__ZTv0_n24_NSt3__113basic_istreamIcNS_11char_traitsIcEEED0Ev
+__ZTv0_n24_NSt3__113basic_istreamIcNS_11char_traitsIcEEED1Ev
+__ZTv0_n24_NSt3__113basic_ostreamIcNS_11char_traitsIcEEED0Ev
+__ZTv0_n24_NSt3__113basic_ostreamIcNS_11char_traitsIcEEED1Ev
+__ZTv0_n24_NSt3__114basic_iostreamIcNS_11char_traitsIcEEED0Ev
+__ZTv0_n24_NSt3__114basic_iostreamIcNS_11char_traitsIcEEED1Ev
+__ZdlPv
+__ZdlPvSt11align_val_t
+__Znwm
+__ZnwmSt11align_val_t
+___chkstk_darwin
+___cxa_allocate_exception
+___cxa_atexit
+___cxa_begin_catch
+___cxa_end_catch
+___cxa_free_exception
+___cxa_guard_acquire
+___cxa_guard_release
+___cxa_pure_virtual
+___cxa_throw
+___divti3
+___dynamic_cast
+___error
+___gxx_personality_v0
+___memcpy_chk
+___memset_chk
+___modti3
+___sincos_stret
+___stack_chk_fail
+___stack_chk_guard
+___stderrp
+___stdoutp
+___swbuf
+___udivti3
+___umodti3
+__tlv_bootstrap
+_abort
+_access
+_aligned_alloc
+_atan2
+_bzero
+_calloc
+_close
+_cos
+_dlopen
+_dlsym
+_exp2
+_fflush
+_flockfile
+_fmod
+_fprintf
+_fputc
+_free
+_fstat
+_fsync
+_ftruncate
+_funlockfile
+_fwrite
+_getenv
+_getpagesize
+_getpid
+_log2
+_lseek
+_mach_error_string
+_mach_task_self_
+_madvise
+_malloc
+_malloc_size
+_memchr
+_memcmp
+_memcpy
+_memmove
+_memset
+_mkdir
+_mmap
+_mprotect
+_munmap
+_open
+_os_sync_wait_on_address
+_os_sync_wake_by_address_all
+_os_sync_wake_by_address_any
+_posix_memalign
+_pread
+_pthread_mutex_lock
+_pthread_mutex_unlock
+_pthread_sigmask
+_pthread_threadid_np
+_read
+_realloc
+_realpath$DARWIN_EXTSN
+_remainder
+_rename
+_sin
+_snprintf
+_stat
+_strcmp
+_strerror
+_strlen
+_strtoll
+_strtoull
+_sys_icache_invalidate
+_sysconf
+_tan
+_vm_deallocate
+_vm_protect
+_vm_remap
+_write
+
+Chargements dynamiques otool -L :
+/Users/runner/work/MaxPS4/MaxPS4/build/fexcore-darwin-ios/FEXCore/Source/libFEXCore.dylib:
+	@rpath/libFEXCore.dylib (compatibility version 0.0.0, current version 0.0.0)
+	/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)
+	/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 2100.43.0)

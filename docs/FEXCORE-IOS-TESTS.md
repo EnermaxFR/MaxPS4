@@ -36,7 +36,7 @@ faire passer la compilation ou la liaison.
 
 ## Examen de la PR #125 et dépendances de liaison
 
-La PR #125 a été fermée sans fusion. Son commit `4e330a711d52fed699de0f0e4c6cd36ab4a54815`
+La PR #125, initialement fermée sans fusion, a été fusionnée ensuite dans main au commit `73ed0f0`. Son commit `4e330a711d52fed699de0f0e4c6cd36ab4a54815`
 et les artefacts du run `38125083690` restent la base de cette vérification.
 L'union des symboles externes des 12 objets, après soustraction des définitions
 présentes dans ces mêmes objets, contient **121 références**, dont **54 FEXCore/LogMan**.
@@ -129,3 +129,22 @@ conservés dans `strict-link.log`, dans l'artefact `heavy-fexcore-source-invento
 du run ci-dessus. `link-report.json` contient aussi les 120 imports agrégés et
 leurs propriétaires candidats. Ces 18 blocages subsistent ; ils n'ont pas été
 supprimés par des symboles factices ou par une option permissive du linker.
+
+## Liaison complète du runtime Darwin cohérent
+
+La branche `codex/fexcore-ios-linkage` part de `main` à `73ed0f0`.
+La nouvelle cible `FEXCore_shared` utilise seulement le fork Darwin embarqué
+par AetherPS4 et les dépendances CMake correspondantes. Elle ne transforme pas
+les objets génériques en objets Darwin et n'intègre pas encore ce runtime à l'app.
+
+Au commit `4f16882`, le run [38127386275](https://github.com/EnermaxFR/MaxPS4/actions/runs/38127386275)
+a produit une véritable bibliothèque `libFEXCore.dylib` iOS ARM64, liaison stricte
+réussie, aucun import FEXCore/LogMan manquant. Les 18 symboles bloquants du
+diagnostic générique sont définis dans ce binaire. Ses 208 imports SDK sont liés
+à libSystem et libc++. Les tests existants passent également : heavy
+[38127386265](https://github.com/EnermaxFR/MaxPS4/actions/runs/38127386265), smoke
+[38127386272](https://github.com/EnermaxFR/MaxPS4/actions/runs/38127386272).
+
+Le rapport principal est `docs/fexcore-ios-linkage-report.md`. La cible complète
+est distincte du diagnostic générique `BLOCKED` décrit plus haut. Elle cible iOS
+18 pour les API de mutex du fork. Aucun test appareil ni IPA n'a été exécuté/produit.
