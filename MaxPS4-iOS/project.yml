@@ -20,6 +20,7 @@ targets:
       - path: Sources
       - path: Resources
       - path: Native/PM4MetalDrawBridge.mm
+      - path: Native/PS4PKGBridge.cpp
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.enermaxfr.maxps4

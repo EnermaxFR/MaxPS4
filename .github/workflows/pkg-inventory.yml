@@ -1,0 +1,68 @@
+name: Generic PS4 PKG inventory
+on:
+  pull_request:
+    paths:
+      - 'MaxPS4-iOS/Native/PS4PKG*'
+      - 'MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h'
+      - 'MaxPS4-iOS/Sources/MaxPS4PKGInspector.swift'
+      - 'MaxPS4-iOS/Sources/MaxPS4Emulator.swift'
+      - 'MaxPS4-iOS/Tests/PS4PKGInventoryTest.cpp'
+      - 'MaxPS4-iOS/Tests/PKGSwiftDiagnosticTest.swift'
+      - 'MaxPS4-iOS/project.yml'
+      - '.github/workflows/pkg-inventory.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test synthetic PKGs with address and undefined-behavior sanitizers
+        shell: bash
+        run: |
+          set -euo pipefail
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer \
+            MaxPS4-iOS/Native/PS4PKGBridge.cpp MaxPS4-iOS/Tests/PS4PKGInventoryTest.cpp \
+            -o "$RUNNER_TEMP/pkg-test"
+          "$RUNNER_TEMP/pkg-test" | tee pkg-tests.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: PKG-sanitizer-report
+          path: pkg-tests.txt
+  swift-ios:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test native parser and actual Swift report bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            MaxPS4-iOS/Native/PS4PKGBridge.cpp MaxPS4-iOS/Tests/PS4PKGInventoryTest.cpp -o "$RUNNER_TEMP/pkg-test"
+          "$RUNNER_TEMP/pkg-test" | tee pkg-native-macos.txt
+          xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -c MaxPS4-iOS/Native/PS4PKGBridge.cpp -o "$RUNNER_TEMP/pkg-bridge.o"
+          swiftc -parse-as-library -import-objc-header MaxPS4-iOS/Native/PS4PKGBridge.h \
+            MaxPS4-iOS/Sources/MaxPS4PKGInspector.swift MaxPS4-iOS/Tests/PKGSwiftDiagnosticTest.swift \
+            "$RUNNER_TEMP/pkg-bridge.o" -lc++ -o "$RUNNER_TEMP/pkg-swift-test"
+          "$RUNNER_TEMP/pkg-swift-test" | tee pkg-swift-macos.txt
+      - name: Compile native parser and type-check Swift for iPhone arm64
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" \
+            -c MaxPS4-iOS/Native/PS4PKGBridge.cpp -o "$RUNNER_TEMP/pkg-ios.o"
+          xcrun swiftc -typecheck -target arm64-apple-ios18.0 -sdk "$SDK" \
+            -import-objc-header MaxPS4-iOS/Native/PS4PKGBridge.h \
+            MaxPS4-iOS/Sources/MaxPS4PKGInspector.swift
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: PKG-Swift-macOS-report
+          path: pkg-*-macos.txt
