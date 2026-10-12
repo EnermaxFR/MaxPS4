@@ -228,6 +228,15 @@ extern "C" int32_t maxps4_jit_cancel() {
 }
 extern "C" int32_t maxps4_jit_state() { std::lock_guard guard(lock); return state; }
 extern "C" int32_t maxps4_jit_error() { std::lock_guard guard(lock); return failure; }
+extern "C" int32_t maxps4_jit_mailbox_diagnostic() {
+    std::lock_guard guard(lock);
+    if (state == 0) return 0;
+    if (mailbox.nonce == 0) return 1;
+    if (mailbox.nonce != expected_nonce) return 2;
+    if (mailbox.status == 0) return 3;
+    if (mailbox.status != 1) return 4;
+    return 5;
+}
 extern "C" int32_t maxps4_jit_failure_stage() { std::lock_guard guard(lock); return failure_stage; }
 extern "C" int32_t maxps4_jit_failure_mach() { std::lock_guard guard(lock); return failure_mach; }
 extern "C" int32_t maxps4_jit_failure_region() { std::lock_guard guard(lock); return failure_region; }
@@ -276,6 +285,7 @@ extern "C" int32_t maxps4_jit_prepare() { return -ENOTSUP; }
 extern "C" int32_t maxps4_jit_cancel() { return 0; }
 extern "C" int32_t maxps4_jit_state() { return 0; }
 extern "C" int32_t maxps4_jit_error() { return 0; }
+extern "C" int32_t maxps4_jit_mailbox_diagnostic() { return 0; }
 extern "C" int32_t maxps4_jit_failure_stage() { return 0; }
 extern "C" int32_t maxps4_jit_failure_mach() { return 0; }
 extern "C" int32_t maxps4_jit_failure_region() { return -1; }
