@@ -51,9 +51,9 @@ static int validateGuestProgram(const uint8_t* bytes, size_t length, uint32_t bu
             }
             bool writable = false;
             for (const auto& region : *regions) {
-                if ((region.permissions & 7U) != 6 || target < region.address) continue;
-                const uint64_t relative = target - region.address;
-                writable |= relative <= region.memory_size && 4 <= region.memory_size - relative;
+                if ((region.permissions & 7U) != 6U) continue;
+                writable |= guest_range_permitted(target, 4, 2, region.address,
+                                                  region.memory_size, region.permissions);
             }
             if (!writable) return -ENOTSUP;
             offset += 9;
