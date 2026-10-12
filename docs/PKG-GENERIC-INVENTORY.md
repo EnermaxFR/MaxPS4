@@ -68,3 +68,14 @@ A compiled IPA does not establish successful installation or game execution.
 
 No Kero Blaster PKG was available in this workspace. No iPhone test, game launch,
 first frame or gameplay is claimed by this change. #161 is only partially covered.
+
+## Descriptor names increment
+
+The plaintext entry_names resource now resolves descriptor name offsets with a
+1 MiB table cap and 255-byte printable ASCII name cap. Zero means unnamed;
+nonzero offsets must point to a string boundary and a terminated name. Failure
+returns no partial names. Names only affect the diagnostic display: an unknown
+entry named eboot.bin is still not extractible. PFS remains opaque, so #161's
+executable admission remains blocked on a genuinely accessible executable source.
+Synthetic sanitizer tests cover valid names, middle-of-string and out-of-range
+offsets, missing terminators and encryption refusal. No game/device validation.

@@ -18,7 +18,7 @@ std::vector<uint8_t> fixture() {
     put(f, 0x20, 0x600, 8); put(f, 0x28, f.size() - 0x600, 8);
     put(f, 0x430, f.size(), 8);
     put(f, 0x5a0, 0x200, 4); put(f, 0x5b0, 0x600, 4); put(f, 0x5b4, 16, 4);
-    put(f, 0x5c0, 0x1000, 4); put(f, 0x5d0, 0x700, 4); put(f, 0x5d4, 16, 4);
+    put(f, 0x5c4, 1, 4); put(f, 0x5c0, 0x1000, 4); put(f, 0x5d0, 0x700, 4); put(f, 0x5d4, 16, 4);
     std::memcpy(f.data() + 0x600, "\0eboot.bin\0", 11);
     std::memcpy(f.data() + 0x700, "\0PSF", 4);
     return f;
@@ -40,6 +40,25 @@ int main() {
     assert(pkg.entries[0].access == Access::plaintext);
     assert(pkg.extract(1, read, output, why) && output.size() == 16 && output[1] == 'P');
     const auto original = f;
+    std::vector<std::string> names;
+    put(f, 0x5c4, 1, 4);
+    assert(parse() && pkg.resolveNames(read, names, why));
+    assert(names.size() == 2 && names[1] == "eboot.bin");
+    // A display name cannot change the entry's extraction policy.
+    put(f, 0x5c0, 0xdead, 4);
+    assert(parse() && pkg.resolveNames(read, names, why));
+    assert(!pkg.extract(1, read, output, why));
+    for (uint32_t off : {2U, 16U, UINT32_MAX}) {
+        put(f, 0x5c4, off, 4);
+        assert(parse() && !pkg.resolveNames(read, names, why) && names.empty());
+    }
+    f = original; put(f, 0x5c4, 1, 4); f[0x609] = 'x';
+    std::fill(f.begin() + 0x60a, f.begin() + 0x610, 'x');
+    assert(parse() && !pkg.resolveNames(read, names, why));
+    f = original; put(f, 0x5a8, 0x80000000, 4);
+    assert(parse()); reads = 0;
+    assert(!pkg.resolveNames(read, names, why) && reads == 0);
+    f = original;
     // No magic-based bypass of a protection flag, including ELF-looking payloads.
     std::memcpy(f.data() + 0x700, "\177ELF", 4);
     put(f, 0x5c8, 0x80000000, 4);
