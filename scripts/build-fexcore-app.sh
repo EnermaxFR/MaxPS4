@@ -60,6 +60,9 @@ codesign --verify --strict --verbose=2 "$EMBEDDED"
 codesign --force --sign - --entitlements MaxPS4-iOS/MaxPS4.entitlements build/Payload/MaxPS4.app
 codesign --verify --strict --verbose=2 build/Payload/MaxPS4.app
 codesign -d --entitlements - build/Payload/MaxPS4.app > build/diagnostics/fex-app-entitlements.plist
+# Trace each post-signing verification so a failed command is actionable in CI.
+trap 'status=$?; echo "IPA packaging failed at line ${LINENO}: ${BASH_COMMAND} (exit ${status})" >&2' ERR
+set -x
 # Xcode's selected sources must call the real opaque ABI, not a legacy build path.
 xcrun nm -u build/Payload/MaxPS4.app/MaxPS4 > build/diagnostics/fex-app-imports.txt
 xcrun otool -L build/Payload/MaxPS4.app/MaxPS4 > build/diagnostics/fex-app-libraries.txt
