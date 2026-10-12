@@ -42,6 +42,7 @@ class ProviderPatchTest(unittest.TestCase):
         self.assertIn('throw std::bad_alloc()', before[patch.BACKEND])
         self.assertIn('#include <new>', before[patch.BACKEND])
         self.assertIn('ThreadOwner.release()', before[patch.CORE])
+        self.assertIn('std::unique_ptr<FEXCore::Core::InternalThreadState>', before[patch.CORE])
         self.assertIn('maxps4_jit_usable_size(Ptr, AllocatedSize)', before[patch.HEADER])
 
     def test_divergence_is_transactional(self):

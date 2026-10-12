@@ -47,7 +47,7 @@ LIFETIME_TAG = '// MaxPS4 checked prepared-region lifetime'
 EXTRA = {
     CORE: [
         ('  FEXCore::Core::InternalThreadState* Thread = new FEXCore::Core::InternalThreadState {\n    .CTX = this,\n  };',
-         '''  auto ThreadOwner = fextl::unique_ptr<FEXCore::Core::InternalThreadState>(
+         '''  auto ThreadOwner = std::unique_ptr<FEXCore::Core::InternalThreadState>(
     new FEXCore::Core::InternalThreadState {.CTX = this});
   auto* Thread = ThreadOwner.get();'''),
         ('  return Thread;\n}\n\nvoid ContextImpl::DestroyThread',
@@ -112,6 +112,8 @@ def adapt(root):
             value = LIFETIME_TAG + '\n' + value
             if name == HEADER:
                 value = '#include "maxps4_jit_memory.h"\n' + value
+            if name == CORE:
+                value = '#include <memory>\n' + value
         texts[name] = value
     for name, path in paths.items():
         path.write_text(texts[name])
