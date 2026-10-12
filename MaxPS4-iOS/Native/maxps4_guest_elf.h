@@ -29,6 +29,10 @@ public:
     int interpret(uint32_t budget, Execution& output);
     void clear();
     const uint8_t* translate(uint64_t address, size_t length, uint32_t permissions) const;
+    // Staging-only logical-to-host translation; segment permissions are enforced.
+    const uint8_t* host_pointer(uint64_t address, size_t bytes, uint32_t permissions) const {
+        return translate(address, bytes, permissions);
+    }
     uint64_t entry() const { return guest_entry; }
     const uint8_t* entry_pointer() const { return translate(guest_entry, 1, 5); }
     const std::vector<Segment>& segments() const { return regions; }
