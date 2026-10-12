@@ -52,7 +52,8 @@ struct MaxPS4FEXDiagnostic: Sendable {
                 var probeBackend: UInt32 = 0
                 let probeStatus = maxps4_fex_engine_probe_case(engine, UInt32(testCase), &probeValue, &probeBackend)
                 let ok = probeStatus == 0 && probeValue == 42 && probeBackend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT)
-                lines.append("Bloc \\(testCase + 1) : \\(ok ? "PASS" : "ÉCHEC") (statut \\(probeStatus), résultat \\(probeValue), backend \\(probeBackend))")
+                let verdict = ok ? "PASS" : "ÉCHEC"
+                lines.append("Bloc \(testCase + 1) : \(verdict) (statut \(probeStatus), résultat \(probeValue), backend \(probeBackend))")
             }
             additionalProbes = "Tests JIT supplémentaires :\\n" + lines.joined(separator: "\\n")
         }
