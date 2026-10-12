@@ -2,7 +2,7 @@
 import Foundation
 
 // Restricted ELF/FEX diagnostic submission. This is not sceGnmSubmitCommandBuffers
-// and the admitted CPU instructions cannot write PM4 or access guest memory.
+// but bounded RIP-relative stores can generate a PM4 stream in guest RW data.
 enum MaxPS4PM4Submission {
     struct Snapshot {
         let words: [UInt32]
@@ -10,7 +10,7 @@ enum MaxPS4PM4Submission {
         let entry: UInt64
         let backend: UInt32
     }
-    static func run(file: Data, guestAddress: UInt64, wordCount: Int) throws -> Snapshot {
+    static func run(file: Data, guestAddress: UInt64, wordCount: Int, budget: UInt32 = 3) throws -> Snapshot {
         guard wordCount > 0, wordCount <= 65536 else {
             throw NSError(domain: "MaxPS4.PM4", code: -22)
         }
@@ -31,7 +31,7 @@ enum MaxPS4PM4Submission {
         let status = file.withUnsafeBytes { bytes in
             words.withUnsafeMutableBufferPointer { output in
                 maxps4_fex_engine_run_elf_pm4(engine,
-                    bytes.bindMemory(to: UInt8.self).baseAddress, bytes.count, 3,
+                    bytes.bindMemory(to: UInt8.self).baseAddress, bytes.count, budget,
                     guestAddress, wordCount, output.baseAddress, output.count,
                     &written, &rax, &backend, &entry)
             }

@@ -25,4 +25,24 @@ inline std::vector<uint8_t> elf(uint32_t initial = 40, uint32_t add = 2, bool da
     }
     return file;
 }
+// Actual x86 stores generate a DRAW_INDEX_AUTO packet in a zero-filled RW
+// segment. The command buffer does not exist in the ELF file's data payload.
+inline std::vector<uint8_t> generated_pm4(uint32_t vertexCount = 3) {
+    auto file = elf(40, 2, true);
+    file.resize(225, 0);
+    put(file, 41, 96, 8); put(file, 64, 104, 8);
+    put(file, 225, 128, 8); put(file, 0, 152, 8);
+    const uint32_t words[] = {0xc0012d00, vertexCount, 2};
+    for (size_t i = 0; i < 3; ++i) {
+        const size_t offset = 10 + i * 10;
+        file[184 + offset] = 0xC7; file[185 + offset] = 0x05;
+        const uint64_t target = 0x10000 + i * 4;
+        const uint64_t next = 0x1000 + offset + 10;
+        put(file, target - next, 186 + offset, 4);
+        put(file, words[i], 190 + offset, 4);
+    }
+    file[224] = 0xF4;
+    return file;
 }
+}
+
