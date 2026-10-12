@@ -33,9 +33,15 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
             report << "Taille vérifiée : " << size << " octets ; entrées : " << pkg.entries.size()
                    << "\nCorps : " << pkg.bodyOffset << " + " << pkg.bodySize
                    << "\nPFS : " << pkg.pfsOffset << " + " << pkg.pfsSize << " (opaque, non monté)\n";
+            size_t inspected = 0;
+            auto boundedRead = [&](uint64_t offset, uint8_t* bytes, size_t count) {
+                if (count > pkg.extractionBudget - inspected) return false;
+                inspected += count; // Failed/invalid name parsing also consumes budget.
+                return read(offset, bytes, count);
+            };
             std::vector<std::string> names;
             std::string nameDiagnostic;
-            const bool namesResolved = pkg.resolveNames(read, names, nameDiagnostic);
+            const bool namesResolved = pkg.resolveNames(boundedRead, names, nameDiagnostic);
             report << (namesResolved ? "Noms de descripteurs résolus (affichage seulement)" : nameDiagnostic) << '\n';
             // Count the names read against the same total inspection budget.
             size_t copied = 0;
@@ -54,7 +60,7 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                     if (e.size <= pkg.extractionBudget - copied) {
                         std::vector<uint8_t> bytes;
                         std::string why;
-                        if (pkg.extract(i, read, bytes, why)) {
+                        if (pkg.extract(i, boundedRead, bytes, why)) {
                             copied += bytes.size();
                             report << " ; copie mémoire=" << bytes.size() << " octets";
                             const char name[] = "eboot.bin";
@@ -70,6 +76,7 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                 }
                 report << '\n';
             }
+            report << "Octets inspectés (budget partagé) : " << inspected << "\n";
             report << "Octets copiés en mémoire : " << copied << "; aucun fichier exporté.\n"
                    << "Les flags déclarés ne constituent pas une authentification.\n"
                    << "Les noms de descripteurs ne constituent pas un système de fichiers ; aucune admission ELF/SELF ni exécution.\n"
