@@ -17,10 +17,10 @@ int main() {
                                   0xfffffffffffffffeULL, 2, 4));
     assert(!guest_range_permitted(0xfff, 1, 4, 0x1000, 0x100, 6));
     // The CPU store validator and the staged memory adapter share this proof.
-    assert(guest_range_permitted(0x100fc, 4, 2, 0x1000, 0x100, 6));
-    assert(!guest_range_permitted(0x100fd, 4, 2, 0x1000, 0x100, 6));
-    assert(!guest_range_permitted(0x100fc, 4, 2, 0x1000, 0x100, 5));
-    assert(guest_range_permitted(0x100fc, 4, 2, 0x1000, 0x100, 7));
+    assert(guest_range_permitted(0x10fc, 4, 2, 0x1000, 0x100, 6));
+    assert(!guest_range_permitted(0x10fd, 4, 2, 0x1000, 0x100, 6));
+    assert(!guest_range_permitted(0x10fc, 4, 2, 0x1000, 0x100, 5));
+    assert(guest_range_permitted(0x10fc, 4, 2, 0x1000, 0x100, 7));
     assert(!guest_range_permitted(UINT64_MAX - 1, 4, 2,
                                   UINT64_MAX - 8, 8, 6));
     std::puts("Guest range permission and overflow checks passed");
