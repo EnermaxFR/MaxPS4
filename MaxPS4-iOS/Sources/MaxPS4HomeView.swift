@@ -254,6 +254,13 @@ struct MaxPS4HomeView: View {
                             .buttonStyle(.bordered)
                         }
                         if game.fileName.lowercased().hasSuffix(".pkg") {
+                            Button("Diagnostiquer le lancement du PKG") {
+                                emulator.diagnosePKGBoot(game)
+                                let bootReport = emulator.status
+                                emulator.inspectPS4EntryPrefixes(game)
+                                detailsReport = bootReport + "\n\n--- Recherche d’exécutable ELF/SELF ---\n" + emulator.status + "\n\nAucun déchiffrement ni lancement PS4 effectué."
+                            }
+                            .buttonStyle(.borderedProminent)
                             Button("Examiner les entrées du PKG") {
                                 emulator.inspectPKGEntries(game)
                                 detailsReport = emulator.status
