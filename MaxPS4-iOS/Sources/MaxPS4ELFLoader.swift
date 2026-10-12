@@ -372,10 +372,10 @@ enum MaxPS4ELFLoader {
             guard entryBytes.count == 1 else { return "ELF64 refusé : point d'entrée illisible" }
             let imports: String
             do { imports = try inspectImports(url: url) }
-            catch { return "ELF64 chargé en mémoire simulée • entrée 0x\\(String(image.entry, radix: 16)) • diagnostic imports impossible : \\(error.localizedDescription) • exécution non démarrée" }
-            return "ELF64 admis • \\(image.segments) segments PT_LOAD • entrée 0x\\(String(image.entry, radix: 16)) • \\(image.memory.allocatedBytes) octets de mémoire invitée simulée • \\(imports) • CPU/FEX non démarré • JIT iPhone non activé • jeu PS4 non lancé"
+            catch { return "ELF64 chargé en mémoire simulée • entrée 0x\(String(image.entry, radix: 16)) • diagnostic imports impossible : \(error.localizedDescription) • exécution non démarrée" }
+            return "ELF64 admis • \(image.segments) segments PT_LOAD • entrée 0x\(String(image.entry, radix: 16)) • \(image.memory.allocatedBytes) octets de mémoire invitée simulée • \(imports) • CPU/FEX non démarré • JIT iPhone non activé • jeu PS4 non lancé"
         } catch {
-            return "Admission ELF64 refusée : \\(error.localizedDescription) • aucune exécution"
+            return "Admission ELF64 refusée : \(error.localizedDescription) • aucune exécution"
         }
     }
 
