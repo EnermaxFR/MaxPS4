@@ -102,7 +102,8 @@ struct MaxPS4FEXDiagnostic: Sendable {
         """
         return Self(succeeded: passed, result: status == 0 ? value : nil,
                     backend: name, details: message,
-                    elfMemoryBridgePassed: elfMemoryBridgePassed)
+                    elfMemoryBridgePassed: elfMemoryBridgePassed,
+                    elfControlFlowPassed: elfControlFlowPassed)
 #else
         return Self(succeeded: false, result: nil, backend: "Aucun",
                     details: "Cette ancienne configuration ne contient pas FEXCore. Utiliser la compilation MaxPS4 FEXCore SideStore.",
