@@ -21,10 +21,11 @@ try {
     const reply = send_command("vAttach;" + get_pid().toString(16));
     if (!reply || !/^T[0-9a-f]{2}/i.test(reply)) throw new Error("Attach: " + reply);
     attached = true;
-    // Reject a replay or a target that has already consumed this request.
-    // Read all 40 bytes before acquiring debugger-owned allocations.
+    // Match the process-local challenge before allocating: a script for a prior
+    // request cannot claim a newly activated mailbox at the same address.
     const initial = send_command("m" + MAXPS4_MAILBOX.toString(16) + ",28");
-    if (initial !== "00".repeat(40)) throw new Error("Mailbox not empty or unreadable");
+    if (initial !== "00".repeat(8) + le64(MAXPS4_NONCE) + "00".repeat(24))
+        throw new Error("Mailbox challenge mismatch or unreadable");
     mailboxOwned = true;
     for (const size of MAXPS4_SIZES) {
         const allocated = send_command("_M" + size.toString(16) + ",rx");

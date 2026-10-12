@@ -15,7 +15,8 @@ function run(failAt = '', badAllocation = '') {
             commands.push(command);
             if (command.startsWith(failAt) && failAt) return 'E01';
             if (command.startsWith('vAttach')) return 'T05thread:1;';
-            if (command.startsWith('m')) return failAt === 'replay' ? '01' + '00'.repeat(39) : '00'.repeat(40);
+            if (command.startsWith('m')) return failAt === 'replay' ? '00'.repeat(40) :
+                '00'.repeat(8) + 'f0debc9a78563412' + '00'.repeat(24);
             if (command.startsWith('_M')) return badAllocation || (0x10000000 + allocation++ * 0x2000000).toString(16);
             return 'OK';
         },
@@ -49,7 +50,7 @@ for (const stage of ['vAttach', 'm100000', 'replay', '_M', 'prepare', 'M100008',
     if (stage === '_M') assert.equal(test.prepared.length, 0);
     if (stage === 'm100000' || stage === 'replay') {
         assert.equal(test.prepared.length, 0);
-        assert(!test.commands.some(x => x.startsWith('M')), 'A stale/unreadable mailbox must never be overwritten');
+        assert(!test.commands.some(x => x.startsWith('M')), 'A stale/unreadable challenge must never be overwritten');
     }
     if (stage === 'prepare' || stage === '_M') {
         assert(test.commands.includes('M100008,20:0200000000000000' + '00'.repeat(24)));

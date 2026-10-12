@@ -36,7 +36,8 @@ La requête `stikdebug://enable-jit` contient le bundle réel, le PID courant et
 les octets UTF-8 du seul script livré dans `script-data` (base64url). Les
 constantes fournies sont une adresse de mailbox alignée, un nonce aléatoire
 non nul et les tailles 16 Kio, 16 Mio et une page hôte pour le canari.
-Le script vérifie la mailbox vide avant toute allocation (rejeu refusé), prépare
+Le script vérifie le challenge nonce de la demande dans la mailbox avant toute
+allocation (rejeu refusé, y compris après une nouvelle activation), prépare
 les RX via les services debugger, publie les métadonnées puis le nonce en
 dernier pendant l'arrêt du processus, et détache. Une ouverture d'URL refusée
 annule uniquement sa propre demande non publiée ; une demande déjà transmise

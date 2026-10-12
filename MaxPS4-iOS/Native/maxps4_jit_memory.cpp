@@ -147,9 +147,10 @@ extern "C" int32_t maxps4_jit_begin(uint64_t* address, uint64_t* nonce, uint64_t
     const long host_page = sysconf(_SC_PAGESIZE);
     if (host_page <= 0 || host_page > 16384 || 16384 % host_page != 0) return -ENOTSUP;
     page_size = static_cast<size_t>(host_page);
-    do { arc4random_buf(&expected_nonce, sizeof(expected_nonce)); } while (!expected_nonce);
+    do { arc4random_buf(&expected_nonce, sizeof(expected_nonce)); } while (expected_nonce <= 2);
     mailbox.nonce = 0;
-    mailbox.status = 0;
+    // Challenge before publication; 1/2 are reserved for final script status.
+    mailbox.status = expected_nonce;
     for (auto& address : mailbox.rx) address = 0;
     state = 1; failure = 0;
     failure_stage = 0; failure_mach = 0; failure_region = -1; active_region = -1;
@@ -222,7 +223,7 @@ extern "C" int32_t maxps4_jit_confirmation() {
 extern "C" int32_t maxps4_jit_launch_failed(uint64_t nonce) {
     std::lock_guard guard(lock);
     // Never cancel a request another script has already started to publish.
-    if (state != 1 || !nonce || nonce != expected_nonce || mailbox.nonce || mailbox.status)
+    if (state != 1 || !nonce || nonce != expected_nonce || mailbox.nonce || mailbox.status != expected_nonce)
         return -EBUSY;
     for (const auto address : mailbox.rx) if (address) return -EBUSY;
     state = 3; failure = ENOENT;
