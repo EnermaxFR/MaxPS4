@@ -33,6 +33,8 @@ class ProviderPatchTest(unittest.TestCase):
         self.assertNotIn('dlopen(', before[patch.ALLOCATOR])
         self.assertNotIn('BreakGetJITMapping', before[patch.ALLOCATOR])
         self.assertIn('maxps4_jit_allocate(Size)', before[patch.ALLOCATOR])
+        self.assertIn('throw std::bad_alloc()', before[patch.BACKEND])
+        self.assertIn('#include <new>', before[patch.BACKEND])
 
     def test_divergence_is_transactional(self):
         path = self.root / patch.BACKEND

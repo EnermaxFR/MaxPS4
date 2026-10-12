@@ -16,10 +16,16 @@ function checked(command) {
 }
 const regions = [];
 let attached = false;
+let mailboxOwned = false;
 try {
     const reply = send_command("vAttach;" + get_pid().toString(16));
     if (!reply || !/^T[0-9a-f]{2}/i.test(reply)) throw new Error("Attach: " + reply);
     attached = true;
+    // Reject a replay or a target that has already consumed this request.
+    // Read all 40 bytes before acquiring debugger-owned allocations.
+    const initial = send_command("m" + MAXPS4_MAILBOX.toString(16) + ",28");
+    if (initial !== "00".repeat(40)) throw new Error("Mailbox not empty or unreadable");
+    mailboxOwned = true;
     for (const size of MAXPS4_SIZES) {
         const allocated = send_command("_M" + size.toString(16) + ",rx");
         if (!allocated || !/^[0-9a-f]+$/i.test(allocated)) throw new Error("RX allocation: " + allocated);
@@ -41,7 +47,7 @@ try {
     for (const address of regions) {
         log("RX cleanup: " + send_command("_m" + address.toString(16)));
     }
-    if (attached) {
+    if (attached && mailboxOwned) {
         try {
             checked("M" + (MAXPS4_MAILBOX + 8n).toString(16) + ",20:" + le64(2n) + "00".repeat(24));
             checked("M" + MAXPS4_MAILBOX.toString(16) + ",8:" + le64(MAXPS4_NONCE));

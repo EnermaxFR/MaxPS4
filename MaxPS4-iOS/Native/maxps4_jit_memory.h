@@ -9,6 +9,10 @@ extern "C" {
 // begin refuses replacement of pending/ready sessions. cancel requires no leases.
 int32_t maxps4_jit_begin(uint64_t *mailbox, uint64_t *nonce, uint64_t *page_size);
 int32_t maxps4_jit_prepare(void);
+// Confirmation is only debugger publication, NEVER permission or FEX execution.
+int32_t maxps4_jit_confirmation(void); // 0 pending/idle, 1 published, 2 script failure
+// Only call after UIApplication reports that the activation URL was NOT opened.
+int32_t maxps4_jit_launch_failed(uint64_t nonce);
 int32_t maxps4_jit_cancel(void);
 int32_t maxps4_jit_state(void); // 0 idle, 1 waiting, 2 ready, 3 failed
 int32_t maxps4_jit_error(void);

@@ -78,6 +78,10 @@ namespace {
 // engine closes. Future independent FEX consumers must share this ownership.
 std::mutex runtime_lock;
 size_t engines = 0;
+#if TARGET_OS_IPHONE
+// The prepared pool contains one dispatcher and one code cache.
+maxps4_fex_engine* jit_owner = nullptr;
+#endif
 void release_config_if_unused() {
     if (engines == 0) FEXCore::Config::Shutdown();
 }
@@ -111,20 +115,26 @@ extern "C" int32_t maxps4_fex_engine_open(maxps4_fex_engine **out) {
 extern "C" void maxps4_fex_engine_close(maxps4_fex_engine *engine) {
     if (!engine) return;
     std::lock_guard lock(runtime_lock);
-    delete engine; // Context must die before global configuration shutdown.
+#if TARGET_OS_IPHONE
+    if (jit_owner == engine) jit_owner = nullptr;
+#endif
+    delete engine; // Context dies under runtime_lock before another owner opens.
     --engines;
     release_config_if_unused();
 }
 extern "C" int32_t maxps4_fex_engine_initialize(maxps4_fex_engine *engine) {
     if (!engine) return -EINVAL;
     std::lock_guard lock(runtime_lock);
-#if TARGET_OS_IPHONE
-    // Keep main's fail-closed gate until the prepared-region provider has
-    // reproducible physical-device validation. Script success alone is insufficient.
-    std::fprintf(stderr, "MaxPS4 FEX JIT: InitCore blocked on iPhone: supported JIT allocation contract not established; returning -ENOTSUP (%d). StikDebug script success is not proof of executable mappings.\n", ENOTSUP);
-    return -ENOTSUP;
-#else
     if (engine->stage == MAXPS4_FEX_DISPATCHER_INITIALIZED) return 0;
+#if TARGET_OS_IPHONE
+    if (jit_owner && jit_owner != engine) return -EBUSY;
+    // A completed nonce is necessary but insufficient. This checks actual Mach
+    // protections, builds W^X aliases and executes the native canary before FEX
+    // emits anything. A denial propagates unchanged to the explicit fallback.
+    const int prepared = maxps4_jit_prepare();
+    if (prepared) return prepared;
+    jit_owner = engine;
+#endif
     engine->context->SetSignalDelegator(&engine->signals);
     // Only admitted HLT-terminated straight-line programs are exposed.
     engine->context->SetSyscallHandler(&engine->probe);
@@ -135,7 +145,6 @@ extern "C" int32_t maxps4_fex_engine_initialize(maxps4_fex_engine *engine) {
     } catch (const std::bad_alloc&) { return -ENOMEM; }
     engine->stage = MAXPS4_FEX_DISPATCHER_INITIALIZED;
     return 0;
-#endif
 }
 extern "C" int32_t maxps4_fex_engine_stage(const maxps4_fex_engine *engine) {
     std::lock_guard lock(runtime_lock);
@@ -202,11 +211,6 @@ int32_t runELF(maxps4_fex_engine *engine,
     if (entry) *entry = 0;
     if (!engine || !result || !backend || !entry) return -EINVAL;
     std::lock_guard lock(runtime_lock);
-#if TARGET_OS_IPHONE
-    (void)file; (void)length; (void)budget; (void)submission;
-    std::fprintf(stderr, "MaxPS4 FEX JIT: probe blocked on iPhone: FEX JIT not initialized; returning -ENOTSUP (%d).\n", ENOTSUP);
-    return -ENOTSUP;
-#else
     try {
     maxps4::GuestELF image;
     const int loaded = image.load(file, length, budget);
@@ -273,7 +277,6 @@ int32_t runELF(maxps4_fex_engine *engine,
     *backend = MAXPS4_CPU_FEX_ARM64_JIT;
     return 0;
     } catch (const std::bad_alloc&) { return -ENOMEM; }
-#endif
 }
 
 

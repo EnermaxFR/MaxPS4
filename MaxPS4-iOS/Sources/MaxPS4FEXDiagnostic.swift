@@ -64,7 +64,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
                 "Liaison/imports : " + (blockers & 1 != 0 ? "requis, non résolus" : "aucun indicateur dynamique détecté"),
                 "TLS : " + (blockers & 2 != 0 ? "requis, non initialisé" : "aucun segment TLS détecté"),
                 "Blocage CPU : adressage absolu PS4, admission des instructions et ABI non raccordés",
-                "JIT iPhone : garde-fou ENOTSUP conservé ; aucune instruction PS4 exécutée",
+                "JIT iPhone : préparation RX/RW vérifiée requise ; aucune instruction PS4 exécutée par ce mappage",
                 "Services PS4 et rendu Metal du jeu : non validés ; aucune jouabilité revendiquée"
             ].joined(separator: "\n")
         } catch { return "MaxPS4 : chargement impossible — \(error.localizedDescription)" }
@@ -92,12 +92,15 @@ struct MaxPS4FEXDiagnostic: Sendable {
             let jit = maxps4_fex_engine_initialize(engine)
             var value: UInt64 = 0; var entry: UInt64 = 0; var rip: UInt64 = 0
             var backend: UInt32 = 0; var count: UInt32 = 0
+            var jitExecution = jit
             let status = file.withUnsafeBytes { bytes in
                 let pointer = bytes.bindMemory(to: UInt8.self).baseAddress
                 if jit == 0 {
-                    return maxps4_fex_engine_run_elf(engine, pointer, bytes.count, 65536,
+                    jitExecution = maxps4_fex_engine_run_elf(engine, pointer, bytes.count, 65536,
                         &value, &backend, &entry)
+                    if jitExecution == 0 { return jitExecution }
                 }
+                // Keep the FEX error if execution itself runs out of JIT memory.
                 return maxps4_fex_engine_interpret_elf(engine, pointer, bytes.count, 65536,
                     &value, &backend, &entry, &rip, &count)
             }
@@ -105,7 +108,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
                 backend == UInt32(MAXPS4_CPU_RESTRICTED_INTERPRETER) ? "Interpréteur ELF sans JIT" : "Aucun"
             return [
                 "ELF importé : " + url.lastPathComponent,
-                "Statut : \(status) ; initialisation JIT : \(jit) ; backend : \(name)",
+                "Statut : \(status) ; initialisation JIT : \(jit) ; exécution JIT : \(jitExecution) ; backend : \(name)",
                 "Entrée invitée : 0x" + String(entry, radix: 16),
                 "RAX : \(value)",
                 backend == UInt32(MAXPS4_CPU_RESTRICTED_INTERPRETER) ?
@@ -210,6 +213,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
         Point d’entrée ELF64 invité : 0x\(String(elfEntry, radix: 16))
         RIP invité après repli : 0x\(String(guestRIP, radix: 16)), instructions terminées : \(instructions)
         Fournisseur RX/RW : état \(maxps4_jit_state()), erreur \(maxps4_jit_error())
+        Confirmation nonce StikDebug : \(maxps4_jit_confirmation()) (1 = régions publiées, pas une validation JIT)
         Échec JIT précis : \(failureName) (étape \(failureStage))
         Code Mach : \(maxps4_jit_failure_mach()), région : \(maxps4_jit_failure_region())
         Régions encore utilisées après nettoyage : \(leases)

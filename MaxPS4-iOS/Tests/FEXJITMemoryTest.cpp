@@ -25,6 +25,12 @@ int main() {
     uint64_t address = 99, nonce = 99, page = 99;
     CHECK(maxps4_jit_begin(nullptr, &nonce, &page) == -EINVAL);
     CHECK(maxps4_jit_prepare() == -EACCES);
+    CHECK(maxps4_jit_confirmation() == 0);
+    CHECK(maxps4_jit_cancel() == 0);
+    CHECK(maxps4_jit_begin(&address, &nonce, &page) == 0);
+    CHECK(maxps4_jit_launch_failed(nonce ^ 1) == -EBUSY);
+    CHECK(maxps4_jit_launch_failed(nonce) == 0);
+    CHECK(maxps4_jit_prepare() == -ENOENT);
     CHECK(maxps4_jit_cancel() == 0);
     for (unsigned cycle = 0; cycle < 3; ++cycle) {
         CHECK(maxps4_jit_begin(&address, &nonce, &page) == 0);
@@ -34,7 +40,12 @@ int main() {
         CHECK(maxps4_jit_allocate(16384) == nullptr && errno == EACCES);
         CHECK(maxps4_jit_cancel() == -EBUSY);
         auto* mailbox = reinterpret_cast<volatile uint64_t*>(address);
-        mailbox[1] = 2; mailbox[0] = nonce;
+        mailbox[1] = 2; mailbox[0] = nonce ^ 1;
+        CHECK(maxps4_jit_prepare() == -EAGAIN);
+        CHECK(maxps4_jit_confirmation() == 0);
+        CHECK(maxps4_jit_launch_failed(nonce) == -EBUSY);
+        mailbox[0] = nonce;
+        CHECK(maxps4_jit_confirmation() == 2);
         CHECK(maxps4_jit_prepare() == -EACCES);
         CHECK(maxps4_jit_state() == 3 && maxps4_jit_error() == EACCES);
         CHECK(maxps4_jit_cancel() == 0);
@@ -55,6 +66,7 @@ int main() {
     auto* mailbox = reinterpret_cast<volatile uint64_t*>(address);
     for (size_t i = 0; i < rx.size(); ++i) mailbox[i + 2] = rx[i];
     mailbox[1] = 1; mailbox[0] = nonce;
+    CHECK(maxps4_jit_confirmation() == 1);
     const int prepared = maxps4_jit_prepare();
     if (prepared == 0) {
         CHECK(maxps4_jit_state() == 2);
@@ -86,6 +98,7 @@ int main() {
     }
     CHECK(maxps4_jit_cancel() == 0);
     CHECK(maxps4_jit_state() == 0 && maxps4_jit_error() == 0);
+    CHECK(maxps4_jit_confirmation() == 0);
     for (const auto pointer : rx) CHECK(unmapped(pointer));
     for (size_t i = 0; i < signal_numbers.size(); ++i) {
         struct sigaction action {}; CHECK(sigaction(signal_numbers[i], nullptr, &action) == 0);

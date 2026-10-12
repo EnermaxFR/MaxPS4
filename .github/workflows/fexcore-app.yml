@@ -49,6 +49,9 @@ jobs:
             MaxPS4-iOS/Tests/GuestELFMemoryTest.cpp -o build/guest-elf-memory-test
           build/guest-elf-memory-test | tee build/diagnostics/guest-elf-memory-tests.txt
           node MaxPS4-iOS/Tests/StikScriptTest.js | tee build/diagnostics/stik-script-tests.txt
+          swiftc -parse-as-library MaxPS4-iOS/Sources/MaxPS4StikRequest.swift \
+            MaxPS4-iOS/Tests/StikRequestTest.swift -o build/stik-request-test
+          build/stik-request-test | tee build/diagnostics/stik-request-tests.txt
           xcrun clang++ -std=c++23 -DMAXPS4_TEST_DARWIN_JIT_POOL=1 \
             -I MaxPS4-iOS/Native MaxPS4-iOS/Native/maxps4_jit_memory.cpp \
             MaxPS4-iOS/Tests/FEXJITMemoryTest.cpp -o build/jit-memory-test
