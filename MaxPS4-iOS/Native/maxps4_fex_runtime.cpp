@@ -218,10 +218,13 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     // giving FEX a host pointer. This is not general address-space translation.
     maxps4::PS4GuestMemory guest_memory(image);
     if (guest_memory.contiguous(image.entry(), 1, 5) != 1) return -EFAULT;
-    // Ensure the entry is backed by readable executable guest bytes, not
-    // merely declared executable in segment metadata.
-    uint8_t entry_opcode = 0;
-    if (!guest_memory.fetch(image.entry(), &entry_opcode, 1)) return -EFAULT;
+    // Fetch a bounded instruction window through the same permission-checked
+    // guest contract used by CPU clients. Never cross the executable segment.
+    // The decoder still enforces the admitted instruction whitelist.
+    std::array<uint8_t, 15> entry_bytes {};
+    const size_t fetch_length = guest_memory.contiguous(image.entry(), entry_bytes.size(), 5);
+    if (!fetch_length || !guest_memory.fetch(image.entry(), entry_bytes.data(), fetch_length))
+        return -EFAULT;
     const auto* entry_pointer = image.entry_pointer();
     if (!entry_pointer) return -EFAULT;
     const long host_page = ::sysconf(_SC_PAGESIZE);
