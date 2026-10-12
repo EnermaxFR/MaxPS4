@@ -23,6 +23,10 @@ inline PM4MetalResult encodePM4TriangleDraws(
     if (!commands.valid) { result.error = PM4MetalError::invalid_stream; return result; }
     if (!encoder) { result.error = PM4MetalError::missing_encoder; return result; }
     if (!pipeline) { result.error = PM4MetalError::missing_pipeline; return result; }
+    if (commands.draws.empty()) {
+        result.error = PM4MetalError::unsupported_draw;
+        return result;
+    }
     for (const auto& draw : commands.draws) {
         if (draw.indexCount != 3 || draw.initiator != 0) {
             result.error = PM4MetalError::unsupported_draw;
