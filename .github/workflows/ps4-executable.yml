@@ -1,0 +1,33 @@
+name: PS4 plaintext executable segment checks
+on:
+  pull_request:
+    paths:
+      - 'MaxPS4-iOS/Native/PS4ExecutableImage.hpp'
+      - 'MaxPS4-iOS/Native/PM4*'
+      - 'MaxPS4-iOS/Tests/PS4ExecutableImageTest.cpp'
+      - 'MaxPS4-iOS/Tests/GuestELFFixture.h'
+      - '.github/workflows/ps4-executable.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  segments:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify PS4 ELF and plaintext SELF with sanitizers
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PS4ExecutableImageTest.cpp -o /tmp/ps4-segments-test
+          /tmp/ps4-segments-test
+  ios-compile:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test on macOS and compile iPhone arm64 segment loader
+        run: |
+          set -euo pipefail
+          xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic MaxPS4-iOS/Tests/PS4ExecutableImageTest.cpp -o /tmp/ps4-segments-test
+          /tmp/ps4-segments-test
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/PS4ExecutableImageTest.cpp -o /tmp/ps4-segments-ios.o
+          xcrun lipo -archs /tmp/ps4-segments-ios.o | grep -w arm64
