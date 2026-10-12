@@ -21,6 +21,17 @@ jobs:
           git -C build/aether-app sparse-checkout set runtime/sources/fexcore-darwin src/core/guest_cpu src/core/ios
           git -C build/aether-app checkout 3347fc13f19860855ce91b66356940989ea6b6a6
           brew install ninja xcodegen
+      - name: Test fixed Stik script and real Mach memory ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/diagnostics
+          node MaxPS4-iOS/Tests/StikScriptTest.js | tee build/diagnostics/stik-script-tests.txt
+          xcrun clang++ -std=c++23 -DMAXPS4_TEST_DARWIN_JIT_POOL=1 \
+            -I MaxPS4-iOS/Native MaxPS4-iOS/Native/maxps4_jit_memory.cpp \
+            MaxPS4-iOS/Tests/FEXJITMemoryTest.cpp -o build/jit-memory-test
+          build/jit-memory-test | tee build/diagnostics/jit-memory-tests.txt
+          leaks --atExit -- build/jit-memory-test 2>&1 | tee build/diagnostics/jit-memory-leaks.txt
       - name: Preserve native runtime tests and test the real Swift C bridge on macOS
         shell: bash
         run: |

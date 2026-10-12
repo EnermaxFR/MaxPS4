@@ -2,6 +2,7 @@
 """Inspect real Mach-O files and their loader contracts inside the actual IPA."""
 import hashlib
 import plistlib
+import re
 from pathlib import Path
 import struct
 import sys
@@ -44,13 +45,25 @@ def verify(path):
         assert ipa.testzip() is None
         metadata = plistlib.loads(ipa.read(prefix + 'Info.plist'))
         assert metadata['CFBundleExecutable'] == 'MaxPS4'
+        project = (Path(__file__).resolve().parents[1] / 'MaxPS4-iOS/project.yml').read_text()
+        expected_build = re.search(r"CURRENT_PROJECT_VERSION:\s*['\"]?([0-9]+)", project)
+        assert expected_build, 'Missing expected build number in project.yml'
+        assert metadata['CFBundleVersion'] == expected_build.group(1), (
+            f"IPA build {metadata['CFBundleVersion']} does not match project build {expected_build.group(1)}"
+        )
         assert metadata['CFBundleIdentifier'] == 'com.enermaxfr.maxps4'
         assert metadata['CFBundlePackageType'] == 'APPL'
         assert tuple(map(int, metadata['MinimumOSVersion'].split('.'))) <= (27, 2)
         for name in (prefix + 'MaxPS4', framework + 'MaxPS4FEXRuntime'):
             assert ipa.getinfo(name).external_attr >> 16 & 0o111, 'Mach-O must be executable'
         assert prefix + 'Assets.car' in ipa.namelist(), 'Original icon asset missing'
+        assert 'stikdebug' in metadata.get('LSApplicationQueriesSchemes', []), 'StikDebug scheme missing'
+        scripts = [n for n in ipa.namelist() if n.startswith(prefix) and n.endswith('/maxps4-stik.js')]
+        assert len(scripts) == 1, 'Fixed StikDebug adapter missing'
+        assert b'prepare_memory_region' in ipa.read(scripts[0])
+        assert ipa.read(scripts[0]) == (Path(__file__).resolve().parents[1] / 'MaxPS4-iOS/Resources/JIT/maxps4-stik.js').read_bytes()
         main = ipa.read(prefix + 'MaxPS4')
+        assert b'maxps4.testFEXCore' in main, 'Diagnostic FEXCore button not present in compiled app'
         runtime = ipa.read(framework + 'MaxPS4FEXRuntime')
         kind, libraries, _, imports, _ = macho(main)
         rkind, dependencies, exports, unresolved, identifiers = macho(runtime)
@@ -60,7 +73,8 @@ def verify(path):
         assert all(n.startswith(('/usr/lib/', '/System/Library/')) for n in dependencies)
         assert not any('FEXCore' in n or 'LogMan' in n or 'maxps4_' in n for n in unresolved)
         required = {'_maxps4_fex_engine_' + n for n in ('open', 'initialize', 'cpuid', 'run', 'close', 'stage')}
-        assert required <= exports and required <= imports, 'App must actually import the FEX ABI'
+        required |= {'_maxps4_jit_' + n for n in ('begin', 'cancel', 'state', 'error', 'leases')}
+        assert required <= exports and required <= imports, 'App must actually import the FEX/session ABI'
         assert any('CreateNewContext' in name for name in exports), 'Real FEX C++ runtime absent'
         fmeta = plistlib.loads(ipa.read(framework + 'Info.plist'))
         assert fmeta['CFBundleExecutable'] == 'MaxPS4FEXRuntime'

@@ -11,6 +11,7 @@ mkdir -p "$FRAMEWORK/Headers" "$FRAMEWORK/Modules"
 cp build/fex-app-ios/libMaxPS4FEXRuntime.dylib "$FRAMEWORK/MaxPS4FEXRuntime"
 xcrun install_name_tool -id '@rpath/MaxPS4FEXRuntime.framework/MaxPS4FEXRuntime' "$FRAMEWORK/MaxPS4FEXRuntime"
 cp MaxPS4-iOS/Native/maxps4_fex_runtime.h "$FRAMEWORK/Headers/MaxPS4FEXRuntime.h"
+cp MaxPS4-iOS/Native/maxps4_jit_memory.h "$FRAMEWORK/Headers/"
 cat > "$FRAMEWORK/Modules/module.modulemap" <<'MAP'
 framework module MaxPS4FEXRuntime { umbrella header "MaxPS4FEXRuntime.h" export * }
 MAP
@@ -20,7 +21,7 @@ from pathlib import Path
 p=Path(sys.argv[1]) / 'Info.plist'
 p.write_bytes(plistlib.dumps(dict(CFBundleIdentifier='com.enermaxfr.maxps4.fexruntime',
     CFBundleExecutable='MaxPS4FEXRuntime', CFBundleName='MaxPS4FEXRuntime',
-    CFBundlePackageType='FMWK', CFBundleShortVersionString='0.2', CFBundleVersion='130',
+    CFBundlePackageType='FMWK', CFBundleShortVersionString='0.2', CFBundleVersion='131',
     CFBundleSupportedPlatforms=['iPhoneOS'], MinimumOSVersion='18.0')))
 PY
 # Ad-hoc signing authenticates the edited Mach-O only; SideStore must re-sign it.
@@ -43,7 +44,7 @@ xcodegen generate --spec MaxPS4-iOS/project.yml
 xcodebuild -project MaxPS4-iOS/MaxPS4.xcodeproj -scheme MaxPS4 \
   -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
   -derivedDataPath build/xcode-fex CODE_SIGNING_ALLOWED=NO \
-  CURRENT_PROJECT_VERSION="${GITHUB_RUN_NUMBER:-130}" build \
+  build \
   2>&1 | tee build/diagnostics/fex-app-build.log
 mkdir -p build/Payload
 rm -rf build/Payload/MaxPS4.app
@@ -53,11 +54,17 @@ cp -R build/xcode-fex/Build/Products/Release-iphoneos/MaxPS4.app build/Payload/
 EMBEDDED=build/Payload/MaxPS4.app/Frameworks/MaxPS4FEXRuntime.framework
 codesign --force --sign - "$EMBEDDED"
 codesign --verify --strict --verbose=2 "$EMBEDDED"
+# Retain only the developer debugging entitlement requested by StikDebug.
+# This ad-hoc signature grants no provisioning rights; SideStore must supply a
+# valid profile permitting get-task-allow and re-sign BOTH app and framework.
+codesign --force --sign - --entitlements MaxPS4-iOS/MaxPS4.entitlements build/Payload/MaxPS4.app
+codesign --verify --strict --verbose=2 build/Payload/MaxPS4.app
+codesign -d --entitlements :- build/Payload/MaxPS4.app > build/diagnostics/fex-app-entitlements.plist
 # Xcode's selected sources must call the real opaque ABI, not a legacy build path.
 xcrun nm -u build/Payload/MaxPS4.app/MaxPS4 > build/diagnostics/fex-app-imports.txt
 xcrun otool -L build/Payload/MaxPS4.app/MaxPS4 > build/diagnostics/fex-app-libraries.txt
 xcrun nm -gU "$FRAMEWORK/MaxPS4FEXRuntime" > build/diagnostics/fex-app-runtime-exports.txt
-for symbol in maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_run; do
+for symbol in maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_run maxps4_jit_begin maxps4_jit_cancel; do
   grep -q "_${symbol}$" build/diagnostics/fex-app-imports.txt
   grep -q "_${symbol}$" build/diagnostics/fex-app-runtime-exports.txt
 done

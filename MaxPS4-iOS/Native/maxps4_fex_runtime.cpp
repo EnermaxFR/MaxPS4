@@ -70,6 +70,9 @@ namespace {
 // engine closes. Future independent FEX consumers must share this ownership.
 std::mutex runtime_lock;
 size_t engines = 0;
+#if TARGET_OS_IPHONE
+maxps4_fex_engine* ios_jit_owner = nullptr;
+#endif
 void release_config_if_unused() {
     if (engines == 0) FEXCore::Config::Shutdown();
 }
@@ -104,27 +107,34 @@ extern "C" void maxps4_fex_engine_close(maxps4_fex_engine *engine) {
     if (!engine) return;
     std::lock_guard lock(runtime_lock);
     delete engine; // Context must die before global configuration shutdown.
+#if TARGET_OS_IPHONE
+    if (ios_jit_owner == engine) ios_jit_owner = nullptr;
+#endif
     --engines;
     release_config_if_unused();
 }
 extern "C" int32_t maxps4_fex_engine_initialize(maxps4_fex_engine *engine) {
     if (!engine) return -EINVAL;
     std::lock_guard lock(runtime_lock);
-#if TARGET_OS_IPHONE
-    // The pinned allocator calls BreakpointJIT, not an OS-provided JIT allocator.
-    // Do not load it or attempt allocation without a supported device contract.
-    return -ENOTSUP;
-#else
     if (engine->stage == MAXPS4_FEX_DISPATCHER_INITIALIZED) return 0;
+#if TARGET_OS_IPHONE
+    if (ios_jit_owner && ios_jit_owner != engine) return -EBUSY;
+    const int prepared = maxps4_jit_prepare();
+    if (prepared != 0) return prepared;
+#endif
     engine->context->SetSignalDelegator(&engine->signals);
     // Only the fixed HLT-terminated probe is exposed, never arbitrary guest code.
     engine->context->SetSyscallHandler(&engine->probe);
     engine->context->EnableExitOnHLT();
     errno = 0;
-    if (!engine->context->InitCore()) return -(errno ? errno : ENOMEM);
+    try {
+        if (!engine->context->InitCore()) return -(errno ? errno : ENOMEM);
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
     engine->stage = MAXPS4_FEX_DISPATCHER_INITIALIZED;
-    return 0;
+#if TARGET_OS_IPHONE
+    ios_jit_owner = engine;
 #endif
+    return 0;
 }
 extern "C" int32_t maxps4_fex_engine_stage(const maxps4_fex_engine *engine) {
     std::lock_guard lock(runtime_lock);
@@ -164,10 +174,8 @@ extern "C" int32_t maxps4_fex_engine_probe(maxps4_fex_engine *engine,
     if (backend) *backend = 0;
     if (!engine || !result || !backend) return -EINVAL;
     std::lock_guard lock(runtime_lock);
-#if TARGET_OS_IPHONE
-    return -ENOTSUP;
-#else
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
+    try {
     const long host_page = ::sysconf(_SC_PAGESIZE);
     if (host_page <= 0) return -EIO;
     const size_t page = static_cast<size_t>(host_page);
@@ -217,5 +225,5 @@ extern "C" int32_t maxps4_fex_engine_probe(maxps4_fex_engine *engine,
     *result = state.gregs[FEXCore::X86State::REG_RAX];
     *backend = MAXPS4_CPU_FEX_ARM64_JIT;
     return 0;
-#endif
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
 }

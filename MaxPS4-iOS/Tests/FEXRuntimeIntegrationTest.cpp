@@ -27,6 +27,15 @@ int main() {
     CHECK(maxps4_fex_engine_open(nullptr) == -EINVAL);
     CHECK(maxps4_fex_engine_stage(nullptr) == 0);
     maxps4_fex_engine_close(nullptr);
+    CHECK(maxps4_jit_begin(nullptr, nullptr, nullptr) == -EINVAL);
+#if !TARGET_OS_IPHONE
+    uint64_t mailbox = 99, nonce = 99, page = 99;
+    CHECK(maxps4_jit_begin(&mailbox, &nonce, &page) == -ENOTSUP);
+    CHECK(mailbox == 0 && nonce == 0 && page == 0);
+    CHECK(maxps4_jit_prepare() == -ENOTSUP);
+#endif
+    CHECK(maxps4_jit_cancel() == 0);
+    CHECK(maxps4_jit_leases() == 0);
     CHECK(maxps4_fex_engine_initialize(nullptr) == -EINVAL);
     uint64_t probe_result = 99; uint32_t probe_backend = 99;
     CHECK(maxps4_fex_engine_probe(nullptr, &probe_result, &probe_backend) == -EINVAL);
@@ -47,9 +56,9 @@ int main() {
         CHECK(maxps4_fex_engine_open(&second) == 0 && second);
         CHECK(maxps4_fex_engine_stage(first) == MAXPS4_FEX_CONTEXT_CREATED);
 #if TARGET_OS_IPHONE
-        CHECK(maxps4_fex_engine_probe(first, &probe_result, &probe_backend) == -ENOTSUP);
+        CHECK(maxps4_fex_engine_probe(first, &probe_result, &probe_backend) == -EAGAIN);
         CHECK(probe_result == 0 && probe_backend == 0);
-        CHECK(maxps4_fex_engine_initialize(first) == -ENOTSUP);
+        CHECK(maxps4_fex_engine_initialize(first) == -EACCES);
         CHECK(maxps4_fex_engine_stage(first) == MAXPS4_FEX_CONTEXT_CREATED);
 #else
         CHECK(maxps4_fex_engine_probe(first, &probe_result, &probe_backend) == -EAGAIN);
