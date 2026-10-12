@@ -1,5 +1,6 @@
 #include "maxps4_fex_runtime.h"
 #include "maxps4_guest_elf.h"
+#include "PS4BoundedFEXAdapter.hpp"
 #include "PM4GuestSubmission.hpp"
 #include "Common/HostFeatures.h"
 #include <FEXCore/Config/Config.h>
@@ -295,4 +296,20 @@ extern "C" int32_t maxps4_fex_engine_run_elf_pm4(maxps4_fex_engine* engine,
         return -EINVAL;
     const PM4Request request {address, count, words, written};
     return runELF(engine, file, length, budget, result, backend, entry, &request);
+}
+
+extern "C" int32_t maxps4_fex_engine_run_ps4_fixture(maxps4_fex_engine* engine,
+    const uint8_t* file, size_t length, uint32_t budget, uint64_t* result,
+    uint32_t* backend, uint64_t* entry) {
+    if (result) *result = 0;
+    if (backend) *backend = 0;
+    if (entry) *entry = 0;
+    if (!engine || !result || !backend || !entry || !file || !length) return -EINVAL;
+    maxps4::PS4ExecutableImage image;
+    const int loaded = image.load(file, length);
+    if (loaded) return loaded;
+    const auto converted = maxps4::adaptPS4ToBoundedELF(image);
+    if (converted.error) return converted.error;
+    return maxps4_fex_engine_run_elf(engine, converted.file.data(),
+        converted.file.size(), budget, result, backend, entry);
 }
