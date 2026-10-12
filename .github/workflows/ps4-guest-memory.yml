@@ -3,6 +3,9 @@ on:
   pull_request:
     paths:
       - 'MaxPS4-iOS/Native/maxps4_guest_range.h'
+      - 'MaxPS4-iOS/Native/maxps4_guest_elf.*'
+      - 'MaxPS4-iOS/Native/maxps4_ps4_guest_memory.h'
+      - 'MaxPS4-iOS/Tests/PS4StagedCPUAdmissionTest.cpp'
       - 'MaxPS4-iOS/Tests/GuestMemoryRangeTest.cpp'
       - 'MaxPS4-iOS/Tests/PS4GuestMemoryABITest.c'
       - 'MaxPS4-iOS/Native/maxps4_fex_runtime.h'
@@ -25,3 +28,4 @@ jobs:
       - name: Verify C ABI signatures for Swift bridge
         run: |
           cc -std=c11 -Wall -Wextra -Werror -pedantic -I MaxPS4-iOS/Native -c MaxPS4-iOS/Tests/PS4GuestMemoryABITest.c -o /tmp/ps4-memory-abi.o
+

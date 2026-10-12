@@ -210,27 +210,8 @@ struct PM4Request {
     uint32_t* words;
     size_t* written;
 };
-int32_t runELF(maxps4_fex_engine *engine,
-    const uint8_t *file, size_t length, uint32_t budget, uint64_t *result,
-    uint32_t *backend, uint64_t *entry, const PM4Request* submission) {
-    if (result) *result = 0;
-    if (backend) *backend = 0;
-    if (entry) *entry = 0;
-    if (!engine || !result || !backend || !entry) return -EINVAL;
-    std::lock_guard lock(runtime_lock);
-    // iOS uses the bounded Darwin ELF execution path after verified InitCore.
-    try {
-    maxps4::GuestELF image;
-    const int loaded = image.load(file, length, budget);
-    if (loaded) return loaded;
-    *entry = image.entry();
-    if (submission) {
-        if ((submission->address & 3U) ||
-            submission->address > UINT64_MAX - submission->count * 4) return -EINVAL;
-        if (!image.translate(submission->address, submission->count * 4, 4)) return -EFAULT;
-        // The CPU may produce PM4 in initially zero-filled RW data. Interpret
-        // only after FEX completes; range/permissions are checked before execution.
-    }
+int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
+    uint64_t* result, uint32_t* backend, const PM4Request* submission) {
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
     const long host_page = ::sysconf(_SC_PAGESIZE);
     if (host_page <= 0) return -EIO;
@@ -284,6 +265,29 @@ int32_t runELF(maxps4_fex_engine *engine,
     *result = state.gregs[FEXCore::X86State::REG_RAX];
     *backend = MAXPS4_CPU_FEX_ARM64_JIT;
     return 0;
+}
+int32_t runELF(maxps4_fex_engine *engine,
+    const uint8_t *file, size_t length, uint32_t budget, uint64_t *result,
+    uint32_t *backend, uint64_t *entry, const PM4Request* submission) {
+    if (result) *result = 0;
+    if (backend) *backend = 0;
+    if (entry) *entry = 0;
+    if (!engine || !result || !backend || !entry) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    // iOS uses the bounded Darwin ELF execution path after verified InitCore.
+    try {
+    maxps4::GuestELF image;
+    const int loaded = image.load(file, length, budget);
+    if (loaded) return loaded;
+    *entry = image.entry();
+    if (submission) {
+        if ((submission->address & 3U) ||
+            submission->address > UINT64_MAX - submission->count * 4) return -EINVAL;
+        if (!image.translate(submission->address, submission->count * 4, 4)) return -EFAULT;
+        // The CPU may produce PM4 in initially zero-filled RW data. Interpret
+        // only after FEX completes; range/permissions are checked before execution.
+    }
+    return executeImage(engine, image, result, backend, submission);
     } catch (const std::bad_alloc&) { return -ENOMEM; }
 }
 
@@ -306,6 +310,21 @@ extern "C" int32_t maxps4_fex_engine_stage_ps4(maxps4_fex_engine* engine,
     std::fprintf(stderr, "MaxPS4 PS4 native staging: entry=0x%llx segments=%u blockers=0x%x; CPU not dispatched\n",
         static_cast<unsigned long long>(*entry), *segments, *blockers);
     return 0;
+}
+extern "C" int32_t maxps4_fex_engine_run_staged_ps4(maxps4_fex_engine* engine,
+    uint32_t budget, uint64_t* result, uint32_t* backend, uint64_t* entry) {
+    if (result) *result = 0;
+    if (backend) *backend = 0;
+    if (entry) *entry = 0;
+    if (!engine || !result || !backend || !entry) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    try {
+        const int admitted = engine->staged_ps4.admit_staged_cpu(budget);
+        if (admitted) return admitted;
+        const int status = executeImage(engine, engine->staged_ps4, result, backend, nullptr);
+        if (!status) *entry = engine->staged_ps4.entry();
+        return status;
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
 }
 extern "C" int32_t maxps4_fex_engine_read_ps4(maxps4_fex_engine* engine,
     uint64_t address, uint8_t* output, size_t length) {
@@ -375,3 +394,4 @@ extern "C" int32_t maxps4_fex_engine_interpret_elf(maxps4_fex_engine* engine,
         return status;
     } catch (const std::bad_alloc&) { return -ENOMEM; }
 }
+

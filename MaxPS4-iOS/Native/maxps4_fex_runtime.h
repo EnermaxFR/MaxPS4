@@ -58,6 +58,14 @@ enum { MAXPS4_PS4_LINKER_REQUIRED = 1, MAXPS4_PS4_TLS_REQUIRED = 2,
 // On failure output fields are zero and any previous staging is discarded.
 int32_t maxps4_fex_engine_stage_ps4(maxps4_fex_engine *engine, const uint8_t *file,
     size_t length, uint64_t *entry, uint32_t *segments, uint32_t *blockers);
+// Real FEX execution of the already staged image, limited to the same finite
+// instruction whitelist as run_elf. RIP-relative stores reach staged RW/non-X
+// data in place. Requires initialized FEX; no fallback, linker or TLS support.
+// Uses rebased CPU addresses internally, NOT a general PS4 virtual address
+// translator. The CPU_ADDRESS_SPACE_REQUIRED blocker remains set. Returns the
+// logical entry; on any failure outputs are zero. Stage/execute are serialized.
+int32_t maxps4_fex_engine_run_staged_ps4(maxps4_fex_engine *engine,
+    uint32_t budget, uint64_t *result, uint32_t *backend, uint64_t *entry);
 // Exact read from a staged readable segment; no host pointers cross the ABI.
 // Failure leaves caller bytes untouched. Serialized against stage/close.
 int32_t maxps4_fex_engine_read_ps4(maxps4_fex_engine *engine, uint64_t address,
@@ -81,5 +89,6 @@ int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine, const uint8_t *code,
 #ifdef __cplusplus
 }
 #endif
+
 
 

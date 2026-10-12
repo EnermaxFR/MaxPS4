@@ -34,3 +34,44 @@ Native tests cover RW data, RX code, invalid permission masks, overflow, cross-s
 - A CPU memory access to a staged guest address demonstrably reaches the same guest bytes as the staging reader.
 - Tests prove permission enforcement and deterministic teardown.
 - No claim of commercial PS4 game execution until the real ELF/SELF loader, imports/syscalls and GPU path are integrated.
+
+## Bounded staged-image CPU handoff
+
+`maxps4_fex_engine_run_staged_ps4` now admits and executes the engine-owned
+staged image in place using the existing real FEX ARM64 execution path.
+Admission validates the complete entry-to-end-of-file code sequence before
+dispatch: MOV EAX, ADD EAX, NOP, exact RIP-relative immediate stores and a final
+HLT. Every store must fit entirely in an RW/non-X segment. Budget exhaustion,
+unsupported instructions and linker/TLS blockers reject dispatch before any
+store. Errors leave result/backend/entry zero. An uninitialized dispatcher
+returns -EAGAIN; an absent image returns -EFAULT. No interpreter fallback is used.
+
+The runtime lock covers admission, CPU execution and thread cleanup, preventing
+restaging while FEX uses the mapping. Executable-range metadata is scoped to the
+execution, and the shared FEX code cache is cleared before every dispatch so
+restaging cannot reuse a previous translation. The existing ELF interpreter
+implementation and backend reporting are preserved.
+
+This is a bounded **rebased** handoff, not the general translator requested in
+step 3 above. Logical guest addresses are used for admission and staging access;
+FEX RIP and effective memory addresses still refer to the host arena. Relative
+offsets are preserved, including negative displacements and logical addresses
+above 4 GiB. Absolute operands remain rejected. The
+CPU_ADDRESS_SPACE_REQUIRED blocker remains set. General PS4 execution still
+needs virtual-address-aware decoding and generated memory accesses, linker,
+TLS, syscalls and GPU integration. No commercial-game playability is claimed.
+
+### Validation for this change
+
+- Linux: checked range, ELF interpreter, ELF memory, PS4 memory, PS4 staging and
+  new staged CPU admission tests passed with AddressSanitizer/UBSan.
+  LeakSanitizer was disabled locally because this executor is under ptrace.
+- C11 ABI signature compilation passed, including the new entry point.
+- The automated real-FEX runtime test now stages synthetic PS4 ELF code, executes
+  stores and reads their results through the staging API, repeating execution and
+  restaging with different results, high addresses and negative displacements.
+  It also checks pre-initialization refusal, whole-program rejection and teardown.
+- Darwin ARM64 execution and iOS linkage cannot run in this Linux executor.
+  They must be verified by the existing FEXCore workflows. At inspection, all
+  current-head workflows were queued; a queued workflow is not a passing check.
+

@@ -203,6 +203,22 @@ int GuestELF::stage_ps4(const uint8_t* file, size_t length) {
         return 0;
     } catch (const std::bad_alloc&) { clear(); return -ENOMEM; }
 }
+int GuestELF::admit_staged_cpu(uint32_t budget) const {
+    if (!budget || budget > 1000000) return -EINVAL;
+    if (!arena) return -EFAULT;
+    if (blockers & 3U) return -ENOTSUP; // Linker/TLS are never bypassed.
+    for (const auto& s : regions) {
+        if (!(s.permissions & 1U) || guest_entry < s.address ||
+            guest_entry - s.address >= s.file_size) continue;
+        const size_t bytes = static_cast<size_t>(s.file_size - (guest_entry - s.address));
+        const auto* code = translate(guest_entry, bytes, 5);
+        if (!code) return -EFAULT;
+        // No absolute operands, branches or stack accesses: rebasing preserves
+        // every admitted RIP-relative store, with a full RW/non-X range proof.
+        return validateGuestProgram(code, bytes, budget, guest_entry, &regions);
+    }
+    return -EFAULT;
+}
 int GuestELF::map_segments(std::vector<Segment> parsed,
     const std::vector<const uint8_t*>& sources, uint64_t entry) {
     const long host_page = ::sysconf(_SC_PAGESIZE);
@@ -249,5 +265,6 @@ int GuestELF::map_segments(std::vector<Segment> parsed,
     return 0;
 }
 }
+
 
 
