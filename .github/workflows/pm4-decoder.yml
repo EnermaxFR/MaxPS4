@@ -1,0 +1,17 @@
+name: PM4 type-3 decoder checks
+on:
+  pull_request:
+    paths:
+      - 'MaxPS4-iOS/Native/PM4Type3Decoder.hpp'
+      - 'MaxPS4-iOS/Tests/PM4Type3DecoderTest.cpp'
+      - '.github/workflows/pm4-decoder.yml'
+  workflow_dispatch:
+jobs:
+  pm4:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run PM4 decoder tests
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PM4Type3DecoderTest.cpp -o /tmp/pm4-decoder-test
+          /tmp/pm4-decoder-test
