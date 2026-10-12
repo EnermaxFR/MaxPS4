@@ -67,3 +67,12 @@ Les contributions sont bienvenues via [Issues](https://github.com/EnermaxFR/MaxP
 
 ---
 *Dernière mise à jour documentaire : 11 octobre 2026 — statuts à réévaluer à partir des diagnostics des prochains builds.*
+
+Développement JIT iPhone : [protocole SideStore + StikDebug et limites de validation](docs/fexcore-stikdebug-jit.md). La PR #131 dépend de la PR #130 ; aucune exécution FEX JIT sur iPhone n’est encore confirmée.
+
+## Prototype GPU Apple Metal
+
+Le diagnostic GPU propose un triangle animé natif Metal, sans émulation GPU PS4.
+Voir [les limites, tests et contrôles sur iPhone](docs/metal-gpu-prototype.md).
+
+Integration PR #157: the integration branch retains main's fail-closed iPhone FEX JIT gate. PM4/FEX/Metal execution is validated separately on macOS; the prepared-region provider does not enable iPhone FEX execution. See [integration validation](docs/integration-157-validation.md).

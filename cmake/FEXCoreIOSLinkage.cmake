@@ -1,6 +1,11 @@
 # Included only by the pinned vendored Darwin project's top-level project().
 # The upstream shared target contains the core objects but omits its base archive.
 function(maxps4_complete_fexcore_linkage)
+  set(NATIVE "${MAXPS4_ROOT}/MaxPS4-iOS/Native")
+  target_sources(FEXCore_Base PRIVATE "${NATIVE}/maxps4_jit_memory.cpp")
+  target_include_directories(FEXCore_Base PRIVATE "${NATIVE}")
+  target_include_directories(FEXCore PRIVATE "${NATIVE}")
+  target_include_directories(FEXCore_shared PRIVATE "${NATIVE}")
   target_link_libraries(FEXCore_shared PRIVATE FEXCore_Base)
   target_link_options(FEXCore_shared PRIVATE "LINKER:-undefined,error")
   if(MAXPS4_BUILD_RUNTIME)
@@ -8,7 +13,9 @@ function(maxps4_complete_fexcore_linkage)
     # One coherent static FEX runtime lives inside this native library. No
     # generic headers/objects or second FEX shared ABI are loaded alongside it.
     add_library(MaxPS4FEXRuntime SHARED
+      "${NATIVE}/maxps4_jit_memory.cpp"
       "${NATIVE}/maxps4_fex_runtime.cpp"
+      "${NATIVE}/maxps4_guest_elf.cpp"
       "${NATIVE}/maxps4_native.cpp"
       "${NATIVE}/aether_jit_allocator_abi.cpp"
       "${NATIVE}/aether_guest_cpu_adapter.cpp"

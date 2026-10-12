@@ -28,6 +28,7 @@ struct MaxPS4HomeView: View {
     @State private var detailsReport: String?
     @State private var jitStatusReport: String?
     @State private var showingFEXDiagnostic = false
+    @State private var showingMetalDiagnostic = false
 
     @AppStorage("showFPS") private var showFPS = false
     @AppStorage("networkEnabled") private var networkEnabled = false
@@ -97,6 +98,7 @@ struct MaxPS4HomeView: View {
             Text(inspectionReport ?? "")
         }
         .sheet(isPresented: $showingFEXDiagnostic) { MaxPS4FEXDiagnosticView() }
+        .sheet(isPresented: $showingMetalDiagnostic) { MaxPS4MetalDiagnosticView() }
         .sheet(isPresented: $showingDuplicates) {
             NavigationStack {
                 List {
@@ -331,6 +333,8 @@ struct MaxPS4HomeView: View {
                 heroPanel
 
                 homeQuickActions
+
+                jitActivationCard
 
                 backendCard
                 systemOverview
@@ -647,11 +651,50 @@ struct MaxPS4HomeView: View {
             }
             .font(.system(size: 42, weight: .black, design: .rounded))
 
-            Text("VOS JEUX • VOTRE UNIVERS")
+            Text("AU-DESSUS DES NUAGES • MAXPS4")
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.white.opacity(0.60))
         }
         .padding(.top, 8)
+    }
+
+    private var jitActivationCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "bolt.fill")
+                    .font(.title2)
+                    .foregroundStyle(.yellow)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("ACTIVER LE JIT")
+                        .font(.headline.bold())
+                        .foregroundStyle(.white)
+                    Text("Étape essentielle avant les tests CPU FEXCore")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+                Spacer(minLength: 0)
+            }
+            Text("Active le JIT pour MaxPS4 depuis SideStore ou ton outil JIT compatible, puis reviens dans l’application pour lancer le diagnostic.")
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.85))
+            Button {
+                withAnimation(.easeInOut(duration: 0.22)) { selectedTab = .developer }
+                showingFEXDiagnostic = true
+            } label: {
+                Label("Vérifier le JIT / FEXCore", systemImage: "checkmark.shield.fill")
+                    .font(.subheadline.bold())
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.yellow)
+            .accessibilityIdentifier("maxps4.jitProminentDiagnostic")
+            Text("L’application ne peut pas activer elle-même le JIT. Un test réussi ne garantit pas le lancement de jeux PS4.")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.6))
+        }
+        .padding(18)
+        .background(Color(red: 0.15, green: 0.11, blue: 0.18), in: RoundedRectangle(cornerRadius: 22))
+        .overlay(RoundedRectangle(cornerRadius: 22).stroke(.yellow.opacity(0.65), lineWidth: 1.5))
     }
 
     private var homeQuickActions: some View {
@@ -1061,7 +1104,7 @@ struct MaxPS4HomeView: View {
     private var heroPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Label("MAXPS4  /  CONTROL CENTER", systemImage: "sparkles.rectangle.stack.fill")
+                Label("MAXPS4  /  ÉDITION NOCTURNE", systemImage: "moon.stars.fill")
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .tracking(2)
                     .foregroundStyle(.cyan)
@@ -1070,10 +1113,10 @@ struct MaxPS4HomeView: View {
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.55))
             }
-            Text("Vos jeux sur iPhone")
+            Text("Dans la légende")
                 .font(.system(size: 34, weight: .black, design: .rounded))
                 .foregroundStyle(.white)
-            Text("Bibliothèque, import et outils dans un seul espace.")
+            Text("Un univers nocturne pour votre bibliothèque et vos diagnostics.")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.66))
             HStack(spacing: 10) {
@@ -1101,9 +1144,9 @@ struct MaxPS4HomeView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             LinearGradient(colors: [
-                Color(red: 0.07, green: 0.12, blue: 0.28),
-                Color(red: 0.19, green: 0.07, blue: 0.34),
-                Color(red: 0.03, green: 0.06, blue: 0.17)
+                Color(red: 0.025, green: 0.045, blue: 0.10),
+                Color(red: 0.11, green: 0.075, blue: 0.20),
+                Color(red: 0.015, green: 0.02, blue: 0.06)
             ], startPoint: .topLeading, endPoint: .bottomTrailing),
             in: RoundedRectangle(cornerRadius: 28)
         )
@@ -1151,6 +1194,9 @@ struct MaxPS4HomeView: View {
                     .tracking(1.1)
                     .foregroundStyle(.cyan)
                     .padding(.top, 8)
+                secondaryAction(icon: "triangle.fill", title: "Diagnostic GPU Metal", subtitle: "Triangle animé natif • aucune émulation GPU PS4") {
+                    showingMetalDiagnostic = true
+                }
                 secondaryAction(icon: "cpu.fill", title: "Tester FEXCore", subtitle: "Contexte réel • x86-64 → 42 • backend affiché") {
                     showingFEXDiagnostic = true
                 }
@@ -1260,6 +1306,24 @@ struct MaxPS4HomeView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.cyan)
+                Button {
+                    showingFEXDiagnostic = true
+                } label: {
+                    Label("Tester FEXCore", systemImage: "cpu.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cyan)
+                .accessibilityIdentifier("maxps4.testFEXCore")
+                Button {
+                    showingMetalDiagnostic = true
+                } label: {
+                    Label("GPU Metal / FEX → Metal", systemImage: "cpu.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cyan)
+                .accessibilityIdentifier("maxps4.openFEXMetal")
                 Button {
                     emulator.status = MaxPS4OnDeviceJITProbe.stikAllocatorPreflightReport()
                 } label: {
@@ -1419,8 +1483,8 @@ private struct MaxPS4Background: View {
         ZStack {
             LinearGradient(
                 colors: [
-                    Color(red: 0.025, green: 0.018, blue: 0.085),
-                    Color(red: 0.055, green: 0.025, blue: 0.17),
+                    Color(red: 0.012, green: 0.025, blue: 0.07),
+                    Color(red: 0.055, green: 0.04, blue: 0.12),
                     .black
                 ],
                 startPoint: .topLeading,
@@ -1429,7 +1493,7 @@ private struct MaxPS4Background: View {
             .ignoresSafeArea()
 
             Circle()
-                .fill(.purple.opacity(0.24))
+                .fill(.purple.opacity(0.18))
                 .frame(width: 360, height: 360)
                 .blur(radius: 80)
                 .offset(x: 180, y: -300)

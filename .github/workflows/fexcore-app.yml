@@ -15,12 +15,45 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Test native Metal triangle and compile iPhone shaders
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/diagnostics
+          swiftc -parse-as-library MaxPS4-iOS/Sources/MaxPS4MetalPipeline.swift \
+            MaxPS4-iOS/Tests/MetalTriangleTest.swift -o build/metal-triangle-test
+          build/metal-triangle-test | tee build/diagnostics/metal-tests.txt
+          python3 - <<'PYMETAL'
+          from pathlib import Path
+          source = Path("MaxPS4-iOS/Sources/MaxPS4MetalPipeline.swift").read_text()
+          shader = source.split('"""')[1]
+          Path("build/diagnostics/triangle.metal").write_text(shader)
+          PYMETAL
+          xcrun -sdk iphoneos metal -c build/diagnostics/triangle.metal \
+            -o build/diagnostics/triangle.air
+          xcrun -sdk iphoneos metallib build/diagnostics/triangle.air \
+            -o build/diagnostics/triangle.metallib
       - name: Checkout coherent pinned runtime
         run: |
           git clone --filter=blob:none --no-checkout https://github.com/Leviidev/AetherPS4.git build/aether-app
           git -C build/aether-app sparse-checkout set runtime/sources/fexcore-darwin src/core/guest_cpu src/core/ios
           git -C build/aether-app checkout 3347fc13f19860855ce91b66356940989ea6b6a6
           brew install ninja xcodegen
+      - name: Test fixed Stik script and real Mach memory ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/diagnostics
+          xcrun clang++ -std=c++23 -Wall -Wextra -Werror -I MaxPS4-iOS/Native \
+            MaxPS4-iOS/Native/maxps4_guest_elf.cpp \
+            MaxPS4-iOS/Tests/GuestELFMemoryTest.cpp -o build/guest-elf-memory-test
+          build/guest-elf-memory-test | tee build/diagnostics/guest-elf-memory-tests.txt
+          node MaxPS4-iOS/Tests/StikScriptTest.js | tee build/diagnostics/stik-script-tests.txt
+          xcrun clang++ -std=c++23 -DMAXPS4_TEST_DARWIN_JIT_POOL=1 \
+            -I MaxPS4-iOS/Native MaxPS4-iOS/Native/maxps4_jit_memory.cpp \
+            MaxPS4-iOS/Tests/FEXJITMemoryTest.cpp -o build/jit-memory-test
+          build/jit-memory-test | tee build/diagnostics/jit-memory-tests.txt
+          leaks --atExit -- build/jit-memory-test 2>&1 | tee build/diagnostics/jit-memory-leaks.txt
       - name: Preserve native runtime tests and test the real Swift C bridge on macOS
         shell: bash
         run: |
@@ -29,11 +62,49 @@ jobs:
           bash scripts/build-fexcore-darwin-ios.sh build/aether-app build/fex-app-host --host-runtime
           swiftc -parse-as-library -D MAXPS4_FEX_APP \
             -import-objc-header MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h \
+            MaxPS4-iOS/Sources/MaxPS4GuestMemory.swift \
+            MaxPS4-iOS/Sources/MaxPS4ELFLoader.swift \
+            MaxPS4-iOS/Sources/MaxPS4CPUPrototype.swift \
+            MaxPS4-iOS/Sources/MaxPS4SyntheticELFFEXBridge.swift \
             MaxPS4-iOS/Sources/MaxPS4FEXDiagnostic.swift MaxPS4-iOS/Tests/FEXSwiftDiagnosticTest.swift \
             -L build/fex-app-host -lMaxPS4FEXRuntime \
             -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" \
             -o build/fex-app-host/swift-fex-test
           build/fex-app-host/swift-fex-test | tee build/fex-app-host/swift-diagnostic-tests.txt
+      - name: Test actual ELF FEX position transfer and offscreen Metal readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc -parse-as-library -D MAXPS4_FEX_APP \
+            -import-objc-header MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h \
+            MaxPS4-iOS/Sources/MaxPS4GuestMemory.swift \
+            MaxPS4-iOS/Sources/MaxPS4ELFLoader.swift \
+            MaxPS4-iOS/Sources/MaxPS4CPUPrototype.swift \
+            MaxPS4-iOS/Sources/MaxPS4SyntheticELFFEXBridge.swift \
+            MaxPS4-iOS/Sources/MaxPS4FEXMetalState.swift \
+            MaxPS4-iOS/Sources/MaxPS4MetalPipeline.swift \
+            MaxPS4-iOS/Tests/FEXMetalIntegrationTest.swift \
+            -L build/fex-app-host -lMaxPS4FEXRuntime \
+            -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" \
+            -o build/fex-app-host/fex-metal-test
+          build/fex-app-host/fex-metal-test | tee build/fex-app-host/fex-metal-tests.txt
+          leaks --atExit -- build/fex-app-host/fex-metal-test 2>&1 | tee build/fex-app-host/fex-metal-leaks.txt
+      - name: Test same ELF arena FEX completion to C++ PM4 to Metal
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun clang++ -std=c++17 -fobjc-arc -c MaxPS4-iOS/Native/PM4MetalDrawBridge.mm -o build/pm4-fex-bridge.o
+          swiftc -parse-as-library -D MAXPS4_FEX_APP -D MAXPS4_PM4_FEX_INTEGRATION \
+            -import-objc-header MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h \
+            MaxPS4-iOS/Sources/MaxPS4PM4Submission.swift \
+            MaxPS4-iOS/Sources/MaxPS4MetalPipeline.swift MaxPS4-iOS/Tests/PM4MetalIntegrationTest.swift \
+            build/pm4-fex-bridge.o -lc++ -L build/fex-app-host -lMaxPS4FEXRuntime \
+            -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" -o build/pm4-fex-metal-test
+          build/pm4-fex-metal-test | tee build/diagnostics/pm4-fex-metal-tests.txt
+      - name: Validate safe Stik trap handling
+        shell: bash
+        run: |
+          set -euo pipefail
           clang++ -std=c++23 MaxPS4-iOS/Tests/StikTrapSafetyTest.cpp \
             -L build/fex-app-host -lMaxPS4FEXRuntime \
             -Wl,-rpath,"$PWD/build/fex-app-host" \
@@ -66,3 +137,4 @@ jobs:
             build/fex-app-ios/*.txt
             build/fex-app-ios/*.log
           retention-days: 14
+

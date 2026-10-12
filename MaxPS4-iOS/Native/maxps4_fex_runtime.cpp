@@ -1,4 +1,6 @@
 #include "maxps4_fex_runtime.h"
+#include "maxps4_guest_elf.h"
+#include "PM4GuestSubmission.hpp"
 #include "Common/HostFeatures.h"
 #include <FEXCore/Config/Config.h>
 #include <FEXCore/Core/Context.h>
@@ -26,14 +28,19 @@ namespace {
 class ProbeAddressSpace final : public FEXCore::HLE::SyscallHandler {
 public:
     ProbeAddressSpace() { OSABI = FEXCore::HLE::SyscallOSABI::OS_GENERIC; }
-    uintptr_t begin = 0;
-    size_t size = 0;
+    const maxps4::GuestELF* image = nullptr;
     uint64_t HandleSyscall(FEXCore::Core::CpuStateFrame*, FEXCore::HLE::SyscallArguments*) override {
         return static_cast<uint64_t>(-ENOSYS);
     }
     FEXCore::HLE::ExecutableRangeInfo QueryGuestExecutableRange(
         FEXCore::Core::InternalThreadState*, uint64_t address) override {
-        if (begin && address >= begin && address - begin < size) return {begin, size, false};
+        if (image) for (const auto& segment : image->segments()) {
+            if (!(segment.permissions & 1)) continue;
+            const auto* pointer = image->translate(segment.address, segment.memory_size, 5);
+            const auto begin = reinterpret_cast<uintptr_t>(pointer);
+            if (pointer && address >= begin && address - begin < segment.file_size)
+                return {begin, segment.file_size, false};
+        }
         return {0, 0, false};
     }
     std::optional<FEXCore::ExecutableFileSectionInfo> LookupExecutableFileSection(
@@ -59,7 +66,7 @@ public:
 }
 struct maxps4_fex_engine {
     // This real FEX configuration holder installs no process signal handlers.
-    // It outlives the context. Only the fixed no-fault probe may execute.
+    // It outlives the context. Only admitted no-fault straight-line code executes.
     FEXCore::SignalDelegator signals;
     ProbeAddressSpace probe;
     fextl::unique_ptr<FEXCore::Context::Context> context;
@@ -111,18 +118,20 @@ extern "C" int32_t maxps4_fex_engine_initialize(maxps4_fex_engine *engine) {
     if (!engine) return -EINVAL;
     std::lock_guard lock(runtime_lock);
 #if TARGET_OS_IPHONE
-    // The pinned allocator calls BreakpointJIT, not an OS-provided JIT allocator.
-    // Do not load it or attempt allocation without a supported device contract.
+    // Keep main's fail-closed gate until the prepared-region provider has
+    // reproducible physical-device validation. Script success alone is insufficient.
     std::fprintf(stderr, "MaxPS4 FEX JIT: InitCore blocked on iPhone: supported JIT allocation contract not established; returning -ENOTSUP (%d). StikDebug script success is not proof of executable mappings.\n", ENOTSUP);
     return -ENOTSUP;
 #else
     if (engine->stage == MAXPS4_FEX_DISPATCHER_INITIALIZED) return 0;
     engine->context->SetSignalDelegator(&engine->signals);
-    // Only the fixed HLT-terminated probe is exposed, never arbitrary guest code.
+    // Only admitted HLT-terminated straight-line programs are exposed.
     engine->context->SetSyscallHandler(&engine->probe);
     engine->context->EnableExitOnHLT();
     errno = 0;
-    if (!engine->context->InitCore()) return -(errno ? errno : ENOMEM);
+    try {
+        if (!engine->context->InitCore()) return -(errno ? errno : ENOMEM);
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
     engine->stage = MAXPS4_FEX_DISPATCHER_INITIALIZED;
     return 0;
 #endif
@@ -161,21 +170,58 @@ extern "C" int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine,
 
 extern "C" int32_t maxps4_fex_engine_probe(maxps4_fex_engine *engine,
                                           uint64_t *result, uint32_t *backend) {
+    // Compatibility wrapper: even the legacy probe goes through the ELF loader.
+    std::array<uint8_t, 131> file {};
+    auto put = [&](uint64_t value, size_t at, size_t width) {
+        for (size_t i = 0; i < width; ++i) file[at + i] = value >> (i * 8);
+    };
+    std::memcpy(file.data(), "\177ELF\2\1\1", 7);
+    put(2,16,2); put(62,18,2); put(1,20,4); put(0x1000,24,8);
+    put(64,32,8); put(64,52,2); put(56,54,2); put(1,56,2);
+    put(1,64,4); put(5,68,4); put(120,72,8); put(0x1000,80,8);
+    put(11,96,8); put(11,104,8); put(1,112,8);
+    constexpr uint8_t code[] = {0xB8,40,0,0,0,0x05,2,0,0,0,0xF4};
+    std::memcpy(file.data() + 120, code, sizeof(code));
+    uint64_t entry = 0;
+    return maxps4_fex_engine_run_elf(engine, file.data(), file.size(), 3, result, backend, &entry);
+}
+
+namespace {
+struct PM4Request {
+    uint64_t address;
+    size_t count;
+    uint32_t* words;
+    size_t* written;
+};
+int32_t runELF(maxps4_fex_engine *engine,
+    const uint8_t *file, size_t length, uint32_t budget, uint64_t *result,
+    uint32_t *backend, uint64_t *entry, const PM4Request* submission) {
     if (result) *result = 0;
     if (backend) *backend = 0;
-    if (!engine || !result || !backend) return -EINVAL;
+    if (entry) *entry = 0;
+    if (!engine || !result || !backend || !entry) return -EINVAL;
     std::lock_guard lock(runtime_lock);
 #if TARGET_OS_IPHONE
+    (void)file; (void)length; (void)budget; (void)submission;
     std::fprintf(stderr, "MaxPS4 FEX JIT: probe blocked on iPhone: FEX JIT not initialized; returning -ENOTSUP (%d).\n", ENOTSUP);
     return -ENOTSUP;
 #else
+    try {
+    maxps4::GuestELF image;
+    const int loaded = image.load(file, length, budget);
+    if (loaded) return loaded;
+    *entry = image.entry();
+    if (submission) {
+        if ((submission->address & 3U) ||
+            submission->address > UINT64_MAX - submission->count * 4) return -EINVAL;
+        if (!image.translate(submission->address, submission->count * 4, 4)) return -EFAULT;
+        // The CPU may produce PM4 in initially zero-filled RW data. Interpret
+        // only after FEX completes; range/permissions are checked before execution.
+    }
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
     const long host_page = ::sysconf(_SC_PAGESIZE);
     if (host_page <= 0) return -EIO;
     const size_t page = static_cast<size_t>(host_page);
-    constexpr uint8_t code[] = {0xB8,40,0,0,0,0x05,2,0,0,0,0xF4};
-    Mapping guest(page, PROT_READ | PROT_WRITE);
-    if (guest.address == MAP_FAILED) return -errno;
     Mapping stack(3 * page, PROT_NONE);
     if (stack.address == MAP_FAILED) return -errno;
     constexpr size_t callret_size = FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE;
@@ -185,16 +231,13 @@ extern "C" int32_t maxps4_fex_engine_probe(maxps4_fex_engine *engine,
     auto* callret_base = static_cast<uint8_t*>(callret.address) + page;
     if (::mprotect(stack_base, page, PROT_READ | PROT_WRITE) != 0 ||
         ::mprotect(callret_base, callret_size, PROT_READ | PROT_WRITE) != 0) return -errno;
-    std::memcpy(guest.address, code, sizeof(code));
-    if (::mprotect(guest.address, page, PROT_READ) != 0) return -errno;
     std::array<FEXCore::Core::CPUState::gdt_segment, 32> gdt {};
-    engine->probe.begin = reinterpret_cast<uintptr_t>(guest.address);
-    engine->probe.size = page;
+    engine->probe.image = &image;
     struct ClearRange {
         ProbeAddressSpace& space;
-        ~ClearRange() { space.begin = 0; space.size = 0; }
+        ~ClearRange() { space.image = nullptr; }
     } clear_range {engine->probe};
-    auto* thread = engine->context->CreateThread(engine->probe.begin,
+    auto* thread = engine->context->CreateThread(reinterpret_cast<uintptr_t>(image.entry_pointer()),
         reinterpret_cast<uintptr_t>(stack_base) + page - 16);
     if (!thread) return -ENOMEM;
     struct DestroyThread {
@@ -214,10 +257,41 @@ extern "C" int32_t maxps4_fex_engine_probe(maxps4_fex_engine *engine,
     segment->L = 1;
     segment->D = 0;
     state.cs_cached = FEXCore::Core::CPUState::CalculateGDTBase(*segment);
+    // mmap can reuse a previous image's address. The context retains a shared
+    // L3 guest-to-host cache across threads: discard those old translations
+    // without allocating another iOS JIT buffer. All engine execution is locked.
+    engine->context->ClearCodeCache(thread, false);
     engine->context->ExecuteThread(thread);
-    if (state.gregs[FEXCore::X86State::REG_RAX] != 42) return -EIO;
+    if (submission) {
+        const auto snapshot = maxps4::gpu::snapshotPM4(image, submission->address, submission->count);
+        if (snapshot.error) return snapshot.error;
+        std::memcpy(submission->words, snapshot.words.data(), snapshot.words.size() * sizeof(uint32_t));
+        *submission->written = snapshot.words.size();
+    }
     *result = state.gregs[FEXCore::X86State::REG_RAX];
     *backend = MAXPS4_CPU_FEX_ARM64_JIT;
     return 0;
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
 #endif
+}
+
+
+} // namespace
+extern "C" int32_t maxps4_fex_engine_run_elf(maxps4_fex_engine* engine,
+    const uint8_t* file, size_t length, uint32_t budget, uint64_t* result,
+    uint32_t* backend, uint64_t* entry) {
+    return runELF(engine, file, length, budget, result, backend, entry, nullptr);
+}
+extern "C" int32_t maxps4_fex_engine_run_elf_pm4(maxps4_fex_engine* engine,
+    const uint8_t* file, size_t length, uint32_t budget, uint64_t address, size_t count,
+    uint32_t* words, size_t capacity, size_t* written, uint64_t* result,
+    uint32_t* backend, uint64_t* entry) {
+    if (written) *written = 0;
+    if (result) *result = 0;
+    if (backend) *backend = 0;
+    if (entry) *entry = 0;
+    if (!written || !words || !count || count > maxps4::gpu::kMaxSubmissionWords || capacity < count)
+        return -EINVAL;
+    const PM4Request request {address, count, words, written};
+    return runELF(engine, file, length, budget, result, backend, entry, &request);
 }

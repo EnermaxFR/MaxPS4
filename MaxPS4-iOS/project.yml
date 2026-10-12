@@ -5,6 +5,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: '5.0'
+    CLANG_CXX_LANGUAGE_STANDARD: 'c++17'
     ARCHS: arm64
     CODE_SIGNING_ALLOWED: NO
     ENABLE_BITCODE: NO
@@ -18,6 +19,7 @@ targets:
     sources:
       - path: Sources
       - path: Resources
+      - path: Native/PM4MetalDrawBridge.mm
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.enermaxfr.maxps4
@@ -26,15 +28,19 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: MaxPS4
         INFOPLIST_KEY_LSRequiresIPhoneOS: YES
+        INFOPLIST_FILE: Info.plist
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: 'UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight'
         TARGETED_DEVICE_FAMILY: '1,2'
-        MARKETING_VERSION: '0.3'
-        CURRENT_PROJECT_VERSION: '1000132'
+        MARKETING_VERSION: '0.3.0'
+        CURRENT_PROJECT_VERSION: '1000133'
     dependencies:
+      - sdk: Metal.framework
+      - sdk: MetalKit.framework
       - framework: ../build/frameworks/MaxPS4FEXRuntime.framework
         embed: true
         codeSign: false
     scheme:
       gatherCoverageData: false
+

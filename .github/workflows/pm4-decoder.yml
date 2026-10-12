@@ -1,0 +1,68 @@
+name: PM4 type-3 decoder checks
+on:
+  pull_request:
+    paths:
+      - 'MaxPS4-iOS/Native/PM4*'
+      - 'MaxPS4-iOS/Native/maxps4_guest_elf*'
+      - 'MaxPS4-iOS/Tests/PM4*'
+      - 'MaxPS4-iOS/Tests/GuestRIPStoreAdmissionTest.cpp'
+      - 'MaxPS4-iOS/Tests/GuestELFFixture.h'
+      - 'MaxPS4-iOS/Sources/MaxPS4Metal*'
+      - 'MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h'
+      - 'MaxPS4-iOS/project.yml'
+      - '.github/workflows/pm4-decoder.yml'
+  workflow_dispatch:
+jobs:
+  pm4:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run PM4 decoder tests
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PM4Type3DecoderTest.cpp -o /tmp/pm4-decoder-test
+          /tmp/pm4-decoder-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PM4CommandInterpreterTest.cpp -o /tmp/pm4-interpreter-test
+          /tmp/pm4-interpreter-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PM4MetalDrawPlanTest.cpp -o /tmp/pm4-plan-test
+          /tmp/pm4-plan-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Native/maxps4_guest_elf.cpp MaxPS4-iOS/Tests/PM4GuestSubmissionTest.cpp -o /tmp/pm4-guest-test
+          /tmp/pm4-guest-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Native/maxps4_guest_elf.cpp MaxPS4-iOS/Tests/GuestRIPStoreAdmissionTest.cpp -o /tmp/rip-store-test
+          /tmp/rip-store-test
+  metal-bridge:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test exported bridge and Swift to C++ linkage on macOS
+        run: |
+          set -euo pipefail
+          mkdir -p build/pm4
+          xcrun clang++ -std=c++17 -fobjc-arc -Wall -Wextra -Werror \
+            MaxPS4-iOS/Native/PM4MetalDrawBridge.mm MaxPS4-iOS/Tests/PM4MetalBridgeTest.mm \
+            -framework Foundation -framework Metal -o build/pm4/abi-test
+          build/pm4/abi-test
+          xcrun clang++ -std=c++17 -fobjc-arc -c MaxPS4-iOS/Native/PM4MetalDrawBridge.mm -o build/pm4/bridge.o
+          swiftc -parse-as-library -import-objc-header MaxPS4-iOS/Native/PM4MetalDrawBridge.h \
+            MaxPS4-iOS/Sources/MaxPS4MetalPipeline.swift MaxPS4-iOS/Tests/PM4MetalIntegrationTest.swift \
+            build/pm4/bridge.o -lc++ -o build/pm4/integration-test
+          build/pm4/integration-test
+      - name: Compile actual bridge and Swift renderer for iPhone arm64
+        run: |
+          set -euo pipefail
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          xcrun --sdk iphoneos clang++ -std=c++17 -fobjc-arc -Wall -Wextra -Werror \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" \
+            -c MaxPS4-iOS/Native/PM4MetalDrawBridge.mm -o build/pm4/bridge-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -target arm64-apple-ios18.0 -isysroot "$SDK" \
+            -c MaxPS4-iOS/Native/maxps4_guest_elf.cpp -o build/pm4/guest-elf-ios.o
+          swiftc -typecheck -D MAXPS4_FEX_APP -target arm64-apple-ios18.0 -sdk "$SDK" \
+            -import-objc-header MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h \
+            MaxPS4-iOS/Sources/MaxPS4GuestMemory.swift MaxPS4-iOS/Sources/MaxPS4CPUPrototype.swift \
+            MaxPS4-iOS/Sources/MaxPS4ELFLoader.swift MaxPS4-iOS/Sources/MaxPS4SyntheticELFFEXBridge.swift \
+            MaxPS4-iOS/Sources/MaxPS4FEXMetalState.swift MaxPS4-iOS/Sources/MaxPS4PM4Submission.swift \
+            MaxPS4-iOS/Sources/MaxPS4MetalPipeline.swift MaxPS4-iOS/Sources/MaxPS4MetalDiagnosticView.swift
+          swiftc -parse-as-library -target arm64-apple-ios18.0 -sdk "$SDK" \
+            -import-objc-header MaxPS4-iOS/Native/PM4MetalDrawBridge.h \
+            MaxPS4-iOS/Sources/MaxPS4MetalPipeline.swift MaxPS4-iOS/Tests/PM4MetalIntegrationTest.swift \
+            build/pm4/bridge-ios.o -lc++ -o build/pm4/integration-ios
+          xcrun nm build/pm4/integration-ios | grep ' T _maxps4_pm4_encode_triangle$'
