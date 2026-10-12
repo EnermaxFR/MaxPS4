@@ -16,6 +16,16 @@ int main() {
     assert(!memory.executable(0x10000, 4));
     assert(memory.executable(0x1000, 1));
     assert(!memory.write(0x1000, bytes, sizeof(bytes)));
+    // RX code must be readable and executable but never writable.
+    uint8_t code_byte = 0;
+    assert(memory.read(0x1000, &code_byte, 1));
+    assert(code_byte == 0xB8);
+    assert(memory.executable(0x1000, 1));
+    assert(!memory.executable(0x10000, 1));
+    // Reject requests straddling an unmapped boundary.
+    assert(!memory.read(0x10000 - 1, output, sizeof(output)));
+    assert(!memory.write(0x10000 - 1, bytes, sizeof(bytes)));
+
     // Reject writes crossing the RW segment boundary, without partial mutation.
     const auto& regions = image.segments();
     bool checked_boundary = false;
