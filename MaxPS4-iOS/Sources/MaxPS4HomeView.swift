@@ -242,6 +242,11 @@ struct MaxPS4HomeView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         if game.fileName.lowercased().hasSuffix(".elf") || game.fileName.lowercased() == "eboot.bin" {
+                            Button("Diagnostiquer le premier lancement PS4") {
+                                emulator.diagnoseFirstPS4Launch(game)
+                                detailsReport = emulator.status
+                            }
+                            .buttonStyle(.borderedProminent)
                             Button("Inspecter les imports ELF64") {
                                 emulator.inspectELFImports(game)
                                 detailsReport = emulator.status
