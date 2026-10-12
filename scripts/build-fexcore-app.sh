@@ -59,7 +59,7 @@ codesign --verify --strict --verbose=2 "$EMBEDDED"
 # valid profile permitting get-task-allow and re-sign BOTH app and framework.
 codesign --force --sign - --entitlements MaxPS4-iOS/MaxPS4.entitlements build/Payload/MaxPS4.app
 codesign --verify --strict --verbose=2 build/Payload/MaxPS4.app
-codesign -d --entitlements :- build/Payload/MaxPS4.app > build/diagnostics/fex-app-entitlements.plist
+codesign -d --entitlements - build/Payload/MaxPS4.app > build/diagnostics/fex-app-entitlements.plist
 # Xcode's selected sources must call the real opaque ABI, not a legacy build path.
 xcrun nm -u build/Payload/MaxPS4.app/MaxPS4 > build/diagnostics/fex-app-imports.txt
 xcrun otool -L build/Payload/MaxPS4.app/MaxPS4 > build/diagnostics/fex-app-libraries.txt
