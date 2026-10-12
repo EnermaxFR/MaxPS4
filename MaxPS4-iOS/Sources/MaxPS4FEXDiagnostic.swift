@@ -103,6 +103,8 @@ struct MaxPS4FEXDiagnostic: Sendable {
         var selected: UInt32 = 0
         var jitStatus = initialized
         var elfEntry: UInt64 = 0
+        var guestRIP: UInt64 = 0
+        var instructions: UInt32 = 0
         var status: Int32
         if initialized == 0 {
             let file = MaxPS4SyntheticELFFEXBridge.syntheticELF()
@@ -114,9 +116,10 @@ struct MaxPS4FEXDiagnostic: Sendable {
         } else { status = initialized }
         if status != 0 {
             // Preserve the actual JIT error separately from the interpreter result.
-            let code: [UInt8] = [0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3]
-            status = code.withUnsafeBufferPointer {
-                maxps4_fex_engine_run(engine, $0.baseAddress, $0.count, 32, &value, &selected)
+            let file = MaxPS4SyntheticELFFEXBridge.syntheticELF()
+            status = file.withUnsafeBytes {
+                maxps4_fex_engine_interpret_elf(engine, $0.bindMemory(to: UInt8.self).baseAddress,
+                    $0.count, 3, &value, &selected, &elfEntry, &guestRIP, &instructions)
             }
         }
         let stage = maxps4_fex_engine_stage(engine)
@@ -141,6 +144,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
         Initialisation FEX JIT : statut \(initialized)
         Exécution FEX JIT : statut \(jitStatus) (0 requis pour un succès JIT)
         Point d’entrée ELF64 invité : 0x\(String(elfEntry, radix: 16))
+        RIP invité après repli : 0x\(String(guestRIP, radix: 16)), instructions terminées : \(instructions)
         Fournisseur RX/RW : état \(maxps4_jit_state()), erreur \(maxps4_jit_error())
         Échec JIT précis : \(failureName) (étape \(failureStage))
         Code Mach : \(maxps4_jit_failure_mach()), région : \(maxps4_jit_failure_region())
@@ -165,3 +169,4 @@ struct MaxPS4FEXDiagnostic: Sendable {
 #endif
     }
 }
+

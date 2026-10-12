@@ -323,3 +323,29 @@ extern "C" int32_t maxps4_fex_engine_run_elf_pm4(maxps4_fex_engine* engine,
     const PM4Request request {address, count, words, written};
     return runELF(engine, file, length, budget, result, backend, entry, &request);
 }
+
+
+extern "C" int32_t maxps4_fex_engine_interpret_elf(maxps4_fex_engine* engine,
+    const uint8_t* file, size_t length, uint32_t budget, uint64_t* result,
+    uint32_t* backend, uint64_t* entry, uint64_t* rip, uint32_t* instructions) {
+    if (result) *result = 0;
+    if (backend) *backend = 0;
+    if (entry) *entry = 0;
+    if (rip) *rip = 0;
+    if (instructions) *instructions = 0;
+    if (!engine || !result || !backend || !entry || !rip || !instructions) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    try {
+        maxps4::GuestELF image;
+        const int loaded = image.load(file, length, budget);
+        if (loaded) return loaded;
+        *entry = image.entry();
+        maxps4::GuestELF::Execution execution;
+        const int status = image.interpret(budget, execution);
+        *result = execution.rax;
+        *rip = execution.rip;
+        *instructions = execution.instructions;
+        *backend = MAXPS4_CPU_RESTRICTED_INTERPRETER;
+        return status;
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
+}

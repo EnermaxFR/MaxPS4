@@ -13,6 +13,23 @@ struct FEXSwiftDiagnosticTest {
             precondition(report.details.contains("Point d’entrée ELF64 invité : 0x1000"))
             print("PASS Swift opaque-C FEX diagnostic iteration=\(iteration) result=42 backend=\(report.backend)")
         }
+        do {
+            var engine: OpaquePointer?
+            precondition(maxps4_fex_engine_open(&engine) == 0)
+            guard let engine else { preconditionFailure("Missing engine") }
+            defer { maxps4_fex_engine_close(engine) }
+            var value: UInt64 = 0; var entry: UInt64 = 0; var rip: UInt64 = 0
+            var backend: UInt32 = 0; var instructions: UInt32 = 0
+            let file = MaxPS4SyntheticELFFEXBridge.syntheticELF()
+            let status = file.withUnsafeBytes {
+                maxps4_fex_engine_interpret_elf(engine, $0.bindMemory(to: UInt8.self).baseAddress,
+                    $0.count, 3, &value, &backend, &entry, &rip, &instructions)
+            }
+            precondition(status == 0 && value == 42 && entry == 0x1000 && rip == 0x100b)
+            precondition(backend == UInt32(MAXPS4_CPU_RESTRICTED_INTERPRETER) && instructions == 3)
+            precondition(maxps4_fex_engine_stage(engine) == MAXPS4_FEX_CONTEXT_CREATED)
+            print("PASS Swift/C loaded ELF interpreter, logical RIP, no initialized JIT dispatcher")
+        }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".elf")
         defer { try? FileManager.default.removeItem(at: url) }
         do {
@@ -71,3 +88,4 @@ struct FEXSwiftDiagnosticTest {
         print("PASS Swift lifecycle; macOS host execution only, no iPhone proof")
     }
 }
+
