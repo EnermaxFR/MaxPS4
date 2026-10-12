@@ -4,6 +4,8 @@ on:
     paths:
       - 'MaxPS4-iOS/Native/PM4Type3Decoder.hpp'
       - 'MaxPS4-iOS/Tests/PM4Type3DecoderTest.cpp'
+      - 'MaxPS4-iOS/Native/PM4CommandInterpreter.hpp'
+      - 'MaxPS4-iOS/Tests/PM4CommandInterpreterTest.cpp'
       - '.github/workflows/pm4-decoder.yml'
   workflow_dispatch:
 jobs:
@@ -15,3 +17,5 @@ jobs:
         run: |
           c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PM4Type3DecoderTest.cpp -o /tmp/pm4-decoder-test
           /tmp/pm4-decoder-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PM4CommandInterpreterTest.cpp -o /tmp/pm4-interpreter-test
+          /tmp/pm4-interpreter-test
