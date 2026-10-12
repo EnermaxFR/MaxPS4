@@ -158,6 +158,19 @@ int main() {
     assert(text.find("MaxPS4") != std::string::npos);
     assert(text.find("eboot.bin") != std::string::npos);
     assert(text.find("Octets copiés en mémoire : 32") != std::string::npos);
+    // Malformed names cannot consume 1 MiB then restart the payload budget.
+    auto large = original;
+    large.resize(0x600 + PKG::extractionBudget + 16, 'x');
+    put(large, 0x430, large.size(), 8); put(large, 0x28, large.size() - 0x600, 8);
+    put(large, 0x5b4, PKG::extractionBudget, 4);
+    put(large, 0x5d0, 0x600 + PKG::extractionBudget, 4);
+    put(large, 0x5c4, 1, 4); large[0x600] = 0; // Unbounded, unterminated name.
+    file = std::fopen(path, "wb"); assert(file);
+    assert(fwrite(large.data(), 1, large.size(), file) == large.size()); assert(fclose(file) == 0);
+    assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
+    const std::string capped(report.data());
+    assert(capped.find("Octets inspectés (budget partagé) : 1048576") != std::string::npos);
+    assert(capped.find("Octets copiés en mémoire : 0") != std::string::npos);
     char tiny[8]; assert(maxps4_pkg_inventory_report(path, tiny, sizeof(tiny)) != 0 && tiny[7] == 0);
     assert(maxps4_pkg_inventory_report(nullptr, tiny, sizeof(tiny)) != 0 && tiny[0] == 0);
     assert(maxps4_pkg_inventory_report(path, nullptr, 0) != 0);
