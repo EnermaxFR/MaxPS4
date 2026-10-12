@@ -156,7 +156,7 @@ int GuestELF::interpret(uint32_t budget, Execution& out) {
         if (!memory.fetch(out.rip, &op, 1)) return -EFAULT;
         const size_t width = (op == 0xB8 || op == 0x05) ? 5 : op == 0xC7 ? 10 : 1;
         uint8_t code[10] = {};
-        if (!memory.fetch(out.rip, code, width) || out.rip > UINT64_MAX - width) return -EFAULT;
+        if (out.rip > UINT64_MAX - width || !memory.fetch(out.rip, code, width)) return -EFAULT;
         const uint64_t next = out.rip + width;
         if (op == 0xB8 || op == 0x05) {
             if (op == 0x05 && !initialized) return -ENOTSUP;
