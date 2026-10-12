@@ -23,5 +23,15 @@ int main() {
     assert(guest_range_permitted(0x10fc, 4, 2, 0x1000, 0x100, 7));
     assert(!guest_range_permitted(UINT64_MAX - 1, 4, 2,
                                   UINT64_MAX - 8, 8, 6));
+    // Validate every byte position and length around a short segment end.
+    // This catches off-by-one errors independently of the hand-picked cases.
+    for (uint64_t address = 0x1ff8; address <= 0x2008; ++address) {
+        for (size_t length = 0; length <= 16; ++length) {
+            const bool expected = length != 0 && address >= 0x2000 &&
+                address - 0x2000 < 8 && length <= 8 - (address - 0x2000);
+            assert(guest_range_permitted(address, length, 4,
+                                         0x2000, 8, 6) == expected);
+        }
+    }
     std::puts("Guest range permission and overflow checks passed");
 }
