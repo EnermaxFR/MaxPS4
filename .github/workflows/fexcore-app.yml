@@ -44,6 +44,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/diagnostics
+          xcrun clang++ -std=c++23 -Wall -Wextra -Werror -I MaxPS4-iOS/Native \
+            MaxPS4-iOS/Native/maxps4_guest_elf.cpp \
+            MaxPS4-iOS/Tests/GuestELFMemoryTest.cpp -o build/guest-elf-memory-test
+          build/guest-elf-memory-test | tee build/diagnostics/guest-elf-memory-tests.txt
           node MaxPS4-iOS/Tests/StikScriptTest.js | tee build/diagnostics/stik-script-tests.txt
           xcrun clang++ -std=c++23 -DMAXPS4_TEST_DARWIN_JIT_POOL=1 \
             -I MaxPS4-iOS/Native MaxPS4-iOS/Native/maxps4_jit_memory.cpp \
@@ -60,11 +64,30 @@ jobs:
             MaxPS4-iOS/Sources/MaxPS4GuestMemory.swift \
             MaxPS4-iOS/Sources/MaxPS4ELFLoader.swift \
             MaxPS4-iOS/Sources/MaxPS4CPUPrototype.swift \
+            MaxPS4-iOS/Sources/MaxPS4SyntheticELFFEXBridge.swift \
             MaxPS4-iOS/Sources/MaxPS4FEXDiagnostic.swift MaxPS4-iOS/Tests/FEXSwiftDiagnosticTest.swift \
             -L build/fex-app-host -lMaxPS4FEXRuntime \
             -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" \
             -o build/fex-app-host/swift-fex-test
           build/fex-app-host/swift-fex-test | tee build/fex-app-host/swift-diagnostic-tests.txt
+      - name: Test actual ELF FEX position transfer and offscreen Metal readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc -parse-as-library -D MAXPS4_FEX_APP \
+            -import-objc-header MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h \
+            MaxPS4-iOS/Sources/MaxPS4GuestMemory.swift \
+            MaxPS4-iOS/Sources/MaxPS4ELFLoader.swift \
+            MaxPS4-iOS/Sources/MaxPS4CPUPrototype.swift \
+            MaxPS4-iOS/Sources/MaxPS4SyntheticELFFEXBridge.swift \
+            MaxPS4-iOS/Sources/MaxPS4FEXMetalState.swift \
+            MaxPS4-iOS/Sources/MaxPS4MetalPipeline.swift \
+            MaxPS4-iOS/Tests/FEXMetalIntegrationTest.swift \
+            -L build/fex-app-host -lMaxPS4FEXRuntime \
+            -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" \
+            -o build/fex-app-host/fex-metal-test
+          build/fex-app-host/fex-metal-test | tee build/fex-app-host/fex-metal-tests.txt
+          leaks --atExit -- build/fex-app-host/fex-metal-test 2>&1 | tee build/fex-app-host/fex-metal-leaks.txt
       - name: Check actual native and Swift heap cleanup on macOS
         shell: bash
         run: |

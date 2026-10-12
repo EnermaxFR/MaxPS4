@@ -15,9 +15,11 @@ struct MaxPS4FEXDiagnosticView: View {
                     Button(running ? "Test en cours…" : "Tester FEXCore") {
                         running = true
                         Task {
-                            let result = await Task.detached(priority: .userInitiated) {
-                                MaxPS4FEXDiagnostic.run()
-                            }.value
+                            let result = await withCheckedContinuation { continuation in
+                                MaxPS4FEXMetalExecution.queue.async {
+                                    continuation.resume(returning: MaxPS4FEXDiagnostic.run())
+                                }
+                            }
                             report = result
                             running = false
                         }

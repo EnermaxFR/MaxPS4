@@ -1315,6 +1315,15 @@ struct MaxPS4HomeView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.cyan)
                 .accessibilityIdentifier("maxps4.testFEXCore")
+                Button {
+                    showingMetalDiagnostic = true
+                } label: {
+                    Label("GPU Metal / FEX → Metal", systemImage: "cpu.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cyan)
+                .accessibilityIdentifier("maxps4.openFEXMetal")
                 Text("Jeu à diagnostiquer")
                     .font(.headline)
                 if emulator.games.isEmpty {

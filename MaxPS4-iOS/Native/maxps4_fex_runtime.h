@@ -19,11 +19,20 @@ void maxps4_fex_engine_close(maxps4_fex_engine *engine);
 int32_t maxps4_fex_engine_stage(const maxps4_fex_engine *engine);
 int32_t maxps4_fex_engine_cpuid(maxps4_fex_engine *engine, uint32_t leaf,
                               uint32_t subleaf, uint32_t out[4]);
-// Fixed mov/add/HLT x86-64 probe only. No user-provided code or host syscalls.
+// Compatibility synthetic ELF fixture routed through run_elf; no host syscalls.
 // Requires initialization and an available executable-memory provider.
 // No interpreter fallback within this function.
 int32_t maxps4_fex_engine_probe(maxps4_fex_engine *engine, uint64_t *result,
                               uint32_t *backend);
+// Executes a bounded static ELF64 ET_EXEC image through real FEX only.
+// Admits MOV EAX,imm32 / ADD EAX,imm32 / NOP / final HLT; no memory operands,
+// branches, relocations or syscalls. Budget counts every admitted instruction.
+// Segments are rebased into owned host mappings, preserving relative offsets;
+// entry reports the original ELF address, never a host pointer. No fallback.
+// Caller keeps file bytes immutable during the call and serializes engine close.
+int32_t maxps4_fex_engine_run_elf(maxps4_fex_engine *engine, const uint8_t *file,
+                                size_t length, uint32_t budget, uint64_t *result,
+                                uint32_t *backend, uint64_t *entry);
 // Existing bounded interpreter fallback; never describes its output as FEX JIT.
 // Caller keeps engine alive during calls and serializes close against them.
 int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine, const uint8_t *code,

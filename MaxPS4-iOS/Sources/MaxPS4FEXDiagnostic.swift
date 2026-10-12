@@ -55,9 +55,14 @@ struct MaxPS4FEXDiagnostic: Sendable {
         var value: UInt64 = 0
         var selected: UInt32 = 0
         var jitStatus = initialized
+        var elfEntry: UInt64 = 0
         var status: Int32
         if initialized == 0 {
-            jitStatus = maxps4_fex_engine_probe(engine, &value, &selected)
+            let file = MaxPS4SyntheticELFFEXBridge.syntheticELF()
+            jitStatus = file.withUnsafeBytes {
+                maxps4_fex_engine_run_elf(engine, $0.bindMemory(to: UInt8.self).baseAddress,
+                                          $0.count, 3, &value, &selected, &elfEntry)
+            }
             status = jitStatus
         } else { status = initialized }
         if status != 0 {
@@ -88,6 +93,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
         Debugger détecté : \(debugger == 1 ? "oui" : debugger == 0 ? "non" : "inconnu") (pas un droit JIT)
         Initialisation FEX JIT : statut \(initialized)
         Exécution FEX JIT : statut \(jitStatus) (0 requis pour un succès JIT)
+        Point d’entrée ELF64 invité : 0x\(String(elfEntry, radix: 16))
         Fournisseur RX/RW : état \(maxps4_jit_state()), erreur \(maxps4_jit_error())
         Échec JIT précis : \(failureName) (étape \(failureStage))
         Code Mach : \(maxps4_jit_failure_mach()), région : \(maxps4_jit_failure_region())
