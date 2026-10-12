@@ -67,6 +67,12 @@ int32_t maxps4_fex_engine_read_ps4(maxps4_fex_engine *engine, uint64_t address,
 // Serialized against stage/close; does not dispatch CPU or initialize JIT.
 int32_t maxps4_fex_engine_write_ps4(maxps4_fex_engine *engine, uint64_t address,
     const uint8_t *input, size_t length);
+// Query whether a staged PS4 guest range is readable (4), writable (2)
+// or executable (1). Requires nonzero valid permission bits and a nonempty
+// fully mapped range. Writes 0 or 1 to permitted, never a host pointer.
+// Does not dispatch guest instructions.
+int32_t maxps4_fex_engine_query_ps4(maxps4_fex_engine *engine, uint64_t address,
+    size_t length, uint32_t permissions, uint32_t *permitted);
 // Existing bounded interpreter fallback; never describes its output as FEX JIT.
 // Caller keeps engine alive during calls and serializes close against them.
 int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine, const uint8_t *code,
