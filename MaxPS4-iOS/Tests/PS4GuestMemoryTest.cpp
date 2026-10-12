@@ -16,6 +16,21 @@ int main() {
     assert(!memory.executable(0x10000, 4));
     assert(memory.executable(0x1000, 1));
     assert(!memory.write(0x1000, bytes, sizeof(bytes)));
+    // Reject writes crossing the RW segment boundary, without partial mutation.
+    const auto& regions = image.segments();
+    for (const auto& region : regions) {
+        if ((region.permissions & 7U) != 6U || region.memory_size < 4) continue;
+        const uint64_t last = region.address + region.memory_size - 1;
+        uint8_t sentinel = 0;
+        assert(memory.read(last, &sentinel, 1));
+        assert(!memory.write(last, bytes, sizeof(bytes)));
+        uint8_t after = 0;
+        assert(memory.read(last, &after, 1));
+        assert(after == sentinel);
+    }
+    assert(!memory.read(0x1000, output, 0));
+    assert(!memory.write(0x10000, bytes, 0));
+
     assert(!memory.read(UINT64_MAX, output, sizeof(output)));
     assert(!memory.write(UINT64_MAX, bytes, sizeof(bytes)));
     assert(!memory.read(0x10000, nullptr, 4));
