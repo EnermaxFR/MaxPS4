@@ -30,7 +30,7 @@ namespace {
 class ProbeAddressSpace final : public FEXCore::HLE::SyscallHandler {
 public:
     ProbeAddressSpace() { OSABI = FEXCore::HLE::SyscallOSABI::OS_GENERIC; }
-    const maxps4::GuestELF* image = nullptr;
+    maxps4::GuestELF* image = nullptr;
     uint64_t HandleSyscall(FEXCore::Core::CpuStateFrame*, FEXCore::HLE::SyscallArguments*) override {
         return static_cast<uint64_t>(-ENOSYS);
     }
@@ -41,7 +41,7 @@ public:
             // FEX receives rebased host addresses only for the restricted
             // admitted program. Resolve executable ranges through the same
             // guest permission contract used by entry dispatch.
-            maxps4::PS4GuestMemory memory(*const_cast<maxps4::GuestELF*>(image));
+            maxps4::PS4GuestMemory memory(*image);
             const size_t executable_bytes = memory.contiguous(
                 segment.address, segment.file_size, 5);
             if (!executable_bytes) continue;
