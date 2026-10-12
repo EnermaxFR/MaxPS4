@@ -62,6 +62,11 @@ int32_t maxps4_fex_engine_stage_ps4(maxps4_fex_engine *engine, const uint8_t *fi
 // Failure leaves caller bytes untouched. Serialized against stage/close.
 int32_t maxps4_fex_engine_read_ps4(maxps4_fex_engine *engine, uint64_t address,
     uint8_t *output, size_t length);
+// Exact write to a staged writable, non-executable guest segment.
+// No host pointers cross the ABI. Rejected accesses leave guest bytes intact.
+// Serialized against stage/close; does not dispatch CPU or initialize JIT.
+int32_t maxps4_fex_engine_write_ps4(maxps4_fex_engine *engine, uint64_t address,
+    const uint8_t *input, size_t length);
 // Existing bounded interpreter fallback; never describes its output as FEX JIT.
 // Caller keeps engine alive during calls and serializes close against them.
 int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine, const uint8_t *code,
