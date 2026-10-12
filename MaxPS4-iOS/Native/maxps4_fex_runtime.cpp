@@ -38,10 +38,18 @@ public:
         FEXCore::Core::InternalThreadState*, uint64_t address) override {
         if (image) for (const auto& segment : image->segments()) {
             if (!(segment.permissions & 1)) continue;
-            const auto* pointer = image->translate(segment.address, segment.memory_size, 5);
+            // FEX receives rebased host addresses only for the restricted
+            // admitted program. Resolve executable ranges through the same
+            // guest permission contract used by entry dispatch.
+            maxps4::PS4GuestMemory memory(*const_cast<maxps4::GuestELF*>(image));
+            const size_t executable_bytes = memory.contiguous(
+                segment.address, segment.file_size, 5);
+            if (!executable_bytes) continue;
+            const auto* pointer = image->translate(segment.address, executable_bytes, 5);
+            if (!pointer) continue;
             const auto begin = reinterpret_cast<uintptr_t>(pointer);
-            if (pointer && address >= begin && address - begin < segment.file_size)
-                return {begin, segment.file_size, false};
+            if (address >= begin && address - begin < executable_bytes)
+                return {begin, executable_bytes, false};
         }
         return {0, 0, false};
     }
