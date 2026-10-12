@@ -45,28 +45,34 @@ private final class TriangleRenderer: NSObject, MTKViewDelegate {
         previousTime = now
         var uniforms = MaxPS4MetalPipeline.uniforms(elapsed: elapsed,
             width: Double(view.drawableSize.width), height: Double(view.drawableSize.height))
-        encoder.setRenderPipelineState(renderMode == 0 ? pipeline : texturedPipeline)
-        if renderMode != 0 {
+        encoder.setRenderPipelineState((renderMode == 0 || renderMode == 4) ? pipeline : texturedPipeline)
+        if renderMode != 0 && renderMode != 4 {
             encoder.setVertexBuffer(quadVertices, offset: 0, index: 1)
         }
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<SIMD3<Float>>.stride, index: 0)
         if renderMode == 0 {
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         } else if renderMode == 4 {
-            // Experimental PM4 type-3 DRAW_INDEX_AUTO packet, count=2 dwords.
-            // The draw is emitted only after the command buffer is decoded.
-            let pm4: [UInt32] = [(3 << 30) | (1 << 16) | (0x2d << 8), 3, 0]
-            let header = pm4[0]
-            let type = header >> 30
-            let opcode = (header >> 8) & 0xff
-            let count = Int((header >> 16) & 0x3fff) + 1
-            if type == 3 && opcode == 0x2d && count == 2 &&
-                pm4.count == count + 1 && pm4[1] == 3 && pm4[2] == 0 {
-                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: Int(pm4[1]))
-            } else {
-                view.isPaused = true
-                report("PM4 invalide : aucun draw soumis", true)
+            // Synthetic PM4 fixture with native shaders; decoding lives in C++ only.
+            #if MAXPS4_FEX_APP
+            let pm4: [UInt32] = [(3 << 30) | (1 << 16) | (0x2d << 8), 3, 2]
+            var drawn = 0
+            let status = pm4.withUnsafeBufferPointer { words in
+                maxps4_pm4_encode_triangle(words.baseAddress, words.count,
+                                          encoder, pipeline, &drawn)
             }
+            if status != 0 || drawn != 1 {
+                encoder.endEncoding()
+                view.isPaused = true
+                report("PM4 rejeté par le décodeur C++ (code \(status))", true)
+                return
+            }
+            #else
+            encoder.endEncoding()
+            view.isPaused = true
+            report("Pont PM4 natif absent de ce build", true)
+            return
+            #endif
         } else {
             // Two separate objects, two texture bindings and two GPU draw commands.
             var left = objectOffset
@@ -269,3 +275,4 @@ struct MaxPS4MetalDiagnosticView: View {
     }
 
 }
+
