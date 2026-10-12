@@ -28,7 +28,7 @@ jobs:
           /tmp/elf-execution
       - name: Verify staged PS4 guest memory adapter
         run: |
-          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer -I MaxPS4-iOS/Native MaxPS4-iOS/Native/maxps4_guest_elf.cpp MaxPS4-iOS/Native/PS4ExecutableImage.cpp MaxPS4-iOS/Tests/PS4GuestMemoryTest.cpp -o /tmp/ps4-memory-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer -I MaxPS4-iOS/Native MaxPS4-iOS/Native/maxps4_guest_elf.cpp MaxPS4-iOS/Tests/PS4GuestMemoryTest.cpp -o /tmp/ps4-memory-test
           /tmp/ps4-memory-test
       - name: Compile interpreter for iPhone ARM64
         if: runner.os == 'macOS'
