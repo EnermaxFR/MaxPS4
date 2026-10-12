@@ -1,7 +1,7 @@
 import Foundation
 
-/// Stage one: admit only the exact immutable program executed by the FEX probe.
-/// Guest virtual addresses are never treated as host pointers. No general ELF execution.
+/// Controlled ELF fixture and admission tests. Native execution loads the ELF's
+/// segments into owned mappings and translates its entry into a FEX guest pointer.
 enum MaxPS4SyntheticELFFEXBridge {
     static let program = Data([0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xF4])
     static let entry: UInt64 = 0x1000
@@ -63,20 +63,28 @@ enum MaxPS4SyntheticELFFEXBridge {
 
 #if MAXPS4_FEX_APP
     /// Uses the established runtime lifecycle, authorized JIT provider and W^X policy.
-    /// FEX currently executes its own byte-identical copy, not the guest virtual mapping.
+    /// Native ELF validation is independent of the Swift diagnostic loader.
     static func run(url: URL) throws -> Result {
-        try run(url: url) {
-            var engine: OpaquePointer?
-            let opened = maxps4_fex_engine_open(&engine)
-            guard opened == 0, let engine else { return (opened == 0 ? -12 : opened, 0, 0) }
-            defer { maxps4_fex_engine_close(engine) }
-            let initialized = maxps4_fex_engine_initialize(engine)
-            guard initialized == 0 else { return (initialized, 0, 0) }
-            var value: UInt64 = 0
-            var backend: UInt32 = 0
-            let status = maxps4_fex_engine_probe(engine, &value, &backend)
-            return (status, value, backend)
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        guard let size = attributes[.size] as? NSNumber,
+              size.uint64Value <= 32 * 1024 * 1024 else { throw BridgeError.unsupportedImage }
+        let file = try Data(contentsOf: url)
+        var engine: OpaquePointer?
+        let opened = maxps4_fex_engine_open(&engine)
+        guard opened == 0, let engine else { throw BridgeError.nativeFailure(opened == 0 ? -12 : opened) }
+        defer { maxps4_fex_engine_close(engine) }
+        let initialized = maxps4_fex_engine_initialize(engine)
+        guard initialized == 0 else { throw BridgeError.nativeFailure(initialized) }
+        var value: UInt64 = 0
+        var backend: UInt32 = 0
+        var entry: UInt64 = 0
+        let status = file.withUnsafeBytes {
+            maxps4_fex_engine_run_elf(engine, $0.bindMemory(to: UInt8.self).baseAddress,
+                                      $0.count, 65536, &value, &backend, &entry)
         }
+        guard status == 0 else { throw BridgeError.nativeFailure(status) }
+        guard backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT) else { throw BridgeError.unexpectedBackend }
+        return Result(rax: value, backend: backend)
     }
 #endif
 }

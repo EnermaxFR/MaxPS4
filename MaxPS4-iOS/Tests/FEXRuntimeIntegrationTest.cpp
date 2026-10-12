@@ -1,5 +1,6 @@
 #include "maxps4_fex_runtime.h"
 #include "maxps4_native.h"
+#include "GuestELFFixture.h"
 #include <FEXCore/Utils/AllocatorHooks.h>
 #include <cerrno>
 #include <cstdio>
@@ -55,6 +56,11 @@ int main() {
         CHECK(maxps4_fex_engine_open(&first) == 0 && first);
         CHECK(maxps4_fex_engine_open(&second) == 0 && second);
         CHECK(maxps4_fex_engine_stage(first) == MAXPS4_FEX_CONTEXT_CREATED);
+        auto not_initialized = guest_test::elf();
+        uint64_t pending_entry = 99;
+        CHECK(maxps4_fex_engine_run_elf(first, not_initialized.data(), not_initialized.size(), 3,
+            &probe_result, &probe_backend, &pending_entry) == -EAGAIN);
+        CHECK(probe_result == 0 && probe_backend == 0 && pending_entry == 0x1000);
 #if TARGET_OS_IPHONE
         CHECK(maxps4_fex_engine_probe(first, &probe_result, &probe_backend) == -EAGAIN);
         CHECK(probe_result == 0 && probe_backend == 0);
@@ -72,6 +78,37 @@ int main() {
 #if !TARGET_OS_IPHONE
         CHECK(maxps4_fex_engine_probe(first, nullptr, &probe_backend) == -EINVAL);
         CHECK(probe_backend == 0);
+        uint64_t elf_entry = 99;
+        auto elf = guest_test::elf(100, 23, true);
+        CHECK(maxps4_fex_engine_run_elf(first, elf.data(), elf.size(), 3,
+            &probe_result, &probe_backend, &elf_entry) == 0);
+        CHECK(elf_entry == 0x1000 && probe_result == 123 && probe_backend == MAXPS4_CPU_FEX_ARM64_JIT);
+        // Entry offset is honored; bytes preceding it must never execute.
+        guest_test::put(elf, 0x1005, 24, 8);
+        elf[189] = 0xB8;
+        guest_test::put(elf, 77, 190, 4);
+        CHECK(maxps4_fex_engine_run_elf(first, elf.data(), elf.size(), 2,
+            &probe_result, &probe_backend, &elf_entry) == 0);
+        CHECK(elf_entry == 0x1005 && probe_result == 77 && probe_backend == MAXPS4_CPU_FEX_ARM64_JIT);
+        CHECK(maxps4_fex_engine_run_elf(first, elf.data(), elf.size(), 1,
+            &probe_result, &probe_backend, &elf_entry) == -E2BIG);
+        CHECK(probe_result == 0 && probe_backend == 0 && elf_entry == 0);
+        elf[194] = 0xC3;
+        CHECK(maxps4_fex_engine_run_elf(first, elf.data(), elf.size(), 3,
+            &probe_result, &probe_backend, &elf_entry) == -ENOTSUP);
+        CHECK(probe_result == 0 && probe_backend == 0);
+        elf = guest_test::elf(UINT32_MAX, 2);
+        CHECK(maxps4_fex_engine_run_elf(first, elf.data(), elf.size(), 3,
+            &probe_result, &probe_backend, &elf_entry) == 0);
+        CHECK(probe_result == 1 && probe_backend == MAXPS4_CPU_FEX_ARM64_JIT);
+        // Reused mmap addresses must not run a cached prior ELF translation.
+        for (uint32_t value = 50; value < 54; ++value) {
+            elf = guest_test::elf(value, 9);
+            CHECK(maxps4_fex_engine_run_elf(first, elf.data(), elf.size(), 3,
+                &probe_result, &probe_backend, &elf_entry) == 0);
+            CHECK(probe_result == value + 9 && probe_backend == MAXPS4_CPU_FEX_ARM64_JIT);
+        }
+        std::puts("PASS real ELF segments/entry -> FEX ARM64 JIT; varied RAX, overflow, admission and budget");
         for (unsigned probe = 0; probe != 2; ++probe) {
             std::printf("BEGIN real FEX ARM64 JIT fixed guest probe cycle=%u attempt=%u\n", repeat, probe);
             CHECK(maxps4_fex_engine_probe(first, &probe_result, &probe_backend) == 0);

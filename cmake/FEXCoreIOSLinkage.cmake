@@ -15,6 +15,7 @@ function(maxps4_complete_fexcore_linkage)
     add_library(MaxPS4FEXRuntime SHARED
       "${NATIVE}/maxps4_jit_memory.cpp"
       "${NATIVE}/maxps4_fex_runtime.cpp"
+      "${NATIVE}/maxps4_guest_elf.cpp"
       "${NATIVE}/maxps4_native.cpp"
       "${NATIVE}/aether_jit_allocator_abi.cpp"
       "${NATIVE}/aether_guest_cpu_adapter.cpp"
