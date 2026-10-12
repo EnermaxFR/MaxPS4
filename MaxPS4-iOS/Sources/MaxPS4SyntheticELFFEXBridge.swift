@@ -69,6 +69,11 @@ enum MaxPS4SyntheticELFFEXBridge {
         guard let size = attributes[.size] as? NSNumber,
               size.uint64Value <= 32 * 1024 * 1024 else { throw BridgeError.unsupportedImage }
         let file = try Data(contentsOf: url)
+        return try run(file: file)
+    }
+
+    static func run(file: Data) throws -> Result {
+        guard file.count <= 32 * 1024 * 1024 else { throw BridgeError.unsupportedImage }
         var engine: OpaquePointer?
         let opened = maxps4_fex_engine_open(&engine)
         guard opened == 0, let engine else { throw BridgeError.nativeFailure(opened == 0 ? -12 : opened) }

@@ -9,7 +9,7 @@ private final class TriangleRenderer: NSObject, MTKViewDelegate {
     private let alternateCheckerboard: MTLTexture
     private let quadVertices: MTLBuffer
     var renderMode = 0
-    var touchOffset = SIMD2<Float>(0, 0)
+    var objectOffset = SIMD2<Float>(-0.43, 0)
     private var elapsed: TimeInterval = 0
     private var previousTime: TimeInterval?
     private var reportedFrame = false
@@ -54,7 +54,7 @@ private final class TriangleRenderer: NSObject, MTKViewDelegate {
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         } else {
             // Two separate objects, two texture bindings and two GPU draw commands.
-            var left = SIMD2<Float>(-0.43 + touchOffset.x, touchOffset.y)
+            var left = objectOffset
             encoder.setVertexBytes(&left, length: MemoryLayout<SIMD2<Float>>.stride, index: 2)
             encoder.setFragmentTexture(checkerboard, index: 0)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
@@ -85,7 +85,7 @@ private struct TriangleSurface: UIViewRepresentable {
     let device: MTLDevice
     let active: Bool
     let renderMode: Int
-    let touchOffset: SIMD2<Float>
+    let objectOffset: SIMD2<Float>
     let report: (String, Bool) -> Void
 
     final class Coordinator {
@@ -109,7 +109,7 @@ private struct TriangleSurface: UIViewRepresentable {
     func updateUIView(_ view: MTKView, context: Context) {
         context.coordinator.renderer?.report = report
         context.coordinator.renderer?.renderMode = renderMode
-        context.coordinator.renderer?.touchOffset = touchOffset
+        context.coordinator.renderer?.objectOffset = objectOffset
         view.isPaused = !active || context.coordinator.renderer == nil
         if !active { context.coordinator.renderer?.pause() }
     }
@@ -128,6 +128,11 @@ struct MaxPS4MetalDiagnosticView: View {
     @State private var running = false
     @State private var renderMode = 0
     @State private var touchOffset = SIMD2<Float>(0, 0)
+    @State private var cpuState = MaxPS4FEXMetalState()
+    @State private var cpuBusy = false
+    @State private var cpuRequest = UUID()
+    @State private var cpuStatus = "Aucun résultat FEX appliqué"
+    @State private var cpuInitial = 750
     @State private var visible = false
     @State private var failed = false
     @State private var status = "Prêt — rendu arrêté"
@@ -145,12 +150,17 @@ struct MaxPS4MetalDiagnosticView: View {
                             Text("Triangle").tag(0)
                             Text("Deux textures").tag(1)
                             Text("Interactif").tag(2)
+                            Text("FEX → Metal").tag(3)
                         }
                         .pickerStyle(.segmented)
-                        .onChange(of: renderMode) { _ in status = "Changement de mode Metal…" }
+                        .onChange(of: renderMode) { _ in
+                            status = "Changement de mode Metal…"
+                            invalidateCPU()
+                        }
                         TriangleSurface(device: device,
                             active: running && visible && scenePhase == .active && !failed,
-                            renderMode: renderMode, touchOffset: renderMode == 2 ? touchOffset : SIMD2<Float>(0, 0)) { message, error in
+                            renderMode: renderMode, objectOffset: MaxPS4FEXMetalState.objectOffset(
+                                mode: renderMode, touch: touchOffset, cpu: cpuState.cpuOffset)) { message, error in
                                 if running || error { status = message }
                                 failed = error
                                 if error { running = false }
@@ -168,6 +178,20 @@ struct MaxPS4MetalDiagnosticView: View {
                         if renderMode == 2 {
                             Text("Glisse ton doigt sur l’image pour déplacer le rectangle bleu.")
                             Button("Recentrer") { touchOffset = SIMD2<Float>(0, 0) }
+                        }
+                        if renderMode == 3 {
+                            Text("ELF64 x86-64 : MOV EAX,n ; ADD EAX,250 ; HLT. Seul un résultat du backend FEXCore JIT déplace le rectangle bleu.")
+                            Picker("Entrée CPU", selection: $cpuInitial) {
+                                Text("Gauche").tag(0)
+                                Text("Centre").tag(750)
+                                Text("Droite").tag(1500)
+                            }.pickerStyle(.segmented)
+                            Button(cpuBusy ? "Exécution FEX…" : "Exécuter ELF → Metal") { executeCPU() }
+                                .disabled(cpuBusy || scenePhase != .active)
+                                .accessibilityIdentifier("maxps4.fexMetalExecute")
+                            Button("Recentrer") { invalidateCPU(); cpuState.reset(); cpuStatus = "Recentré — aucun résultat CPU appliqué" }
+                            Text(cpuStatus).accessibilityIdentifier("maxps4.fexMetalStatus")
+                            Text("JIT autorisé via StikDebug requis sur iPhone. Aucun jeu PS4 ni GPU PS4 n’est exécuté.")
                         }
                         Button(running ? "Arrêter le rendu" : "Démarrer le rendu") {
                             running.toggle()
@@ -188,7 +212,40 @@ struct MaxPS4MetalDiagnosticView: View {
             .navigationTitle("Diagnostic GPU")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } } }
             .onAppear { visible = true }
-            .onDisappear { visible = false; running = false }
+            .onDisappear { visible = false; running = false; invalidateCPU() }
+            .onChange(of: scenePhase) { phase in
+                if phase != .active { invalidateCPU() }
+            }
         }
     }
+
+    private func invalidateCPU() {
+        cpuRequest = UUID()
+        cpuBusy = false
+    }
+
+    private func executeCPU() {
+        let request = UUID()
+        cpuRequest = request
+        cpuBusy = true
+        cpuStatus = "Exécution ELF64 par FEXCore…"
+        let initial = UInt32(cpuInitial)
+        MaxPS4FEXMetalExecution.queue.async {
+            let result = Result { try MaxPS4FEXMetalExecution.run(initial: initial) }
+            DispatchQueue.main.async {
+                // Discard completion after mode switch, background, reset or dismissal.
+                guard cpuRequest == request, visible, scenePhase == .active, renderMode == 3 else { return }
+                cpuBusy = false
+                do {
+                    let value = try result.get()
+                    try cpuState.accept(value)
+                    cpuStatus = "FEXCore JIT ARM64 — RAX=\(value.rax), x=\(cpuState.cpuOffset.x) — résultat appliqué à Metal"
+                } catch {
+                    cpuState.reset()
+                    cpuStatus = "Échec ELF/FEX : \(error). Aucun résultat CPU appliqué. Vérifier l’autorisation JIT."
+                }
+            }
+        }
+    }
+
 }

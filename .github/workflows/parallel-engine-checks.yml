@@ -41,6 +41,22 @@ jobs:
             -o build/parallel/elf/swift-prototypes-test
           build/parallel/elf/swift-prototypes-test
 
+  fex-metal-state:
+    name: FEX Metal coordinate and touch isolation tests
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run position state tests without a JIT substitute
+        run: |
+          mkdir -p build/parallel/state
+          swiftc -parse-as-library MaxPS4-iOS/Sources/MaxPS4GuestMemory.swift \
+            MaxPS4-iOS/Sources/MaxPS4ELFLoader.swift \
+            MaxPS4-iOS/Sources/MaxPS4CPUPrototype.swift \
+            MaxPS4-iOS/Sources/MaxPS4SyntheticELFFEXBridge.swift \
+            MaxPS4-iOS/Sources/MaxPS4FEXMetalState.swift \
+            MaxPS4-iOS/Tests/FEXMetalStateTest.swift -o build/parallel/state/test
+          build/parallel/state/test
+
   cpu-native-abi:
     name: CPU native ABI (iOS ARM64)
     runs-on: macos-latest
