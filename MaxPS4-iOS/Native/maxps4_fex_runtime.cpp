@@ -69,6 +69,7 @@ struct maxps4_fex_engine {
     // It outlives the context. Only admitted no-fault straight-line code executes.
     FEXCore::SignalDelegator signals;
     ProbeAddressSpace probe;
+    maxps4::GuestELF staged_ps4;
     fextl::unique_ptr<FEXCore::Context::Context> context;
     int32_t stage = MAXPS4_FEX_CONTEXT_CREATED;
 };
@@ -277,6 +278,33 @@ int32_t runELF(maxps4_fex_engine *engine,
 
 
 } // namespace
+extern "C" int32_t maxps4_fex_engine_stage_ps4(maxps4_fex_engine* engine,
+    const uint8_t* file, size_t length, uint64_t* entry, uint32_t* segments, uint32_t* blockers) {
+    if (entry) *entry = 0;
+    if (segments) *segments = 0;
+    if (blockers) *blockers = 0;
+    if (!engine) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    engine->staged_ps4.clear();
+    if (!entry || !segments || !blockers) return -EINVAL;
+    const int error = engine->staged_ps4.stage_ps4(file, length);
+    if (error) return error;
+    *entry = engine->staged_ps4.entry();
+    *segments = static_cast<uint32_t>(engine->staged_ps4.segments().size());
+    *blockers = engine->staged_ps4.ps4_blockers();
+    std::fprintf(stderr, "MaxPS4 PS4 native staging: entry=0x%llx segments=%u blockers=0x%x; CPU not dispatched\n",
+        static_cast<unsigned long long>(*entry), *segments, *blockers);
+    return 0;
+}
+extern "C" int32_t maxps4_fex_engine_read_ps4(maxps4_fex_engine* engine,
+    uint64_t address, uint8_t* output, size_t length) {
+    if (!engine || !output || !length || length > 1024 * 1024) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    const auto* bytes = engine->staged_ps4.translate(address, length, 4);
+    if (!bytes) return -EFAULT;
+    std::memcpy(output, bytes, length);
+    return 0;
+}
 extern "C" int32_t maxps4_fex_engine_run_elf(maxps4_fex_engine* engine,
     const uint8_t* file, size_t length, uint32_t budget, uint64_t* result,
     uint32_t* backend, uint64_t* entry) {
