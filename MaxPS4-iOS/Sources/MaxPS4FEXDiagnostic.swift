@@ -55,6 +55,9 @@ struct MaxPS4FEXDiagnostic: Sendable {
         default: name = "Aucun"
         }
         let passed = status == 0 && cpuidStatus == 0 && value == 42 && selected != 0 && leases == 0
+        let stageNames = ["inconnu", "mailbox-status", "rx-address-validation", "rx-address-overlap", "rx-protection-check", "vm-remap", "rw-current-protection", "rw-max-protection", "rx-max-protection", "alias-protection-check", "code-cache-guard-page", "canary-alias-coherence", "canary-execution"]
+        let failureStage = Int(maxps4_jit_failure_stage())
+        let failureName = stageNames.indices.contains(failureStage) ? stageNames[failureStage] : "inconnu"
         let message = """
         Système : \(ProcessInfo.processInfo.operatingSystemVersionString)
         Runtime FEX Darwin : contexte créé, stade \(stage)
@@ -63,6 +66,8 @@ struct MaxPS4FEXDiagnostic: Sendable {
         Initialisation FEX JIT : statut \(initialized)
         Exécution FEX JIT : statut \(jitStatus) (0 requis pour un succès JIT)
         Fournisseur RX/RW : état \(maxps4_jit_state()), erreur \(maxps4_jit_error())
+        Échec JIT précis : \(failureName) (étape \(failureStage))
+        Code Mach : \(maxps4_jit_failure_mach()), région : \(maxps4_jit_failure_region())
         Régions encore utilisées après nettoyage : \(leases)
         Exécution x86-64 : statut \(status), résultat \(status == 0 ? String(value) : "absent")
         Backend : \(name)

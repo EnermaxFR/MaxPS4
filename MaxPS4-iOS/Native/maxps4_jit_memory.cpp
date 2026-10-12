@@ -1,6 +1,7 @@
 #include "maxps4_jit_memory.h"
 #include <TargetConditionals.h>
 #include <cerrno>
+#include <os/log.h>
 #if TARGET_OS_IPHONE || defined(MAXPS4_TEST_DARWIN_JIT_POOL)
 #include <mach/mach.h>
 #include <mach/vm_map.h>
@@ -30,19 +31,31 @@ std::array<Region, 3> regions {};
 std::mutex lock;
 uint64_t expected_nonce = 0;
 int state = 0, failure = 0;
+int failure_stage = 0, failure_mach = 0, failure_region = -1;
+int active_region = -1;
 size_t page_size = 0;
 
 bool protection(uintptr_t address, size_t bytes, vm_prot_t required) {
-    vm_address_t base = address;
-    vm_size_t size = 0;
-    vm_region_basic_info_data_64_t info {};
-    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
-    mach_port_t object = MACH_PORT_NULL;
-    const auto kr = vm_region_64(mach_task_self(), &base, &size,
-        VM_REGION_BASIC_INFO_64, reinterpret_cast<vm_region_info_t>(&info), &count, &object);
-    if (object != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), object);
-    return kr == KERN_SUCCESS && base == address && size >= bytes &&
-        info.protection == required;
+    // vm_region_64 describes one VM entry, not necessarily the entire RX pool.
+    // Verify every contiguous subregion without relaxing W^X or accepting gaps.
+    if (!bytes || address > UINTPTR_MAX - bytes) return false;
+    const uintptr_t end = address + bytes;
+    uintptr_t cursor = address;
+    while (cursor < end) {
+        vm_address_t base = static_cast<vm_address_t>(cursor);
+        vm_size_t size = 0;
+        vm_region_basic_info_data_64_t info {};
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object = MACH_PORT_NULL;
+        const auto kr = vm_region_64(mach_task_self(), &base, &size,
+            VM_REGION_BASIC_INFO_64, reinterpret_cast<vm_region_info_t>(&info), &count, &object);
+        if (object != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), object);
+        if (kr != KERN_SUCCESS || base > cursor || size == 0 ||
+            base > UINTPTR_MAX - size || base + size <= cursor ||
+            info.protection != required) return false;
+        cursor = base + size;
+    }
+    return true;
 }
 void destroy_regions() {
     for (auto& region : regions) {
@@ -102,7 +115,14 @@ int execute_canary(uintptr_t address) {
     }
     return error;
 }
-int reject(int error) {
+int reject_stage(int error, const char* stage, kern_return_t kr = KERN_SUCCESS) {
+    static constexpr const char* stages[] = {"mailbox-status", "rx-address-validation", "rx-address-overlap", "rx-protection-check", "vm-remap", "rw-current-protection", "rw-max-protection", "rx-max-protection", "alias-protection-check", "code-cache-guard-page", "canary-alias-coherence", "canary-execution"};
+    failure_stage = 0;
+    for (int i = 0; i < 12; ++i) if (std::strcmp(stage, stages[i]) == 0) { failure_stage = i + 1; break; }
+    failure_mach = kr;
+    failure_region = active_region;
+    os_log_error(OS_LOG_DEFAULT, "MaxPS4 JIT memory rejected at %{public}s: errno=%{public}d kern_return=%{public}d", stage, error, kr);
+
     destroy_regions();
     state = 3;
     failure = error;
@@ -142,45 +162,47 @@ extern "C" int32_t maxps4_jit_prepare() {
     if (state != 1) return -EACCES;
     if (mailbox.nonce != expected_nonce) return -EAGAIN;
     std::atomic_thread_fence(std::memory_order_acquire);
-    if (mailbox.status != 1) return reject(EACCES);
+    if (mailbox.status != 1) return reject_stage(EACCES, "mailbox-status");
     const std::array sizes {size_t{16384}, size_t{16 * 1024 * 1024}, page_size};
     // Claim ALL addresses before attempting remaps, so rollback releases every
     // debugger-owned RX allocation even if the first remap is denied.
     for (size_t i = 0; i < regions.size(); ++i) {
         const auto rx = static_cast<uintptr_t>(mailbox.rx[i]);
-        if (!rx || rx % page_size || rx > UINTPTR_MAX - sizes[i]) return reject(EINVAL);
+        if (!rx || rx % page_size || rx > UINTPTR_MAX - sizes[i]) return reject_stage(EINVAL, "rx-address-validation");
         for (size_t j = 0; j < i; ++j)
-            if (rx < regions[j].rx + regions[j].size && regions[j].rx < rx + sizes[i]) return reject(EINVAL);
+            if (rx < regions[j].rx + regions[j].size && regions[j].rx < rx + sizes[i]) return reject_stage(EINVAL, "rx-address-overlap");
         regions[i] = {0, rx, sizes[i], false};
     }
     for (auto& region : regions) {
-        if (!protection(region.rx, region.size, VM_PROT_READ | VM_PROT_EXECUTE)) return reject(EACCES);
+        active_region = static_cast<int>(&region - regions.data());
+        if (!protection(region.rx, region.size, VM_PROT_READ | VM_PROT_EXECUTE)) return reject_stage(EACCES, "rx-protection-check");
         vm_address_t rw = 0;
         vm_prot_t current = 0, maximum = 0;
         auto kr = vm_remap(mach_task_self(), &rw, region.size, 0, VM_FLAGS_ANYWHERE,
             mach_task_self(), region.rx, FALSE, &current, &maximum, VM_INHERIT_NONE);
-        if (kr != KERN_SUCCESS) return reject(EACCES);
+        if (kr != KERN_SUCCESS) return reject_stage(EACCES, "vm-remap", kr);
         region.rw = rw;
         // Lower both ceilings: NEVER turn the executable alias writable.
         kr = vm_protect(mach_task_self(), rw, region.size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
-        if (kr != KERN_SUCCESS) return reject(EACCES);
+        if (kr != KERN_SUCCESS) return reject_stage(EACCES, "rw-current-protection", kr);
         kr = vm_protect(mach_task_self(), rw, region.size, TRUE, VM_PROT_READ | VM_PROT_WRITE);
-        if (kr != KERN_SUCCESS) return reject(EACCES);
+        if (kr != KERN_SUCCESS) return reject_stage(EACCES, "rw-max-protection", kr);
         kr = vm_protect(mach_task_self(), region.rx, region.size, TRUE, VM_PROT_READ | VM_PROT_EXECUTE);
-        if (kr != KERN_SUCCESS || !protection(rw, region.size, VM_PROT_READ | VM_PROT_WRITE) ||
-            !protection(region.rx, region.size, VM_PROT_READ | VM_PROT_EXECUTE)) return reject(EACCES);
+        if (kr != KERN_SUCCESS) return reject_stage(EACCES, "rx-max-protection", kr);
+        if (!protection(rw, region.size, VM_PROT_READ | VM_PROT_WRITE) ||
+            !protection(region.rx, region.size, VM_PROT_READ | VM_PROT_EXECUTE)) return reject_stage(EACCES, "alias-protection-check");
     }
     if (vm_protect(mach_task_self(), regions[1].rw + regions[1].size - page_size,
-        page_size, FALSE, VM_PROT_NONE) != KERN_SUCCESS) return reject(EACCES);
+        page_size, FALSE, VM_PROT_NONE) != KERN_SUCCESS) return reject_stage(EACCES, "code-cache-guard-page");
     // A native-memory test, NOT the guest/FEX test or evidence of FEX success.
     const uint32_t code[] = {0x52800540U, 0xD65F03C0U}; // mov w0,#42; ret
     auto& canary = regions[2];
     std::memcpy(reinterpret_cast<void*>(canary.rw), code, sizeof(code));
-    if (std::memcmp(reinterpret_cast<void*>(canary.rx), code, sizeof(code)) != 0) return reject(EIO);
+    if (std::memcmp(reinterpret_cast<void*>(canary.rx), code, sizeof(code)) != 0) return reject_stage(EIO, "canary-alias-coherence");
     sys_icache_invalidate(reinterpret_cast<void*>(canary.rw), sizeof(code));
     sys_icache_invalidate(reinterpret_cast<void*>(canary.rx), sizeof(code));
     const int error = execute_canary(canary.rx);
-    if (error) return reject(error);
+    if (error) return reject_stage(error, "canary-execution");
     // The canary isn't needed by FEX and must not remain allocated.
     if (vm_deallocate(mach_task_self(), canary.rw, canary.size) != KERN_SUCCESS ||
         vm_deallocate(mach_task_self(), canary.rx, canary.size) != KERN_SUCCESS) std::abort();
@@ -204,6 +226,9 @@ extern "C" int32_t maxps4_jit_cancel() {
 }
 extern "C" int32_t maxps4_jit_state() { std::lock_guard guard(lock); return state; }
 extern "C" int32_t maxps4_jit_error() { std::lock_guard guard(lock); return failure; }
+extern "C" int32_t maxps4_jit_failure_stage() { std::lock_guard guard(lock); return failure_stage; }
+extern "C" int32_t maxps4_jit_failure_mach() { std::lock_guard guard(lock); return failure_mach; }
+extern "C" int32_t maxps4_jit_failure_region() { std::lock_guard guard(lock); return failure_region; }
 extern "C" void* maxps4_jit_allocate(size_t size) {
     std::lock_guard guard(lock);
     if (state != 2) { errno = EACCES; return nullptr; }
@@ -249,5 +274,8 @@ extern "C" int32_t maxps4_jit_prepare() { return -ENOTSUP; }
 extern "C" int32_t maxps4_jit_cancel() { return 0; }
 extern "C" int32_t maxps4_jit_state() { return 0; }
 extern "C" int32_t maxps4_jit_error() { return 0; }
+extern "C" int32_t maxps4_jit_failure_stage() { return 0; }
+extern "C" int32_t maxps4_jit_failure_mach() { return 0; }
+extern "C" int32_t maxps4_jit_failure_region() { return -1; }
 extern "C" uint32_t maxps4_jit_leases() { return 0; }
 #endif
