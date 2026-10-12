@@ -28,6 +28,7 @@ struct MaxPS4HomeView: View {
     @State private var detailsReport: String?
     @State private var jitStatusReport: String?
     @State private var showingFEXDiagnostic = false
+    @State private var showingMetalDiagnostic = false
 
     @AppStorage("showFPS") private var showFPS = false
     @AppStorage("networkEnabled") private var networkEnabled = false
@@ -97,6 +98,7 @@ struct MaxPS4HomeView: View {
             Text(inspectionReport ?? "")
         }
         .sheet(isPresented: $showingFEXDiagnostic) { MaxPS4FEXDiagnosticView() }
+        .sheet(isPresented: $showingMetalDiagnostic) { MaxPS4MetalDiagnosticView() }
         .sheet(isPresented: $showingDuplicates) {
             NavigationStack {
                 List {
@@ -1192,6 +1194,9 @@ struct MaxPS4HomeView: View {
                     .tracking(1.1)
                     .foregroundStyle(.cyan)
                     .padding(.top, 8)
+                secondaryAction(icon: "triangle.fill", title: "Diagnostic GPU Metal", subtitle: "Triangle animé natif • aucune émulation GPU PS4") {
+                    showingMetalDiagnostic = true
+                }
                 secondaryAction(icon: "cpu.fill", title: "Tester FEXCore", subtitle: "Contexte réel • x86-64 → 42 • backend affiché") {
                     showingFEXDiagnostic = true
                 }

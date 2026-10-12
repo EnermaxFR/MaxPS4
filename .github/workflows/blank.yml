@@ -1795,6 +1795,8 @@ jobs:
             -O
             -parse-as-library
             -framework SwiftUI
+            -framework Metal
+            -framework MetalKit
             -framework UIKit
             -framework Foundation
             MaxPS4-iOS/Sources/*.swift

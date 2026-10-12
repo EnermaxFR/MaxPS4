@@ -15,6 +15,24 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Test native Metal triangle and compile iPhone shaders
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/diagnostics
+          swiftc -parse-as-library MaxPS4-iOS/Sources/MaxPS4MetalPipeline.swift \
+            MaxPS4-iOS/Tests/MetalTriangleTest.swift -o build/metal-triangle-test
+          build/metal-triangle-test | tee build/diagnostics/metal-tests.txt
+          python3 - <<'PYMETAL'
+          from pathlib import Path
+          source = Path("MaxPS4-iOS/Sources/MaxPS4MetalPipeline.swift").read_text()
+          shader = source.split('"""')[1]
+          Path("build/diagnostics/triangle.metal").write_text(shader)
+          PYMETAL
+          xcrun -sdk iphoneos metal -c build/diagnostics/triangle.metal \
+            -o build/diagnostics/triangle.air
+          xcrun -sdk iphoneos metallib build/diagnostics/triangle.air \
+            -o build/diagnostics/triangle.metallib
       - name: Checkout coherent pinned runtime
         run: |
           git clone --filter=blob:none --no-checkout https://github.com/Leviidev/AetherPS4.git build/aether-app
