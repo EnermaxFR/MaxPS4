@@ -20,12 +20,12 @@ enum MaxPS4MetalPipeline {
     fragment float4 triangleFragment(Output in [[stage_in]]) { return float4(in.color, 1); }
 
     struct TexOutput { float4 position [[position]]; float2 uv; };
-    vertex TexOutput quadVertex(uint id [[vertex_id]], constant float3 &u [[buffer(0)]]) {
-        const float2 p[] = { {-0.7,-0.7}, {0.7,-0.7}, {-0.7,0.7}, {0.7,-0.7}, {0.7,0.7}, {-0.7,0.7} };
-        const float2 uv[] = { {0,1}, {1,1}, {0,0}, {1,1}, {1,0}, {0,0} };
+    struct QuadVertex { float2 position; float2 uv; };
+    vertex TexOutput quadVertex(uint id [[vertex_id]], constant float3 &u [[buffer(0)]], constant QuadVertex *vertices [[buffer(1)]], constant float2 &offset [[buffer(2)]]) {
+        
         TexOutput o;
-        o.position = float4(p[id].x*u.y, p[id].y*u.z, 0, 1);
-        o.uv = uv[id];
+        o.position = float4((vertices[id].position.x + offset.x)*u.y, (vertices[id].position.y + offset.y)*u.z, 0, 1);
+        o.uv = vertices[id].uv;
         return o;
     }
     fragment float4 quadFragment(TexOutput in [[stage_in]], texture2d<float> tex [[texture(0)]]) {
@@ -51,6 +51,21 @@ enum MaxPS4MetalPipeline {
         descriptor.fragmentFunction = library.makeFunction(name: "quadFragment")
         descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
         return try device.makeRenderPipelineState(descriptor: descriptor)
+    }
+
+    // Interleaved float2 position and float2 UV; shared by multiple draw calls.
+    static func makeQuadVertexBuffer(device: MTLDevice) throws -> MTLBuffer {
+        let vertices: [Float] = [
+            -0.34, -0.34, 0, 1,   0.34, -0.34, 1, 1,   -0.34, 0.34, 0, 0,
+             0.34, -0.34, 1, 1,   0.34,  0.34, 1, 0,   -0.34, 0.34, 0, 0
+        ]
+        guard let buffer = vertices.withUnsafeBytes({ bytes in
+            device.makeBuffer(bytes: bytes.baseAddress!, length: bytes.count, options: .storageModeShared)
+        }) else {
+            throw NSError(domain: "MaxPS4.Metal", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: "Création du buffer de sommets impossible"])
+        }
+        return buffer
     }
 
     static func makeCheckerboard(device: MTLDevice, alternate: Bool = false) throws -> MTLTexture {
