@@ -149,6 +149,9 @@ struct MaxPS4FEXDiagnostic: Sendable {
         let initialized = maxps4_fex_engine_initialize(engine)
         let providerAfter = maxps4_jit_state()
         let providerError = maxps4_jit_error()
+        let mailboxDiagnostic = Int(maxps4_jit_mailbox_diagnostic())
+        let mailboxDescriptions = ["session inactive", "nonce absent", "nonce incorrect", "statut non publié", "confirmation rejetée", "confirmation reçue"]
+        let mailboxDescription = mailboxDescriptions.indices.contains(mailboxDiagnostic) ? mailboxDescriptions[mailboxDiagnostic] : "inconnu"
         let jitGuidance: String
         if initialized == -45 && providerAfter == 1 {
             jitGuidance = "Activation StikDebug en attente : MaxPS4 n’a pas reçu la confirmation des régions RX. Terminer l’activation dans StikDebug, revenir dans MaxPS4, puis relancer le test. Ne pas libérer la mémoire avant ce test."
@@ -206,6 +209,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
         Initialisation FEX JIT : statut \(initialized)
         État fournisseur avant/après : \(providerBefore) → \(providerAfter)
         Diagnostic JIT : \(jitGuidance)
+        Confirmation StikDebug : \(mailboxDescription) (code \(mailboxDiagnostic))
         Exécution FEX JIT : statut \(jitStatus) (0 requis pour un succès JIT)
         Point d’entrée ELF64 invité : 0x\(String(elfEntry, radix: 16))
         RIP invité après repli : 0x\(String(guestRIP, radix: 16)), instructions terminées : \(instructions)
