@@ -35,6 +35,7 @@ struct PrototypeSmokeTest {
             ("Chargeur ELF64 : types SCE PS4", MaxPS4ELFLoader.sceExecutableTypeSelfTest()),
             ("Validation des segments ELF64", MaxPS4ELFLoader.segmentPreflightSelfTest()),
             ("Importations ELF64 synthétiques", MaxPS4ELFLoader.importDemoSelfTest()),
+            ("Admission premier lancement ELF64 sans exécution", MaxPS4ELFLoader.firstLaunchAdmissionSelfTest()),
             ("Relocalisation relative x86-64", MaxPS4ELFLoader.relativeRelocationSelfTest()),
             ("Relocalisations groupées atomiques", MaxPS4ELFLoader.relocationBatchSelfTest()),
             ("Inventaire des relocalisations", MaxPS4ELFLoader.relocationSelfTest()),

@@ -954,6 +954,15 @@ final class MaxPS4Emulator: ObservableObject {
         }
     }
 
+    func diagnoseFirstPS4Launch(_ game: MaxPS4Game) {
+        let name = game.fileName.lowercased()
+        guard name.hasSuffix(".elf") || name == "eboot.bin" else {
+            status = "Premier lancement : sélectionner un ELF64 clair ou eboot.bin ; SELF protégé non pris en charge"
+            return
+        }
+        status = MaxPS4ELFLoader.firstLaunchAdmission(url: URL(fileURLWithPath: game.localPath))
+    }
+
     func inspectELFImports(_ game: MaxPS4Game) {
         let name = game.fileName.lowercased()
         guard name.hasSuffix(".elf") || name == "eboot.bin" else {
