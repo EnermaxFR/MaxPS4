@@ -7,6 +7,19 @@ This branch starts from b49f0c7 and is intentionally separate from PR #166.
 - `maxps4_fex_engine_read_ps4` reads staged readable guest bytes using a guest virtual address.
 - `maxps4_fex_engine_run_elf` executes only a bounded admitted ELF fixture and rebases segments. It is **not** a general PS4 guest address-space implementation.
 
+## Implemented native memory contract (PR #170)
+
+The C ABI exposes three bounded operations on an already staged image:
+- `maxps4_fex_engine_read_ps4(engine, guest_address, output, length)` copies readable bytes into the caller buffer.
+- `maxps4_fex_engine_write_ps4(engine, guest_address, input, length)` copies bytes into a writable, non-executable guest segment.
+- `maxps4_fex_engine_query_ps4(engine, guest_address, length, permissions, &permitted)` reports whether all requested permission bits (R=4, W=2, X=1) cover the entire range. `permitted` is initialized to zero even for invalid arguments when the pointer is non-null.
+
+All three require a non-null engine and buffer/output where applicable, a nonzero length of at most 1 MiB, and serialize against staging through the native runtime lock. Invalid arguments return `-EINVAL`; a mapped-but-inaccessible or unmapped read/write returns `-EFAULT`; the permission query returns success with `permitted=0` for inaccessible ranges. They do **not** execute instructions or return a host address. No CPU guest-memory callback is installed by these operations.
+
+The `PS4GuestMemory` adapter owns no mapping. Its lifetime is bounded by the owning `GuestELF` image; staging or clearing that image invalidates previously translated host pointers. Exact reads/writes validate the full range before copying, and overlapping source/destination buffers have memmove semantics. Host mapping permissions remain separate from the guest's logical X bit: PS4 code pages are not made host-executable.
+
+Native tests cover RW data, RX code, invalid permission masks, overflow, cross-segment rejection, preservation of buffers on rejected accesses, overlapping transfers, and teardown. These are regression tests, **not evidence of a working PS4 CPU execution path**. CI status must be checked independently.
+
 ## Required next implementation
 1. Define a checked guest-address translator for address + length with overflow protection, mapping permissions, and deterministic errors for unmapped/cross-boundary accesses.
 2. Expose read/write/execute access modes internally, never raw host pointers over the Swift/C boundary.
