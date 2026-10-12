@@ -13,6 +13,13 @@ int main() {
     assert(memory.write(0x10000, bytes, sizeof(bytes)));
     assert(memory.read(0x10000, output, sizeof(output)));
     for (unsigned i = 0; i < 4; ++i) assert(output[i] == bytes[i]);
+    assert(memory.permitted(0x10000, 4, 6));
+    assert(memory.permitted(0x10000, 4, 4));
+    assert(memory.permitted(0x10000, 4, 2));
+    assert(!memory.permitted(0x10000, 4, 1));
+    assert(!memory.permitted(0x10000, 4, 0));
+    assert(!memory.permitted(0x10000, 4, 8));
+    assert(!memory.permitted(UINT64_MAX, 4, 4));
     assert(!memory.executable(0x10000, 4));
     assert(memory.executable(0x1000, 1));
     assert(!memory.write(0x1000, bytes, sizeof(bytes)));
