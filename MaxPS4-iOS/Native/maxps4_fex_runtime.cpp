@@ -1,4 +1,5 @@
 #include "maxps4_fex_runtime.h"
+#include "maxps4_jit_memory.h"
 #include "maxps4_guest_elf.h"
 #include "PM4GuestSubmission.hpp"
 #include "Common/HostFeatures.h"
@@ -119,9 +120,15 @@ extern "C" int32_t maxps4_fex_engine_initialize(maxps4_fex_engine *engine) {
     if (!engine) return -EINVAL;
     std::lock_guard lock(runtime_lock);
 #if TARGET_OS_IPHONE
-    // Keep main's fail-closed gate until the prepared-region provider has
-    // reproducible physical-device validation. Script success alone is insufficient.
-    std::fprintf(stderr, "MaxPS4 FEX JIT: InitCore blocked on iPhone: supported JIT allocation contract not established; returning -ENOTSUP (%d). StikDebug script success is not proof of executable mappings.\n", ENOTSUP);
+    // Validate the debugger-published RX regions on the device before reporting
+    // the separate FEXCore allocator-integration blocker. Do not call InitCore
+    // until FEXCore actually uses the verified RX/RW provider.
+    const int32_t prepared = maxps4_jit_prepare();
+    if (prepared != 0) {
+        std::fprintf(stderr, "MaxPS4 FEX JIT: RX/RW preparation failed (%d).\n", prepared);
+        return prepared;
+    }
+    std::fprintf(stderr, "MaxPS4 FEX JIT: RX/RW preparation succeeded; FEXCore allocator is not yet connected.\n");
     return -ENOTSUP;
 #else
     if (engine->stage == MAXPS4_FEX_DISPATCHER_INITIALIZED) return 0;
