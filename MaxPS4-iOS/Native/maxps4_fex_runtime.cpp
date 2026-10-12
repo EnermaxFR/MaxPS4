@@ -357,6 +357,16 @@ extern "C" int32_t maxps4_fex_engine_query_ps4(maxps4_fex_engine* engine,
     *permitted = memory.permitted(address, length, permissions) ? 1U : 0U;
     return 0;
 }
+extern "C" int32_t maxps4_fex_engine_contiguous_ps4(maxps4_fex_engine* engine,
+    uint64_t address, size_t limit, uint32_t permissions, size_t* available) {
+    if (available) *available = 0;
+    if (!engine || !available || !limit || limit > 1024 * 1024 ||
+        !permissions || (permissions & ~7U)) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    maxps4::PS4GuestMemory memory(engine->staged_ps4);
+    *available = memory.contiguous(address, limit, permissions);
+    return 0;
+}
 extern "C" int32_t maxps4_fex_engine_run_elf(maxps4_fex_engine* engine,
     const uint8_t* file, size_t length, uint32_t budget, uint64_t* result,
     uint32_t* backend, uint64_t* entry) {
