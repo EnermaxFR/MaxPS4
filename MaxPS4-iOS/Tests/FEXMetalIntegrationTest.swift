@@ -8,7 +8,7 @@ struct FEXMetalIntegrationTest {
         var state = MaxPS4FEXMetalState()
         var offsets = [SIMD2<Float>]()
         for _ in 0..<8 {
-            for initial: UInt32 in [0, 750, 1500] {
+            for initial in [UInt32(0), 750, 1500] {
                 let result = try MaxPS4FEXMetalExecution.run(initial: initial)
                 precondition(result.backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT))
                 precondition(result.rax == UInt64(initial) + 250)
