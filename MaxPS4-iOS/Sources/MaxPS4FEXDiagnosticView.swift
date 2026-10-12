@@ -39,6 +39,10 @@ struct MaxPS4FEXDiagnosticView: View {
                             .foregroundStyle(report.succeeded ? .green : .orange)
                         Text(report.details).font(.system(.body, design: .monospaced))
                             .textSelection(.enabled)
+                        Divider()
+                        Text(report.ps4IntegrationReport)
+                            .font(.system(.footnote, design: .monospaced))
+                            .textSelection(.enabled)
                     }
                 }.padding()
             }
