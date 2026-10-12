@@ -45,6 +45,18 @@ int32_t maxps4_fex_engine_run_elf_pm4(maxps4_fex_engine *engine, const uint8_t *
     size_t length, uint32_t budget, uint64_t guest_address, size_t word_count,
     uint32_t *words, size_t capacity, size_t *written, uint64_t *result,
     uint32_t *backend, uint64_t *entry);
+enum { MAXPS4_PS4_LINKER_REQUIRED = 1, MAXPS4_PS4_TLS_REQUIRED = 2,
+       MAXPS4_PS4_CPU_ADDRESS_SPACE_REQUIRED = 4 };
+// Stage a validated plaintext PS4 ELF/SELF in engine-owned, non-host-executable
+// guest mappings. Does not initialize JIT, dispatch CPU or resolve imports.
+// Guest addresses must be translated; rebasing is unsafe for arbitrary execution.
+// On failure output fields are zero and any previous staging is discarded.
+int32_t maxps4_fex_engine_stage_ps4(maxps4_fex_engine *engine, const uint8_t *file,
+    size_t length, uint64_t *entry, uint32_t *segments, uint32_t *blockers);
+// Exact read from a staged readable segment; no host pointers cross the ABI.
+// Failure leaves caller bytes untouched. Serialized against stage/close.
+int32_t maxps4_fex_engine_read_ps4(maxps4_fex_engine *engine, uint64_t address,
+    uint8_t *output, size_t length);
 // Existing bounded interpreter fallback; never describes its output as FEX JIT.
 // Caller keeps engine alive during calls and serializes close against them.
 int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine, const uint8_t *code,

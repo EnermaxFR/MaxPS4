@@ -18,12 +18,20 @@ public:
     GuestELF(const GuestELF&) = delete;
     GuestELF& operator=(const GuestELF&) = delete;
     int load(const uint8_t* file, size_t length, uint32_t budget);
+    // Maps validated plaintext PS4 segments into the same FEX arena, without
+    // instruction admission or execution. Guest addresses remain logical;
+    // absolute addressing requires an address-space backend before execution.
+    int stage_ps4(const uint8_t* file, size_t length);
+    uint32_t ps4_blockers() const { return blockers; }
     void clear();
     const uint8_t* translate(uint64_t address, size_t length, uint32_t permissions) const;
     uint64_t entry() const { return guest_entry; }
     const uint8_t* entry_pointer() const { return translate(guest_entry, 1, 5); }
     const std::vector<Segment>& segments() const { return regions; }
 private:
+    int map_segments(std::vector<Segment> parsed, const std::vector<const uint8_t*>& sources,
+                     uint64_t entry);
+    uint32_t blockers = 0;
     std::vector<Segment> regions;
     void* arena = nullptr;
     size_t arena_size = 0;

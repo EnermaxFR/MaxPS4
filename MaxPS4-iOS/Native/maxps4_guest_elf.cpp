@@ -1,4 +1,5 @@
 #include "maxps4_guest_elf.h"
+#include "PS4ExecutableImage.hpp"
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
@@ -73,6 +74,7 @@ void GuestELF::clear() {
     arena = nullptr;
     arena_size = 0;
     guest_base = guest_entry = 0;
+    blockers = 0;
     regions.clear();
 }
 const uint8_t* GuestELF::translate(uint64_t address, size_t length, uint32_t permissions) const {
@@ -136,6 +138,57 @@ int GuestELF::load(const uint8_t* file, size_t length, uint32_t budget) {
     if (!code_size) return -ENOEXEC;
     const int admitted = validateGuestProgram(file + code_offset, code_size, budget, entry, &parsed);
     if (admitted) return admitted;
+    std::vector<const uint8_t*> sources;
+    try {
+        for (const auto& segment : parsed) sources.push_back(file + segment.file_offset);
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
+    return map_segments(std::move(parsed), sources, entry);
+}
+int GuestELF::stage_ps4(const uint8_t* file, size_t length) {
+    clear();
+    PS4ExecutableImage image;
+    const int error = image.load(file, length);
+    if (error) return error;
+    // A shared library has no process entry and needs separate linker ownership.
+    if (image.type == 0xfe18) return -ENOTSUP;
+    try {
+        std::vector<Segment> parsed;
+        std::vector<const uint8_t*> sources;
+        for (const auto& segment : image.segments) {
+            const auto& h = segment.header;
+            parsed.push_back({h.address, h.offset, h.fileSize, h.memorySize, h.flags});
+            sources.push_back(segment.bytes.data());
+        }
+        const int mapped = map_segments(std::move(parsed), sources, image.entry);
+        if (mapped) return mapped;
+        // Staging cannot authorize CPU dispatch: rebased absolute addresses,
+        // arbitrary instructions and PS4 ABI/services remain unresolved.
+        blockers = 4U | (image.requiresLinker ? 1U : 0U) | (image.requiresTLS ? 2U : 0U);
+        return 0;
+    } catch (const std::bad_alloc&) { clear(); return -ENOMEM; }
+}
+int GuestELF::map_segments(std::vector<Segment> parsed,
+    const std::vector<const uint8_t*>& sources, uint64_t entry) {
+    const long host_page = ::sysconf(_SC_PAGESIZE);
+    if (host_page <= 0) return -EIO;
+    const uint64_t page = static_cast<uint64_t>(host_page);
+    uint64_t begin = UINT64_MAX, end = 0;
+    for (size_t i = 0; i < parsed.size(); ++i) {
+        const auto& s = parsed[i];
+        if ((s.permissions & 3U) == 3U || s.address > UINT64_MAX - s.memory_size ||
+            s.address + s.memory_size > UINT64_MAX - (page - 1)) return -ENOEXEC;
+        const uint64_t low = s.address / page * page;
+        const uint64_t high = (s.address + s.memory_size + page - 1) / page * page;
+        for (size_t j = 0; j < i; ++j) {
+            const auto& old = parsed[j];
+            const uint64_t old_low = old.address / page * page;
+            const uint64_t old_high = (old.address + old.memory_size + page - 1) / page * page;
+            if (low < old_high && old_low < high) return -ENOEXEC;
+        }
+        begin = std::min(begin, low); end = std::max(end, high);
+        if (end - begin > limit) return -E2BIG;
+    }
+    if (parsed.empty() || sources.size() != parsed.size()) return -ENOEXEC;
     arena_size = static_cast<size_t>(end - begin);
     void* mapped = ::mmap(nullptr, arena_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (mapped == MAP_FAILED) { arena_size = 0; return -errno; }
@@ -143,14 +196,15 @@ int GuestELF::load(const uint8_t* file, size_t length, uint32_t budget) {
     guest_base = begin;
     guest_entry = entry;
     regions = std::move(parsed);
-    for (const auto& s : regions) {
+    for (size_t i = 0; i < regions.size(); ++i) {
+        const auto& s = regions[i];
         const size_t low = static_cast<size_t>(s.address / page * page - begin);
         const size_t bytes = static_cast<size_t>((s.address + s.memory_size + page - 1) / page * page - begin - low);
         auto* destination = static_cast<uint8_t*>(arena) + low;
         if (::mprotect(destination, bytes, PROT_READ | PROT_WRITE) != 0) {
             const int error = -errno; clear(); return error;
         }
-        std::memcpy(static_cast<uint8_t*>(arena) + (s.address - begin), file + s.file_offset, s.file_size);
+        std::memcpy(static_cast<uint8_t*>(arena) + (s.address - begin), sources[i], s.file_size);
         const int protection = PROT_READ | ((s.permissions & 2) ? PROT_WRITE : 0);
         if (::mprotect(destination, bytes, protection) != 0) {
             const int error = -errno; clear(); return error;

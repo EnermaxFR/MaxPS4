@@ -18,12 +18,59 @@ struct MaxPS4FEXDiagnostic: Sendable {
             "\(elfMemoryBridgePassed ? "✓" : "✗") Contrôles ELF synthétique + mémoire invitée : \(elfMemoryBridgePassed ? "tests indépendants réussis" : "échec du test")",
             "\(elfControlFlowPassed ? "✓" : "✗") ELF → mémoire → CPU prototype : \(elfControlFlowPassed ? "exécution synthétique validée" : "non validé")",
             "◌ Chargeur SELF/ELF PS4 : prototype d’analyse, pas de chargement exécutable complet",
-            "✗ Mémoire invitée PS4 : non connectée au contexte FEXCore",
+            "◌ Mémoire invitée PS4 : mappage natif disponible par diagnostic de fichier ; dispatch CPU bloqué",
             "✗ Appels système et bibliothèques PS4 : non implémentés",
             "✗ GPU / rendu PS4 : non connecté",
             "Lancement d’un jeu PS4 : indisponible",
             "Le succès du JIT ne valide pas un jeu PS4."
         ].joined(separator: "\n")
+    }
+
+    /// Imported plaintext file -> real engine-owned guest pages -> entry readback.
+    /// Staging succeeds independently of JIT permission, and never dispatches CPU.
+    static func stagePS4(url: URL) -> String {
+#if MAXPS4_FEX_APP
+        do {
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let size = try handle.seekToEnd()
+            guard size >= 64, size <= 64 * 1024 * 1024 else {
+                return "MaxPS4 : fichier hors budget ELF/SELF (64 Mio)"
+            }
+            try handle.seek(toOffset: 0)
+            let file = try handle.read(upToCount: Int(size)) ?? Data()
+            guard file.count == Int(size) else { return "MaxPS4 : lecture ELF/SELF incomplète" }
+            var engine: OpaquePointer?
+            let opened = maxps4_fex_engine_open(&engine)
+            guard opened == 0, let engine else { return "FEXCore : ouverture impossible (\(opened))" }
+            defer { maxps4_fex_engine_close(engine) }
+            var entry: UInt64 = 0
+            var segments: UInt32 = 0
+            var blockers: UInt32 = 0
+            let staged = file.withUnsafeBytes {
+                maxps4_fex_engine_stage_ps4(engine, $0.bindMemory(to: UInt8.self).baseAddress,
+                    $0.count, &entry, &segments, &blockers)
+            }
+            guard staged == 0 else { return "MaxPS4 : mappage ELF/SELF PS4 refusé (\(staged))" }
+            var first = [UInt8](repeating: 0, count: 1)
+            let read = first.withUnsafeMutableBufferPointer {
+                maxps4_fex_engine_read_ps4(engine, entry, $0.baseAddress, $0.count)
+            }
+            guard read == 0 else { return "MaxPS4 : lecture du point d'entrée refusée (\(read))" }
+            return [
+                "MaxPS4 : ELF/SELF PS4 clair mappé dans la mémoire native du moteur FEXCore",
+                "Segments : \(segments) ; entrée invitée : 0x" + String(entry, radix: 16),
+                "Premier octet relu : 0x" + String(first[0], radix: 16) + " (non exécuté)",
+                "Liaison/imports : " + (blockers & 1 != 0 ? "requis, non résolus" : "aucun indicateur dynamique détecté"),
+                "TLS : " + (blockers & 2 != 0 ? "requis, non initialisé" : "aucun segment TLS détecté"),
+                "Blocage CPU : adressage absolu PS4, admission des instructions et ABI non raccordés",
+                "JIT iPhone : garde-fou ENOTSUP conservé ; aucune instruction PS4 exécutée",
+                "Services PS4 et rendu Metal du jeu : non validés ; aucune jouabilité revendiquée"
+            ].joined(separator: "\n")
+        } catch { return "MaxPS4 : chargement impossible — \(error.localizedDescription)" }
+#else
+        return "MaxPS4 : moteur FEXCore natif absent de cette compilation"
+#endif
     }
 
     static func run() -> Self {

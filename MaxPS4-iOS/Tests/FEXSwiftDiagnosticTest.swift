@@ -30,6 +30,43 @@ struct FEXSwiftDiagnosticTest {
                 precondition(status == -ENOTSUP)
             }
         } catch { preconditionFailure("Native Swift ELF execution failed: \(error)") }
+        do {
+            var file = MaxPS4SyntheticELFFEXBridge.syntheticELF()
+            file[7] = 9; file[16] = 0; file[17] = 0xfe
+            // Real opaque engine staging API, independent of JIT initialization.
+            var engine: OpaquePointer?
+            precondition(maxps4_fex_engine_open(&engine) == 0)
+            guard let engine else { preconditionFailure("Missing engine") }
+            defer { maxps4_fex_engine_close(engine) }
+            var entry: UInt64 = 99; var segments: UInt32 = 99; var blockers: UInt32 = 99
+            let staged = file.withUnsafeBytes {
+                maxps4_fex_engine_stage_ps4(engine, $0.bindMemory(to: UInt8.self).baseAddress,
+                    $0.count, &entry, &segments, &blockers)
+            }
+            precondition(staged == 0 && entry == 0x1000 && segments == 1 && blockers == 4)
+            precondition(maxps4_fex_engine_stage(engine) == MAXPS4_FEX_CONTEXT_CREATED)
+            var first = [UInt8](repeating: 0, count: 5)
+            precondition(first.withUnsafeMutableBufferPointer {
+                maxps4_fex_engine_read_ps4(engine, entry, $0.baseAddress, $0.count)
+            } == 0 && first[0] == 0xb8)
+            let saved = first
+            precondition(first.withUnsafeMutableBufferPointer {
+                maxps4_fex_engine_read_ps4(engine, UInt64.max, $0.baseAddress, $0.count)
+            } == -EFAULT && first == saved)
+            try file.write(to: url)
+            let report = MaxPS4FEXDiagnostic.stagePS4(url: url)
+            precondition(report.contains("Premier octet relu : 0xb8") && report.contains("non exécuté"))
+            file[7] = 0
+            let rejected = file.withUnsafeBytes {
+                maxps4_fex_engine_stage_ps4(engine, $0.bindMemory(to: UInt8.self).baseAddress,
+                    $0.count, &entry, &segments, &blockers)
+            }
+            precondition(rejected == -ENOEXEC && entry == 0 && segments == 0 && blockers == 0)
+            precondition(first.withUnsafeMutableBufferPointer {
+                maxps4_fex_engine_read_ps4(engine, 0x1000, $0.baseAddress, $0.count)
+            } == -EFAULT)
+            print("PASS Swift/C PS4 staging + entry readback + unchanged dispatcher stage + atomic rejection")
+        } catch { preconditionFailure("PS4 native staging failed: \(error)") }
         print("PASS Swift ELF file bytes -> native mappings -> real FEX JIT RAX=123; unsupported ELF rejected")
         print("PASS Swift lifecycle; macOS host execution only, no iPhone proof")
     }
