@@ -16,11 +16,14 @@ static read_fn read_api = &maxps4_fex_engine_read_ps4;
 static read_fn fetch_api = &maxps4_fex_engine_fetch_ps4;
 static write_fn write_api = &maxps4_fex_engine_write_ps4;
 static query_fn query_api = &maxps4_fex_engine_query_ps4;
+typedef int32_t (*contiguous_fn)(maxps4_fex_engine *, uint64_t, size_t,
+                                 uint32_t, size_t *);
+static contiguous_fn contiguous_api = &maxps4_fex_engine_contiguous_ps4;
 typedef int32_t (*run_staged_fn)(maxps4_fex_engine *, uint32_t,
                                 uint64_t *, uint32_t *, uint64_t *);
 static run_staged_fn run_staged_api = &maxps4_fex_engine_run_staged_ps4;
 
 int main(void) {
-    return !(stage_api && read_api && fetch_api && write_api && query_api && run_staged_api);
+    return !(stage_api && read_api && fetch_api && write_api && query_api && contiguous_api && run_staged_api);
 }
 
