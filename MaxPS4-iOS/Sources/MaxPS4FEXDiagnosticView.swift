@@ -104,7 +104,7 @@ struct MaxPS4FEXDiagnosticView: View {
                 }
             }
             .navigationTitle("Diagnostic FEXCore")
-            .onChange(of: scenePhase) { _, phase in
+            .onChange(of: scenePhase) { phase in
                 if phase == .active && activationRequested {
                     activationMessage = MaxPS4StikActivation.confirmation()
                 }

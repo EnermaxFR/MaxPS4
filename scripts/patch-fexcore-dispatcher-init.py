@@ -14,7 +14,12 @@ PATCHES = {
         ('  return fextl::make_unique<Dispatcher>(CTX);',
          '''  void* Buffer = FEXCore::Allocator::VirtualAlloc(MAX_DISPATCHER_CODE_SIZE, true);
   if (!Buffer || Buffer == reinterpret_cast<void*>(-1)) return {};
-  return fextl::make_unique<Dispatcher>(CTX, Buffer);'''),),
+  try {
+    return fextl::make_unique<Dispatcher>(CTX, Buffer);
+  } catch (...) {
+    FEXCore::Allocator::VirtualFree(Buffer, MAX_DISPATCHER_CODE_SIZE);
+    throw;
+  }'''),),
     'FEXCore/Source/Interface/Core/Core.cpp': (
         ('  Dispatcher = FEXCore::CPU::Dispatcher::Create(this);',
          '''  Dispatcher = FEXCore::CPU::Dispatcher::Create(this);

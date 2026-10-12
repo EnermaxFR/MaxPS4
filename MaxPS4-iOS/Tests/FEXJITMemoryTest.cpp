@@ -73,6 +73,9 @@ int main() {
         void* dispatcher = maxps4_jit_allocate(sizes[0]);
         void* cache = maxps4_jit_allocate(sizes[1]);
         CHECK(dispatcher && cache && maxps4_jit_leases() == 2);
+        CHECK(maxps4_jit_usable_size(cache, sizes[1]) == sizes[1] - page);
+        CHECK(maxps4_jit_usable_size(cache, sizes[1] - 1) == 0);
+        CHECK(maxps4_jit_usable_size(dispatcher, sizes[0]) == 0);
         CHECK(maxps4_jit_allocate(sizes[0]) == nullptr && errno == ENOMEM);
         CHECK(maxps4_jit_allocate(4096) == nullptr && errno == ENOMEM);
         CHECK(maxps4_jit_cancel() == -EBUSY);

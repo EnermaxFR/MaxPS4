@@ -148,7 +148,8 @@ extern "C" int32_t maxps4_jit_begin(uint64_t* address, uint64_t* nonce, uint64_t
     if (host_page <= 0 || host_page > 16384 || 16384 % host_page != 0) return -ENOTSUP;
     page_size = static_cast<size_t>(host_page);
     do { arc4random_buf(&expected_nonce, sizeof(expected_nonce)); } while (!expected_nonce);
-    mailbox.nonce = mailbox.status = 0;
+    mailbox.nonce = 0;
+    mailbox.status = 0;
     for (auto& address : mailbox.rx) address = 0;
     state = 1; failure = 0;
     failure_stage = 0; failure_mach = 0; failure_region = -1; active_region = -1;
@@ -239,7 +240,8 @@ extern "C" int32_t maxps4_jit_cancel() {
     if (state == 1) return -EBUSY;
     for (const auto& region : regions) if (region.leased) return -EBUSY;
     destroy_regions(); expected_nonce = 0; state = failure = 0;
-    mailbox.nonce = mailbox.status = 0;
+    mailbox.nonce = 0;
+    mailbox.status = 0;
     for (auto& address : mailbox.rx) address = 0;
     failure_stage = 0; failure_mach = 0; failure_region = -1; active_region = -1;
     return 0;
@@ -268,6 +270,12 @@ extern "C" int32_t maxps4_jit_free(void* write, size_t size) {
         return 1;
     }
     return 0;
+}
+extern "C" size_t maxps4_jit_usable_size(void* write, size_t size) {
+    std::lock_guard guard(lock);
+    const auto& cache = regions[1];
+    return cache.leased && cache.rw == reinterpret_cast<uintptr_t>(write) &&
+        cache.size == size && size > page_size ? size - page_size : 0;
 }
 extern "C" void* maxps4_jit_executable(void* pointer) { std::lock_guard guard(lock); return translate(pointer, false); }
 extern "C" void* maxps4_jit_writable(void* pointer) { std::lock_guard guard(lock); return translate(pointer, true); }
@@ -300,4 +308,5 @@ extern "C" int32_t maxps4_jit_failure_stage() { return 0; }
 extern "C" int32_t maxps4_jit_failure_mach() { return 0; }
 extern "C" int32_t maxps4_jit_failure_region() { return -1; }
 extern "C" uint32_t maxps4_jit_leases() { return 0; }
+extern "C" size_t maxps4_jit_usable_size(void*, size_t) { return 0; }
 #endif

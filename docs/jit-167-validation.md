@@ -24,6 +24,11 @@ Le remplacement de l'allocateur dans le checkout FEX épinglé est déjà appliq
 par `build-fexcore-darwin-ios.sh`. L'allocation du code cache échoue désormais
 par `std::bad_alloc` rattrapé par le pont C, au lieu d'une assertion potentiellement
 désactivée suivie d'une écriture via un pointeur nul.
+Les objets FEX sont compilés avec les exceptions activées afin que ce refus
+remonte effectivement au pont C. Les constructions partielles du thread,
+dispatcher et cache sont nettoyées pendant ce retour d'erreur. La taille utile
+du cache et la classification des PC excluent toute la page de garde hôte
+(16 Kio sur iPhone), au lieu d'exclure seulement une page invitée de 4 Kio.
 
 ## Contrat StikDebug et permissions
 

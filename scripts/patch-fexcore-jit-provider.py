@@ -10,6 +10,8 @@ import sys
 TAG = '// MaxPS4 authorized debugger region provider'
 ALLOCATOR = 'FEXCore/Source/Utils/Allocator.cpp'
 BACKEND = 'FEXCore/Source/Interface/Core/CPUBackend.cpp'
+CORE = 'FEXCore/Source/Interface/Core/Core.cpp'
+HEADER = 'FEXCore/Source/Interface/Core/CPUBackend.h'
 START = '#if defined(__APPLE__) && TARGET_OS_IPHONE\n// iOS JIT allocation:'
 END = '#endif\n} // namespace FEXCore::Allocator'
 PROVIDER = '''#if defined(__APPLE__) && TARGET_OS_IPHONE
@@ -40,8 +42,41 @@ NEW_BACKEND = '''#elif defined(__APPLE__) && TARGET_OS_IPHONE
     LOGMAN_THROW_A_FMT(!!Ptr, "Couldn't allocate code buffer");'''
 
 
+# Keep partially created FEX state owned while an allocator error unwinds.
+LIFETIME_TAG = '// MaxPS4 checked prepared-region lifetime'
+EXTRA = {
+    CORE: [
+        ('  FEXCore::Core::InternalThreadState* Thread = new FEXCore::Core::InternalThreadState {\n    .CTX = this,\n  };',
+         '''  auto ThreadOwner = fextl::unique_ptr<FEXCore::Core::InternalThreadState>(
+    new FEXCore::Core::InternalThreadState {.CTX = this});
+  auto* Thread = ThreadOwner.get();'''),
+        ('  return Thread;\n}\n\nvoid ContextImpl::DestroyThread',
+         '  return ThreadOwner.release();\n}\n\nvoid ContextImpl::DestroyThread'),
+    ],
+    BACKEND: [
+        ('    LookupCache = fextl::make_unique<GuestToHostMap>();',
+         '''    try {
+      LookupCache = fextl::make_unique<GuestToHostMap>();
+    } catch (...) {
+      FEXCore::Allocator::VirtualFree(Ptr, AllocatedSize);
+      throw;
+    }'''),
+        ('      uintptr_t LastPageAddr = AlignDown(BufferExecBase + Buffer.AllocatedSize - 1, FEXCore::Utils::FEX_PAGE_SIZE);',
+         '      uintptr_t LastPageAddr = BufferExecBase + Buffer.UsableSize();'),
+    ],
+    HEADER: [
+        ('      return AllocatedSize - FEXCore::Utils::FEX_PAGE_SIZE;',
+         '''#if defined(__APPLE__) && TARGET_OS_IPHONE
+      // The prepared pool guards a HOST page (16 KiB on iPhone).
+      return maxps4_jit_usable_size(Ptr, AllocatedSize);
+#else
+      return AllocatedSize - FEXCore::Utils::FEX_PAGE_SIZE;
+#endif'''),
+    ],
+}
+
 def adapt(root):
-    paths = {name: root / name for name in (ALLOCATOR, BACKEND)}
+    paths = {name: root / name for name in (ALLOCATOR, BACKEND, CORE, HEADER)}
     texts = {name: path.read_text() for name, path in paths.items()}
     allocator = texts[ALLOCATOR]
     if TAG in allocator:
@@ -64,6 +99,20 @@ def adapt(root):
         if backend.count(OLD_BACKEND) != 1:
             raise ValueError('Pinned code-cache allocation context diverged')
         texts[BACKEND] = '#include <new>\n' + backend.replace(OLD_BACKEND, NEW_BACKEND, 1)
+    for name, replacements in EXTRA.items():
+        value = texts[name]
+        if LIFETIME_TAG in value:
+            if any(value.count(new) != 1 for _, new in replacements):
+                raise ValueError(f'Applied lifetime context diverged: {name}')
+        else:
+            for old, new in replacements:
+                if value.count(old) != 1:
+                    raise ValueError(f'Pinned lifetime context diverged: {name}')
+                value = value.replace(old, new, 1)
+            value = LIFETIME_TAG + '\n' + value
+            if name == HEADER:
+                value = '#include "maxps4_jit_memory.h"\n' + value
+        texts[name] = value
     for name, path in paths.items():
         path.write_text(texts[name])
 

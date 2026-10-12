@@ -25,6 +25,7 @@ int32_t maxps4_jit_free(void *write, size_t size);
 void *maxps4_jit_executable(void *write);
 void *maxps4_jit_writable(void *execute);
 int32_t maxps4_jit_describe(void *address, uintptr_t *base, size_t *offset, size_t *size);
+size_t maxps4_jit_usable_size(void *write, size_t size);
 #ifdef __cplusplus
 }
 #endif
