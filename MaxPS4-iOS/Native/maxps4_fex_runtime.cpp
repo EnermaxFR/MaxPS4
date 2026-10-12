@@ -213,6 +213,13 @@ struct PM4Request {
 int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     uint64_t* result, uint32_t* backend, const PM4Request* submission) {
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
+    // FEX still uses rebased host addresses for the admitted instruction set.
+    // Check the logical PS4 entry via the shared guest-memory contract before
+    // giving FEX a host pointer. This is not general address-space translation.
+    maxps4::PS4GuestMemory guest_memory(image);
+    if (guest_memory.contiguous(image.entry(), 1, 5) != 1) return -EFAULT;
+    const auto* entry_pointer = image.entry_pointer();
+    if (!entry_pointer) return -EFAULT;
     const long host_page = ::sysconf(_SC_PAGESIZE);
     if (host_page <= 0) return -EIO;
     const size_t page = static_cast<size_t>(host_page);
@@ -231,7 +238,7 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
         ProbeAddressSpace& space;
         ~ClearRange() { space.image = nullptr; }
     } clear_range {engine->probe};
-    auto* thread = engine->context->CreateThread(reinterpret_cast<uintptr_t>(image.entry_pointer()),
+    auto* thread = engine->context->CreateThread(reinterpret_cast<uintptr_t>(entry_pointer),
         reinterpret_cast<uintptr_t>(stack_base) + page - 16);
     if (!thread) return -ENOMEM;
     struct DestroyThread {
