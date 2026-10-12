@@ -72,7 +72,7 @@ def verify(path):
         assert load_path in libraries and identifiers == [load_path]
         assert all(n.startswith(('/usr/lib/', '/System/Library/')) for n in dependencies)
         assert not any('FEXCore' in n or 'LogMan' in n or 'maxps4_' in n for n in unresolved)
-        required = {'_maxps4_fex_engine_' + n for n in ('open', 'initialize', 'cpuid', 'run', 'close', 'stage')}
+        required = {'_maxps4_fex_engine_' + n for n in ('open', 'initialize', 'cpuid', 'run', 'run_elf', 'close', 'stage')}
         required |= {'_maxps4_jit_' + n for n in ('begin', 'cancel', 'state', 'error', 'leases')}
         assert required <= exports and required <= imports, 'App must actually import the FEX/session ABI'
         assert any('CreateNewContext' in name for name in exports), 'Real FEX C++ runtime absent'
