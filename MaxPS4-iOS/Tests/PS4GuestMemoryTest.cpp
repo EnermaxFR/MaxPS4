@@ -25,6 +25,19 @@ int main() {
     // Reject requests straddling an unmapped boundary.
     assert(!memory.read(0x10000 - 1, output, sizeof(output)));
     assert(!memory.write(0x10000 - 1, bytes, sizeof(bytes)));
+    // A failed read must not overwrite the caller's destination buffer.
+    uint8_t unchanged[4] = {0xA5, 0x5A, 0xC3, 0x3C};
+    assert(!memory.read(0x10000 - 1, unchanged, sizeof(unchanged)));
+    assert(unchanged[0] == 0xA5 && unchanged[1] == 0x5A &&
+           unchanged[2] == 0xC3 && unchanged[3] == 0x3C);
+    // A rejected write must leave the valid data segment untouched.
+    uint8_t before_write[4] = {};
+    uint8_t after_write[4] = {};
+    assert(memory.read(0x10000, before_write, sizeof(before_write)));
+    assert(!memory.write(0x10000 - 1, bytes, sizeof(bytes)));
+    assert(memory.read(0x10000, after_write, sizeof(after_write)));
+    for (unsigned i = 0; i < 4; ++i) assert(after_write[i] == before_write[i]);
+
 
     // Reject writes crossing the RW segment boundary, without partial mutation.
     const auto& regions = image.segments();
