@@ -65,6 +65,20 @@ int main() {
         assert(code_snapshot[i] == code[i]);
     assert(memory.executable(0x1000, 1));
     assert(!memory.executable(0x10000, 1));
+    // Every mapped segment must reject a range extending beyond its last
+    // byte. Permission queries must not silently accept a partial interval.
+    for (const auto& segment : image.segments()) {
+        assert(segment.memory_size > 0);
+        const uint64_t last = segment.address + segment.memory_size - 1;
+        const uint32_t readable = segment.permissions & 4U;
+        assert(readable == 4U);
+        assert(memory.permitted(last, 1, readable));
+        assert(!memory.permitted(last, 2, readable));
+        assert(!memory.permitted(last, SIZE_MAX, readable));
+        assert(!memory.permitted(last, 1, 0));
+        assert(!memory.permitted(last, 1, 8));
+    }
+
     // Reject requests straddling an unmapped boundary.
     assert(!memory.read(0x10000 - 1, output, sizeof(output)));
     assert(!memory.write(0x10000 - 1, bytes, sizeof(bytes)));
