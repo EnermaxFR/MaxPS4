@@ -120,16 +120,24 @@ extern "C" int32_t maxps4_fex_engine_initialize(maxps4_fex_engine *engine) {
     if (!engine) return -EINVAL;
     std::lock_guard lock(runtime_lock);
 #if TARGET_OS_IPHONE
-    // Validate the debugger-published RX regions on the device before reporting
-    // the separate FEXCore allocator-integration blocker. Do not call InitCore
-    // until FEXCore actually uses the verified RX/RW provider.
+    // FEXCore is built with patch-fexcore-jit-provider.py: its iOS JIT
+    // allocations use the prepared MaxPS4 RX/RW pool, never MAP_JIT fallback.
+    // Fail closed until StikDebug regions pass alias/protection/canary checks.
+    if (engine->stage == MAXPS4_FEX_DISPATCHER_INITIALIZED) return 0;
     const int32_t prepared = maxps4_jit_prepare();
     if (prepared != 0) {
         std::fprintf(stderr, "MaxPS4 FEX JIT: RX/RW preparation failed (%d).\n", prepared);
         return prepared;
     }
-    std::fprintf(stderr, "MaxPS4 FEX JIT: RX/RW preparation succeeded; FEXCore allocator is not yet connected.\n");
-    return -ENOTSUP;
+    engine->context->SetSignalDelegator(&engine->signals);
+    engine->context->SetSyscallHandler(&engine->probe);
+    engine->context->EnableExitOnHLT();
+    errno = 0;
+    try {
+        if (!engine->context->InitCore()) return -(errno ? errno : ENOMEM);
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
+    engine->stage = MAXPS4_FEX_DISPATCHER_INITIALIZED;
+    return 0;
 #else
     if (engine->stage == MAXPS4_FEX_DISPATCHER_INITIALIZED) return 0;
     engine->context->SetSignalDelegator(&engine->signals);
