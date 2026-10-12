@@ -145,7 +145,25 @@ struct MaxPS4FEXDiagnostic: Sendable {
             (0..<4).map { UInt8(truncatingIfNeeded: word >> ($0 * 8)) }
         }
         let vendor = String(decoding: vendorBytes, as: UTF8.self)
+        let providerBefore = maxps4_jit_state()
         let initialized = maxps4_fex_engine_initialize(engine)
+        let providerAfter = maxps4_jit_state()
+        let providerError = maxps4_jit_error()
+        let mailboxDiagnostic = Int(maxps4_jit_mailbox_diagnostic())
+        let mailboxDescriptions = ["session inactive", "nonce absent", "nonce incorrect", "statut non publié", "confirmation rejetée", "confirmation reçue"]
+        let mailboxDescription = mailboxDescriptions.indices.contains(mailboxDiagnostic) ? mailboxDescriptions[mailboxDiagnostic] : "inconnu"
+        let jitGuidance: String
+        if initialized == -45 && providerAfter == 1 {
+            jitGuidance = "Activation StikDebug en attente : MaxPS4 n’a pas reçu la confirmation des régions RX. Terminer l’activation dans StikDebug, revenir dans MaxPS4, puis relancer le test. Ne pas libérer la mémoire avant ce test."
+        } else if initialized == -45 && providerAfter == 0 {
+            jitGuidance = "JIT non préparé : utiliser « Activer avec StikDebug » avant le test FEXCore."
+        } else if providerAfter == 3 {
+            jitGuidance = "Préparation mémoire JIT refusée (erreur \\(providerError)). Consulter l’étape et le code Mach ci-dessous."
+        } else if initialized == 0 {
+            jitGuidance = "FEXCore JIT initialisé ; vérifier le backend réel du test ci-dessous."
+        } else {
+            jitGuidance = "Initialisation JIT non disponible (statut \\(initialized))."
+        }
         var value: UInt64 = 0
         var selected: UInt32 = 0
         var jitStatus = initialized
@@ -189,6 +207,9 @@ struct MaxPS4FEXDiagnostic: Sendable {
         CPUID invité FEX : statut \(cpuidStatus), fournisseur \(vendor), feuille maximale \(cpuid[0])
         Debugger détecté : \(debugger == 1 ? "oui" : debugger == 0 ? "non" : "inconnu") (pas un droit JIT)
         Initialisation FEX JIT : statut \(initialized)
+        État fournisseur avant/après : \(providerBefore) → \(providerAfter)
+        Diagnostic JIT : \(jitGuidance)
+        Confirmation StikDebug : \(mailboxDescription) (code \(mailboxDiagnostic))
         Exécution FEX JIT : statut \(jitStatus) (0 requis pour un succès JIT)
         Point d’entrée ELF64 invité : 0x\(String(elfEntry, radix: 16))
         RIP invité après repli : 0x\(String(guestRIP, radix: 16)), instructions terminées : \(instructions)

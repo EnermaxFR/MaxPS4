@@ -13,6 +13,25 @@ struct MaxPS4FEXDiagnosticView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    Text("État du JIT FEXCore").font(.headline)
+                    if let report {
+                        let jitActive = report.succeeded && report.backend == "FEXCore JIT ARM64"
+                        Label(
+                            jitActive ? "JIT actif" :
+                                report.succeeded && report.backend.contains("Interpréteur") ? "Interpréteur utilisé — JIT indisponible" :
+                                "JIT indisponible",
+                            systemImage: jitActive ? "checkmark.shield.fill" : "exclamationmark.shield.fill"
+                        )
+                        .font(.headline)
+                        .foregroundStyle(jitActive ? .green : .orange)
+                        .accessibilityIdentifier("maxps4-jit-status")
+                    } else {
+                        Label("JIT non testé sur cet appareil", systemImage: "questionmark.shield")
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Le JIT nécessite une autorisation effective d’exécution de code sur cet iPhone. SideStore ou un débogueur détecté ne suffisent pas à la prouver. Si l’initialisation renvoie -45 (ENOTSUP), consultez le diagnostic et utilisez l’interpréteur de repli.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     Text("Test x86-64 : 40 + 2").font(.headline)
                     Text("Le contexte FEX est interrogé réellement. Si son JIT est indisponible, le programme est exécuté par l’interpréteur natif existant.")
                     Button(running ? "Test en cours…" : "Tester FEXCore") {

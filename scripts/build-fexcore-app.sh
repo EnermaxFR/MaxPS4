@@ -59,14 +59,28 @@ codesign --verify --strict --verbose=2 "$EMBEDDED"
 # valid profile permitting get-task-allow and re-sign BOTH app and framework.
 codesign --force --sign - --entitlements MaxPS4-iOS/MaxPS4.entitlements build/Payload/MaxPS4.app
 codesign --verify --strict --verbose=2 build/Payload/MaxPS4.app
-codesign -d --entitlements :- build/Payload/MaxPS4.app > build/diagnostics/fex-app-entitlements.plist
+codesign -d --entitlements - build/Payload/MaxPS4.app > build/diagnostics/fex-app-entitlements.plist
+# Trace each post-signing verification so a failed command is actionable in CI.
+trap 'status=$?; echo "IPA packaging failed at line ${LINENO}: ${BASH_COMMAND} (exit ${status})" >&2' ERR
+set -x
 # Xcode's selected sources must call the real opaque ABI, not a legacy build path.
 xcrun nm -u build/Payload/MaxPS4.app/MaxPS4 > build/diagnostics/fex-app-imports.txt
 xcrun otool -L build/Payload/MaxPS4.app/MaxPS4 > build/diagnostics/fex-app-libraries.txt
 xcrun nm -gU "$FRAMEWORK/MaxPS4FEXRuntime" > build/diagnostics/fex-app-runtime-exports.txt
+# Every public ABI entry must be exported by the embedded runtime. Only
+# entries actually called by the Swift app are required in its undefined imports;
+# the compiler may legitimately omit unused public functions.
 for symbol in maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_run maxps4_fex_engine_run_elf maxps4_jit_begin maxps4_jit_cancel; do
-  grep -q "_${symbol}$" build/diagnostics/fex-app-imports.txt
-  grep -q "_${symbol}$" build/diagnostics/fex-app-runtime-exports.txt
+  if ! grep -q "_${symbol}$" build/diagnostics/fex-app-runtime-exports.txt; then
+    echo "Missing FEXCore runtime export: ${symbol}" >&2
+    exit 1
+  fi
+done
+for symbol in maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_run_elf maxps4_jit_begin; do
+  if ! grep -q "_${symbol}$" build/diagnostics/fex-app-imports.txt; then
+    echo "Missing required app import: ${symbol}" >&2
+    exit 1
+  fi
 done
 (cd build && zip -qry MaxPS4-FEXCore-SideStore.ipa Payload)
 python3 scripts/verify-fexcore-ipa.py build/MaxPS4-FEXCore-SideStore.ipa \

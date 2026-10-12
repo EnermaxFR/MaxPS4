@@ -1,4 +1,5 @@
 #include "maxps4_fex_runtime.h"
+#include "maxps4_jit_memory.h"
 #include "maxps4_guest_elf.h"
 #include "PM4GuestSubmission.hpp"
 #include "Common/HostFeatures.h"
@@ -119,10 +120,24 @@ extern "C" int32_t maxps4_fex_engine_initialize(maxps4_fex_engine *engine) {
     if (!engine) return -EINVAL;
     std::lock_guard lock(runtime_lock);
 #if TARGET_OS_IPHONE
-    // Keep main's fail-closed gate until the prepared-region provider has
-    // reproducible physical-device validation. Script success alone is insufficient.
-    std::fprintf(stderr, "MaxPS4 FEX JIT: InitCore blocked on iPhone: supported JIT allocation contract not established; returning -ENOTSUP (%d). StikDebug script success is not proof of executable mappings.\n", ENOTSUP);
-    return -ENOTSUP;
+    // FEXCore is built with patch-fexcore-jit-provider.py: its iOS JIT
+    // allocations use the prepared MaxPS4 RX/RW pool, never MAP_JIT fallback.
+    // Fail closed until StikDebug regions pass alias/protection/canary checks.
+    if (engine->stage == MAXPS4_FEX_DISPATCHER_INITIALIZED) return 0;
+    const int32_t prepared = maxps4_jit_prepare();
+    if (prepared != 0) {
+        std::fprintf(stderr, "MaxPS4 FEX JIT: RX/RW preparation failed (%d).\n", prepared);
+        return prepared;
+    }
+    engine->context->SetSignalDelegator(&engine->signals);
+    engine->context->SetSyscallHandler(&engine->probe);
+    engine->context->EnableExitOnHLT();
+    errno = 0;
+    try {
+        if (!engine->context->InitCore()) return -(errno ? errno : ENOMEM);
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
+    engine->stage = MAXPS4_FEX_DISPATCHER_INITIALIZED;
+    return 0;
 #else
     if (engine->stage == MAXPS4_FEX_DISPATCHER_INITIALIZED) return 0;
     engine->context->SetSignalDelegator(&engine->signals);
@@ -202,11 +217,7 @@ int32_t runELF(maxps4_fex_engine *engine,
     if (entry) *entry = 0;
     if (!engine || !result || !backend || !entry) return -EINVAL;
     std::lock_guard lock(runtime_lock);
-#if TARGET_OS_IPHONE
-    (void)file; (void)length; (void)budget; (void)submission;
-    std::fprintf(stderr, "MaxPS4 FEX JIT: probe blocked on iPhone: FEX JIT not initialized; returning -ENOTSUP (%d).\n", ENOTSUP);
-    return -ENOTSUP;
-#else
+    // iOS uses the bounded Darwin ELF execution path after verified InitCore.
     try {
     maxps4::GuestELF image;
     const int loaded = image.load(file, length, budget);
@@ -273,7 +284,6 @@ int32_t runELF(maxps4_fex_engine *engine,
     *backend = MAXPS4_CPU_FEX_ARM64_JIT;
     return 0;
     } catch (const std::bad_alloc&) { return -ENOMEM; }
-#endif
 }
 
 
