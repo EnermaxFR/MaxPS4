@@ -543,19 +543,33 @@ extern "C" int maxps4_native_arm64_preflight(
 // They provide an app-side protocol surface for a future W^X JIT allocator.
 // Source protocol: StikDebug/StikJIT INTEGRATION.md.
 #if defined(__APPLE__) && defined(__aarch64__)
-extern "C" __attribute__((naked, noinline, optnone))
-void maxps4_stikdebug_jit26_detach() noexcept {
+namespace {
+// No authenticated, live trap-handler handshake exists in this integration.
+// Neither CS_DEBUGGED, P_TRACED nor a UI opt-in validates that handler.
+constexpr bool stikdebug_trap_handler_validated() noexcept { return false; }
+__attribute__((naked, noinline, optnone))
+void stikdebug_jit26_detach_raw() noexcept {
     __asm__("mov x16, #0\n"
             "brk #0xf00d\n"
             "ret");
 }
 
-extern "C" __attribute__((naked, noinline, optnone))
-void* maxps4_stikdebug_jit26_prepare_region(void* address,
+__attribute__((naked, noinline, optnone))
+void* stikdebug_jit26_prepare_region_raw(void* address,
                                              std::size_t length) noexcept {
     __asm__("mov x16, #1\n"
             "brk #0xf00d\n"
             "ret");
+}
+} // namespace
+extern "C" void maxps4_stikdebug_jit26_detach() noexcept {
+    if (!stikdebug_trap_handler_validated()) return;
+    stikdebug_jit26_detach_raw();
+}
+extern "C" void* maxps4_stikdebug_jit26_prepare_region(
+    void* address, std::size_t length) noexcept {
+    if (!stikdebug_trap_handler_validated()) return nullptr;
+    return stikdebug_jit26_prepare_region_raw(address, length);
 }
 #endif
 

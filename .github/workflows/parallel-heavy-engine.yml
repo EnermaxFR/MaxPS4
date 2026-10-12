@@ -1,4 +1,5 @@
 name: MaxPS4 parallel heavy engine checks
+# Revalidate PR #126 after synchronizing its head with main.
 
 on:
   workflow_dispatch:
