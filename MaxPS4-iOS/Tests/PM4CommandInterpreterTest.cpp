@@ -10,7 +10,7 @@ int main() {
     assert(valid.valid && valid.writes.size() == 2 && valid.draws.size() == 1);
     assert(valid.writes[1].offset == 5 && valid.writes[1].value == 0x456);
     assert(valid.draws[0].indexCount == 3);
-    const std::uint32_t badReg[] = {(3u<<30)|(1u<<16)|(0x69u<<8), 0x3ffu, 1u};
+    const std::uint32_t badReg[] = {(3u<<30)|(1u<<16)|(0x69u<<8), 0x400u, 1u};
     assert(!interpretPM4(badReg, 3).valid);
     const std::uint32_t unknown[] = {(3u<<30)|(0xffu<<8), 0u};
     assert(!interpretPM4(unknown, 2).valid);
