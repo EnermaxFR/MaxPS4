@@ -21,7 +21,7 @@ from pathlib import Path
 p=Path(sys.argv[1]) / 'Info.plist'
 p.write_bytes(plistlib.dumps(dict(CFBundleIdentifier='com.enermaxfr.maxps4.fexruntime',
     CFBundleExecutable='MaxPS4FEXRuntime', CFBundleName='MaxPS4FEXRuntime',
-    CFBundlePackageType='FMWK', CFBundleShortVersionString='0.2', CFBundleVersion='131',
+    CFBundlePackageType='FMWK', CFBundleShortVersionString='0.3.0', CFBundleVersion='132',
     CFBundleSupportedPlatforms=['iPhoneOS'], MinimumOSVersion='18.0')))
 PY
 # Ad-hoc signing authenticates the edited Mach-O only; SideStore must re-sign it.

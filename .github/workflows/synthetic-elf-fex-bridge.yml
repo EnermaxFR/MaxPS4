@@ -1,0 +1,28 @@
+name: Synthetic ELF FEX bridge admission
+on:
+  pull_request:
+    paths:
+      - 'MaxPS4-iOS/Sources/MaxPS4SyntheticELFFEXBridge.swift'
+      - 'MaxPS4-iOS/Sources/MaxPS4GuestMemory.swift'
+      - 'MaxPS4-iOS/Sources/MaxPS4ELFLoader.swift'
+      - 'MaxPS4-iOS/Sources/MaxPS4CPUPrototype.swift'
+      - 'MaxPS4-iOS/Tests/SyntheticELFFEXBridgeTest.swift'
+      - '.github/workflows/synthetic-elf-fex-bridge.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  admission:
+    runs-on: macos-14
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and test admission (no real JIT execution)
+        run: |
+          swiftc MaxPS4-iOS/Sources/MaxPS4GuestMemory.swift \
+            MaxPS4-iOS/Sources/MaxPS4ELFLoader.swift \
+            MaxPS4-iOS/Sources/MaxPS4CPUPrototype.swift \
+            MaxPS4-iOS/Sources/MaxPS4SyntheticELFFEXBridge.swift \
+            MaxPS4-iOS/Tests/SyntheticELFFEXBridgeTest.swift \
+            -o "$RUNNER_TEMP/maxps4-synthetic-bridge-test"
+          "$RUNNER_TEMP/maxps4-synthetic-bridge-test"
