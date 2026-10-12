@@ -77,6 +77,14 @@ int main() {
     for (uint8_t i = 0; i < 6; ++i) assert(rw[i + 2] == i);
     assert(memory.read(0x10002, rw, 6));
     for (uint8_t i = 0; i < 6; ++i) assert(rw[i] == i);
+    // A failed PS4 staging attempt must discard the previous ELF arena.
+    const uint8_t invalid_ps4[] = {0, 1, 2, 3};
+    assert(image.stage_ps4(invalid_ps4, sizeof(invalid_ps4)) != 0);
+    assert(image.segments().empty());
+    assert(image.entry() == 0);
+    assert(!memory.permitted(0x10000, 4, 4));
+    assert(!memory.read(0x10000, output, 4));
+    assert(!memory.write(0x10000, bytes, 4));
     image.clear();
     assert(!memory.read(0x10000, output, 4));
     std::puts("PS4 guest memory adapter checks passed");
