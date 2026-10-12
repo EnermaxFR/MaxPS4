@@ -53,7 +53,7 @@ enum MaxPS4MetalPipeline {
         return try device.makeRenderPipelineState(descriptor: descriptor)
     }
 
-    static func makeCheckerboard(device: MTLDevice) throws -> MTLTexture {
+    static func makeCheckerboard(device: MTLDevice, alternate: Bool = false) throws -> MTLTexture {
         let size = 64
         let rowBytes = size * 4
         var pixels = [UInt8](repeating: 0, count: size * rowBytes)
@@ -61,9 +61,9 @@ enum MaxPS4MetalPipeline {
             for x in 0..<size {
                 let light = ((x / 8) + (y / 8)) % 2 == 0
                 let i = y * rowBytes + x * 4
-                pixels[i] = light ? 91 : 18
-                pixels[i + 1] = light ? 170 : 32
-                pixels[i + 2] = light ? 255 : 92
+                pixels[i] = alternate ? (light ? 255 : 90) : (light ? 91 : 18)
+                pixels[i + 1] = alternate ? (light ? 175 : 28) : (light ? 170 : 32)
+                pixels[i + 2] = alternate ? (light ? 45 : 120) : (light ? 255 : 92)
                 pixels[i + 3] = 255
             }
         }

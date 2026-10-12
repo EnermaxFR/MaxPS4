@@ -6,7 +6,8 @@ private final class TriangleRenderer: NSObject, MTKViewDelegate {
     private let pipeline: MTLRenderPipelineState
     private let texturedPipeline: MTLRenderPipelineState
     private let checkerboard: MTLTexture
-    var textured = false
+    private let alternateCheckerboard: MTLTexture
+    var renderMode = 0
     private var elapsed: TimeInterval = 0
     private var previousTime: TimeInterval?
     private var reportedFrame = false
@@ -21,6 +22,7 @@ private final class TriangleRenderer: NSObject, MTKViewDelegate {
         pipeline = try MaxPS4MetalPipeline.make(device: device)
         texturedPipeline = try MaxPS4MetalPipeline.makeTextured(device: device)
         checkerboard = try MaxPS4MetalPipeline.makeCheckerboard(device: device)
+        alternateCheckerboard = try MaxPS4MetalPipeline.makeCheckerboard(device: device, alternate: true)
         self.report = report
         super.init()
     }
@@ -40,13 +42,15 @@ private final class TriangleRenderer: NSObject, MTKViewDelegate {
         previousTime = now
         var uniforms = MaxPS4MetalPipeline.uniforms(elapsed: elapsed,
             width: Double(view.drawableSize.width), height: Double(view.drawableSize.height))
-        encoder.setRenderPipelineState(textured ? texturedPipeline : pipeline)
-        if textured { encoder.setFragmentTexture(checkerboard, index: 0) }
+        encoder.setRenderPipelineState(renderMode == 0 ? pipeline : texturedPipeline)
+        if renderMode != 0 {
+            encoder.setFragmentTexture(renderMode == 1 ? checkerboard : alternateCheckerboard, index: 0)
+        }
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<SIMD3<Float>>.stride, index: 0)
-        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: textured ? 6 : 3)
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: renderMode == 0 ? 3 : 6)
         encoder.endEncoding()
         command.present(drawable)
-        let mode = textured ? "Texture" : "Triangle"
+        let mode = renderMode == 0 ? "Triangle" : (renderMode == 1 ? "Texture bleue" : "Texture orange")
         let first = !reportedFrame
         reportedFrame = true
         command.addCompletedHandler { [weak self] buffer in
@@ -65,7 +69,7 @@ private final class TriangleRenderer: NSObject, MTKViewDelegate {
 private struct TriangleSurface: UIViewRepresentable {
     let device: MTLDevice
     let active: Bool
-    let textured: Bool
+    let renderMode: Int
     let report: (String, Bool) -> Void
 
     final class Coordinator {
@@ -88,7 +92,7 @@ private struct TriangleSurface: UIViewRepresentable {
     }
     func updateUIView(_ view: MTKView, context: Context) {
         context.coordinator.renderer?.report = report
-        context.coordinator.renderer?.textured = textured
+        context.coordinator.renderer?.renderMode = renderMode
         view.isPaused = !active || context.coordinator.renderer == nil
         if !active { context.coordinator.renderer?.pause() }
     }
@@ -105,7 +109,7 @@ struct MaxPS4MetalDiagnosticView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var device = MTLCreateSystemDefaultDevice()
     @State private var running = false
-    @State private var textured = false
+    @State private var renderMode = 0
     @State private var visible = false
     @State private var failed = false
     @State private var status = "Prêt — rendu arrêté"
@@ -119,15 +123,16 @@ struct MaxPS4MetalDiagnosticView: View {
                     Text(device.map { "Metal disponible : \($0.name)" } ?? "Metal indisponible sur cet appareil")
                         .accessibilityIdentifier("maxps4.metalAvailability")
                     if let device {
-                        Picker("Démonstration", selection: $textured) {
-                            Text("Triangle").tag(false)
-                            Text("Texture").tag(true)
+                        Picker("Démonstration", selection: $renderMode) {
+                            Text("Triangle").tag(0)
+                            Text("Bleu").tag(1)
+                            Text("Orange").tag(2)
                         }
                         .pickerStyle(.segmented)
-                        .onChange(of: textured) { _ in status = "Changement de mode Metal…" }
+                        .onChange(of: renderMode) { _ in status = "Changement de mode Metal…" }
                         TriangleSurface(device: device,
                             active: running && visible && scenePhase == .active && !failed,
-                            textured: textured) { message, error in
+                            renderMode: renderMode) { message, error in
                                 if running || error { status = message }
                                 failed = error
                                 if error { running = false }
