@@ -33,6 +33,14 @@ int main() {
     assert(!memory.fetch(0x1000, nullptr, 1));
     assert(!memory.fetch(0x1000, &fetched, 0));
     assert(!memory.fetch(UINT64_MAX, &fetched, 1));
+    // An invalid instruction fetch must not change the destination buffer.
+    fetched = 0xA7;
+    assert(!memory.fetch(0x10000, &fetched, 1));
+    assert(fetched == 0xA7);
+    assert(!memory.fetch(0x1000 - 1, &fetched, 1));
+    assert(fetched == 0xA7);
+    assert(!memory.fetch(0x1000, &fetched, SIZE_MAX));
+    assert(fetched == 0xA7);
     assert(memory.executable(0x1000, 1));
     assert(!memory.executable(0x10000, 1));
     // Reject requests straddling an unmapped boundary.
