@@ -65,6 +65,24 @@ int main() {
         assert(code_snapshot[i] == code[i]);
     assert(memory.executable(0x1000, 1));
     assert(!memory.executable(0x10000, 1));
+    // A CPU client may query a bounded contiguous span without acquiring a
+    // host pointer or crossing the current guest segment.
+    assert(memory.contiguous(0x1000, 1, 5) == 1);
+    assert(memory.contiguous(0x1000, 16, 2) == 0);
+    assert(memory.contiguous(0x10000, 4, 6) == 4);
+    assert(memory.contiguous(0x10000, 4, 5) == 0);
+    assert(memory.contiguous(0x10000, 0, 4) == 0);
+    assert(memory.contiguous(0x10000, 4, 0) == 0);
+    assert(memory.contiguous(0x10000, 4, 8) == 0);
+    assert(memory.contiguous(UINT64_MAX, 4, 4) == 0);
+    for (const auto& segment : image.segments()) {
+        const uint64_t last = segment.address + segment.memory_size - 1;
+        assert(memory.contiguous(last, 4, 4) == 1);
+        assert(memory.contiguous(last, SIZE_MAX, 4) == 1);
+        assert(memory.contiguous(segment.address + segment.memory_size, 1,
+                                 segment.permissions) == 0);
+    }
+
     // Every mapped segment must reject a range extending beyond its last
     // byte. Permission queries must not silently accept a partial interval.
     for (const auto& segment : image.segments()) {
