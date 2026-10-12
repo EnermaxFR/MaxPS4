@@ -41,6 +41,22 @@ int main() {
     assert(fetched == 0xA7);
     assert(!memory.fetch(0x1000, &fetched, SIZE_MAX));
     assert(fetched == 0xA7);
+    // An instruction fetch must not partially modify output when it crosses
+    // the executable segment boundary.
+    uint8_t unchanged_fetch[4] = {0x11, 0x22, 0x33, 0x44};
+    assert(!memory.fetch(0x1000 + 40, unchanged_fetch, sizeof(unchanged_fetch)));
+    assert(unchanged_fetch[0] == 0x11 && unchanged_fetch[1] == 0x22 &&
+           unchanged_fetch[2] == 0x33 && unchanged_fetch[3] == 0x44);
+    // A valid fetch may overlap its destination inside the same RX mapping:
+    // memmove semantics are required for the host-side adapter.
+    auto* code = const_cast<uint8_t*>(image.translate(0x1000, 8, 5));
+    assert(code);
+    uint8_t code_snapshot[4] = {};
+    assert(memory.fetch(0x1000, code_snapshot, sizeof(code_snapshot)));
+    // Destination is the code mapping itself; an identical-range copy is safe.
+    assert(memory.fetch(0x1000, code, sizeof(code_snapshot)));
+    for (size_t i = 0; i < sizeof(code_snapshot); ++i)
+        assert(code[i] == code_snapshot[i]);
     assert(memory.executable(0x1000, 1));
     assert(!memory.executable(0x10000, 1));
     // Reject requests straddling an unmapped boundary.
