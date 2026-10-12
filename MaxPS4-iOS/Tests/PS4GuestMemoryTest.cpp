@@ -151,6 +151,9 @@ int main() {
     assert(image.segments().empty());
     assert(image.entry() == 0);
     assert(!memory.permitted(0x10000, 4, 4));
+    // The span API must not retain stale permissions after restaging fails.
+    assert(memory.contiguous(0x10000, 4, 4) == 0);
+    assert(memory.contiguous(0x1000, 15, 5) == 0);
     assert(!memory.read(0x10000, output, 4));
     assert(!memory.write(0x10000, bytes, 4));
     image.clear();
