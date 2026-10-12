@@ -1,4 +1,4 @@
-name: Build MaxPS4 iOS IPA
+name: Legacy MaxPS4 porting probes and IPA (without FEX app integration)
 
 # The IPA is generated on demand only; engine CI runs independently.
 # This avoids packaging an unplayable app for every source-level fix.

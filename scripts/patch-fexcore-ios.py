@@ -48,6 +48,8 @@ def adapt(root):
     edit("FEXCore/include/FEXCore/Utils/WritePriorityMutex.h", mutex)
 
     def signals(code):
+        if code.count("class ScopedSignalMasker final {") != 1:
+            raise ValueError("Expected exactly one pinned ScopedSignalMasker class")
         start = code.index("class ScopedSignalMasker final {")
         stop = code.index("\n/**", start)
         original = code[start:stop]
@@ -81,6 +83,8 @@ private:
         # Select Darwin before the TPIDRRO fast path: Darwin does not promise
         # that this register contains the Linux-style CPU index either.
         marker = "DEF_OP(ProcessorID) {"
+        if code.count(marker) != 1:
+            raise ValueError("Expected exactly one pinned ProcessorID implementation")
         start = code.index(marker) + len(marker)
         stop = code.index("\n}", start)
         return code[:start] + """

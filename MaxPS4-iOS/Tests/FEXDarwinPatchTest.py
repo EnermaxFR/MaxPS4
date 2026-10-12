@@ -74,5 +74,18 @@ class DarwinPatchTest(unittest.TestCase):
             patch.adapt(self.root)
         self.assertEqual(before, self.contents())
 
+    def test_duplicate_structural_context_fails_without_partial_writes(self):
+        for relative, marker in ((files[1], 'class ScopedSignalMasker final {'),
+                                 (files[4], 'DEF_OP(ProcessorID) {')):
+            with self.subTest(relative=relative):
+                target = self.root / relative
+                original = target.read_text()
+                target.write_text(original + '\n' + marker + '\n')
+                before = self.contents()
+                with self.assertRaises(ValueError):
+                    patch.adapt(self.root)
+                self.assertEqual(before, self.contents())
+                target.write_text(original)
+
 
 unittest.main()

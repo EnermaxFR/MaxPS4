@@ -6,6 +6,9 @@ extern "C" int maxps4_shadps4_utility_probe() noexcept {
     return Common::ToLower("MAXPS4") == "maxps4" ? 1 : 0;
 }
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -540,19 +543,33 @@ extern "C" int maxps4_native_arm64_preflight(
 // They provide an app-side protocol surface for a future W^X JIT allocator.
 // Source protocol: StikDebug/StikJIT INTEGRATION.md.
 #if defined(__APPLE__) && defined(__aarch64__)
-extern "C" __attribute__((naked, noinline, optnone))
-void maxps4_stikdebug_jit26_detach() noexcept {
+namespace {
+// No authenticated, live trap-handler handshake exists in this integration.
+// Neither CS_DEBUGGED, P_TRACED nor a UI opt-in validates that handler.
+constexpr bool stikdebug_trap_handler_validated() noexcept { return false; }
+__attribute__((naked, noinline, optnone))
+void stikdebug_jit26_detach_raw() noexcept {
     __asm__("mov x16, #0\n"
             "brk #0xf00d\n"
             "ret");
 }
 
-extern "C" __attribute__((naked, noinline, optnone))
-void* maxps4_stikdebug_jit26_prepare_region(void* address,
+__attribute__((naked, noinline, optnone))
+void* stikdebug_jit26_prepare_region_raw(void* address,
                                              std::size_t length) noexcept {
     __asm__("mov x16, #1\n"
             "brk #0xf00d\n"
             "ret");
+}
+} // namespace
+extern "C" void maxps4_stikdebug_jit26_detach() noexcept {
+    if (!stikdebug_trap_handler_validated()) return;
+    stikdebug_jit26_detach_raw();
+}
+extern "C" void* maxps4_stikdebug_jit26_prepare_region(
+    void* address, std::size_t length) noexcept {
+    if (!stikdebug_trap_handler_validated()) return nullptr;
+    return stikdebug_jit26_prepare_region_raw(address, length);
 }
 #endif
 
@@ -871,7 +888,13 @@ extern "C" int maxps4_native_debugger_attached() noexcept {
 // Returns 1 only when separate RX and RW aliases were created.
 extern "C" int maxps4_stikdualmap_allocate(
     std::size_t bytes, void** rw_out, void** rx_out) noexcept {
-#if defined(__APPLE__) && defined(__aarch64__)
+#if defined(MAXPS4_PLATFORM_JIT_ONLY) && TARGET_OS_IPHONE
+    // Shipping FEX app: debugger attachment is not an OS JIT authorization.
+    // Refuse the experimental BRK allocator; do not invoke an external protocol.
+    if (rw_out) *rw_out = nullptr;
+    if (rx_out) *rx_out = nullptr;
+    return 0;
+#elif defined(__APPLE__) && defined(__aarch64__)
     if (!rw_out || !rx_out) return 0;
     *rw_out = nullptr;
     *rx_out = nullptr;

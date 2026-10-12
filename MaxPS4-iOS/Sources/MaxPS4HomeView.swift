@@ -27,6 +27,7 @@ struct MaxPS4HomeView: View {
     @State private var selectedGameDetails: MaxPS4Game?
     @State private var detailsReport: String?
     @State private var jitStatusReport: String?
+    @State private var showingFEXDiagnostic = false
 
     @AppStorage("showFPS") private var showFPS = false
     @AppStorage("networkEnabled") private var networkEnabled = false
@@ -95,6 +96,7 @@ struct MaxPS4HomeView: View {
         } message: {
             Text(inspectionReport ?? "")
         }
+        .sheet(isPresented: $showingFEXDiagnostic) { MaxPS4FEXDiagnosticView() }
         .sheet(isPresented: $showingDuplicates) {
             NavigationStack {
                 List {
@@ -1149,6 +1151,9 @@ struct MaxPS4HomeView: View {
                     .tracking(1.1)
                     .foregroundStyle(.cyan)
                     .padding(.top, 8)
+                secondaryAction(icon: "cpu.fill", title: "Tester FEXCore", subtitle: "Contexte réel • x86-64 → 42 • backend affiché") {
+                    showingFEXDiagnostic = true
+                }
                 secondaryAction(icon: "checkmark.shield", title: "Tester le pont C++ natif", subtitle: "Vérifier le composant natif sur iPhone • pas de jeu") {
                     emulator.testShadPS4NativeUtility()
                 }
@@ -1255,6 +1260,17 @@ struct MaxPS4HomeView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.cyan)
+                Button {
+                    emulator.status = MaxPS4OnDeviceJITProbe.stikAllocatorPreflightReport()
+                } label: {
+                    Label("Diagnostiquer StikDebug / mémoire JIT (sans BRK)", systemImage: "memorychip")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.cyan)
+                Text("Précontrôle uniquement : aucun JIT FEXCore ni jeu PS4 exécuté.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Text("Jeu à diagnostiquer")
                     .font(.headline)
                 if emulator.games.isEmpty {

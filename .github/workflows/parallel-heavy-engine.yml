@@ -276,10 +276,7 @@ jobs:
           PYCODE
           # This strict linker probe permits no missing symbols. Its BLOCKED
           # result is a diagnostic, separate from the regression gate above.
-          if xcrun --sdk iphoneos clang++ -target arm64-apple-ios16.0 -isysroot "$SDK" \
-              -dynamiclib -Wl,-undefined,error \
-              "${CORE_OBJECTS[@]}" "${DEPENDENCY_OBJECTS[@]}" \
-              -o "$OUT/fexcore-link-probe.dylib" > "$OUT/strict-link.log" 2>&1; then
+          if bash scripts/link-fexcore-ios.sh "$OUT"; then
             echo "PASS strict iOS link (runtime JIT not tested)" | tee "$OUT/strict-link-status.txt"
           else
             echo "BLOCKED complete iOS link; see strict-link.log and link-report.json" \
@@ -399,6 +396,9 @@ jobs:
             build/heavy/fexcore/*-unresolved-symbols.txt
             build/heavy/fexcore/link-*.nm
             build/heavy/fexcore/link-report.json
+            build/heavy/fexcore/link-*.txt
+            build/heavy/fexcore/jit-with-dependencies.o
+            build/heavy/fexcore/fexcore-link-probe.dylib
             build/heavy/fexcore/link-dependencies-status.txt
             build/heavy/fexcore/partial-link.log
             build/heavy/fexcore/strict-link.log

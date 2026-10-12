@@ -1,0 +1,44 @@
+$ python3 -B MaxPS4-iOS/Tests/FEXDarwinPatchTest.py /workspace/FEX-pristine
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.005s
+
+OK
+Applied 9 Darwin adaptations (compile port only)
+Applied 0 Darwin adaptations (compile port only)
+
+exit=0
+
+$ python3 -B MaxPS4-iOS/Tests/FEXDiagnosticsTest.py
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.004s
+
+OK
+
+exit=0
+
+$ /workspace/maxps4-test-results/native-jit
+PASS add: 6 ARM64 words (data only), result=42
+PASS loop: 7 ARM64 words (data only), result=0
+PASS xor: 9 ARM64 words (data only), result=15
+PASS and: 9 ARM64 words (data only), result=15
+PASS or: 9 ARM64 words (data only), result=17
+PASS large immediate: 8 ARM64 words (data only), result=4097
+PASS comparison/branch: 11 ARM64 words (data only), result=7
+PASS JIT pipeline regression
+
+exit=0
+
+$ /workspace/maxps4-test-results/fex-darwin-primitives
+PASS Darwin signal-mask restoration and reader/writer contention
+
+exit=0
+
+$ bash -n scripts/build-fexcore-darwin-ios.sh scripts/link-fexcore-ios.sh
+
+exit=0
+
+$ git diff --check
+
+exit=0
