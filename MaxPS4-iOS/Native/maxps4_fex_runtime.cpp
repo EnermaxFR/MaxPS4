@@ -1,5 +1,6 @@
 #include "maxps4_fex_runtime.h"
 #include "maxps4_guest_elf.h"
+#include "PM4GuestSubmission.hpp"
 #include "Common/HostFeatures.h"
 #include <FEXCore/Config/Config.h>
 #include <FEXCore/Core/Context.h>
@@ -192,9 +193,16 @@ extern "C" int32_t maxps4_fex_engine_probe(maxps4_fex_engine *engine,
     return maxps4_fex_engine_run_elf(engine, file.data(), file.size(), 3, result, backend, &entry);
 }
 
-extern "C" int32_t maxps4_fex_engine_run_elf(maxps4_fex_engine *engine,
+namespace {
+struct PM4Request {
+    uint64_t address;
+    size_t count;
+    uint32_t* words;
+    size_t* written;
+};
+int32_t runELF(maxps4_fex_engine *engine,
     const uint8_t *file, size_t length, uint32_t budget, uint64_t *result,
-    uint32_t *backend, uint64_t *entry) {
+    uint32_t *backend, uint64_t *entry, const PM4Request* submission) {
     if (result) *result = 0;
     if (backend) *backend = 0;
     if (entry) *entry = 0;
@@ -205,6 +213,10 @@ extern "C" int32_t maxps4_fex_engine_run_elf(maxps4_fex_engine *engine,
     const int loaded = image.load(file, length, budget);
     if (loaded) return loaded;
     *entry = image.entry();
+    if (submission) {
+        const auto preflight = maxps4::gpu::snapshotPM4(image, submission->address, submission->count);
+        if (preflight.error) return preflight.error;
+    }
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
     const long host_page = ::sysconf(_SC_PAGESIZE);
     if (host_page <= 0) return -EIO;
@@ -249,8 +261,35 @@ extern "C" int32_t maxps4_fex_engine_run_elf(maxps4_fex_engine *engine,
     // without allocating another iOS JIT buffer. All engine execution is locked.
     engine->context->ClearCodeCache(thread, false);
     engine->context->ExecuteThread(thread);
+    if (submission) {
+        const auto snapshot = maxps4::gpu::snapshotPM4(image, submission->address, submission->count);
+        if (snapshot.error) return snapshot.error;
+        std::memcpy(submission->words, snapshot.words.data(), snapshot.words.size() * sizeof(uint32_t));
+        *submission->written = snapshot.words.size();
+    }
     *result = state.gregs[FEXCore::X86State::REG_RAX];
     *backend = MAXPS4_CPU_FEX_ARM64_JIT;
     return 0;
     } catch (const std::bad_alloc&) { return -ENOMEM; }
+}
+
+
+} // namespace
+extern "C" int32_t maxps4_fex_engine_run_elf(maxps4_fex_engine* engine,
+    const uint8_t* file, size_t length, uint32_t budget, uint64_t* result,
+    uint32_t* backend, uint64_t* entry) {
+    return runELF(engine, file, length, budget, result, backend, entry, nullptr);
+}
+extern "C" int32_t maxps4_fex_engine_run_elf_pm4(maxps4_fex_engine* engine,
+    const uint8_t* file, size_t length, uint32_t budget, uint64_t address, size_t count,
+    uint32_t* words, size_t capacity, size_t* written, uint64_t* result,
+    uint32_t* backend, uint64_t* entry) {
+    if (written) *written = 0;
+    if (result) *result = 0;
+    if (backend) *backend = 0;
+    if (entry) *entry = 0;
+    if (!written || !words || !count || count > maxps4::gpu::kMaxSubmissionWords || capacity < count)
+        return -EINVAL;
+    const PM4Request request {address, count, words, written};
+    return runELF(engine, file, length, budget, result, backend, entry, &request);
 }

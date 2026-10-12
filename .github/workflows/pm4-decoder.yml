@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'MaxPS4-iOS/Native/PM4*'
+      - 'MaxPS4-iOS/Native/maxps4_guest_elf*'
       - 'MaxPS4-iOS/Tests/PM4*'
       - 'MaxPS4-iOS/Sources/MaxPS4Metal*'
       - 'MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h'
@@ -22,6 +23,8 @@ jobs:
           /tmp/pm4-interpreter-test
           c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PM4MetalDrawPlanTest.cpp -o /tmp/pm4-plan-test
           /tmp/pm4-plan-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Native/maxps4_guest_elf.cpp MaxPS4-iOS/Tests/PM4GuestSubmissionTest.cpp -o /tmp/pm4-guest-test
+          /tmp/pm4-guest-test
   metal-bridge:
     runs-on: macos-latest
     steps:
@@ -47,7 +50,10 @@ jobs:
             -target arm64-apple-ios18.0 -isysroot "$SDK" \
             -c MaxPS4-iOS/Native/PM4MetalDrawBridge.mm -o build/pm4/bridge-ios.o
           swiftc -typecheck -D MAXPS4_FEX_APP -target arm64-apple-ios18.0 -sdk "$SDK" \
-            -import-objc-header MaxPS4-iOS/Native/PM4MetalDrawBridge.h \
+            -import-objc-header MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h \
+            MaxPS4-iOS/Sources/MaxPS4GuestMemory.swift MaxPS4-iOS/Sources/MaxPS4CPUPrototype.swift \
+            MaxPS4-iOS/Sources/MaxPS4ELFLoader.swift MaxPS4-iOS/Sources/MaxPS4SyntheticELFFEXBridge.swift \
+            MaxPS4-iOS/Sources/MaxPS4FEXMetalState.swift MaxPS4-iOS/Sources/MaxPS4PM4Submission.swift \
             MaxPS4-iOS/Sources/MaxPS4MetalPipeline.swift MaxPS4-iOS/Sources/MaxPS4MetalDiagnosticView.swift
           swiftc -parse-as-library -target arm64-apple-ios18.0 -sdk "$SDK" \
             -import-objc-header MaxPS4-iOS/Native/PM4MetalDrawBridge.h \

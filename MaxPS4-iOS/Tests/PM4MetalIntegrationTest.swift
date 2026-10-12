@@ -5,7 +5,29 @@ import Metal
 struct PM4MetalIntegrationTest {
     static func main() throws {
         var drawn = 99
+        #if MAXPS4_PM4_FEX_INTEGRATION
+        // Two real ELF PT_LOAD mappings: admitted x86 code and static PM4 data.
+        var file = Data(repeating: 0, count: 207)
+        func put(_ value: UInt64, _ offset: Int, _ width: Int) {
+            for i in 0..<width { file[offset + i] = UInt8(truncatingIfNeeded: value >> (i * 8)) }
+        }
+        file.replaceSubrange(0..<7, with: [0x7f, 69, 76, 70, 2, 1, 1])
+        put(2, 16, 2); put(62, 18, 2); put(1, 20, 4); put(0x1000, 24, 8)
+        put(64, 32, 8); put(64, 52, 2); put(56, 54, 2); put(2, 56, 2)
+        put(1, 64, 4); put(5, 68, 4); put(184, 72, 8); put(0x1000, 80, 8)
+        put(11, 96, 8); put(32, 104, 8); put(1, 112, 8)
+        put(1, 120, 4); put(6, 124, 4); put(195, 128, 8); put(0x10000, 136, 8)
+        put(12, 152, 8); put(64, 160, 8); put(1, 168, 8)
+        file[184] = 0xb8; put(40, 185, 4); file[189] = 5; put(2, 190, 4); file[194] = 0xf4
+        put(0xc0012d00, 195, 4); put(3, 199, 4); put(2, 203, 4)
+        let snapshot = try MaxPS4PM4Submission.run(file: file, guestAddress: 0x10000, wordCount: 3)
+        precondition(snapshot.rax == 42 && snapshot.entry == 0x1000)
+        precondition(snapshot.backend == MAXPS4_CPU_FEX_ARM64_JIT && maxps4_jit_leases() == 0)
+        let words = snapshot.words
+        print("PASS real FEX completion -> static PM4 in same ELF arena -> owned Swift snapshot")
+        #else
         let words: [UInt32] = [0xc0012d00, 3, 2]
+        #endif
         let noEncoder = words.withUnsafeBufferPointer {
             maxps4_pm4_encode_triangle($0.baseAddress, $0.count, nil, nil, &drawn)
         }

@@ -88,6 +88,18 @@ jobs:
             -o build/fex-app-host/fex-metal-test
           build/fex-app-host/fex-metal-test | tee build/fex-app-host/fex-metal-tests.txt
           leaks --atExit -- build/fex-app-host/fex-metal-test 2>&1 | tee build/fex-app-host/fex-metal-leaks.txt
+      - name: Test same ELF arena FEX completion to C++ PM4 to Metal
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun clang++ -std=c++17 -fobjc-arc -c MaxPS4-iOS/Native/PM4MetalDrawBridge.mm -o build/pm4-fex-bridge.o
+          swiftc -parse-as-library -D MAXPS4_FEX_APP -D MAXPS4_PM4_FEX_INTEGRATION \
+            -import-objc-header MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h \
+            MaxPS4-iOS/Sources/MaxPS4PM4Submission.swift \
+            MaxPS4-iOS/Sources/MaxPS4MetalPipeline.swift MaxPS4-iOS/Tests/PM4MetalIntegrationTest.swift \
+            build/pm4-fex-bridge.o -lc++ -L build/fex-app-host -lMaxPS4FEXRuntime \
+            -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" -o build/pm4-fex-metal-test
+          build/pm4-fex-metal-test | tee build/diagnostics/pm4-fex-metal-tests.txt
       - name: Check actual native and Swift heap cleanup on macOS
         shell: bash
         run: |
@@ -113,3 +125,4 @@ jobs:
             build/fex-app-ios/*.txt
             build/fex-app-ios/*.log
           retention-days: 14
+

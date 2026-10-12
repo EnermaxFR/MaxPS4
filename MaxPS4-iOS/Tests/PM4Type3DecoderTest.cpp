@@ -17,4 +17,6 @@ int main() {
     const std::uint32_t invalid[] = {0u};
     assert(decodePM4Type3(invalid, 1).error == PM4Error::unsupported_packet_type);
     assert(decodePM4Type3(nullptr, 0));
+    assert(decodePM4Type3(commands, 65537).error == PM4Error::too_many_words);
 }
+

@@ -33,6 +33,15 @@ int32_t maxps4_fex_engine_probe(maxps4_fex_engine *engine, uint64_t *result,
 int32_t maxps4_fex_engine_run_elf(maxps4_fex_engine *engine, const uint8_t *file,
                                 size_t length, uint32_t budget, uint64_t *result,
                                 uint32_t *backend, uint64_t *entry);
+// Same restricted real FEX execution, followed by a PM4 snapshot from that
+// image's readable PT_LOAD memory before unmapping it. Caller supplies the guest
+// address; the admitted CPU program cannot generate commands (no memory operands).
+// Maximum 65536 words. On failure written=0 and words remain untouched. The
+// copied stream has valid supported PM4 semantics, not necessarily Metal state.
+int32_t maxps4_fex_engine_run_elf_pm4(maxps4_fex_engine *engine, const uint8_t *file,
+    size_t length, uint32_t budget, uint64_t guest_address, size_t word_count,
+    uint32_t *words, size_t capacity, size_t *written, uint64_t *result,
+    uint32_t *backend, uint64_t *entry);
 // Existing bounded interpreter fallback; never describes its output as FEX JIT.
 // Caller keeps engine alive during calls and serializes close against them.
 int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine, const uint8_t *code,
@@ -41,3 +50,4 @@ int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine, const uint8_t *code,
 #ifdef __cplusplus
 }
 #endif
+
