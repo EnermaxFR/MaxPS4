@@ -1,4 +1,5 @@
 #include "maxps4_guest_elf.h"
+#include "maxps4_guest_range.h"
 #include "PS4ExecutableImage.hpp"
 #include <algorithm>
 #include <cerrno>
@@ -78,11 +79,10 @@ void GuestELF::clear() {
     regions.clear();
 }
 const uint8_t* GuestELF::translate(uint64_t address, size_t length, uint32_t permissions) const {
-    if (!arena || !length || (permissions & ~7U)) return nullptr;
+    if (!arena) return nullptr;
     for (const auto& segment : regions) {
-        if ((segment.permissions & permissions) != permissions || address < segment.address) continue;
-        const uint64_t offset = address - segment.address;
-        if (offset <= segment.memory_size && length <= segment.memory_size - offset)
+        if (guest_range_permitted(address, length, permissions, segment.address,
+                                  segment.memory_size, segment.permissions))
             return static_cast<const uint8_t*>(arena) + (address - guest_base);
     }
     return nullptr;
