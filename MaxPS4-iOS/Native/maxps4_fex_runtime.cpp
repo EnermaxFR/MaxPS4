@@ -45,6 +45,10 @@ public:
             const size_t executable_bytes = memory.contiguous(
                 segment.address, segment.file_size, 5);
             if (!executable_bytes) continue;
+            // The executable file extent must be entirely backed by a
+            // permission-checked segment. Never advertise a truncated range
+            // to FEX as though the complete code extent were mapped.
+            if (executable_bytes != segment.file_size) continue;
             const auto* pointer = image->translate(segment.address, executable_bytes, 5);
             if (!pointer) continue;
             const auto begin = reinterpret_cast<uintptr_t>(pointer);
