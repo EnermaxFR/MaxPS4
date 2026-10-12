@@ -70,6 +70,10 @@ int32_t maxps4_fex_engine_run_staged_ps4(maxps4_fex_engine *engine,
 // Failure leaves caller bytes untouched. Serialized against stage/close.
 int32_t maxps4_fex_engine_read_ps4(maxps4_fex_engine *engine, uint64_t address,
     uint8_t *output, size_t length);
+// Fetch instructions only from staged readable AND executable guest memory.
+// Invalid ranges leave output unchanged. No host pointers cross the C ABI.
+int32_t maxps4_fex_engine_fetch_ps4(maxps4_fex_engine *engine, uint64_t address,
+    uint8_t *output, size_t length);
 // Exact write to a staged writable, non-executable guest segment.
 // No host pointers cross the ABI. Rejected accesses leave guest bytes intact.
 // Serialized against stage/close; does not dispatch CPU or initialize JIT.
