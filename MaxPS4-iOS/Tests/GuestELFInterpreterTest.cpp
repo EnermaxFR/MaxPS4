@@ -21,6 +21,15 @@ int main(int argc, char** argv) {
     assert(image.load(file.data(), file.size(), 6) == 0);
     const auto* data = image.translate(0x10000, 12, 6);
     assert(data && data[0] == 0);
+    // Checked translation: guest permissions, boundaries and unmapped addresses.
+    assert(image.translate(0x10000, 12, 4) == data);
+    assert(image.translate(0x10000, 12, 2) == data);
+    assert(image.translate(0x10000, 12, 1) == nullptr);
+    assert(image.translate(0x10000, 0, 4) == nullptr);
+    assert(image.translate(UINT64_MAX, 2, 4) == nullptr);
+    assert(image.translate(0x10000, 12, 8) == nullptr);
+    assert(image.translate(0x10000, 12, 0) == nullptr);
+
     assert(image.interpret(6, state) == 0);
     assert(state.rax == 42 && state.rip == 0x1029 && state.instructions == 6);
     assert(data[0] == 0 && data[1] == 0x2d && data[2] == 1 && data[3] == 0xc0);
