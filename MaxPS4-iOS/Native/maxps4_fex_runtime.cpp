@@ -217,11 +217,7 @@ int32_t runELF(maxps4_fex_engine *engine,
     if (entry) *entry = 0;
     if (!engine || !result || !backend || !entry) return -EINVAL;
     std::lock_guard lock(runtime_lock);
-#if TARGET_OS_IPHONE
-    (void)file; (void)length; (void)budget; (void)submission;
-    std::fprintf(stderr, "MaxPS4 FEX JIT: probe blocked on iPhone: FEX JIT not initialized; returning -ENOTSUP (%d).\n", ENOTSUP);
-    return -ENOTSUP;
-#else
+    // iOS uses the bounded Darwin ELF execution path after verified InitCore.
     try {
     maxps4::GuestELF image;
     const int loaded = image.load(file, length, budget);
@@ -288,7 +284,6 @@ int32_t runELF(maxps4_fex_engine *engine,
     *backend = MAXPS4_CPU_FEX_ARM64_JIT;
     return 0;
     } catch (const std::bad_alloc&) { return -ENOMEM; }
-#endif
 }
 
 
