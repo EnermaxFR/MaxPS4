@@ -13,14 +13,14 @@ public:
         if (!destination || !length) return false;
         const auto* source = image_.translate(address, length, 4);
         if (!source) return false;
-        std::memcpy(destination, source, length);
+        std::memmove(destination, source, length);
         return true;
     }
     bool write(uint64_t address, const void* source, size_t length) {
         if (!source || !length) return false;
         const auto* destination = image_.translate(address, length, 2);
         if (!destination || image_.translate(address, length, 1)) return false;
-        std::memcpy(const_cast<uint8_t*>(destination), source, length);
+        std::memmove(const_cast<uint8_t*>(destination), source, length);
         return true;
     }
     bool permitted(uint64_t address, size_t length, uint32_t permissions) const {
