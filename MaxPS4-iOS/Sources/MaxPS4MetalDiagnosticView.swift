@@ -9,6 +9,7 @@ private final class TriangleRenderer: NSObject, MTKViewDelegate {
     private let alternateCheckerboard: MTLTexture
     private let quadVertices: MTLBuffer
     var renderMode = 0
+    var touchOffset = SIMD2<Float>(0, 0)
     private var elapsed: TimeInterval = 0
     private var previousTime: TimeInterval?
     private var reportedFrame = false
@@ -53,7 +54,7 @@ private final class TriangleRenderer: NSObject, MTKViewDelegate {
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         } else {
             // Two separate objects, two texture bindings and two GPU draw commands.
-            var left = SIMD2<Float>(-0.43, 0)
+            var left = SIMD2<Float>(-0.43 + touchOffset.x, touchOffset.y)
             encoder.setVertexBytes(&left, length: MemoryLayout<SIMD2<Float>>.stride, index: 2)
             encoder.setFragmentTexture(checkerboard, index: 0)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
@@ -84,6 +85,7 @@ private struct TriangleSurface: UIViewRepresentable {
     let device: MTLDevice
     let active: Bool
     let renderMode: Int
+    let touchOffset: SIMD2<Float>
     let report: (String, Bool) -> Void
 
     final class Coordinator {
@@ -107,6 +109,7 @@ private struct TriangleSurface: UIViewRepresentable {
     func updateUIView(_ view: MTKView, context: Context) {
         context.coordinator.renderer?.report = report
         context.coordinator.renderer?.renderMode = renderMode
+        context.coordinator.renderer?.touchOffset = touchOffset
         view.isPaused = !active || context.coordinator.renderer == nil
         if !active { context.coordinator.renderer?.pause() }
     }
@@ -124,6 +127,7 @@ struct MaxPS4MetalDiagnosticView: View {
     @State private var device = MTLCreateSystemDefaultDevice()
     @State private var running = false
     @State private var renderMode = 0
+    @State private var touchOffset = SIMD2<Float>(0, 0)
     @State private var visible = false
     @State private var failed = false
     @State private var status = "Prêt — rendu arrêté"
@@ -140,18 +144,31 @@ struct MaxPS4MetalDiagnosticView: View {
                         Picker("Démonstration", selection: $renderMode) {
                             Text("Triangle").tag(0)
                             Text("Deux textures").tag(1)
+                            Text("Interactif").tag(2)
                         }
                         .pickerStyle(.segmented)
                         .onChange(of: renderMode) { _ in status = "Changement de mode Metal…" }
                         TriangleSurface(device: device,
                             active: running && visible && scenePhase == .active && !failed,
-                            renderMode: renderMode) { message, error in
+                            renderMode: renderMode, touchOffset: renderMode == 2 ? touchOffset : SIMD2<Float>(0, 0)) { message, error in
                                 if running || error { status = message }
                                 failed = error
                                 if error { running = false }
                             }
                             .frame(height: 300)
+                            .contentShape(Rectangle())
+                            .gesture(DragGesture(minimumDistance: 0).onChanged { gesture in
+                                guard renderMode == 2 else { return }
+                                let delta = gesture.translation
+                                touchOffset = SIMD2<Float>(
+                                    max(-0.55, min(0.55, Float(delta.width) / 170)),
+                                    max(-0.65, min(0.65, -Float(delta.height) / 170)))
+                            })
                             .clipShape(RoundedRectangle(cornerRadius: 16))
+                        if renderMode == 2 {
+                            Text("Glisse ton doigt sur l’image pour déplacer le rectangle bleu.")
+                            Button("Recentrer") { touchOffset = SIMD2<Float>(0, 0) }
+                        }
                         Button(running ? "Arrêter le rendu" : "Démarrer le rendu") {
                             running.toggle()
                             status = running ? "Soumission du rendu Metal…" : "Rendu arrêté"
