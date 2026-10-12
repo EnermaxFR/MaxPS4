@@ -1,0 +1,21 @@
+#include "../Native/maxps4_fex_runtime.h"
+#include <stddef.h>
+#include <stdint.h>
+
+// Compile-only ABI contract: Swift's bridging header consumes this as C,
+// not C++. Linkage is intentionally not required by this test.
+typedef int32_t (*stage_fn)(maxps4_fex_engine *, const uint8_t *,
+                            size_t, uint64_t *, uint32_t *, uint32_t *);
+typedef int32_t (*read_fn)(maxps4_fex_engine *, uint64_t, uint8_t *, size_t);
+typedef int32_t (*write_fn)(maxps4_fex_engine *, uint64_t, const uint8_t *, size_t);
+typedef int32_t (*query_fn)(maxps4_fex_engine *, uint64_t, size_t,
+                            uint32_t, uint32_t *);
+
+static stage_fn stage_api = &maxps4_fex_engine_stage_ps4;
+static read_fn read_api = &maxps4_fex_engine_read_ps4;
+static write_fn write_api = &maxps4_fex_engine_write_ps4;
+static query_fn query_api = &maxps4_fex_engine_query_ps4;
+
+int main(void) {
+    return !(stage_api && read_api && write_api && query_api);
+}
