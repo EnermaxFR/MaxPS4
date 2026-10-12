@@ -16,6 +16,15 @@ public:
         std::memmove(destination, source, length);
         return true;
     }
+    // Instruction fetch requires both guest read and execute permissions.
+    // Copy into a caller-owned buffer; never leak host arena pointers to CPU clients.
+    bool fetch(uint64_t address, void* destination, size_t length) const {
+        if (!destination || !length) return false;
+        const auto* source = image_.translate(address, length, 5);
+        if (!source) return false;
+        std::memmove(destination, source, length);
+        return true;
+    }
     bool write(uint64_t address, const void* source, size_t length) {
         if (!source || !length) return false;
         const auto* destination = image_.translate(address, length, 2);
