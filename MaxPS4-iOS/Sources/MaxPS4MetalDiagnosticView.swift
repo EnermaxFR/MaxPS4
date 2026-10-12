@@ -52,6 +52,21 @@ private final class TriangleRenderer: NSObject, MTKViewDelegate {
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<SIMD3<Float>>.stride, index: 0)
         if renderMode == 0 {
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        } else if renderMode == 4 {
+            // Experimental PM4 type-3 DRAW_INDEX_AUTO packet, count=2 dwords.
+            // The draw is emitted only after the command buffer is decoded.
+            let pm4: [UInt32] = [(3 << 30) | (1 << 16) | (0x2d << 8), 3, 0]
+            let header = pm4[0]
+            let type = header >> 30
+            let opcode = (header >> 8) & 0xff
+            let count = Int((header >> 16) & 0x3fff) + 1
+            if type == 3 && opcode == 0x2d && count == 2 &&
+                pm4.count == count + 1 && pm4[1] == 3 && pm4[2] == 0 {
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: Int(pm4[1]))
+            } else {
+                view.isPaused = true
+                report("PM4 invalide : aucun draw soumis", true)
+            }
         } else {
             // Two separate objects, two texture bindings and two GPU draw commands.
             var left = objectOffset
@@ -65,7 +80,7 @@ private final class TriangleRenderer: NSObject, MTKViewDelegate {
         }
         encoder.endEncoding()
         command.present(drawable)
-        let mode = renderMode == 0 ? "Triangle" : "Deux rectangles texturés"
+        let mode = renderMode == 0 ? "Triangle" : (renderMode == 4 ? "Triangle PM4 → Metal" : "Deux rectangles texturés")
         let first = !reportedFrame
         reportedFrame = true
         command.addCompletedHandler { [weak self] buffer in
@@ -151,6 +166,7 @@ struct MaxPS4MetalDiagnosticView: View {
                             Text("Deux textures").tag(1)
                             Text("Interactif").tag(2)
                             Text("FEX → Metal").tag(3)
+                            Text("PM4 → Metal").tag(4)
                         }
                         .pickerStyle(.segmented)
                         .onChange(of: renderMode) { _ in
@@ -178,6 +194,10 @@ struct MaxPS4MetalDiagnosticView: View {
                         if renderMode == 2 {
                             Text("Glisse ton doigt sur l’image pour déplacer le rectangle bleu.")
                             Button("Recentrer") { touchOffset = SIMD2<Float>(0, 0) }
+                        }
+                        if renderMode == 4 {
+                            Text("Expérimental : paquet PM4 type 3 DRAW_INDEX_AUTO (3 sommets) décodé dans le rendu, puis traduit en draw Metal. Shaders natifs ; pas encore de shaders PS4 ni de mémoire GPU PS4.")
+                                .accessibilityIdentifier("maxps4.pm4MetalDescription")
                         }
                         if renderMode == 3 {
                             Text("ELF64 x86-64 : MOV EAX,n ; ADD EAX,250 ; HLT. Seul un résultat du backend FEXCore JIT déplace le rectangle bleu.")
