@@ -27,6 +27,12 @@ int main() {
     uint8_t code_byte = 0;
     assert(memory.read(0x1000, &code_byte, 1));
     assert(code_byte == 0xB8);
+    uint8_t fetched = 0;
+    assert(memory.fetch(0x1000, &fetched, 1) && fetched == code_byte);
+    assert(!memory.fetch(0x10000, &fetched, 1));
+    assert(!memory.fetch(0x1000, nullptr, 1));
+    assert(!memory.fetch(0x1000, &fetched, 0));
+    assert(!memory.fetch(UINT64_MAX, &fetched, 1));
     assert(memory.executable(0x1000, 1));
     assert(!memory.executable(0x10000, 1));
     // Reject requests straddling an unmapped boundary.
