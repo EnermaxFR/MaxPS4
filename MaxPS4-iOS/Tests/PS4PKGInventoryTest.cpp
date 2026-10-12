@@ -161,6 +161,7 @@ int main() {
     // Malformed names cannot consume 1 MiB then restart the payload budget.
     auto large = original;
     large.resize(0x600 + PKG::extractionBudget + 16, 'x');
+    std::fill(large.begin() + 0x600, large.end(), 'x');
     put(large, 0x430, large.size(), 8); put(large, 0x28, large.size() - 0x600, 8);
     put(large, 0x5b4, PKG::extractionBudget, 4);
     put(large, 0x5d0, 0x600 + PKG::extractionBudget, 4);
