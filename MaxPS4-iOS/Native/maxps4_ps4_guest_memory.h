@@ -38,6 +38,23 @@ public:
     bool executable(uint64_t address, size_t length) const {
         return permitted(address, length, 5);
     }
+    // Report the contiguous permitted bytes in the containing segment, capped
+    // by the caller's limit. Never return a raw host address or cross a segment.
+    size_t contiguous(uint64_t address, size_t limit, uint32_t permissions) const {
+        if (!limit || !permissions || (permissions & ~7U)) return 0;
+        for (const auto& segment : image_.segments()) {
+            if ((segment.permissions & permissions) != permissions ||
+                address < segment.address ||
+                segment.memory_size > UINT64_MAX - segment.address)
+                continue;
+            const uint64_t offset = address - segment.address;
+            if (offset >= segment.memory_size) continue;
+            const uint64_t available = segment.memory_size - offset;
+            return available < static_cast<uint64_t>(limit)
+                ? static_cast<size_t>(available) : limit;
+        }
+        return 0;
+    }
 private:
     GuestELF& image_;
 };
