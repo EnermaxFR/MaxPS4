@@ -151,6 +151,7 @@ extern "C" int32_t maxps4_jit_begin(uint64_t* address, uint64_t* nonce, uint64_t
     mailbox.nonce = mailbox.status = 0;
     for (auto& address : mailbox.rx) address = 0;
     state = 1; failure = 0;
+    failure_stage = 0; failure_mach = 0; failure_region = -1; active_region = -1;
     *address = reinterpret_cast<uintptr_t>(&mailbox);
     *nonce = expected_nonce; *page = page_size;
     return 0;
@@ -222,6 +223,7 @@ extern "C" int32_t maxps4_jit_cancel() {
     if (state == 1) return -EBUSY;
     for (const auto& region : regions) if (region.leased) return -EBUSY;
     destroy_regions(); expected_nonce = 0; state = failure = 0;
+    failure_stage = 0; failure_mach = 0; failure_region = -1; active_region = -1;
     return 0;
 }
 extern "C" int32_t maxps4_jit_state() { std::lock_guard guard(lock); return state; }
