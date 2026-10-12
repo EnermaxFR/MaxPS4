@@ -23,8 +23,11 @@ public:
         std::memcpy(const_cast<uint8_t*>(destination), source, length);
         return true;
     }
+    bool permitted(uint64_t address, size_t length, uint32_t permissions) const {
+        return image_.translate(address, length, permissions) != nullptr;
+    }
     bool executable(uint64_t address, size_t length) const {
-        return image_.translate(address, length, 5) != nullptr;
+        return permitted(address, length, 5);
     }
 private:
     GuestELF& image_;
