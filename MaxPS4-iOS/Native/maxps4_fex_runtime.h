@@ -25,14 +25,26 @@ int32_t maxps4_fex_engine_cpuid(maxps4_fex_engine *engine, uint32_t leaf,
 int32_t maxps4_fex_engine_probe(maxps4_fex_engine *engine, uint64_t *result,
                               uint32_t *backend);
 // Executes a bounded static ELF64 ET_EXEC image through real FEX only.
-// Admits MOV EAX,imm32 / ADD EAX,imm32 / NOP / final HLT; no memory operands,
-// branches, relocations or syscalls. Budget counts every admitted instruction.
+// Admits MOV EAX,imm32 / ADD EAX,imm32 / NOP / final HLT, and exact
+// MOV dword [RIP+disp32],imm32 stores proven to target guest RW/non-X data.
+// No branches, arbitrary memory access, relocations or syscalls. Every
+// instruction, including a store, counts against the finite admission budget.
 // Segments are rebased into owned host mappings, preserving relative offsets;
 // entry reports the original ELF address, never a host pointer. No fallback.
 // Caller keeps file bytes immutable during the call and serializes engine close.
 int32_t maxps4_fex_engine_run_elf(maxps4_fex_engine *engine, const uint8_t *file,
                                 size_t length, uint32_t budget, uint64_t *result,
                                 uint32_t *backend, uint64_t *entry);
+// Same restricted real FEX execution, followed by a PM4 snapshot from that
+// image's readable PT_LOAD memory before unmapping it. Caller supplies the guest
+// address; admitted RIP-relative stores can generate commands in RW data.
+// Range checks precede execution; PM4 interpretation follows CPU completion.
+// Maximum 65536 words. On failure written=0 and words remain untouched. The
+// copied stream has valid supported PM4 semantics, not necessarily Metal state.
+int32_t maxps4_fex_engine_run_elf_pm4(maxps4_fex_engine *engine, const uint8_t *file,
+    size_t length, uint32_t budget, uint64_t guest_address, size_t word_count,
+    uint32_t *words, size_t capacity, size_t *written, uint64_t *result,
+    uint32_t *backend, uint64_t *entry);
 // Existing bounded interpreter fallback; never describes its output as FEX JIT.
 // Caller keeps engine alive during calls and serializes close against them.
 int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine, const uint8_t *code,
@@ -41,3 +53,4 @@ int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine, const uint8_t *code,
 #ifdef __cplusplus
 }
 #endif
+

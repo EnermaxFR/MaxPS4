@@ -5,6 +5,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: '5.0'
+    CLANG_CXX_LANGUAGE_STANDARD: 'c++17'
     ARCHS: arm64
     CODE_SIGNING_ALLOWED: NO
     ENABLE_BITCODE: NO
@@ -18,6 +19,7 @@ targets:
     sources:
       - path: Sources
       - path: Resources
+      - path: Native/PM4MetalDrawBridge.mm
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.enermaxfr.maxps4
@@ -41,3 +43,4 @@ targets:
         codeSign: false
     scheme:
       gatherCoverageData: false
+

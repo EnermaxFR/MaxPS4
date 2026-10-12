@@ -13,7 +13,7 @@ struct PM4Packet {
     std::size_t payloadWord;
     std::size_t payloadCount;
 };
-enum class PM4Error { none, null_input, unsupported_packet_type, truncated_packet, too_many_packets };
+enum class PM4Error { none, null_input, unsupported_packet_type, truncated_packet, too_many_packets, too_many_words };
 struct PM4DecodeResult {
     PM4Error error = PM4Error::none;
     std::vector<PM4Packet> packets;
@@ -28,6 +28,10 @@ inline PM4DecodeResult decodePM4Type3(const std::uint32_t* words,
     PM4DecodeResult result;
     if (wordCount && !words) {
         result.error = PM4Error::null_input;
+        return result;
+    }
+    if (wordCount > 65536) {
+        result.error = PM4Error::too_many_words;
         return result;
     }
     std::size_t offset = 0;
@@ -58,3 +62,4 @@ inline PM4DecodeResult decodePM4Type3(const std::uint32_t* words,
     return result;
 }
 } // namespace maxps4::gpu
+
