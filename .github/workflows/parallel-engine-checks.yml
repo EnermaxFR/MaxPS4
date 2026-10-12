@@ -138,6 +138,7 @@ jobs:
           xcrun --sdk iphoneos swiftc \
             -target arm64-apple-ios16.0 \
             -sdk "$SDK" -parse-as-library -typecheck \
+            -import-objc-header MaxPS4-iOS/Native/PS4PKGBridge.h \
             MaxPS4-iOS/Sources/*.swift \
             2>&1 | tee build/parallel/frontend/typecheck.log
           echo "PASS Swift frontend typecheck; not an IPA or game launch"
