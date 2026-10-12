@@ -23,8 +23,16 @@ public:
     // absolute addressing requires an address-space backend before execution.
     int stage_ps4(const uint8_t* file, size_t length);
     uint32_t ps4_blockers() const { return blockers; }
+    struct Execution { uint64_t rax = 0, rip = 0; uint32_t instructions = 0; };
+    // Executes only loader-admitted instructions, with logical guest RIP and
+    // permission-checked memory accesses. No executable host allocation.
+    int interpret(uint32_t budget, Execution& output);
     void clear();
     const uint8_t* translate(uint64_t address, size_t length, uint32_t permissions) const;
+    // Staging-only logical-to-host translation; segment permissions are enforced.
+    const uint8_t* host_pointer(uint64_t address, size_t bytes, uint32_t permissions) const {
+        return translate(address, bytes, permissions);
+    }
     uint64_t entry() const { return guest_entry; }
     const uint8_t* entry_pointer() const { return translate(guest_entry, 1, 5); }
     const std::vector<Segment>& segments() const { return regions; }
@@ -44,4 +52,5 @@ private:
 // No branches, stack operations, arbitrary memory accesses or syscalls.
 int validate_guest_program(const uint8_t* bytes, size_t length, uint32_t budget);
 }
+
 

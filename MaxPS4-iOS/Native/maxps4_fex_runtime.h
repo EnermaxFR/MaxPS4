@@ -35,6 +35,11 @@ int32_t maxps4_fex_engine_probe(maxps4_fex_engine *engine, uint64_t *result,
 int32_t maxps4_fex_engine_run_elf(maxps4_fex_engine *engine, const uint8_t *file,
                                 size_t length, uint32_t budget, uint64_t *result,
                                 uint32_t *backend, uint64_t *entry);
+// Explicit ELF interpreter fallback; backend is never reported as FEX JIT.
+// Reports logical next RIP and completed instruction count, including on errors.
+int32_t maxps4_fex_engine_interpret_elf(maxps4_fex_engine *engine,
+    const uint8_t *file, size_t length, uint32_t budget, uint64_t *result,
+    uint32_t *backend, uint64_t *entry, uint64_t *rip, uint32_t *instructions);
 // Same restricted real FEX execution, followed by a PM4 snapshot from that
 // image's readable PT_LOAD memory before unmapping it. Caller supplies the guest
 // address; admitted RIP-relative stores can generate commands in RW data.
@@ -65,4 +70,5 @@ int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine, const uint8_t *code,
 #ifdef __cplusplus
 }
 #endif
+
 

@@ -144,6 +144,43 @@ int GuestELF::load(const uint8_t* file, size_t length, uint32_t budget) {
     } catch (const std::bad_alloc&) { return -ENOMEM; }
     return map_segments(std::move(parsed), sources, entry);
 }
+int GuestELF::interpret(uint32_t budget, Execution& out) {
+    out = {};
+    if (!arena || blockers || !budget || budget > 1000000) return -EINVAL;
+    out.rip = guest_entry;
+    bool initialized = false;
+    while (out.instructions < budget) {
+        const auto* opcode = translate(out.rip, 1, 5);
+        if (!opcode) return -EFAULT;
+        const uint8_t op = *opcode;
+        const size_t width = (op == 0xB8 || op == 0x05) ? 5 : op == 0xC7 ? 10 : 1;
+        const auto* code = translate(out.rip, width, 5);
+        if (!code || out.rip > UINT64_MAX - width) return -EFAULT;
+        const uint64_t next = out.rip + width;
+        if (op == 0xB8 || op == 0x05) {
+            if (op == 0x05 && !initialized) return -ENOTSUP;
+            const uint32_t immediate = static_cast<uint32_t>(number(code + 1, 4));
+            out.rax = op == 0xB8 ? immediate : static_cast<uint32_t>(out.rax + immediate);
+            initialized = true;
+        } else if (op == 0xC7) {
+            if (code[1] != 0x05) return -ENOTSUP;
+            const uint64_t raw = number(code + 2, 4);
+            const int64_t displacement = raw >= 0x80000000ULL ?
+                static_cast<int64_t>(raw) - 0x100000000LL : static_cast<int64_t>(raw);
+            if ((displacement < 0 && next < static_cast<uint64_t>(-displacement)) ||
+                (displacement >= 0 && next > UINT64_MAX - static_cast<uint64_t>(displacement))) return -EFAULT;
+            const uint64_t target = displacement < 0 ? next - static_cast<uint64_t>(-displacement) :
+                next + static_cast<uint64_t>(displacement);
+            auto* destination = const_cast<uint8_t*>(translate(target, 4, 6));
+            if (!destination || translate(target, 4, 1)) return -EFAULT;
+            std::memcpy(destination, code + 6, 4);
+        } else if (op != 0x90 && op != 0xF4) return -ENOTSUP;
+        ++out.instructions;
+        out.rip = next;
+        if (op == 0xF4) return initialized ? 0 : -ENOTSUP;
+    }
+    return -E2BIG;
+}
 int GuestELF::stage_ps4(const uint8_t* file, size_t length) {
     clear();
     PS4ExecutableImage image;
@@ -213,4 +250,5 @@ int GuestELF::map_segments(std::vector<Segment> parsed,
     return 0;
 }
 }
+
 

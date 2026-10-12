@@ -1,15 +1,37 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct MaxPS4FEXDiagnosticView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var running = false
     @State private var report: MaxPS4FEXDiagnostic?
     @State private var activationMessage: String?
+    @State private var importingELF = false
+    @State private var importedReport: String?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    Text("État du JIT FEXCore").font(.headline)
+                    if let report {
+                        let jitActive = report.succeeded && report.backend == "FEXCore JIT ARM64"
+                        Label(
+                            jitActive ? "JIT actif" :
+                                report.succeeded && report.backend.contains("Interpréteur") ? "Interpréteur utilisé — JIT indisponible" :
+                                "JIT indisponible",
+                            systemImage: jitActive ? "checkmark.shield.fill" : "exclamationmark.shield.fill"
+                        )
+                        .font(.headline)
+                        .foregroundStyle(jitActive ? .green : .orange)
+                        .accessibilityIdentifier("maxps4-jit-status")
+                    } else {
+                        Label("JIT non testé sur cet appareil", systemImage: "questionmark.shield")
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Le JIT nécessite une autorisation effective d’exécution de code sur cet iPhone. SideStore ou un débogueur détecté ne suffisent pas à la prouver. Si l’initialisation renvoie -45 (ENOTSUP), consultez le diagnostic et utilisez l’interpréteur de repli.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     Text("Test x86-64 : 40 + 2").font(.headline)
                     Text("Le contexte FEX est interrogé réellement. Si son JIT est indisponible, le programme est exécuté par l’interpréteur natif existant.")
                     Button(running ? "Test en cours…" : "Tester FEXCore") {
@@ -26,6 +48,12 @@ struct MaxPS4FEXDiagnosticView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(running)
+                    Button("Exécuter un ELF de test…") { importingELF = true }
+                        .disabled(running)
+                    if let importedReport {
+                        Text(importedReport).font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
                     Button("Activer avec StikDebug") {
                         activationMessage = MaxPS4StikActivation.begin()
                     }
@@ -48,8 +76,28 @@ struct MaxPS4FEXDiagnosticView: View {
                     }
                 }.padding()
             }
+            .fileImporter(isPresented: $importingELF, allowedContentTypes: [.data]) { selection in
+                switch selection {
+                case .success(let url):
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    running = true
+                    Task {
+                        defer {
+                            if scoped { url.stopAccessingSecurityScopedResource() }
+                            running = false
+                        }
+                        importedReport = await withCheckedContinuation { continuation in
+                            MaxPS4FEXMetalExecution.queue.async {
+                                continuation.resume(returning: MaxPS4FEXDiagnostic.executeTestELF(url: url))
+                            }
+                        }
+                    }
+                case .failure(let error): importedReport = error.localizedDescription
+                }
+            }
             .navigationTitle("Diagnostic FEXCore")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } } }
         }
     }
 }
+

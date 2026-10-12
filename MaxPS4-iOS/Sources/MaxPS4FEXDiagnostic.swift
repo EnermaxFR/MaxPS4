@@ -73,6 +73,53 @@ struct MaxPS4FEXDiagnostic: Sendable {
 #endif
     }
 
+    /// Executes a user-selected bounded static ELF, using the same native loader
+    /// for FEX and the no-JIT path. Arbitrary PS4 binaries remain rejected.
+    static func executeTestELF(url: URL) -> String {
+#if MAXPS4_FEX_APP
+        do {
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let size = try handle.seekToEnd()
+            guard size >= 64, size <= 32 * 1024 * 1024 else { return "ELF hors budget (32 Mio)" }
+            try handle.seek(toOffset: 0)
+            let file = try handle.read(upToCount: Int(size)) ?? Data()
+            guard file.count == Int(size) else { return "Lecture ELF incomplète" }
+            var engine: OpaquePointer?
+            let opened = maxps4_fex_engine_open(&engine)
+            guard opened == 0, let engine else { return "Ouverture FEXCore refusée : \(opened)" }
+            defer { maxps4_fex_engine_close(engine) }
+            let jit = maxps4_fex_engine_initialize(engine)
+            var value: UInt64 = 0; var entry: UInt64 = 0; var rip: UInt64 = 0
+            var backend: UInt32 = 0; var count: UInt32 = 0
+            let status = file.withUnsafeBytes { bytes in
+                let pointer = bytes.bindMemory(to: UInt8.self).baseAddress
+                if jit == 0 {
+                    return maxps4_fex_engine_run_elf(engine, pointer, bytes.count, 65536,
+                        &value, &backend, &entry)
+                }
+                return maxps4_fex_engine_interpret_elf(engine, pointer, bytes.count, 65536,
+                    &value, &backend, &entry, &rip, &count)
+            }
+            let name = backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT) ? "FEXCore JIT ARM64" :
+                backend == UInt32(MAXPS4_CPU_RESTRICTED_INTERPRETER) ? "Interpréteur ELF sans JIT" : "Aucun"
+            return [
+                "ELF importé : " + url.lastPathComponent,
+                "Statut : \(status) ; initialisation JIT : \(jit) ; backend : \(name)",
+                "Entrée invitée : 0x" + String(entry, radix: 16),
+                "RAX : \(value)",
+                backend == UInt32(MAXPS4_CPU_RESTRICTED_INTERPRETER) ?
+                    "RIP invité : 0x" + String(rip, radix: 16) + " ; instructions terminées : \(count)" :
+                    "RIP final et compteur FEX : non exposés",
+                "Admission limitée : MOV EAX, ADD EAX, NOP, stores RIP-relatifs RW et HLT final.",
+                "Imports, relocations, TLS et exécution de jeu PS4 : non pris en charge."
+            ].joined(separator: "\n")
+        } catch { return "Exécution ELF impossible : \(error.localizedDescription)" }
+#else
+        return "Moteur FEXCore natif absent de cette compilation"
+#endif
+    }
+
     static func run() -> Self {
 #if MAXPS4_FEX_APP
         let elfMemoryBridgePassed = MaxPS4ELFLoader.importDemoSelfTest() &&
@@ -98,11 +145,31 @@ struct MaxPS4FEXDiagnostic: Sendable {
             (0..<4).map { UInt8(truncatingIfNeeded: word >> ($0 * 8)) }
         }
         let vendor = String(decoding: vendorBytes, as: UTF8.self)
+        let providerBefore = maxps4_jit_state()
         let initialized = maxps4_fex_engine_initialize(engine)
+        let providerAfter = maxps4_jit_state()
+        let providerError = maxps4_jit_error()
+        let mailboxDiagnostic = Int(maxps4_jit_mailbox_diagnostic())
+        let mailboxDescriptions = ["session inactive", "nonce absent", "nonce incorrect", "statut non publié", "confirmation rejetée", "confirmation reçue"]
+        let mailboxDescription = mailboxDescriptions.indices.contains(mailboxDiagnostic) ? mailboxDescriptions[mailboxDiagnostic] : "inconnu"
+        let jitGuidance: String
+        if initialized == -45 && providerAfter == 1 {
+            jitGuidance = "Activation StikDebug en attente : MaxPS4 n’a pas reçu la confirmation des régions RX. Terminer l’activation dans StikDebug, revenir dans MaxPS4, puis relancer le test. Ne pas libérer la mémoire avant ce test."
+        } else if initialized == -45 && providerAfter == 0 {
+            jitGuidance = "JIT non préparé : utiliser « Activer avec StikDebug » avant le test FEXCore."
+        } else if providerAfter == 3 {
+            jitGuidance = "Préparation mémoire JIT refusée (erreur \\(providerError)). Consulter l’étape et le code Mach ci-dessous."
+        } else if initialized == 0 {
+            jitGuidance = "FEXCore JIT initialisé ; vérifier le backend réel du test ci-dessous."
+        } else {
+            jitGuidance = "Initialisation JIT non disponible (statut \\(initialized))."
+        }
         var value: UInt64 = 0
         var selected: UInt32 = 0
         var jitStatus = initialized
         var elfEntry: UInt64 = 0
+        var guestRIP: UInt64 = 0
+        var instructions: UInt32 = 0
         var status: Int32
         if initialized == 0 {
             let file = MaxPS4SyntheticELFFEXBridge.syntheticELF()
@@ -114,9 +181,10 @@ struct MaxPS4FEXDiagnostic: Sendable {
         } else { status = initialized }
         if status != 0 {
             // Preserve the actual JIT error separately from the interpreter result.
-            let code: [UInt8] = [0xB8, 40, 0, 0, 0, 0x05, 2, 0, 0, 0, 0xC3]
-            status = code.withUnsafeBufferPointer {
-                maxps4_fex_engine_run(engine, $0.baseAddress, $0.count, 32, &value, &selected)
+            let file = MaxPS4SyntheticELFFEXBridge.syntheticELF()
+            status = file.withUnsafeBytes {
+                maxps4_fex_engine_interpret_elf(engine, $0.bindMemory(to: UInt8.self).baseAddress,
+                    $0.count, 3, &value, &selected, &elfEntry, &guestRIP, &instructions)
             }
         }
         let stage = maxps4_fex_engine_stage(engine)
@@ -139,8 +207,12 @@ struct MaxPS4FEXDiagnostic: Sendable {
         CPUID invité FEX : statut \(cpuidStatus), fournisseur \(vendor), feuille maximale \(cpuid[0])
         Debugger détecté : \(debugger == 1 ? "oui" : debugger == 0 ? "non" : "inconnu") (pas un droit JIT)
         Initialisation FEX JIT : statut \(initialized)
+        État fournisseur avant/après : \(providerBefore) → \(providerAfter)
+        Diagnostic JIT : \(jitGuidance)
+        Confirmation StikDebug : \(mailboxDescription) (code \(mailboxDiagnostic))
         Exécution FEX JIT : statut \(jitStatus) (0 requis pour un succès JIT)
         Point d’entrée ELF64 invité : 0x\(String(elfEntry, radix: 16))
+        RIP invité après repli : 0x\(String(guestRIP, radix: 16)), instructions terminées : \(instructions)
         Fournisseur RX/RW : état \(maxps4_jit_state()), erreur \(maxps4_jit_error())
         Échec JIT précis : \(failureName) (étape \(failureStage))
         Code Mach : \(maxps4_jit_failure_mach()), région : \(maxps4_jit_failure_region())
@@ -165,3 +237,4 @@ struct MaxPS4FEXDiagnostic: Sendable {
 #endif
     }
 }
+
