@@ -3,6 +3,11 @@ on:
   pull_request:
     paths:
       - 'MaxPS4-iOS/Native/maxps4_guest_elf.*'
+      - 'MaxPS4-iOS/Native/maxps4_ps4_guest_memory.h'
+      - 'MaxPS4-iOS/Native/maxps4_guest_range.h'
+      - 'MaxPS4-iOS/Tests/PS4GuestMemoryTest.cpp'
+      - 'MaxPS4-iOS/Tests/PS4StagedCPUAdmissionTest.cpp'
+      - 'MaxPS4-iOS/Tests/PS4ExecutableFixture.h'
       - 'MaxPS4-iOS/Native/maxps4_fex_runtime.*'
       - 'MaxPS4-iOS/Sources/MaxPS4FEXDiagnostic*.swift'
       - 'MaxPS4-iOS/Tests/GuestELF*'
@@ -23,6 +28,14 @@ jobs:
         run: |
           c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Native/maxps4_guest_elf.cpp MaxPS4-iOS/Tests/GuestELFInterpreterTest.cpp -o /tmp/elf-execution
           /tmp/elf-execution
+      - name: Verify staged PS4 guest memory adapter
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer -I MaxPS4-iOS/Native MaxPS4-iOS/Native/maxps4_guest_elf.cpp MaxPS4-iOS/Tests/PS4GuestMemoryTest.cpp -o /tmp/ps4-memory-test
+          /tmp/ps4-memory-test
+      - name: Verify staged CPU admission without executing FEX
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Native/maxps4_guest_elf.cpp MaxPS4-iOS/Tests/PS4StagedCPUAdmissionTest.cpp -o /tmp/ps4-cpu-admission
+          /tmp/ps4-cpu-admission
       - name: Compile interpreter for iPhone ARM64
         if: runner.os == 'macOS'
         run: |
@@ -36,3 +49,4 @@ jobs:
         with:
           name: MaxPS4-test-ELF-${{ runner.os }}
           path: build/MaxPS4-test-123.elf
+

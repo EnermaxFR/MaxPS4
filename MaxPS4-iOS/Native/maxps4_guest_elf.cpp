@@ -1,4 +1,6 @@
 #include "maxps4_guest_elf.h"
+#include "maxps4_guest_range.h"
+#include "maxps4_ps4_guest_memory.h"
 #include "PS4ExecutableImage.hpp"
 #include <algorithm>
 #include <cerrno>
@@ -50,9 +52,9 @@ static int validateGuestProgram(const uint8_t* bytes, size_t length, uint32_t bu
             }
             bool writable = false;
             for (const auto& region : *regions) {
-                if ((region.permissions & 7U) != 6 || target < region.address) continue;
-                const uint64_t relative = target - region.address;
-                writable |= relative <= region.memory_size && 4 <= region.memory_size - relative;
+                if ((region.permissions & 7U) != 6U) continue;
+                writable |= guest_range_permitted(target, 4, 2, region.address,
+                                                  region.memory_size, region.permissions);
             }
             if (!writable) return -ENOTSUP;
             offset += 9;
@@ -78,11 +80,10 @@ void GuestELF::clear() {
     regions.clear();
 }
 const uint8_t* GuestELF::translate(uint64_t address, size_t length, uint32_t permissions) const {
-    if (!arena || !length || (permissions & ~7U)) return nullptr;
+    if (!arena) return nullptr;
     for (const auto& segment : regions) {
-        if ((segment.permissions & permissions) != permissions || address < segment.address) continue;
-        const uint64_t offset = address - segment.address;
-        if (offset <= segment.memory_size && length <= segment.memory_size - offset)
+        if (guest_range_permitted(address, length, permissions, segment.address,
+                                  segment.memory_size, segment.permissions))
             return static_cast<const uint8_t*>(arena) + (address - guest_base);
     }
     return nullptr;
@@ -149,13 +150,13 @@ int GuestELF::interpret(uint32_t budget, Execution& out) {
     if (!arena || blockers || !budget || budget > 1000000) return -EINVAL;
     out.rip = guest_entry;
     bool initialized = false;
+    PS4GuestMemory memory(*this);
     while (out.instructions < budget) {
-        const auto* opcode = translate(out.rip, 1, 5);
-        if (!opcode) return -EFAULT;
-        const uint8_t op = *opcode;
+        uint8_t op = 0;
+        if (!memory.fetch(out.rip, &op, 1)) return -EFAULT;
         const size_t width = (op == 0xB8 || op == 0x05) ? 5 : op == 0xC7 ? 10 : 1;
-        const auto* code = translate(out.rip, width, 5);
-        if (!code || out.rip > UINT64_MAX - width) return -EFAULT;
+        uint8_t code[10] = {};
+        if (out.rip > UINT64_MAX - width || !memory.fetch(out.rip, code, width)) return -EFAULT;
         const uint64_t next = out.rip + width;
         if (op == 0xB8 || op == 0x05) {
             if (op == 0x05 && !initialized) return -ENOTSUP;
@@ -171,9 +172,7 @@ int GuestELF::interpret(uint32_t budget, Execution& out) {
                 (displacement >= 0 && next > UINT64_MAX - static_cast<uint64_t>(displacement))) return -EFAULT;
             const uint64_t target = displacement < 0 ? next - static_cast<uint64_t>(-displacement) :
                 next + static_cast<uint64_t>(displacement);
-            auto* destination = const_cast<uint8_t*>(translate(target, 4, 6));
-            if (!destination || translate(target, 4, 1)) return -EFAULT;
-            std::memcpy(destination, code + 6, 4);
+            if (!memory.write(target, code + 6, 4)) return -EFAULT;
         } else if (op != 0x90 && op != 0xF4) return -ENOTSUP;
         ++out.instructions;
         out.rip = next;
@@ -203,6 +202,22 @@ int GuestELF::stage_ps4(const uint8_t* file, size_t length) {
         blockers = 4U | (image.requiresLinker ? 1U : 0U) | (image.requiresTLS ? 2U : 0U);
         return 0;
     } catch (const std::bad_alloc&) { clear(); return -ENOMEM; }
+}
+int GuestELF::admit_staged_cpu(uint32_t budget) const {
+    if (!budget || budget > 1000000) return -EINVAL;
+    if (!arena) return -EFAULT;
+    if (blockers & 3U) return -ENOTSUP; // Linker/TLS are never bypassed.
+    for (const auto& s : regions) {
+        if (!(s.permissions & 1U) || guest_entry < s.address ||
+            guest_entry - s.address >= s.file_size) continue;
+        const size_t bytes = static_cast<size_t>(s.file_size - (guest_entry - s.address));
+        const auto* code = translate(guest_entry, bytes, 5);
+        if (!code) return -EFAULT;
+        // No absolute operands, branches or stack accesses: rebasing preserves
+        // every admitted RIP-relative store, with a full RW/non-X range proof.
+        return validateGuestProgram(code, bytes, budget, guest_entry, &regions);
+    }
+    return -EFAULT;
 }
 int GuestELF::map_segments(std::vector<Segment> parsed,
     const std::vector<const uint8_t*>& sources, uint64_t entry) {
@@ -250,5 +265,6 @@ int GuestELF::map_segments(std::vector<Segment> parsed,
     return 0;
 }
 }
+
 
 
