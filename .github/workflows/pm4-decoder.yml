@@ -5,6 +5,7 @@ on:
       - 'MaxPS4-iOS/Native/PM4Type3Decoder.hpp'
       - 'MaxPS4-iOS/Tests/PM4Type3DecoderTest.cpp'
       - 'MaxPS4-iOS/Native/PM4CommandInterpreter.hpp'
+      - 'MaxPS4-iOS/Native/PM4MetalDrawBridge.mm'
       - 'MaxPS4-iOS/Tests/PM4CommandInterpreterTest.cpp'
       - '.github/workflows/pm4-decoder.yml'
   workflow_dispatch:
@@ -19,3 +20,10 @@ jobs:
           /tmp/pm4-decoder-test
           c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PM4CommandInterpreterTest.cpp -o /tmp/pm4-interpreter-test
           /tmp/pm4-interpreter-test
+  metal-bridge:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile Objective-C++ PM4 Metal bridge
+        run: |
+          xcrun clang++ -std=c++17 -fobjc-arc -Wall -Wextra -Werror -fsyntax-only -x objective-c++ MaxPS4-iOS/Native/PM4MetalDrawBridge.mm
