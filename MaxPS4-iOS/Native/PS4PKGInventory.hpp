@@ -90,6 +90,41 @@ public:
             return true;
         } catch (const std::bad_alloc&) { diagnostic = "Budget mémoire indisponible"; return false; }
     }
+    // Name offsets refer to the plaintext entry_names resource, never PFS.
+    // Names are display-only ASCII; no paths are opened or extraction enabled.
+    bool resolveNames(const Reader& read, std::vector<std::string>& names,
+                      std::string& diagnostic) const {
+        names.clear(); diagnostic.clear();
+        size_t index = entries.size();
+        for (size_t i = 0; i < entries.size(); ++i)
+            if (entries[i].id == 0x200) index = i;
+        std::vector<uint8_t> bytes;
+        if (index == entries.size() || !extract(index, read, bytes, diagnostic)) {
+            diagnostic = "Noms indisponibles : table absente ou non admissible";
+            return false;
+        }
+        std::vector<std::string> pending(entries.size());
+        for (size_t i = 0; i < entries.size(); ++i) {
+            const size_t start = entries[i].nameOffset;
+            if (!start) continue; // Zero is the unnamed sentinel.
+            if (start >= bytes.size() || bytes[start - 1] != 0) {
+                diagnostic = "Offset de nom hors table ou au milieu d'une chaîne"; return false;
+            }
+            size_t end = start;
+            while (end < bytes.size() && bytes[end] && end - start < 255) {
+                if (bytes[end] < 0x20 || bytes[end] > 0x7e) {
+                    diagnostic = "Nom non ASCII affichable"; return false;
+                }
+                ++end;
+            }
+            if (end == bytes.size() || bytes[end] != 0) {
+                diagnostic = "Nom non terminé ou supérieur à 255 octets"; return false;
+            }
+            pending[i].assign(reinterpret_cast<const char*>(bytes.data() + start), end - start);
+        }
+        names = std::move(pending);
+        return true;
+    }
 private:
     static uint64_t be(const uint8_t* p, size_t n) {
         uint64_t v = 0;

@@ -18,7 +18,7 @@ std::vector<uint8_t> fixture() {
     put(f, 0x20, 0x600, 8); put(f, 0x28, f.size() - 0x600, 8);
     put(f, 0x430, f.size(), 8);
     put(f, 0x5a0, 0x200, 4); put(f, 0x5b0, 0x600, 4); put(f, 0x5b4, 16, 4);
-    put(f, 0x5c0, 0x1000, 4); put(f, 0x5d0, 0x700, 4); put(f, 0x5d4, 16, 4);
+    put(f, 0x5c4, 1, 4); put(f, 0x5c0, 0x1000, 4); put(f, 0x5d0, 0x700, 4); put(f, 0x5d4, 16, 4);
     std::memcpy(f.data() + 0x600, "\0eboot.bin\0", 11);
     std::memcpy(f.data() + 0x700, "\0PSF", 4);
     return f;
@@ -40,6 +40,25 @@ int main() {
     assert(pkg.entries[0].access == Access::plaintext);
     assert(pkg.extract(1, read, output, why) && output.size() == 16 && output[1] == 'P');
     const auto original = f;
+    std::vector<std::string> names;
+    put(f, 0x5c4, 1, 4);
+    assert(parse() && pkg.resolveNames(read, names, why));
+    assert(names.size() == 2 && names[1] == "eboot.bin");
+    // A display name cannot change the entry's extraction policy.
+    put(f, 0x5c0, 0xdead, 4);
+    assert(parse() && pkg.resolveNames(read, names, why));
+    assert(!pkg.extract(1, read, output, why));
+    for (uint32_t off : {2U, 16U, UINT32_MAX}) {
+        put(f, 0x5c4, off, 4);
+        assert(parse() && !pkg.resolveNames(read, names, why) && names.empty());
+    }
+    f = original; put(f, 0x5c4, 1, 4); f[0x609] = 'x';
+    std::fill(f.begin() + 0x60a, f.begin() + 0x610, 'x');
+    assert(parse() && !pkg.resolveNames(read, names, why));
+    f = original; put(f, 0x5a8, 0x80000000, 4);
+    assert(parse()); reads = 0;
+    assert(!pkg.resolveNames(read, names, why) && reads == 0);
+    f = original;
     // No magic-based bypass of a protection flag, including ELF-looking payloads.
     std::memcpy(f.data() + 0x700, "\177ELF", 4);
     put(f, 0x5c8, 0x80000000, 4);
@@ -139,6 +158,20 @@ int main() {
     assert(text.find("MaxPS4") != std::string::npos);
     assert(text.find("eboot.bin") != std::string::npos);
     assert(text.find("Octets copiés en mémoire : 32") != std::string::npos);
+    // Malformed names cannot consume 1 MiB then restart the payload budget.
+    auto large = original;
+    large.resize(0x600 + PKG::extractionBudget + 16, 'x');
+    std::fill(large.begin() + 0x600, large.end(), 'x');
+    put(large, 0x430, large.size(), 8); put(large, 0x28, large.size() - 0x600, 8);
+    put(large, 0x5b4, PKG::extractionBudget, 4);
+    put(large, 0x5d0, 0x600 + PKG::extractionBudget, 4);
+    put(large, 0x5c4, 1, 4); large[0x600] = 0; // Unbounded, unterminated name.
+    file = std::fopen(path, "wb"); assert(file);
+    assert(fwrite(large.data(), 1, large.size(), file) == large.size()); assert(fclose(file) == 0);
+    assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
+    const std::string capped(report.data());
+    assert(capped.find("Octets inspectés (budget partagé) : 1048576") != std::string::npos);
+    assert(capped.find("Octets copiés en mémoire : 0") != std::string::npos);
     char tiny[8]; assert(maxps4_pkg_inventory_report(path, tiny, sizeof(tiny)) != 0 && tiny[7] == 0);
     assert(maxps4_pkg_inventory_report(nullptr, tiny, sizeof(tiny)) != 0 && tiny[0] == 0);
     assert(maxps4_pkg_inventory_report(path, nullptr, 0) != 0);

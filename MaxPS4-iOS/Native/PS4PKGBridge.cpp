@@ -33,20 +33,34 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
             report << "Taille vérifiée : " << size << " octets ; entrées : " << pkg.entries.size()
                    << "\nCorps : " << pkg.bodyOffset << " + " << pkg.bodySize
                    << "\nPFS : " << pkg.pfsOffset << " + " << pkg.pfsSize << " (opaque, non monté)\n";
+            size_t inspected = 0;
+            auto boundedRead = [&](uint64_t offset, uint8_t* bytes, size_t count) {
+                if (count > pkg.extractionBudget - inspected) return false;
+                inspected += count; // Failed/invalid name parsing also consumes budget.
+                return read(offset, bytes, count);
+            };
+            std::vector<std::string> names;
+            std::string nameDiagnostic;
+            const bool namesResolved = pkg.resolveNames(boundedRead, names, nameDiagnostic);
+            report << (namesResolved ? "Noms de descripteurs résolus (affichage seulement)" : nameDiagnostic) << '\n';
+            // Count the names read against the same total inspection budget.
             size_t copied = 0;
+            if (namesResolved) for (const auto& e : pkg.entries)
+                if (e.id == 0x200) copied += e.size;
             for (size_t i = 0; i < pkg.entries.size(); ++i) {
                 const auto& e = pkg.entries[i];
                 report << '#' << i + 1 << " id=0x" << std::hex << e.id << std::dec
                        << " [" << pkg.type(e.id) << "] offset=" << e.offset << " taille=" << e.size
                        << " nom@=" << e.nameOffset << " flags=0x" << std::hex << e.flags1 << "/0x" << e.flags2
                        << std::dec << " : " << pkg.accessName(e.access);
+                if (namesResolved && !names[i].empty()) report << " nom=" << names[i];
                 if (!e.problem.empty()) report << " (" << e.problem << ')';
                 // Total payload inspection budget, not per-entry budget.
-                if (e.access == maxps4::PS4PKGInventory::Access::plaintext) {
+                if (e.access == maxps4::PS4PKGInventory::Access::plaintext && !(namesResolved && e.id == 0x200)) {
                     if (e.size <= pkg.extractionBudget - copied) {
                         std::vector<uint8_t> bytes;
                         std::string why;
-                        if (pkg.extract(i, read, bytes, why)) {
+                        if (pkg.extract(i, boundedRead, bytes, why)) {
                             copied += bytes.size();
                             report << " ; copie mémoire=" << bytes.size() << " octets";
                             const char name[] = "eboot.bin";
@@ -62,9 +76,10 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                 }
                 report << '\n';
             }
+            report << "Octets inspectés (budget partagé) : " << inspected << "\n";
             report << "Octets copiés en mémoire : " << copied << "; aucun fichier exporté.\n"
                    << "Les flags déclarés ne constituent pas une authentification.\n"
-                   << "Noms internes non résolus ; aucune admission ELF/SELF ni exécution.\n"
+                   << "Les noms de descripteurs ne constituent pas un système de fichiers ; aucune admission ELF/SELF ni exécution.\n"
                    << "Absence de signature dans ces ressources ≠ absence d'exécutable dans le PKG.\n"
                    << "Aucun déchiffrement, aucune recherche dans les clés/licences ou le PFS.\n";
         }
