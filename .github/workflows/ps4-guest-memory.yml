@@ -1,0 +1,22 @@
+name: PS4 guest memory range checks
+on:
+  pull_request:
+    paths:
+      - 'MaxPS4-iOS/Native/maxps4_guest_range.h'
+      - 'MaxPS4-iOS/Tests/GuestMemoryRangeTest.cpp'
+      - '.github/workflows/ps4-guest-memory.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  guest-range:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run checked guest-range tests
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/GuestMemoryRangeTest.cpp -o /tmp/guest-range-test
+          /tmp/guest-range-test
