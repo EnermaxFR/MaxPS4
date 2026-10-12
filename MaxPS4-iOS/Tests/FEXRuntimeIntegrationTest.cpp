@@ -108,6 +108,19 @@ int main() {
             0x10000, 3, submitted, 3, &written, &probe_result, &probe_backend, &elf_entry) == -ENOTSUP);
         CHECK(written == 0 && submitted[0] == 99 && probe_backend == 0);
         std::puts("PASS actual FEX execution -> same ELF arena PM4 snapshot; no CPU-generated commands claimed");
+        for (uint32_t count : {3U, 6U, 3U}) {
+            auto generated = guest_test::generated_pm4(count);
+            CHECK(maxps4_fex_engine_run_elf_pm4(first, generated.data(), generated.size(), 6,
+                0x10000, 3, submitted, 3, &written, &probe_result, &probe_backend, &elf_entry) == 0);
+            CHECK(written == 3 && submitted[0] == 0xc0012d00 && submitted[1] == count && submitted[2] == 2);
+            CHECK(probe_result == 42 && probe_backend == MAXPS4_CPU_FEX_ARM64_JIT);
+            // The data segment had no file payload. These words came from real
+            // x86 RIP-relative stores executed through FEX, not Swift or an interpreter.
+            CHECK(maxps4_fex_engine_run_elf_pm4(first, generated.data(), generated.size(), 5,
+                0x10000, 3, submitted, 3, &written, &probe_result, &probe_backend, &elf_entry) == -E2BIG);
+            CHECK(written == 0 && probe_result == 0 && probe_backend == 0);
+        }
+        std::puts("PASS real FEX RIP-relative stores generate PM4 in initially zero-filled guest data");
         // Entry offset is honored; bytes preceding it must never execute.
         guest_test::put(elf, 0x1005, 24, 8);
         elf[189] = 0xB8;

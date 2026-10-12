@@ -6,8 +6,8 @@ struct PM4MetalIntegrationTest {
     static func main() throws {
         var drawn = 99
         #if MAXPS4_PM4_FEX_INTEGRATION
-        // Two real ELF PT_LOAD mappings: admitted x86 code and static PM4 data.
-        var file = Data(repeating: 0, count: 207)
+        // Two ELF PT_LOAD mappings: x86 code and zero-filled data. FEX writes PM4.
+        var file = Data(repeating: 0, count: 225)
         func put(_ value: UInt64, _ offset: Int, _ width: Int) {
             for i in 0..<width { file[offset + i] = UInt8(truncatingIfNeeded: value >> (i * 8)) }
         }
@@ -15,16 +15,24 @@ struct PM4MetalIntegrationTest {
         put(2, 16, 2); put(62, 18, 2); put(1, 20, 4); put(0x1000, 24, 8)
         put(64, 32, 8); put(64, 52, 2); put(56, 54, 2); put(2, 56, 2)
         put(1, 64, 4); put(5, 68, 4); put(184, 72, 8); put(0x1000, 80, 8)
-        put(11, 96, 8); put(32, 104, 8); put(1, 112, 8)
-        put(1, 120, 4); put(6, 124, 4); put(195, 128, 8); put(0x10000, 136, 8)
-        put(12, 152, 8); put(64, 160, 8); put(1, 168, 8)
-        file[184] = 0xb8; put(40, 185, 4); file[189] = 5; put(2, 190, 4); file[194] = 0xf4
-        put(0xc0012d00, 195, 4); put(3, 199, 4); put(2, 203, 4)
-        let snapshot = try MaxPS4PM4Submission.run(file: file, guestAddress: 0x10000, wordCount: 3)
+        put(41, 96, 8); put(64, 104, 8); put(1, 112, 8)
+        put(1, 120, 4); put(6, 124, 4); put(225, 128, 8); put(0x10000, 136, 8)
+        put(0, 152, 8); put(64, 160, 8); put(1, 168, 8)
+        file[184] = 0xb8; put(40, 185, 4); file[189] = 5; put(2, 190, 4)
+        let generated: [UInt32] = [0xc0012d00, 3, 2]
+        for i in 0..<3 {
+            let offset = 10 + i * 10
+            file[184 + offset] = 0xc7; file[185 + offset] = 0x05
+            put(UInt64(0x10000 + i * 4 - (0x1000 + offset + 10)), 186 + offset, 4)
+            put(UInt64(generated[i]), 190 + offset, 4)
+        }
+        file[224] = 0xf4
+        let snapshot = try MaxPS4PM4Submission.run(file: file, guestAddress: 0x10000, wordCount: 3, budget: 6)
         precondition(snapshot.rax == 42 && snapshot.entry == 0x1000)
         precondition(snapshot.backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT) && maxps4_jit_leases() == 0)
         let words = snapshot.words
-        print("PASS real FEX completion -> static PM4 in same ELF arena -> owned Swift snapshot")
+        precondition(words == generated)
+        print("PASS real FEX x86 stores -> generated PM4 in zero-filled ELF data -> owned Swift snapshot")
         #else
         let words: [UInt32] = [0xc0012d00, 3, 2]
         #endif

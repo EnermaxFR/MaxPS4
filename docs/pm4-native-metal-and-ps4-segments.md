@@ -34,13 +34,17 @@ escapes to Swift or Metal. Invalid streams do not publish words.
 
 `MaxPS4PM4Submission` exposes this diagnostic operation to Swift. The
 macOS integration test chains FEX completion, the native memory snapshot,
-C++ PM4 interpretation, Metal draw and pixel readback.
+C++ PM4 interpretation, Metal draw and pixel readback. The readable range is checked
+before execution; command semantics are interpreted after CPU completion.
 
-The guest code is still restricted to MOV EAX immediate, ADD EAX immediate,
-NOP and final HLT. The PM4 data in tests is static file data. CPU-generated
-command buffers, arbitrary memory instructions, branches, real PS4 system calls
-and sceGnm submission are not implemented by this change. This API does not
-claim that the CPU generated commands or that a game ran.
+The guest code remains restricted to MOV EAX immediate, ADD EAX immediate,
+NOP, final HLT and exact RIP-relative immediate stores proven to target guest
+RW/non-executable data. The FEX integration fixture starts with zero-filled BSS;
+three actual translated x86 stores generate its PM4 packet. General memory
+access, branches, real PS4 system calls and sceGnm submission remain unimplemented.
+This diagnostic does not claim that a game ran. See fex-generated-pm4.md for
+admission guarantees and the distinction between Linux validation and real FEX
+execution in macOS ARM64 CI.
 
 ## Separate plaintext PS4 segment component
 
@@ -66,7 +70,8 @@ integration must be implemented before staged PS4 images can execute.
 ## Validation
 
 Local Linux checks: PM4 framing, command semantics, Metal preflight, actual
-ELF-memory snapshot and PS4 ELF/SELF segment tests under ASan/UBSan. LeakSanitizer
+ELF-memory snapshot, bounded RIP-relative store admission and PS4 ELF/SELF
+segment tests under ASan/UBSan. LeakSanitizer
 must be disabled in the local ptrace sandbox; CI retains the sanitizer defaults.
 
 GitHub Actions checks:

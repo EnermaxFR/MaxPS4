@@ -30,6 +30,10 @@ private:
     uint64_t guest_base = 0, guest_entry = 0;
 };
 // Admission guarantees a finite sequence: MOV EAX,imm32; ADD EAX,imm32;
-// NOP; terminal HLT. No branches, memory operands, stack operations or syscalls.
+// NOP; terminal HLT. The ELF loader also admits C7 05 disp32 imm32 stores
+// after proving each target lies wholly in a guest RW/non-X segment. This
+// standalone validator has no segment proof and still rejects memory operands.
+// No branches, stack operations, arbitrary memory accesses or syscalls.
 int validate_guest_program(const uint8_t* bytes, size_t length, uint32_t budget);
 }
+

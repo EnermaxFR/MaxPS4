@@ -214,8 +214,11 @@ int32_t runELF(maxps4_fex_engine *engine,
     if (loaded) return loaded;
     *entry = image.entry();
     if (submission) {
-        const auto preflight = maxps4::gpu::snapshotPM4(image, submission->address, submission->count);
-        if (preflight.error) return preflight.error;
+        if ((submission->address & 3U) ||
+            submission->address > UINT64_MAX - submission->count * 4) return -EINVAL;
+        if (!image.translate(submission->address, submission->count * 4, 4)) return -EFAULT;
+        // The CPU may produce PM4 in initially zero-filled RW data. Interpret
+        // only after FEX completes; range/permissions are checked before execution.
     }
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
     const long host_page = ::sysconf(_SC_PAGESIZE);
