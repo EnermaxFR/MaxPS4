@@ -150,8 +150,8 @@ int GuestELF::interpret(uint32_t budget, Execution& out) {
     if (!arena || blockers || !budget || budget > 1000000) return -EINVAL;
     out.rip = guest_entry;
     bool initialized = false;
+    PS4GuestMemory memory(*this);
     while (out.instructions < budget) {
-        PS4GuestMemory memory(*this);
         uint8_t op = 0;
         if (!memory.fetch(out.rip, &op, 1)) return -EFAULT;
         const size_t width = (op == 0xB8 || op == 0x05) ? 5 : op == 0xC7 ? 10 : 1;
@@ -172,7 +172,6 @@ int GuestELF::interpret(uint32_t budget, Execution& out) {
                 (displacement >= 0 && next > UINT64_MAX - static_cast<uint64_t>(displacement))) return -EFAULT;
             const uint64_t target = displacement < 0 ? next - static_cast<uint64_t>(-displacement) :
                 next + static_cast<uint64_t>(displacement);
-            PS4GuestMemory memory(*this);
             if (!memory.write(target, code + 6, 4)) return -EFAULT;
         } else if (op != 0x90 && op != 0xF4) return -ENOTSUP;
         ++out.instructions;
