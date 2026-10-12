@@ -1,5 +1,6 @@
 #include "maxps4_guest_elf.h"
 #include "maxps4_guest_range.h"
+#include "maxps4_ps4_guest_memory.h"
 #include "PS4ExecutableImage.hpp"
 #include <algorithm>
 #include <cerrno>
@@ -171,9 +172,8 @@ int GuestELF::interpret(uint32_t budget, Execution& out) {
                 (displacement >= 0 && next > UINT64_MAX - static_cast<uint64_t>(displacement))) return -EFAULT;
             const uint64_t target = displacement < 0 ? next - static_cast<uint64_t>(-displacement) :
                 next + static_cast<uint64_t>(displacement);
-            auto* destination = const_cast<uint8_t*>(translate(target, 4, 6));
-            if (!destination || translate(target, 4, 1)) return -EFAULT;
-            std::memcpy(destination, code + 6, 4);
+            PS4GuestMemory memory(*this);
+            if (!memory.write(target, code + 6, 4)) return -EFAULT;
         } else if (op != 0x90 && op != 0xF4) return -ENOTSUP;
         ++out.instructions;
         out.rip = next;
