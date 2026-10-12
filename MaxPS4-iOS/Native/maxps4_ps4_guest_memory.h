@@ -50,17 +50,8 @@ public:
             const uint64_t offset = address - segment.address;
             if (offset >= segment.memory_size) continue;
             const uint64_t available = segment.memory_size - offset;
-            // Compare in the wider integer domain before converting. On a
-            // host with size_t wider than uint64_t, a huge limit must not
-            // truncate and incorrectly reduce the reported guest span.
-            if constexpr (sizeof(size_t) > sizeof(uint64_t)) {
-                return static_cast<uint64_t>(limit) > available &&
-                       limit > UINT64_MAX
-                    ? static_cast<size_t>(available)
-                    : (available < static_cast<uint64_t>(limit)
-                        ? static_cast<size_t>(available) : limit);
-            }
-            return available < static_cast<uint64_t>(limit)
+            // uintmax_t avoids truncating a wide host size_t before comparison.
+            return static_cast<uintmax_t>(limit) > available
                 ? static_cast<size_t>(available) : limit;
         }
         return 0;
