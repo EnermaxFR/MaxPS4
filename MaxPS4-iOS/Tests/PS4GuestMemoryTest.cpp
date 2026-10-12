@@ -44,7 +44,15 @@ int main() {
     // An instruction fetch must not partially modify output when it crosses
     // the executable segment boundary.
     uint8_t unchanged_fetch[4] = {0x11, 0x22, 0x33, 0x44};
-    assert(!memory.fetch(0x1000 + 40, unchanged_fetch, sizeof(unchanged_fetch)));
+    uint64_t executable_end = 0;
+    for (const auto& segment : image.segments()) {
+        if ((segment.permissions & 5U) == 5U) {
+            executable_end = segment.address + segment.memory_size;
+            break;
+        }
+    }
+    assert(executable_end > 0);
+    assert(!memory.fetch(executable_end - 1, unchanged_fetch, sizeof(unchanged_fetch)));
     assert(unchanged_fetch[0] == 0x11 && unchanged_fetch[1] == 0x22 &&
            unchanged_fetch[2] == 0x33 && unchanged_fetch[3] == 0x44);
     // A valid fetch may overlap its destination inside the same RX mapping:
