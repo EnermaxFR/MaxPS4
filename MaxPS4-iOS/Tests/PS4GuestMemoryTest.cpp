@@ -68,6 +68,15 @@ int main() {
     assert(!memory.write(UINT64_MAX, bytes, sizeof(bytes)));
     assert(!memory.read(0x10000, nullptr, 4));
     assert(!memory.write(0x10000, nullptr, 4));
+    // Host callers may supply overlapping buffers inside the staged RW arena.
+    // Transfers must have memmove semantics, not undefined memcpy overlap.
+    auto* rw = const_cast<uint8_t*>(image.translate(0x10000, 8, 6));
+    assert(rw);
+    for (uint8_t i = 0; i < 8; ++i) rw[i] = i;
+    assert(memory.write(0x10002, rw, 6));
+    for (uint8_t i = 0; i < 6; ++i) assert(rw[i + 2] == i);
+    assert(memory.read(0x10002, rw, 6));
+    for (uint8_t i = 0; i < 6; ++i) assert(rw[i] == i);
     image.clear();
     assert(!memory.read(0x10000, output, 4));
     std::puts("PS4 guest memory adapter checks passed");
