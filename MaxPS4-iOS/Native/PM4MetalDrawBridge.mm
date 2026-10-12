@@ -21,8 +21,6 @@ inline PM4MetalResult encodePM4TriangleDraws(
     PM4MetalResult result;
     const auto commands = interpretPM4(words, wordCount);
     if (!commands.valid) { result.error = PM4MetalError::invalid_stream; return result; }
-    if (!encoder) { result.error = PM4MetalError::missing_encoder; return result; }
-    if (!pipeline) { result.error = PM4MetalError::missing_pipeline; return result; }
     if (commands.draws.empty()) {
         result.error = PM4MetalError::unsupported_draw;
         return result;
@@ -33,6 +31,8 @@ inline PM4MetalResult encodePM4TriangleDraws(
             return result;
         }
     }
+    if (!encoder) { result.error = PM4MetalError::missing_encoder; return result; }
+    if (!pipeline) { result.error = PM4MetalError::missing_pipeline; return result; }
     [encoder setRenderPipelineState:pipeline];
     for (const auto& draw : commands.draws) {
         [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:draw.indexCount];
