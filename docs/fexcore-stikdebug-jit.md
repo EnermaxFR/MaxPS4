@@ -12,14 +12,25 @@ The user reports a physical iPhone running iOS 27.2 (24B5099f): real FEX context
 and GenuineIntel CPUID, debugger absent, InitCore ENOTSUP, native interpreter 42.
 That is the user's observed #130 result, not a successful device JIT test.
 
-## Exact reason for ENOTSUP and the new real path
+> **État de la version intégrée (PR #159, iPhone) : chemin expérimental désactivé.**
+> Le code iOS livré garde `maxps4_fex_engine_initialize()` et l'exécution FEX JIT
+> derrière un refus explicite `-ENOTSUP` (sur Darwin : -45). La préparation
+> mémoire StikDebug décrite ci-dessous est un **protocole de conception non activé**,
+> et l'interface actuelle ne déclenche pas `maxps4_jit_prepare()`. Ni la signature
+> SideStore, ni le résultat 42 de l'interpréteur, ni le succès d'un script StikDebug
+> ne démontrent que le JIT FEX fonctionne sur iPhone. Les critères de réussite JIT
+> cités dans ce document ne sont **pas atteignables avec cette version** ; ne pas
+> les utiliser comme procédure d'acceptation sur appareil tant que le garde-fou
+> n'a pas été réévalué et validé de manière reproductible.
+
+## Exact reason for ENOTSUP and the proposed experimental path
 
 #129/#130 explicitly returned ENOTSUP in `maxps4_fex_engine_initialize` and
 `maxps4_fex_engine_probe` on iOS. The coherent pinned Aether Darwin runtime
 `3347fc13f19860855ce91b66356940989ea6b6a6` otherwise dynamically loaded an absent
 BreakpointJIT framework. Adding debugger detection would not fix either cause.
 
-The new provider removes both runtime gates, replaces the pinned iOS allocator
+The experimental provider design would remove both runtime gates, replacing the pinned iOS allocator
 with a checked adapter to the real prepared-region pool, and keeps every other
 Darwin adaptation and the opaque C ABI. No generic FEX objects, fake symbols,
 builtin fake interpreter, or second FEX dylib are linked. macOS retains MAP_JIT
@@ -50,13 +61,13 @@ no app BRK instruction and therefore no crash from a missing breakpoint script.
    executable. It verifies alias coherence, invalidates both instruction-cache
    aliases with sys_icache_invalidate and executes a tiny native ARM64 canary.
    The canary is NOT guest execution and never selects the FEX backend.
-5. Only successful preparation and native execution permit real InitCore,
+5. In the proposed (currently disabled) design only successful preparation and native execution would permit real InitCore,
    dispatcher emission, real CreateThread and ExecuteThread. The fixed guest
    `mov eax,40; add eax,2; hlt` must yield real guest RAX=42. Only that call
    selects `MAXPS4_CPU_FEX_ARM64_JIT`. The interpreter fallback remains separate
    and is explicitly labelled; JIT errors remain visible when fallback succeeds.
 
-This is an actual integration path, not proof it works on iOS 27.2. Public Mach
+This is a proposed experimental integration path, not an enabled iPhone feature or proof it works on iOS 27.2. Public Mach
 VM APIs implement local aliasing/protection/cleanup; the initial executable grant
 comes from an authorized external debugger, NOT a public on-device entitlement
 API. No private csops/SecTask/IOKit API is used by MaxPS4, no jailbreak or
