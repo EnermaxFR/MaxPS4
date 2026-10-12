@@ -3,8 +3,10 @@ on:
   pull_request:
     paths:
       - 'MaxPS4-iOS/Native/PS4ExecutableImage.hpp'
+      - 'MaxPS4-iOS/Native/PS4GuestMappingPlan.hpp'
       - 'MaxPS4-iOS/Native/PM4*'
       - 'MaxPS4-iOS/Tests/PS4ExecutableImageTest.cpp'
+      - 'MaxPS4-iOS/Tests/PS4GuestMappingPlanTest.cpp'
       - 'MaxPS4-iOS/Tests/GuestELFFixture.h'
       - '.github/workflows/ps4-executable.yml'
   workflow_dispatch:
@@ -19,6 +21,8 @@ jobs:
         run: |
           c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PS4ExecutableImageTest.cpp -o /tmp/ps4-segments-test
           /tmp/ps4-segments-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PS4GuestMappingPlanTest.cpp -o /tmp/ps4-mapping-test
+          /tmp/ps4-mapping-test
   ios-compile:
     runs-on: macos-latest
     steps:
@@ -28,6 +32,10 @@ jobs:
           set -euo pipefail
           xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic MaxPS4-iOS/Tests/PS4ExecutableImageTest.cpp -o /tmp/ps4-segments-test
           /tmp/ps4-segments-test
+          xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic MaxPS4-iOS/Tests/PS4GuestMappingPlanTest.cpp -o /tmp/ps4-mapping-test
+          /tmp/ps4-mapping-test
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/PS4ExecutableImageTest.cpp -o /tmp/ps4-segments-ios.o
           xcrun lipo -archs /tmp/ps4-segments-ios.o | grep -w arm64
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/PS4GuestMappingPlanTest.cpp -o /tmp/ps4-mapping-ios.o
+          xcrun lipo -archs /tmp/ps4-mapping-ios.o | grep -w arm64
