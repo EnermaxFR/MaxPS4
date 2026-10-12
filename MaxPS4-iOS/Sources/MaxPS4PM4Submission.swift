@@ -36,7 +36,7 @@ enum MaxPS4PM4Submission {
                     &written, &rax, &backend, &entry)
             }
         }
-        guard status == 0, written == wordCount, backend == MAXPS4_CPU_FEX_ARM64_JIT else {
+        guard status == 0, written == wordCount, backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT) else {
             throw NSError(domain: "MaxPS4.PM4", code: status == 0 ? -5 : Int(status))
         }
         return Snapshot(words: words, rax: rax, entry: entry, backend: backend)

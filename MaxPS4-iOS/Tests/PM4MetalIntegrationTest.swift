@@ -22,7 +22,7 @@ struct PM4MetalIntegrationTest {
         put(0xc0012d00, 195, 4); put(3, 199, 4); put(2, 203, 4)
         let snapshot = try MaxPS4PM4Submission.run(file: file, guestAddress: 0x10000, wordCount: 3)
         precondition(snapshot.rax == 42 && snapshot.entry == 0x1000)
-        precondition(snapshot.backend == MAXPS4_CPU_FEX_ARM64_JIT && maxps4_jit_leases() == 0)
+        precondition(snapshot.backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT) && maxps4_jit_leases() == 0)
         let words = snapshot.words
         print("PASS real FEX completion -> static PM4 in same ELF arena -> owned Swift snapshot")
         #else
