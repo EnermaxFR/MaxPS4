@@ -314,6 +314,13 @@ extern "C" int32_t maxps4_fex_engine_read_ps4(maxps4_fex_engine* engine,
     maxps4::PS4GuestMemory memory(engine->staged_ps4);
     return memory.read(address, output, length) ? 0 : -EFAULT;
 }
+extern "C" int32_t maxps4_fex_engine_write_ps4(maxps4_fex_engine* engine,
+    uint64_t address, const uint8_t* input, size_t length) {
+    if (!engine || !input || !length || length > 1024 * 1024) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    maxps4::PS4GuestMemory memory(engine->staged_ps4);
+    return memory.write(address, input, length) ? 0 : -EFAULT;
+}
 extern "C" int32_t maxps4_fex_engine_run_elf(maxps4_fex_engine* engine,
     const uint8_t* file, size_t length, uint32_t budget, uint64_t* result,
     uint32_t* backend, uint64_t* entry) {
