@@ -47,6 +47,13 @@ int main() {
         CHECK(vm_protect(mach_task_self(), rx[i], sizes[i], FALSE,
             VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS);
     }
+    // Regression: the 16 MiB RX code cache may span multiple Mach VM entries.
+    // Split its protection at a page boundary, then restore RX before the probe.
+    // The runtime must verify the full range rather than only the first entry.
+    const vm_address_t split = rx[1] + 8 * 1024 * 1024;
+    CHECK(vm_protect(mach_task_self(), split, page, FALSE, VM_PROT_READ) == KERN_SUCCESS);
+    CHECK(vm_protect(mach_task_self(), split, page, FALSE,
+        VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS);
     constexpr std::array signal_numbers {SIGILL, SIGSEGV, SIGBUS, SIGTRAP};
     std::array<struct sigaction, signal_numbers.size()> original {};
     for (size_t i = 0; i < signal_numbers.size(); ++i)
