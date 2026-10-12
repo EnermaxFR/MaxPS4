@@ -1,6 +1,7 @@
 #include "maxps4_fex_runtime.h"
 #include "maxps4_jit_memory.h"
 #include "maxps4_guest_elf.h"
+#include "maxps4_ps4_guest_memory.h"
 #include "PM4GuestSubmission.hpp"
 #include "Common/HostFeatures.h"
 #include <FEXCore/Config/Config.h>
@@ -310,10 +311,8 @@ extern "C" int32_t maxps4_fex_engine_read_ps4(maxps4_fex_engine* engine,
     uint64_t address, uint8_t* output, size_t length) {
     if (!engine || !output || !length || length > 1024 * 1024) return -EINVAL;
     std::lock_guard lock(runtime_lock);
-    const auto* bytes = engine->staged_ps4.translate(address, length, 4);
-    if (!bytes) return -EFAULT;
-    std::memcpy(output, bytes, length);
-    return 0;
+    maxps4::PS4GuestMemory memory(engine->staged_ps4);
+    return memory.read(address, output, length) ? 0 : -EFAULT;
 }
 extern "C" int32_t maxps4_fex_engine_run_elf(maxps4_fex_engine* engine,
     const uint8_t* file, size_t length, uint32_t budget, uint64_t* result,
