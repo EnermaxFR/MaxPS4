@@ -85,6 +85,12 @@ int32_t maxps4_fex_engine_write_ps4(maxps4_fex_engine *engine, uint64_t address,
 // Does not dispatch guest instructions.
 int32_t maxps4_fex_engine_query_ps4(maxps4_fex_engine *engine, uint64_t address,
     size_t length, uint32_t permissions, uint32_t *permitted);
+// Query the maximum contiguous bytes at a staged guest address, capped by
+// limit (1 MiB). Never exposes a host pointer or crosses a segment boundary.
+// On invalid arguments, available is zero; an unmapped address returns zero
+// with success. Serialized against staging and close.
+int32_t maxps4_fex_engine_contiguous_ps4(maxps4_fex_engine *engine,
+    uint64_t address, size_t limit, uint32_t permissions, size_t *available);
 // Existing bounded interpreter fallback; never describes its output as FEX JIT.
 // Caller keeps engine alive during calls and serializes close against them.
 int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine, const uint8_t *code,
