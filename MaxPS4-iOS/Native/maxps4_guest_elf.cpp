@@ -151,12 +151,12 @@ int GuestELF::interpret(uint32_t budget, Execution& out) {
     out.rip = guest_entry;
     bool initialized = false;
     while (out.instructions < budget) {
-        const auto* opcode = translate(out.rip, 1, 5);
-        if (!opcode) return -EFAULT;
-        const uint8_t op = *opcode;
+        PS4GuestMemory memory(*this);
+        uint8_t op = 0;
+        if (!memory.fetch(out.rip, &op, 1)) return -EFAULT;
         const size_t width = (op == 0xB8 || op == 0x05) ? 5 : op == 0xC7 ? 10 : 1;
-        const auto* code = translate(out.rip, width, 5);
-        if (!code || out.rip > UINT64_MAX - width) return -EFAULT;
+        uint8_t code[10] = {};
+        if (!memory.fetch(out.rip, code, width) || out.rip > UINT64_MAX - width) return -EFAULT;
         const uint64_t next = out.rip + width;
         if (op == 0xB8 || op == 0x05) {
             if (op == 0x05 && !initialized) return -ENOTSUP;
