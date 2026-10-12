@@ -73,6 +73,53 @@ struct MaxPS4FEXDiagnostic: Sendable {
 #endif
     }
 
+    /// Executes a user-selected bounded static ELF, using the same native loader
+    /// for FEX and the no-JIT path. Arbitrary PS4 binaries remain rejected.
+    static func executeTestELF(url: URL) -> String {
+#if MAXPS4_FEX_APP
+        do {
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let size = try handle.seekToEnd()
+            guard size >= 64, size <= 32 * 1024 * 1024 else { return "ELF hors budget (32 Mio)" }
+            try handle.seek(toOffset: 0)
+            let file = try handle.read(upToCount: Int(size)) ?? Data()
+            guard file.count == Int(size) else { return "Lecture ELF incomplète" }
+            var engine: OpaquePointer?
+            let opened = maxps4_fex_engine_open(&engine)
+            guard opened == 0, let engine else { return "Ouverture FEXCore refusée : \(opened)" }
+            defer { maxps4_fex_engine_close(engine) }
+            let jit = maxps4_fex_engine_initialize(engine)
+            var value: UInt64 = 0; var entry: UInt64 = 0; var rip: UInt64 = 0
+            var backend: UInt32 = 0; var count: UInt32 = 0
+            let status = file.withUnsafeBytes { bytes in
+                let pointer = bytes.bindMemory(to: UInt8.self).baseAddress
+                if jit == 0 {
+                    return maxps4_fex_engine_run_elf(engine, pointer, bytes.count, 65536,
+                        &value, &backend, &entry)
+                }
+                return maxps4_fex_engine_interpret_elf(engine, pointer, bytes.count, 65536,
+                    &value, &backend, &entry, &rip, &count)
+            }
+            let name = backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT) ? "FEXCore JIT ARM64" :
+                backend == UInt32(MAXPS4_CPU_RESTRICTED_INTERPRETER) ? "Interpréteur ELF sans JIT" : "Aucun"
+            return [
+                "ELF importé : " + url.lastPathComponent,
+                "Statut : \(status) ; initialisation JIT : \(jit) ; backend : \(name)",
+                "Entrée invitée : 0x" + String(entry, radix: 16),
+                "RAX : \(value)",
+                backend == UInt32(MAXPS4_CPU_RESTRICTED_INTERPRETER) ?
+                    "RIP invité : 0x" + String(rip, radix: 16) + " ; instructions terminées : \(count)" :
+                    "RIP final et compteur FEX : non exposés",
+                "Admission limitée : MOV EAX, ADD EAX, NOP, stores RIP-relatifs RW et HLT final.",
+                "Imports, relocations, TLS et exécution de jeu PS4 : non pris en charge."
+            ].joined(separator: "\n")
+        } catch { return "Exécution ELF impossible : \(error.localizedDescription)" }
+#else
+        return "Moteur FEXCore natif absent de cette compilation"
+#endif
+    }
+
     static func run() -> Self {
 #if MAXPS4_FEX_APP
         let elfMemoryBridgePassed = MaxPS4ELFLoader.importDemoSelfTest() &&

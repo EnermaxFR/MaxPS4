@@ -36,6 +36,8 @@ struct FEXSwiftDiagnosticTest {
             var file = MaxPS4SyntheticELFFEXBridge.syntheticELF()
             file[121] = 100; file[126] = 23
             try file.write(to: url)
+            let imported = MaxPS4FEXDiagnostic.executeTestELF(url: url)
+            precondition(imported.contains("Statut : 0") && imported.contains("RAX : 123"))
             let result = try MaxPS4SyntheticELFFEXBridge.run(url: url)
             precondition(result.rax == 123 && result.backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT))
             file[130] = 0xC3

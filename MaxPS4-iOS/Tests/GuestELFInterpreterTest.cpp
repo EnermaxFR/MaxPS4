@@ -3,7 +3,9 @@
 #include <cassert>
 #include <cerrno>
 #include <cstdio>
-int main() {
+#include <fstream>
+#include <iterator>
+int main(int argc, char** argv) {
     maxps4::GuestELF image;
     maxps4::GuestELF::Execution state;
     auto file = guest_test::elf();
@@ -26,5 +28,13 @@ int main() {
     guest_test::put(file, 0, 196, 4); // store targets RX code: reject before execution
     assert(image.load(file.data(), file.size(), 6) == -ENOTSUP);
     assert(image.interpret(6, state) == -EINVAL && state.instructions == 0);
+    if (argc == 2) {
+        std::ifstream input(argv[1], std::ios::binary);
+        assert(input);
+        file.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+        assert(image.load(file.data(), file.size(), 3) == 0);
+        assert(image.interpret(3, state) == 0);
+        assert(state.rax == 123 && state.rip == 0x100b && state.instructions == 3);
+    }
     std::puts("ELF interpreter: arithmetic, guest RIP, budget, real stores and RX isolation passed");
 }

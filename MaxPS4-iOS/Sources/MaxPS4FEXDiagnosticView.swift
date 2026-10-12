@@ -1,10 +1,13 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct MaxPS4FEXDiagnosticView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var running = false
     @State private var report: MaxPS4FEXDiagnostic?
     @State private var activationMessage: String?
+    @State private var importingELF = false
+    @State private var importedReport: String?
 
     var body: some View {
         NavigationStack {
@@ -26,6 +29,12 @@ struct MaxPS4FEXDiagnosticView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(running)
+                    Button("Exécuter un ELF de test…") { importingELF = true }
+                        .disabled(running)
+                    if let importedReport {
+                        Text(importedReport).font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
                     Button("Activer avec StikDebug") {
                         activationMessage = MaxPS4StikActivation.begin()
                     }
@@ -48,8 +57,28 @@ struct MaxPS4FEXDiagnosticView: View {
                     }
                 }.padding()
             }
+            .fileImporter(isPresented: $importingELF, allowedContentTypes: [.data]) { selection in
+                switch selection {
+                case .success(let url):
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    running = true
+                    Task {
+                        defer {
+                            if scoped { url.stopAccessingSecurityScopedResource() }
+                            running = false
+                        }
+                        importedReport = await withCheckedContinuation { continuation in
+                            MaxPS4FEXMetalExecution.queue.async {
+                                continuation.resume(returning: MaxPS4FEXDiagnostic.executeTestELF(url: url))
+                            }
+                        }
+                    }
+                case .failure(let error): importedReport = error.localizedDescription
+                }
+            }
             .navigationTitle("Diagnostic FEXCore")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } } }
         }
     }
 }
+
