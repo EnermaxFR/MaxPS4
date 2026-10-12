@@ -45,6 +45,12 @@ int32_t maxps4_fex_engine_run_elf_pm4(maxps4_fex_engine *engine, const uint8_t *
     size_t length, uint32_t budget, uint64_t guest_address, size_t word_count,
     uint32_t *words, size_t capacity, size_t *written, uint64_t *result,
     uint32_t *backend, uint64_t *entry);
+// Restricted PS4 ELF/unencrypted SELF fixture -> staging -> bounded FEX runner.
+// Uses existing instruction admission, guest arena, W^X and finite budget.
+// No PS4 syscalls, dynamic imports, relocations, or game compatibility.
+int32_t maxps4_fex_engine_run_ps4_fixture(maxps4_fex_engine *engine,
+    const uint8_t *file, size_t length, uint32_t budget, uint64_t *result,
+    uint32_t *backend, uint64_t *entry);
 // Existing bounded interpreter fallback; never describes its output as FEX JIT.
 // Caller keeps engine alive during calls and serializes close against them.
 int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine, const uint8_t *code,

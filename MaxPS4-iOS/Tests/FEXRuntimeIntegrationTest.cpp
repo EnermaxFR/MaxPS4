@@ -83,6 +83,20 @@ int main() {
         CHECK(maxps4_fex_engine_run_elf(first, elf.data(), elf.size(), 3,
             &probe_result, &probe_backend, &elf_entry) == 0);
         CHECK(elf_entry == 0x1000 && probe_result == 123 && probe_backend == MAXPS4_CPU_FEX_ARM64_JIT);
+        // Real FEX execution through the PS4-specific staging loader and
+        // conservative ET_EXEC fixture adapter (not a full Orbis ABI).
+        auto ps4_fixture = guest_test::elf(100, 23, true);
+        ps4_fixture[7] = 9; // ELFOSABI FreeBSD/PS4
+        guest_test::put(ps4_fixture, 0xfe00, 16, 2); // ET_SCE_EXEC
+        CHECK(maxps4_fex_engine_run_ps4_fixture(first, ps4_fixture.data(),
+            ps4_fixture.size(), 3, &probe_result, &probe_backend, &elf_entry) == 0);
+        CHECK(elf_entry == 0x1000 && probe_result == 123 &&
+            probe_backend == MAXPS4_CPU_FEX_ARM64_JIT);
+        guest_test::put(ps4_fixture, 0xfe18, 16, 2); // PS4 shared library needs linker
+        CHECK(maxps4_fex_engine_run_ps4_fixture(first, ps4_fixture.data(),
+            ps4_fixture.size(), 3, &probe_result, &probe_backend, &elf_entry) != 0);
+        CHECK(probe_result == 0 && probe_backend == 0);
+        std::puts("PASS PS4-format staged ELF fixture -> bounded real FEX CPU result");
         auto pm4_elf = guest_test::elf(40, 2, true);
         pm4_elf.resize(207);
         guest_test::put(pm4_elf, 12, 152, 8);
