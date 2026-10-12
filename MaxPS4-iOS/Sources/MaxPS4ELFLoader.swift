@@ -362,6 +362,39 @@ enum MaxPS4ELFLoader {
                " • inventaire uniquement, résolution et application des relocalisations non implémentées"
     }
 
+    /// Diagnostic d'admission uniquement : aucune instruction invitée exécutée.
+    /// Un ELF valide peut être chargé en mémoire simulée, mais cela ne signifie
+    /// pas que les imports, syscalls, relocalisations ou le JIT PS4 sont prêts.
+    static func firstLaunchAdmission(url: URL) -> String {
+        do {
+            let image = try load(url: url)
+            let entryBytes = try image.memory.fetchInstructionBytes(at: image.entry, count: 1)
+            guard entryBytes.count == 1 else { return "ELF64 refusé : point d'entrée illisible" }
+            let imports: String
+            do { imports = try inspectImports(url: url) }
+            catch { return "ELF64 chargé en mémoire simulée • entrée 0x\\(String(image.entry, radix: 16)) • diagnostic imports impossible : \\(error.localizedDescription) • exécution non démarrée" }
+            return "ELF64 admis • \\(image.segments) segments PT_LOAD • entrée 0x\\(String(image.entry, radix: 16)) • \\(image.memory.allocatedBytes) octets de mémoire invitée simulée • \\(imports) • CPU/FEX non démarré • JIT iPhone non activé • jeu PS4 non lancé"
+        } catch {
+            return "Admission ELF64 refusée : \\(error.localizedDescription) • aucune exécution"
+        }
+    }
+
+    static func firstLaunchAdmissionSelfTest() -> Bool {
+        do {
+            let url = try createImportDemo()
+            defer { try? FileManager.default.removeItem(at: url) }
+            let accepted = firstLaunchAdmission(url: url)
+            guard accepted.contains("ELF64 admis"), accepted.contains("entrée 0x1000"),
+                  accepted.contains("sceKernelGetProcessTime"),
+                  accepted.contains("CPU/FEX non démarré") else { return false }
+            var invalid = try Data(contentsOf: url)
+            invalid[24] = 0 // Point d'entrée 0x1000 -> 0x0000, hors PT_LOAD exécutable.
+            invalid[25] = 0
+            try invalid.write(to: url, options: .atomic)
+            return firstLaunchAdmission(url: url).contains("Admission ELF64 refusée")
+        } catch { return false }
+    }
+
     static func load(url: URL) throws -> (memory: MaxPS4GuestMemory, entry: UInt64, segments: Int) {
         // Keep this diagnostic loader bounded even for unexpectedly large inputs.
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
