@@ -115,7 +115,12 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                                     size_t keyEnd = static_cast<size_t>(keyAt);
                                     while (keyEnd < valueStart && bytes[keyEnd] &&
                                            keyEnd - keyAt <= 32) ++keyEnd;
-                                    valid = keyEnd < valueStart && keyEnd - keyAt <= 32;
+                                    valid = keyEnd < valueStart && keyEnd > keyAt &&
+                                        keyEnd - keyAt <= 32;
+                                    for (size_t k = static_cast<size_t>(keyAt); valid && k < keyEnd; ++k)
+                                        if (!((bytes[k] >= 'A' && bytes[k] <= 'Z') ||
+                                              (bytes[k] >= '0' && bytes[k] <= '9') ||
+                                              bytes[k] == '_')) valid = false;
                                     if (!valid) break;
                                     const std::string key(reinterpret_cast<const char*>(bytes.data() + keyAt),
                                                           keyEnd - static_cast<size_t>(keyAt));
