@@ -9,3 +9,4 @@ int32_t maxps4_native_debugger_attached(void)
 
 
 #include "OrbisAnalysisBridge.h"
+#include "OrbisLinkerBridge.h"
