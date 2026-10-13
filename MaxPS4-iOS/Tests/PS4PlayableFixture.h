@@ -35,7 +35,7 @@ inline std::vector<uint8_t> app(bool animated = false) {
     // The original app() remains byte-identical to the shipped demo ELF.
     if (animated) {
         rip(0x8b,0x05,counter); immediate(0x25,15); immediate(0x05,80);
-        emit({0x89,0xc6}); // ESI = cell 80 + (frame & 15), row 5.
+        emit({0x8d,0x30}); // LEA ESI,[RAX]: cell 80 + (frame & 15), row 5.
         immediate(0xb9,0xff40d030); // ECX = second sprite RGBA.
         emit({0x39,0xd6,0x0f,0x44,0xcb}); // Collision: if ESI == EDX, ECX = player color.
     }
