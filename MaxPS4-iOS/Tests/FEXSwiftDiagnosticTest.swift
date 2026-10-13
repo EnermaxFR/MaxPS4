@@ -4,6 +4,13 @@ import Darwin
 @main
 struct FEXSwiftDiagnosticTest {
     static func main() {
+        if CommandLine.arguments.count > 1 {
+            let demo = URL(fileURLWithPath: CommandLine.arguments[1])
+            let linked = MaxPS4FEXDiagnostic.executeTestELF(url: demo)
+            precondition(linked.contains("Exécution FEX ARM64 : réussie"))
+            precondition(linked.contains("RAX : 2") && linked.contains("appels libkernel : 1"))
+            print("PASS Swift imported Orbis ELF -> native linker -> real FEX/libkernel -> RAX 2")
+        }
         for iteration in 0..<8 {
             let report = autoreleasepool { MaxPS4FEXDiagnostic.run() }
             precondition(report.succeeded && report.result == 42)

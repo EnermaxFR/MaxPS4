@@ -19,7 +19,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
             "\(elfControlFlowPassed ? "✓" : "✗") ELF → mémoire → CPU prototype : \(elfControlFlowPassed ? "exécution synthétique validée" : "non validé")",
             "◌ Chargeur SELF/ELF PS4 : prototype d’analyse, pas de chargement exécutable complet",
             "◌ Mémoire invitée PS4 : mappage natif disponible par diagnostic de fichier ; dispatch CPU bloqué",
-            "✗ Appels système et bibliothèques PS4 : non implémentés",
+            "◌ Services libkernel disponibles ; démo ELF dynamique bornée à vérifier sur cet appareil",
             "✗ GPU / rendu PS4 : non connecté",
             "Lancement d’un jeu PS4 : indisponible",
             "Le succès du JIT ne valide pas un jeu PS4."
@@ -89,6 +89,33 @@ struct MaxPS4FEXDiagnostic: Sendable {
             let opened = maxps4_fex_engine_open(&engine)
             guard opened == 0, let engine else { return "Ouverture FEXCore refusée : \(opened)" }
             defer { maxps4_fex_engine_close(engine) }
+            // Orbis demonstration path has its own strict linker and real FEX
+            // trampoline. It never falls through to the static interpreter.
+            if file.count >= 18, file[7] == 9, file[17] == 0xfe {
+                var entry: UInt64 = 0; var imports: UInt32 = 0
+                let linked = file.withUnsafeBytes { bytes in
+                    maxps4_fex_engine_link_ps4(engine, bytes.bindMemory(to: UInt8.self).baseAddress,
+                        bytes.count, 65536, &entry, &imports)
+                }
+                guard linked == 0 else {
+                    return "Démo PS4 : liaison refusée (\(linked)). Format dynamique, imports ou instructions hors du périmètre pris en charge."
+                }
+                let initialized = maxps4_fex_engine_initialize(engine)
+                guard initialized == 0 else {
+                    return "Démo PS4 liée (\(imports) imports) ; exécution FEX indisponible sur cet appareil (\(initialized))."
+                }
+                var value: UInt64 = 0; var backend: UInt32 = 0; var calls: UInt32 = 0
+                let executed = maxps4_fex_engine_run_linked_ps4(engine, &value, &backend, &entry, &calls)
+                let nativeFEX = executed == 0 && backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT)
+                return [
+                    "Démo PS4 : " + url.lastPathComponent,
+                    "Exécution FEX ARM64 : " + (nativeFEX ? "réussie" : "non validée (\(executed))"),
+                    "Imports résolus : \(imports) ; appels libkernel : \(calls)",
+                    "RAX : \(value) ; entrée : 0x" + String(entry, radix: 16),
+                    "La démo scePthreadSelf attend RAX = 2 après reprise de son exécution.",
+                    "TLS, dépendances PRX complètes et lancement de jeu : indisponibles."
+                ].joined(separator: "\n")
+            }
             let jit = maxps4_fex_engine_initialize(engine)
             var value: UInt64 = 0; var entry: UInt64 = 0; var rip: UInt64 = 0
             var backend: UInt32 = 0; var count: UInt32 = 0

@@ -1,6 +1,13 @@
 name: MaxPS4 FEXCore SideStore IPA
 on:
   workflow_dispatch:
+  push:
+    branches: ['codex/ps4-memory-translation-contract']
+    paths:
+      - 'MaxPS4-iOS/**'
+      - 'scripts/*fexcore*'
+      - 'cmake/FEXCoreIOSLinkage.cmake'
+      - '.github/workflows/fexcore-app.yml'
   pull_request:
     paths:
       - 'MaxPS4-iOS/**'
@@ -70,7 +77,7 @@ jobs:
             -L build/fex-app-host -lMaxPS4FEXRuntime \
             -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" \
             -o build/fex-app-host/swift-fex-test
-          build/fex-app-host/swift-fex-test | tee build/fex-app-host/swift-diagnostic-tests.txt
+          build/fex-app-host/swift-fex-test build/fex-app-host/ps4-libkernel-demo.elf | tee build/fex-app-host/swift-diagnostic-tests.txt
       - name: Test actual ELF FEX position transfer and offscreen Metal readback
         shell: bash
         run: |

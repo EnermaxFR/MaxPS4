@@ -48,7 +48,7 @@ struct MaxPS4FEXDiagnosticView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(running)
-                    Button("Exécuter un ELF de test…") { importingELF = true }
+                    Button("Exécuter un ELF de test ou une démo PS4…") { importingELF = true }
                         .disabled(running)
                     if let importedReport {
                         Text(importedReport).font(.system(.body, design: .monospaced))
