@@ -49,7 +49,7 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                    << " ; chiffrés déclarés=" << encrypted
                    << " ; non pris en charge=" << unsupported
                    << " ; inconnus=" << unknown << " ; invalides=" << invalid << '\n';
-            if (pkg.pfsSize) report << "PFS présent : contenu opaque ; aucun exécutable déduit de cet inventaire.\\n";
+            if (pkg.pfsSize) report << "PFS présent : contenu opaque ; aucun exécutable déduit de cet inventaire.\n";
             size_t inspected = 0;
             auto boundedRead = [&](uint64_t offset, uint8_t* bytes, size_t count) {
                 if (count > pkg.extractionBudget - inspected) return false;
