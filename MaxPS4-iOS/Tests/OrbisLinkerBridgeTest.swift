@@ -22,7 +22,7 @@ struct OrbisLinkerBridgeTest {
                             modules.withUnsafeBufferPointer { m in
                                 var image: OpaquePointer?
                                 var diagnostic = [CChar](repeating: 0, count: 256)
-                                precondition(maxps4_orbis_link(m.baseAddress, m.count, 1024, &image, &diagnostic, diagnostic.count) == 0)
+                                precondition(maxps4_orbis_link(m.baseAddress, m.count, 1024, &image, &diagnostic, 256) == 0)
                                 defer { maxps4_orbis_close(image) }
                                 precondition(maxps4_orbis_mapping_count(image) == 4)
                                 var mapping = maxps4_orbis_mapping()
@@ -31,13 +31,13 @@ struct OrbisLinkerBridgeTest {
                                 var entry: UInt64 = 0
                                 precondition(maxps4_orbis_entry(image, consumerPath, &entry) == 0 && entry == 0x101000)
                                 var bytes = [UInt8](repeating: 0, count: 8)
-                                precondition(maxps4_orbis_read(image, 0x102000, &bytes, bytes.count) == 0)
+                                precondition(maxps4_orbis_read(image, 0x102000, &bytes, 8) == 0)
                                 precondition(bytes == [0, 0x10, 0x20, 0, 0, 0, 0, 0])
                                 bytes = [UInt8](repeating: 0xa5, count: 8)
-                                precondition(maxps4_orbis_read(image, 0x1020ff, &bytes, bytes.count) < 0)
+                                precondition(maxps4_orbis_read(image, 0x1020ff, &bytes, 8) < 0)
                                 precondition(bytes.allSatisfy { $0 == 0xa5 })
                                 var failed: OpaquePointer?
-                                precondition(maxps4_orbis_link(m.baseAddress, m.count, 1, &failed, &diagnostic, diagnostic.count) < 0)
+                                precondition(maxps4_orbis_link(m.baseAddress, m.count, 1, &failed, &diagnostic, 256) < 0)
                                 precondition(failed == nil && diagnostic[0] != 0)
                             }
                         }

@@ -97,7 +97,7 @@ jobs:
             -target arm64-apple-ios18.0 -isysroot "$SDK" \
             -c MaxPS4-iOS/Native/OrbisLinkerBridge.cpp -o "$RUNNER_TEMP/orbis-ios.o"
           xcrun lipo -archs "$RUNNER_TEMP/orbis-ios.o" | grep -w arm64
-          xcrun swiftc -typecheck -target arm64-apple-ios18.0 -sdk "$SDK" \
+          xcrun swiftc -parse-as-library -typecheck -target arm64-apple-ios18.0 -sdk "$SDK" \
             -import-objc-header MaxPS4-iOS/Native/OrbisLinkerBridge.h MaxPS4-iOS/Tests/OrbisLinkerBridgeTest.swift
           xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
             -target arm64-apple-ios18.0 -isysroot "$SDK" \

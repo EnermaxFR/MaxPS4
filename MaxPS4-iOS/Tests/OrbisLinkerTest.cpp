@@ -94,6 +94,20 @@ int main(int argc, char** argv) {
     put(consumer,64+3*56+8,UINT64_MAX); reject(batch(), "dynamic metadata out of bounds"); consumer=original;
     // A PRX entry in zero-filled memory is not admitted as file-backed code.
     put(provider,24,0x1100); put(provider,64+40,0x200); reject(batch(), "invalid module entry"); provider=make(true);
+    put(consumer,64+2*56+32,160); reject(batch(), "unterminated dynamic table"); consumer=original;
+    put(consumer,64+2*56+32,17); reject(batch(), "dynamic metadata out of bounds"); consumer=original;
+    setTag(consumer,0x61000037,1); reject(batch(), "string offset"); consumer=original;
+    // Missing descriptor ID, invalid NID alphabet and export outside mapped memory.
+    const size_t symbolName = 0x601 + std::string("FixtureLibrary").size()+1+std::string("FixtureModule").size()+1;
+    consumer[symbolName]='!'; reject(batch(), "invalid NID alphabet"); consumer=original;
+    consumer[symbolName+12]='C'; reject(batch(), "missing library/module ID"); consumer=original;
+    put(provider,0x820,0x3000); reject(batch(), "export outside valid segment"); provider=make(true);
+    put(consumer,64+3*56,7,4); reject(batch(), "TLS not supported"); consumer=original;
+    put(consumer,64+56+40,33*1024*1024); reject(batch(), "chargeur"); consumer=original;
+    // Overflow in S+A, independently of segment-address overflow.
+    put(consumer,0x908,(uint64_t{1}<<32)|1); put(consumer,0x910,INT64_MAX);
+    auto addOverflow=batch(); addOverflow[1].bias=UINT64_MAX-0x10000;
+    reject(addOverflow, "guest address overflow"); consumer=original;
     auto overlapping=batch(); overlapping[1].bias=0x100000; reject(overlapping,"overlapping guest modules");
     auto overflow=batch(); overflow[1].bias=UINT64_MAX-0x800; reject(overflow,"guest address overflow");
     auto names=batch(); names[1].file.request.logicalPath="../provider.prx"; reject(names,"chemin");
@@ -104,6 +118,8 @@ int main(int argc, char** argv) {
     Linker::Image hleImage;
     check(Linker::link(hleBatch,{{id,0x201000}},hleImage,diagnostic),"explicit HLE guest trampoline");
     check(value(hleImage,0x102000)==0x201000,"HLE relocation");
+    check(!Linker::link(hleBatch,{{id,0x201000},{id,0x201000}},hleImage,diagnostic) && diagnostic.find("ambiguous")!=std::string::npos,"duplicate HLE rejected");
+    check(!Linker::link(batch(),{{id,0x201000}},hleImage,diagnostic),"HLE/export collision rejected");
     check(!Linker::link(hleBatch,{{id,0x202000}},hleImage,diagnostic),"HLE data target refused");
     id.libraryVersion=2; check(!Linker::link(hleBatch,{{id,0x201000}},hleImage,diagnostic),"HLE version mismatch unresolved");
     check(consumer==original,"source unchanged after successful links");
