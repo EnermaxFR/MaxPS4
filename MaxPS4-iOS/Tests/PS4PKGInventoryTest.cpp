@@ -160,6 +160,15 @@ int main() {
     assert(text.find("Bilan des descripteurs : lisibles déclarés=2 ; chiffrés déclarés=0") != std::string::npos);
     assert(text.find("inconnus=0 ; invalides=0") != std::string::npos);
     assert(text.find("Octets copiés en mémoire : 32") != std::string::npos);
+    // A plaintext ELF magic with only 16 bytes must be diagnosed as truncated,
+    // never accepted as an executable or dispatched to FEX.
+    auto shortElf = original;
+    std::memcpy(shortElf.data() + 0x700, "\177ELF", 4);
+    file = std::fopen(path, "wb"); assert(file);
+    assert(fwrite(shortElf.data(), 1, shortElf.size(), file) == shortElf.size());
+    assert(fclose(file) == 0);
+    assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
+    assert(std::string(report.data()).find("ELF tronqué : en-tête ELF64 incomplet") != std::string::npos);
     // Malformed names cannot consume 1 MiB then restart the payload budget.
     auto large = original;
     large.resize(0x600 + PKG::extractionBudget + 16, 'x');
