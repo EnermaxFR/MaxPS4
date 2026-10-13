@@ -49,6 +49,12 @@ xcodebuild -project MaxPS4-iOS/MaxPS4.xcodeproj -scheme MaxPS4 \
 mkdir -p build/Payload
 rm -rf build/Payload/MaxPS4.app
 cp -R build/xcode-fex/Build/Products/Release-iphoneos/MaxPS4.app build/Payload/
+# Generate the optional animated guest from the same native fixture verified by CI.
+ANIMATED=build/Payload/MaxPS4.app/PlayableAnimatedDemo
+mkdir -p "$ANIMATED"
+build/fex-app-host/Bin/maxps4-ps4-linked-test --animated-playable-bundle "$ANIMATED"
+cp MaxPS4-iOS/Resources/PlayableDemo/maxps4.json "$ANIMATED/"
+test -s "$ANIMATED/app.elf" && test -s "$ANIMATED/provider.prx" && test -s "$ANIMATED/maxps4.json"
 # Record the tested source revision before signing, for shareable device proof.
 python3 - <<'PYREVISION'
 import plistlib, subprocess
