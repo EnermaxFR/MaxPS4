@@ -158,6 +158,31 @@ int main() {
     assert(text.find("MaxPS4") != std::string::npos);
     assert(text.find("eboot.bin") != std::string::npos);
     assert(text.find("Octets copiés en mémoire : 32") != std::string::npos);
+    // Reproduce the two descriptor classes observed in the real Kero Blaster
+    // report, without including or reading any proprietary game payload.
+    auto descriptors = original;
+    put(descriptors, 0x5a0, 0x100, 4); // metas
+    put(descriptors, 0x5b0, 0x5a0, 4); // begins inside the descriptor table
+    put(descriptors, 0x5b4, 16, 4);
+    put(descriptors, 0x5c0, 0x200, 4); // entry_names
+    put(descriptors, 0x5c8, 0x40000000U, 4);
+    put(descriptors, 0x5d0, 0x600, 4);
+    put(descriptors, 0x5d4, 16, 4);
+    f = descriptors;
+    assert(parse());
+    assert(pkg.entries[0].access == Access::invalid);
+    assert(pkg.entries[1].access == Access::unsupported);
+    reads = 0;
+    assert(!pkg.resolveNames(read, names, why) && reads == 0);
+    assert(!pkg.extract(1, read, output, why) && output.empty());
+    file = std::fopen(path, "wb"); assert(file);
+    assert(fwrite(f.data(), 1, f.size(), file) == f.size());
+    assert(fclose(file) == 0);
+    assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
+    const std::string descriptorReport(report.data());
+    assert(descriptorReport.find("Diagnostic metas : début à l'offset") != std::string::npos);
+    assert(descriptorReport.find("Diagnostic entry_names : table déclarée") != std::string::npos);
+    f = original;
     // Malformed names cannot consume 1 MiB then restart the payload budget.
     auto large = original;
     large.resize(0x600 + PKG::extractionBudget + 16, 'x');
