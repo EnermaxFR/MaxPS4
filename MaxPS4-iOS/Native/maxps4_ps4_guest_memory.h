@@ -16,6 +16,22 @@ public:
         std::memmove(destination, source, length);
         return true;
     }
+    // Copy a NUL-terminated guest string for future libkernel path/name calls.
+    // Require a terminator within capacity and leave the caller buffer unchanged
+    // on failure (unmapped pages, missing terminator, or invalid arguments).
+    bool read_cstring(uint64_t address, char* destination, size_t capacity) const {
+        if (!destination || !capacity || capacity > 4096) return false;
+        char scratch[4096];
+        for (size_t i = 0; i < capacity; ++i) {
+            if (address > UINT64_MAX - i ||
+                !read(address + i, &scratch[i], 1)) return false;
+            if (scratch[i] == '\\0') {
+                std::memmove(destination, scratch, i + 1);
+                return true;
+            }
+        }
+        return false;
+    }
     // Instruction fetch requires both guest read and execute permissions.
     // Copy into a caller-owned buffer; never leak host arena pointers to CPU clients.
     bool fetch(uint64_t address, void* destination, size_t length) const {
