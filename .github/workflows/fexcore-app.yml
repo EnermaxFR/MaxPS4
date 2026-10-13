@@ -6,6 +6,18 @@ on:
         description: 'Publish the verified PKG diagnostic IPA as a test prerelease'
         type: boolean
         default: false
+      delivery_existing_run:
+        description: 'Optional successful IPA run to deliver without rebuilding'
+        type: string
+        default: ''
+      delivery_fixtures_run:
+        description: 'PKG inventory run for the same source revision (existing delivery only)'
+        type: string
+        default: ''
+      delivery_source_commit:
+        description: 'Exact source SHA of the existing IPA and fixtures'
+        type: string
+        default: ''
   pull_request:
     paths:
       - 'MaxPS4-iOS/**'
@@ -16,6 +28,7 @@ permissions:
   contents: read
 jobs:
   application:
+    if: inputs.delivery_existing_run == '' || github.event_name != 'workflow_dispatch'
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -164,7 +177,7 @@ jobs:
             build/fex-app-ios/*.log
           retention-days: 14
   publish-pkg-diagnostic:
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_pkg_delivery
+    if: always() && github.event_name == 'workflow_dispatch' && inputs.publish_pkg_delivery && (needs.application.result == 'success' || inputs.delivery_existing_run != '')
     needs: application
     runs-on: ubuntu-latest
     permissions:
@@ -172,17 +185,43 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.delivery_source_commit || github.sha }}
+      - name: Validate existing artifact provenance
+        if: inputs.delivery_existing_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IPA_RUN: ${{ inputs.delivery_existing_run }}
+          FIXTURES_RUN: ${{ inputs.delivery_fixtures_run }}
+          EXPECTED_SOURCE: ${{ inputs.delivery_source_commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+          for run in "$IPA_RUN" "$FIXTURES_RUN"; do
+            gh run view "$run" --json headSha,conclusion > "$RUNNER_TEMP/delivery-run.json"
+            python3 - "$RUNNER_TEMP/delivery-run.json" <<'PY'
+          import json, os, sys
+          run = json.load(open(sys.argv[1]))
+          assert run['headSha'] == os.environ['EXPECTED_SOURCE'] and run['conclusion'] == 'success'
+          PY
+          done
       - uses: actions/download-artifact@v4
         with:
           name: MaxPS4-FEXCore-SideStore
           path: build/delivery
+          run-id: ${{ inputs.delivery_existing_run || github.run_id }}
+          github-token: ${{ github.token }}
       - uses: actions/download-artifact@v4
         with:
-          name: MaxPS4-PKG-delivery-fixtures
+          name: ${{ inputs.delivery_existing_run != '' && 'MaxPS4-synthetic-PKG-fixtures' || 'MaxPS4-PKG-delivery-fixtures' }}
           path: build/delivery/pkg-fixtures
+          run-id: ${{ inputs.delivery_fixtures_run || github.run_id }}
+          github-token: ${{ github.token }}
       - name: Verify and publish test artifacts
         env:
           GH_TOKEN: ${{ github.token }}
+          DELIVERY_SOURCE: ${{ inputs.delivery_source_commit || github.sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -199,7 +238,7 @@ jobs:
           (folder / 'PKG-ANALYSIS-iPhone.md').write_text(Path('docs/PKG-ANALYSIS.md').read_text())
           (folder / 'release-notes.md').write_text(
               'Préversion de diagnostic PKG PS4, PR #173 en brouillon, sans fusion dans main.\n\n'
-              'Source : ' + os.environ['GITHUB_SHA'] + '\n'
+              'Source : ' + os.environ['DELIVERY_SOURCE'] + '\n'
               'CI : https://github.com/' + os.environ['GITHUB_REPOSITORY'] + '/actions/runs/' + os.environ['GITHUB_RUN_ID'] + '\n\n'
               'iPhone/iPad ARM64, iOS 18.0 minimum. IPA à re-signer avec SideStore (application et framework). '
               'Le JIT ne sert pas à l’analyse PKG. Protocole iPhone et quatre fixtures entièrement synthétiques joints.\n\n'
@@ -208,8 +247,8 @@ jobs:
               'Aucun lancement automatique, déchiffrement, contournement DRM, gestion de clés protégées ou extraction PFS.\n')
           PY
           # A distinct immutable tag identifies this exact diagnostic build.
-          TAG="pkg-analysis-pr173-${GITHUB_SHA:0:7}"
-          gh release create "$TAG" --target "$GITHUB_SHA" --prerelease --latest=false \
+          TAG="pkg-analysis-pr173-${DELIVERY_SOURCE:0:7}"
+          gh release create "$TAG" --target "$DELIVERY_SOURCE" --prerelease --latest=false \
             --title 'MaxPS4 — analyse PKG PS4 (PR #173, test SideStore)' \
             --notes-file build/delivery/release-notes.md
           gh release upload "$TAG" build/delivery/MaxPS4-FEXCore-SideStore.ipa \
