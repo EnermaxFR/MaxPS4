@@ -229,11 +229,14 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                 const uint8_t op = code[0];
                 refusal_opcode = op;
                 size_t width = op == 0xb8 || op == 0xba || op == 0xbb || op == 0x05 || op == 0x25 || op == 0x0d ? 5 :
-                    op == 0xff || op == 0x8b || op == 0x89 || op == 0x81 ? 6 :
+                    op == 0xff || op == 0x8b || op == 0x81 ? 6 :
                     op == 0xc7 ? 10 : op == 0xc1 || op == 0x0f ? 3 :
-                    op == 0x01 || op == 0x29 ? 2 : 1;
+                    op == 0x01 || op == 0x29 || op == 0x89 ? 2 : 1;
                 if (!fetch(pc,width)) return -EFAULT;
-                if (op == 0x89 && code[1] == 0xc3) width = 2;
+                if (op == 0x89 && code[1] != 0xc3) {
+                    width = 6;
+                    if (!fetch(pc,width)) return -EFAULT;
+                }
                 // A CALL target may not enter another instruction's operand.
                 // Otherwise rewriting one decoded stream could invalidate a
                 // different stream that was admitted over overlapping bytes.

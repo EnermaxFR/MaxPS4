@@ -22,6 +22,7 @@ struct MaxPS4PlayableView: View {
                     touch = 0
                     if session.running { session.stop() }
                     else if let url = selected ?? Bundle.main.url(forResource: "PlayableDemo", withExtension: nil) { session.start(url: url) }
+                    else { session.missingDemo() }
                 }.buttonStyle(.borderedProminent)
                 Button("Importer une démo Orbis…") { importing = true }.disabled(session.running)
                 Toggle("Commandes tactiles", isOn: $touchVisible)
@@ -40,7 +41,10 @@ struct MaxPS4PlayableView: View {
         }
         .navigationTitle("Première image jouable")
         .fileImporter(isPresented: $importing, allowedContentTypes: [.folder]) { result in
-            if case .success(let url) = result { selected = url; touch = 0; session.start(url: url) }
+            switch result {
+            case .success(let url): selected = url; touch = 0; session.start(url: url)
+            case .failure(let error): session.importFailed(error)
+            }
         }
         .onReceive(poll) { _ in
             var buttons = touchVisible ? touch : 0

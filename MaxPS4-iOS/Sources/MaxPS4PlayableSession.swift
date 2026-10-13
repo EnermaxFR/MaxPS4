@@ -132,6 +132,8 @@ private final class MaxPS4PlayableWorker {
         }
     }
     func input(_ buttons: UInt32) { worker?.input(buttons) }
+    func importFailed(_ error: Error) { report = "Import refusé : \(error.localizedDescription)" }
+    func missingDemo() { report = "Dossier PlayableDemo absent de cette compilation." }
     func stop() {
         generation = UUID(); worker?.stop(); worker = nil
         running = false; image = nil

@@ -1,6 +1,7 @@
 # Première image jouable : démonstration synthétique
 
-La scène est un programme x86-64 original, sans ressource commerciale. Elle
+La scène est un programme x86-64 original, sans ressource commerciale,
+redistribué sous la licence GPL v2 du dépôt (voir `LICENSE`). Elle
 passe par ELF SCE → dépendance PRX explicite → NID fictif qualifié → RELA →
 pages invitées possédées → admission CPU → FEXCore → HLT. Les pixels ne sont
 pas dessinés en Swift : Swift reçoit une copie RGBA de la mémoire invitée et
