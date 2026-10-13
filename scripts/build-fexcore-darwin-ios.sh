@@ -16,7 +16,7 @@ TARGETS=(FEXCore_shared)
 RUNTIME=OFF
 if [[ "${3:-}" == --runtime || "${3:-}" == --host-runtime ]]; then
   RUNTIME=ON
-  TARGETS+=(MaxPS4FEXRuntime maxps4-fex-runtime-test)
+  TARGETS+=(MaxPS4FEXRuntime maxps4-fex-runtime-test maxps4-ps4-linked-test)
 fi
 if [[ "${3:-}" == --host-runtime ]]; then
   SDK=$(xcrun --sdk macosx --show-sdk-path)
@@ -115,6 +115,19 @@ if [[ "$RUNTIME" == ON ]]; then
     exit 1
   fi
   if [[ "$SYSTEM" == Darwin ]]; then
+    python3 - "$OUT" <<'PY'
+import subprocess, sys
+from pathlib import Path
+out = Path(sys.argv[1])
+run = subprocess.run([str(out / 'Bin/maxps4-ps4-linked-test')], timeout=60,
+                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+(out / 'ps4-linked-tests.txt').write_text(run.stdout)
+print(run.stdout)
+if run.returncode:
+    raise SystemExit(run.returncode)
+subprocess.run([str(out / 'Bin/maxps4-ps4-linked-test'), str(out / 'ps4-libkernel-demo.elf'),
+                str(out / 'ps4-libkernel-combined.elf')], check=True)
+PY
     if ! "$OUT/Bin/maxps4-fex-runtime-test" 2>&1 | tee "$OUT/runtime-tests.txt"; then
       xcrun lldb --batch -o run -k 'thread backtrace all' \
         -- "$OUT/Bin/maxps4-fex-runtime-test" > "$OUT/runtime-backtrace.txt" 2>&1 || true

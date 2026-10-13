@@ -8,6 +8,8 @@ on:
       - 'MaxPS4-iOS/Tests/PS4*'
       - 'cmake/FEXCoreIOSLinkage.cmake'
       - 'scripts/test-ps4-system-services.sh'
+      - 'scripts/test-ps4-fex-linked.sh'
+      - 'cmake/FEXCoreLinkedTests.cmake'
       - '.github/workflows/ps4-system-services.yml'
   push:
     branches: ['codex/ps4-memory-translation-contract']
@@ -18,11 +20,37 @@ on:
       - 'MaxPS4-iOS/Tests/PS4*'
       - 'cmake/FEXCoreIOSLinkage.cmake'
       - 'scripts/test-ps4-system-services.sh'
+      - 'scripts/test-ps4-fex-linked.sh'
+      - 'cmake/FEXCoreLinkedTests.cmake'
       - '.github/workflows/ps4-system-services.yml'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
+  linked-fex:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch pinned FEX runtime and upstream ARM64 instruction simulator
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/Leviidev/AetherPS4.git build/aether-linked
+          git -C build/aether-linked sparse-checkout set runtime/sources/fexcore-darwin
+          git -C build/aether-linked checkout 3347fc13f19860855ce91b66356940989ea6b6a6
+          git clone --filter=blob:none --no-checkout https://github.com/FEX-Emu/vixl.git build/aether-linked/runtime/sources/fexcore-darwin/External/vixl
+          git -C build/aether-linked/runtime/sources/fexcore-darwin/External/vixl checkout 5f418449c48f6ca3ad37c47ec632f17a561c0580
+      - name: Execute linked PS4 code through FEX and real libkernel services
+        run: bash scripts/test-ps4-fex-linked.sh build/aether-linked build/ps4-linked
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ps4-linked-fex-simulator
+          path: |
+            build/ps4-linked/*.log
+            build/ps4-linked/*.txt
+            build/ps4-linked/ps4-libkernel-demo.elf
+            build/ps4-linked/ps4-libkernel-combined.elf
+            build/ps4-linked/Bin/maxps4-ps4-linked-test
   services:
     strategy:
       matrix:

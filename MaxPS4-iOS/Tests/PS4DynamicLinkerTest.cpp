@@ -60,6 +60,46 @@ int main() {
     assert(load(good,9) == 0); // CALL + generated thunk + NOP + ADD + store + HLT.
     assert(load(good,8) == -E2BIG);
     assert(load(combined()) == 0 && linker.imports().size() == 5);
+    auto defined = [&](uint32_t type, uint64_t symbol, uint64_t addend = 0) {
+        auto file = good;
+        put(file,3,data_file+0x804,4); // Include the defined symbol in DT_HASH.
+        const size_t sym = data_file+0x400+2*24;
+        put(file,1,sym,4); file[sym+4] = 0x11; put(file,1,sym+6,2);
+        put(file,symbol,sym+8); put(file,8,sym+16);
+        put(file,data+0x80,data_file+0xc18);
+        put(file,(2ULL<<32)|type,data_file+0xc20);
+        put(file,addend,data_file+0xc28);
+        put(file,48,dynamic_file+7*16+8);
+        return file;
+    };
+    for (uint32_t type : {1U,2U,6U,7U,10U,11U}) {
+        assert(load(defined(type,data+0x3000)) == 0);
+        assert(memory.read(data+0x80,bytes,type == 2 || type == 10 || type == 11 ? 4 : 8));
+        const size_t width = type == 2 || type == 10 || type == 11 ? 4 : 8;
+        assert(maxps4::ps4::get_le(bytes,width) == (type == 2 ? 0x2f80 : data+0x3000));
+    }
+    bad = defined(8,data+0x3000,data+0x3000);
+    put(bad,8,data_file+0xc20); // R_RELATIVE must have symbol index zero.
+    assert(load(bad) == 0 && memory.read(data+0x80,bytes,8));
+    assert(maxps4::ps4::get_le(bytes,8) == data+0x3000);
+    assert(load(defined(1,data+0x3000,UINT64_MAX)) == 0);
+    assert(memory.read(data+0x80,bytes,8) && maxps4::ps4::get_le(bytes,8) == data+0x2fff);
+    // Restore a valid link after a successful negative addend check.
+    assert(load(good) == 0);
+    bad = defined(1,data+0x3000,UINT64_MAX-data-0x3000); rejected(bad,-EOVERFLOW);
+    bad = defined(1,data+0x3000,0x100000); rejected(bad,-ENOEXEC);
+    bad = defined(1,data+0x3000); bad[data_file+0x400+2*24+4] = 0x16; rejected(bad,-ENOTSUP);
+    bad = defined(1,data+0x3000); put(bad,data,data_file+0xc18); rejected(bad,-ENOEXEC); // Duplicate target.
+    auto distant = [&](uint32_t type, uint64_t symbol) {
+        auto file = defined(type,symbol);
+        put(file,4,56,2);
+        put(file,1,232,4); put(file,4,236,4); put(file,0xa000,240);
+        put(file,symbol,248); put(file,8,264); put(file,0x4000,272); put(file,1,280);
+        return file;
+    };
+    rejected(distant(2,0x100000000ULL),-EOVERFLOW); // Signed PC32.
+    rejected(distant(10,0x100000000ULL),-EOVERFLOW); // Unsigned R32.
+    rejected(distant(11,0x80000000ULL),-EOVERFLOW); // Signed R32S.
     // Mutate the final writable-store proof after a valid import: no mapping
     // or partial image can escape a rejected late instruction.
     bad = good; put(bad,entry-(entry+18),entry+14,4); rejected(bad,-EFAULT);

@@ -29,8 +29,9 @@ public:
         bytes({0xff,0x15});
         immediate(data+slot*8-(entry+code.size()+4),4);
     }
-    void store(uint64_t address) {
-        bytes({0x48,0x89,0x05}); immediate(address-(entry+code.size()+4),4);
+    void store(uint64_t address, uint8_t source = 0) {
+        bytes({static_cast<uint8_t>(source >= 8 ? 0x4c : 0x48),0x89,static_cast<uint8_t>(0x05|((source&7)<<3))});
+        immediate(address-(entry+code.size()+4),4);
     }
     std::vector<uint8_t> elf() const {
         std::vector<uint8_t> file(0xc000);

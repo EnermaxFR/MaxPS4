@@ -23,7 +23,8 @@ int64_t maxps4_fex_engine_mount_app0(maxps4_fex_engine *engine, const char *dire
 // guest thread identity is 1. No guest CPU import trampoline is installed.
 int64_t maxps4_fex_engine_call_libkernel(maxps4_fex_engine *engine, uint32_t service,
     const maxps4_ps4_kernel_call *call, uint64_t guest_thread);
-enum { MAXPS4_CPU_RESTRICTED_INTERPRETER = 1, MAXPS4_CPU_FEX_ARM64_JIT = 2 };
+enum { MAXPS4_CPU_RESTRICTED_INTERPRETER = 1, MAXPS4_CPU_FEX_ARM64_JIT = 2,
+       MAXPS4_CPU_FEX_ARM64_SIMULATOR = 3 };
 enum { MAXPS4_FEX_CONTEXT_CREATED = 1, MAXPS4_FEX_DISPATCHER_INITIALIZED = 2 };
 // Creates the real executable dispatcher; does not execute guest code.
 // iOS requires successful authorized debugger-region preparation first.
@@ -82,6 +83,17 @@ int32_t maxps4_fex_engine_stage_ps4(maxps4_fex_engine *engine, const uint8_t *fi
 // logical entry; on any failure outputs are zero. Stage/execute are serialized.
 int32_t maxps4_fex_engine_run_staged_ps4(maxps4_fex_engine *engine,
     uint32_t budget, uint64_t *result, uint32_t *backend, uint64_t *entry);
+// Link and admit a bounded Orbis ELF with standard dynamic tables, one
+// libkernel dependency and imported GOT calls. No fallback, SCE tables, TLS,
+// general PRX graph or arbitrary guest memory instructions. Clears old staging
+// and services on each attempt. CPU_ADDRESS_SPACE_REQUIRED remains set.
+int32_t maxps4_fex_engine_link_ps4(maxps4_fex_engine *engine, const uint8_t *file,
+    size_t length, uint32_t budget, uint64_t *entry, uint32_t *imports);
+// Execute that linked program through real FEX. The syscall trampoline captures
+// SysV arguments, dispatches existing libkernel, updates RAX and resumes CPU.
+// Only the program admitted at link time can execute; no interpreter fallback.
+int32_t maxps4_fex_engine_run_linked_ps4(maxps4_fex_engine *engine,
+    uint64_t *result, uint32_t *backend, uint64_t *entry, uint32_t *calls);
 // Exact read from staged or anonymous readable memory; no host pointers cross the ABI.
 // Failure leaves caller bytes untouched. Serialized against stage/close.
 int32_t maxps4_fex_engine_read_ps4(maxps4_fex_engine *engine, uint64_t address,

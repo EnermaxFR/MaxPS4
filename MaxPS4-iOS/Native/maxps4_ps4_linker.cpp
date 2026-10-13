@@ -45,7 +45,9 @@ constexpr size_t thunk_size = 11;
 int PS4DynamicLinker::load(GuestELF& image, const uint8_t* file, size_t length, uint32_t budget) {
     image.clear(); reset();
     auto fail = [&](int error, const char* message) {
-        image.clear(); imports_.clear(); stack_ = 0; diagnostic_ = message; return error;
+        image.clear(); imports_.clear(); stack_ = 0;
+        try { diagnostic_ = message; } catch (const std::bad_alloc&) { diagnostic_.clear(); }
+        return error;
     };
     if (!budget || budget > 1000000) return fail(-EINVAL, "invalid instruction budget");
     try {
@@ -62,8 +64,14 @@ int PS4DynamicLinker::load(GuestELF& image, const uint8_t* file, size_t length, 
         }
         if (!dynamic || !dynamic->fileSize || dynamic->fileSize % 16 ||
             dynamic->fileSize > 65536 || dynamic->fileSize > dynamic->memorySize ||
+            dynamic->memorySize > 65536 || dynamic->address > UINT64_MAX - dynamic->memorySize ||
+            (dynamic->flags & ~7U) || !(dynamic->flags & 4U) ||
+            (dynamic->alignment > 1 && ((dynamic->alignment & (dynamic->alignment-1)) ||
+                dynamic->address % dynamic->alignment != dynamic->offset % dynamic->alignment)) ||
             dynamic->offset > length || dynamic->fileSize > length - dynamic->offset)
             return fail(-ENOEXEC, "invalid PT_DYNAMIC");
+        if (!parsed.translate(dynamic->address,dynamic->memorySize,4))
+            return fail(-ENOEXEC, "PT_DYNAMIC exceeds its containing segment");
         const auto* table = parsed.translate(dynamic->address, dynamic->fileSize, 4);
         if (!table || std::memcmp(table, file + dynamic->offset, dynamic->fileSize))
             return fail(-ENOEXEC, "dynamic table is not the declared file-backed memory");
@@ -85,6 +93,7 @@ int PS4DynamicLinker::load(GuestELF& image, const uint8_t* file, size_t length, 
         if (!terminated || tags[11] != 24 || !tags[4] || !tags[5] || !tags[6] ||
             !tags[10] || tags[10] > 65536 || needed.size() != 1)
             return fail(-ENOEXEC, "missing or invalid symbol/dependency tables");
+        if ((tags[9] && tags[9] != 24) || tags[24]) return fail(-ENOEXEC, "invalid dynamic entry size/marker");
         // No initialization is silently skipped. Future module scheduling must
         // explicitly execute DT_INIT/arrays before these are accepted.
         for (uint64_t t : {12U,13U,25U,26U,27U,28U,30U,0x6ffffffbU})
@@ -147,6 +156,7 @@ int PS4DynamicLinker::load(GuestELF& image, const uint8_t* file, size_t length, 
                 }
                 if (type != 1 && type != 2 && type != 6 && type != 7 && type != 8 && type != 10 && type != 11)
                     return fail(-ENOTSUP, "unsupported x86-64 relocation");
+                if ((type == 6 || type == 7) && a) return fail(-ENOTSUP, "GOT relocation with addend");
                 const size_t width = type == 2 || type == 10 || type == 11 ? 4 : 8;
                 if (target % width || !parsed.translate(target, width, 2) || parsed.translate(target, width, 1))
                     return fail(-ENOEXEC, "relocation target must be aligned RW/non-X");
@@ -184,8 +194,10 @@ int PS4DynamicLinker::load(GuestELF& image, const uint8_t* file, size_t length, 
                         Import binding = found->second; binding.slot = target;
                         imports_.push_back(binding); value = binding.thunk;
                     } else {
+                        if ((sym[4] & 15) > 2) return fail(-ENOTSUP, "unsupported defined symbol type (including TLS)");
                         if (section >= 0xff00 || !parsed.translate(u(sym+8), size ? size : 1, 4) ||
                             !add(u(sym+8), a, value)) return fail(-EOVERFLOW, "invalid defined symbol/addend");
+                        if (!parsed.translate(value,1,4)) return fail(-ENOEXEC, "symbol addend outside guest memory");
                     }
                 }
                 if (type == 2) {
@@ -223,18 +235,26 @@ int PS4DynamicLinker::load(GuestELF& image, const uint8_t* file, size_t length, 
         auto* code = code_segment->bytes.data() + parsed.entry - code_segment->header.address;
         const size_t code_size = code_segment->header.fileSize - (parsed.entry - code_segment->header.address);
         if (code_size > 65536) return fail(-E2BIG, "entry program too large");
-        size_t offset = 0; uint32_t instructions = 0; bool halted = false, stack_arg = false;
+        size_t offset = 0; uint32_t instructions = 0, initialized = 0;
+        bool halted = false, stack_arg = false;
         while (offset < code_size) {
             const size_t left = code_size - offset;
             auto* p = code + offset; size_t width = 0;
             if (++instructions > budget) return fail(-E2BIG, "instruction budget exhausted");
-            if (p[0] >= 0xb8 && p[0] <= 0xbf && p[0] != 0xbc && left >= 5) width = 5;
+            if (p[0] >= 0xb8 && p[0] <= 0xbf && p[0] != 0xbc && left >= 5) {
+                width = 5; initialized |= 1U << (p[0]-0xb8);
+            }
             else if ((p[0] == 0x48 || p[0] == 0x49) && left >= 10 && p[1] >= 0xb8 && p[1] <= 0xbf &&
-                     !(p[0] == 0x48 && p[1] == 0xbc)) width = 10;
-            else if (p[0] == 0x41 && left >= 6 && (p[1] == 0xb8 || p[1] == 0xb9)) width = 6;
-            else if (p[0] == 0x05 && left >= 5) width = 5;
+                     !(p[0] == 0x48 && p[1] == 0xbc)) {
+                width = 10; initialized |= 1U << (p[1]-0xb8+(p[0] == 0x49 ? 8 : 0));
+            }
+            else if (p[0] == 0x41 && left >= 6 && (p[1] == 0xb8 || p[1] == 0xb9)) {
+                width = 6; initialized |= 1U << (p[1]-0xb8+8);
+            }
+            else if (p[0] == 0x05 && left >= 5 && (initialized & 1)) width = 5;
             else if (p[0] == 0x90) width = 1;
-            else if (left >= 3 && p[0] == 0x48 && p[1] == 0x89 && (p[2] == 0xc7 || p[2] == 0xc6)) width = 3;
+            else if (left >= 3 && p[0] == 0x48 && p[1] == 0x89 &&
+                     (p[2] == 0xc7 || p[2] == 0xc6) && (initialized & 1)) width = 3;
             else if (left >= 4 && p[0] == 0x48 && p[1] == 0x83 && p[3] == 0x10 &&
                      ((p[2] == 0xec && !stack_arg) || (p[2] == 0xc4 && stack_arg))) {
                 stack_arg = p[2] == 0xec; width = 4;
@@ -250,10 +270,17 @@ int PS4DynamicLinker::load(GuestELF& image, const uint8_t* file, size_t length, 
                 uint32_t displacement = 0;
                 if (!relative(found->thunk,parsed.entry+offset+5,displacement)) return fail(-EOVERFLOW,"CALL displacement overflow");
                 p[0] = 0xe8; put(p+1,displacement,4); p[5] = 0x90; width = 6;
+                initialized |= 1; // A verified service returns a logical value in RAX.
                 if (++instructions > budget) return fail(-E2BIG,"CALL padding budget exhausted");
-            } else if ((left >= 7 && !std::memcmp(p,"\x48\x89\x05",3)) ||
+            } else if ((left >= 7 && (p[0] == 0x48 || p[0] == 0x4c) && p[1] == 0x89 && (p[2] & 0xc7) == 5) ||
                        (left >= 10 && p[0] == 0xc7 && p[1] == 0x05)) {
-                const bool qword = p[0] == 0x48; width = qword ? 7 : 10;
+                const bool qword = p[0] != 0xc7; width = qword ? 7 : 10;
+                if (qword) {
+                    const uint32_t source = ((p[2] >> 3) & 7) + (p[0] == 0x4c ? 8 : 0);
+                    constexpr uint32_t permitted = (1U<<0)|(1U<<3)|(1U<<5)|(1U<<12)|(1U<<13)|(1U<<14)|(1U<<15);
+                    if (!(permitted & (1U<<source)) || !(initialized & (1U<<source)))
+                        return fail(-ENOTSUP,"store could disclose private CPU pointers");
+                }
                 uint64_t target = 0;
                 if (!add(parsed.entry+offset+width,signed32(u(p+(qword ? 3 : 2),4)),target) ||
                     !parsed.translate(target,qword ? 8 : 4,2) || parsed.translate(target,qword ? 8 : 4,1))

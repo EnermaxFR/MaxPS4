@@ -19,6 +19,7 @@ function(maxps4_complete_fexcore_linkage)
       "${NATIVE}/maxps4_ps4_libkernel.cpp"
       "${NATIVE}/maxps4_ps4_virtual_memory.cpp"
       "${NATIVE}/maxps4_ps4_threads.cpp"
+      "${NATIVE}/maxps4_ps4_linker.cpp"
       "${NATIVE}/maxps4_native.cpp"
       "${NATIVE}/aether_jit_allocator_abi.cpp"
       "${NATIVE}/aether_guest_cpu_adapter.cpp"
@@ -42,6 +43,10 @@ function(maxps4_complete_fexcore_linkage)
     target_include_directories(maxps4-fex-runtime-test PRIVATE "${NATIVE}"
       "${CMAKE_SOURCE_DIR}/FEXCore/include" "${CMAKE_BINARY_DIR}/include")
     target_link_libraries(maxps4-fex-runtime-test PRIVATE MaxPS4FEXRuntime fmt::fmt)
+    add_executable(maxps4-ps4-linked-test
+      "${MAXPS4_ROOT}/MaxPS4-iOS/Tests/PS4FEXLinkedExecutionTest.cpp")
+    target_compile_features(maxps4-ps4-linked-test PRIVATE cxx_std_23)
+    target_link_libraries(maxps4-ps4-linked-test PRIVATE MaxPS4FEXRuntime)
   endif()
 endfunction()
 cmake_language(DEFER CALL maxps4_complete_fexcore_linkage)
