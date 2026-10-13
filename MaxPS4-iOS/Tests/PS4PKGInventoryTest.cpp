@@ -179,6 +179,14 @@ int main() {
     assert(fclose(file) == 0);
     assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
     assert(std::string(report.data()).find("PSF valide (1 entrées) ; TITLE=Demo") != std::string::npos);
+    // An embedded NUL must not turn a longer field into a misleading prefix.
+    sfo[0x731] = 0;
+    file = std::fopen(path, "wb"); assert(file);
+    assert(fwrite(sfo.data(), 1, sfo.size(), file) == sfo.size());
+    assert(fclose(file) == 0);
+    assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
+    assert(std::string(report.data()).find("TITLE=Demo") == std::string::npos);
+    sfo[0x731] = 'e';
     // A malformed key must not be displayed as trusted metadata.
     sfo[0x724] = '/';
     file = std::fopen(path, "wb"); assert(file);
