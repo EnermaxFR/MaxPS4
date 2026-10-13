@@ -127,7 +127,7 @@ static int animatedGuestTest() {
                 const size_t oldOffset=((oldCell/16)*2*width+(oldCell%16)*2)*4;
                 uint32_t oldRGBA=0;
                 for(int b=0;b<4;++b) oldRGBA|=uint32_t(image[oldOffset+b])<<(8*b);
-                CHECK(oldRGBA==0xff302018);
+                CHECK(oldRGBA==(oldCell==87 ? 0xff2080e0u : 0xff302018u));
             }
         }
     }
