@@ -189,7 +189,7 @@ final class MaxPS4Emulator: ObservableObject {
                 .replacingOccurrences(of: "_", with: " ")
                 .replacingOccurrences(of: "-", with: " ")
 
-            let displayName = isPKG && prettyName.uppercased().contains("SONICMANIA") ? "Sonic Mania" : prettyName
+            let displayName = prettyName // Library label only; metadata comes from the checked report.
             let game = MaxPS4Game(
                 id: UUID(),
                 name: displayName,
@@ -250,493 +250,41 @@ final class MaxPS4Emulator: ObservableObject {
 
     func inspect(_ game: MaxPS4Game) {
         do {
-            if game.fileName.lowercased().hasSuffix(".pkg") {
-                let fileURL = URL(fileURLWithPath: game.localPath)
-                let attributes = try fileManager.attributesOfItem(atPath: fileURL.path)
-                let byteCount = (attributes[.size] as? NSNumber)?.int64Value ?? 0
-                let size = ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
-                let handle = try FileHandle(forReadingFrom: fileURL)
-                defer { try? handle.close() }
-                let header = try handle.read(upToCount: 128) ?? Data()
-                guard byteCount >= 128, header.count >= 128,
-                      Array(header.prefix(4)) == [0x7F, 0x43, 0x4E, 0x54] else {
-                    status = "PKG PS4 : en-tête incomplet ou invalide"
-                    return
-                }
-                // Big-endian header fields: distinguish the advertised PKG length
-                // from the actual number of bytes on disk, without reading payload data.
-                func bigEndian64(_ offset: Int) -> UInt64 {
-                    (0..<8).reduce(UInt64(0)) { value, i in
-                        (value << 8) | UInt64(header[offset + i])
-                    }
-                }
-                // PS4 PKG: 0x18 is the 32-bit entry-table offset, not package length.
-                let tableOffset = (0..<4).reduce(UInt32(0)) { ($0 << 8) | UInt32(header[0x18 + $1]) }
-                let declaredBodySize = bigEndian64(0x28)
-                let sizeCheck: String
-                sizeCheck = declaredBodySize <= UInt64(byteCount)
-                    ? "taille du corps plausible (champ 0x28, non équivalente au fichier entier)"
-                    : "taille du corps supérieure à la taille réelle"
-                // The PKG header holds a big-endian entry count at offset 0x10.
-                // Report it only as a diagnostic: no extraction or trust decision.
-                let entryCount = (0..<4).reduce(UInt32(0)) { value, i in
-                    (value << 8) | UInt32(header[0x10 + i])
-                }
-                let secondaryCount = UInt32(header[0x16]) << 8 | UInt32(header[0x17])
-                let tableCheck: String
-                if entryCount == 0 {
-                    tableCheck = "aucune entrée déclarée ; table non vérifiée"
-                } else if entryCount > 100_000 {
-                    tableCheck = "nombre d’entrées inhabituellement élevé ; table non vérifiée"
-                } else if secondaryCount != entryCount {
-                    tableCheck = "compteur secondaire supérieur au total ; en-tête suspect"
-                } else {
-                    tableCheck = "compteurs plausibles ; positions et contenu de la table non vérifiés"
-                }
-                let entryCheck = entryCount > 0 && entryCount <= 100_000
-                    ? String(entryCount) + " entrées déclarées (non vérifiées)"
-                    : "nombre absent ou inhabituel (non vérifié)"
-                // PS4 PKG content_id is an ASCII field at 0x40 (36 bytes).
-                // Never parse encrypted contents or infer a version from arbitrary bytes.
-                let field = header.subdata(in: 0x40..<0x64)
-                let contentID = String(bytes: field.prefix(while: { $0 != 0 }), encoding: .ascii)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                let validID = contentID.flatMap { id -> String? in
-                    guard id.count >= 16, id.count <= 36,
-                          id.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || $0 == 45 || $0 == 95 }) else {
-                        return nil
-                    }
-                    return id
-                }
-                let identifierSource = validID ?? game.fileName.uppercased()
-                let titleID = identifierSource.range(of: "CUSA[0-9]{5}", options: .regularExpression)
-                    .map { String(identifierSource[$0]) }
-                let title = game.fileName.uppercased().contains("SONICMANIA") ? "Sonic Mania (nom du fichier)" : game.name
-                let report = [
-                    "Format : PKG PS4 (signature vérifiée)",
-                    "Titre : " + title,
-                    "Taille : " + size,
-                    "Contrôle en-tête : " + sizeCheck,
-                    "Table des entrées : " + entryCheck,
-                    "Décalage table : 0x" + String(tableOffset, radix: 16),
-                    "Cohérence compteurs : " + tableCheck,
-                    "Content ID : " + (validID ?? "indisponible"),
-                    "Title ID : " + (titleID ?? "indisponible"),
-                    "Version : non déterminée",
-                    "Contenu : non extrait, non déchiffré",
-                    "Exécution PS4 : indisponible"
-                ]
-                status = report.joined(separator: "\n")
-            } else {
-                status = try MaxPS4ELFInspector.inspect(url: URL(fileURLWithPath: game.localPath))
-            }
+            let url = URL(fileURLWithPath: game.localPath)
+            status = game.fileName.lowercased().hasSuffix(".pkg")
+                ? try MaxPS4PKGInspector.inspect(url: url)
+                : try MaxPS4ELFInspector.inspect(url: url)
         } catch {
             status = "Analyse impossible : \(error.localizedDescription)"
         }
     }
 
-    /// Common bounded native parser; never decrypts, exports or executes content.
+    /// Dedicated iOS action: bounded file I/O and parsing run off the main actor.
+    /// Each request reopens the retained file; no cached report is trusted.
+    func analyzePKG(_ game: MaxPS4Game) async -> String {
+        guard game.fileName.lowercased().hasSuffix(".pkg") else {
+            return "Analyse PKG : sélectionnez un paquet .pkg"
+        }
+        let url = URL(fileURLWithPath: game.localPath)
+        let report = await Task.detached(priority: .userInitiated) {
+            do { return try MaxPS4PKGInspector.inspect(url: url) }
+            catch { return "Analyse PKG impossible : \(error.localizedDescription)" }
+        }.value
+        status = report
+        return report
+    }
+
     private func pkgEntryReport(_ url: URL) throws -> String {
         try MaxPS4PKGInspector.inspect(url: url)
     }
 
-    func inspectPKGEntries(_ game: MaxPS4Game) {
-        guard game.fileName.lowercased().hasSuffix(".pkg") else {
-            status = "Analyse des entrées : choisissez un PKG"
-            return
-        }
-        do {
-            status = try pkgEntryReport(URL(fileURLWithPath: game.localPath))
-        } catch {
-            status = "Analyse des entrées : \(error.localizedDescription)"
-        }
-    }
-
-    /// Searches raw PKG bytes for readable asset signatures. This never decrypts or modifies data.
-    func inspectPKGAssetCandidates(_ game: MaxPS4Game) {
-        guard game.fileName.lowercased().hasSuffix(".pkg") else {
-            status = "Ressources PKG : sélectionnez un fichier .pkg"
-            return
-        }
-        do {
-            let url = URL(fileURLWithPath: game.localPath)
-            let attributes = try fileManager.attributesOfItem(atPath: url.path)
-            guard let size = (attributes[.size] as? NSNumber)?.uint64Value, size >= 128 else {
-                status = "Ressources PKG : fichier absent ou trop court"
-                return
-            }
-            let handle = try FileHandle(forReadingFrom: url)
-            defer { try? handle.close() }
-            let header = try handle.read(upToCount: 4) ?? Data()
-            guard Array(header) == [0x7F, 0x43, 0x4E, 0x54] else {
-                status = "Ressources PKG : signature PS4 invalide"
-                return
-            }
-            try handle.seek(toOffset: 0)
-            let patterns: [(String, [UInt8])] = [
-                ("Data.rsdk", Array("Data.rsdk".utf8)),
-                ("RSDK", Array("RSDK".utf8)),
-                ("ELF64", [0x7F, 0x45, 0x4C, 0x46, 0x02]),
-                ("DDS", Array("DDS ".utf8)),
-                ("PNG", [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
-            ]
-            var matches: [String: [UInt64]] = [:]
-            var scanned: UInt64 = 0
-            var overlap = Data()
-            let chunkSize = 256 * 1024
-            while scanned < size {
-                let amount = Int(min(UInt64(chunkSize), size - scanned))
-                guard let data = try handle.read(upToCount: amount), !data.isEmpty else { break }
-                var bytes = overlap
-                bytes.append(data)
-                let base = scanned - UInt64(overlap.count)
-                for (name, needle) in patterns {
-                    let signature = Data(needle)
-                    var cursor = 0
-                    while cursor + signature.count <= bytes.count {
-                        guard let range = bytes.range(of: signature, in: cursor..<bytes.count) else { break }
-                        let address = base + UInt64(range.lowerBound)
-                        var locations = matches[name, default: []]
-                        if locations.count < 8 && !locations.contains(address) {
-                            locations.append(address)
-                            matches[name] = locations
-                        }
-                        cursor = range.lowerBound + 1
-                    }
-                }
-                scanned += UInt64(data.count)
-                overlap = Data(bytes.suffix(8))
-            }
-            var lines = [
-                game.name + " — diagnostic de ressources PKG",
-                "Analyse brute en lecture seule : \(scanned) / \(size) octets",
-                "Aucun déchiffrement ni extraction automatique."
-            ]
-            for (name, _) in patterns {
-                let positions = matches[name, default: []]
-                let locations = positions.map { "0x" + String($0, radix: 16) }.joined(separator: ", ")
-                lines.append("\(name) : " + (positions.isEmpty ? "non trouvé en clair" : locations))
-            }
-            lines.append("Les signatures ne prouvent pas qu'un fichier complet est exploitable.")
-            lines.append("Data.rsdk requis pour envisager un port natif ; contenu chiffré non pris en charge.")
-            status = lines.joined(separator: "\n")
-        } catch {
-            status = "Analyse des ressources PKG impossible : \(error.localizedDescription)"
-        }
-    }
-
-    func inspectPKGStructure(_ game: MaxPS4Game) {
-        guard game.fileName.lowercased().hasSuffix(".pkg") else {
-            status = "Structure PKG : sélectionnez un fichier .pkg"
-            return
-        }
-        do {
-            let url = URL(fileURLWithPath: game.localPath)
-            let attributes = try fileManager.attributesOfItem(atPath: url.path)
-            guard let size = (attributes[.size] as? NSNumber)?.uint64Value, size >= 128 else {
-                status = "Structure PKG : fichier trop court"
-                return
-            }
-            let handle = try FileHandle(forReadingFrom: url)
-            defer { try? handle.close() }
-            let header = try handle.read(upToCount: 128) ?? Data()
-            guard header.count == 128,
-                  Array(header.prefix(4)) == [0x7F, 0x43, 0x4E, 0x54] else {
-                status = "Structure PKG : signature invalide"
-                return
-            }
-            func be32(_ offset: Int) -> UInt32 {
-                (0..<4).reduce(UInt32(0)) { ($0 << 8) | UInt32(header[offset + $1]) }
-            }
-            func be64(_ offset: Int) -> UInt64 {
-                (0..<8).reduce(UInt64(0)) { ($0 << 8) | UInt64(header[offset + $1]) }
-            }
-            let count = UInt64(be32(0x10))
-            let scEntryCount = UInt64(UInt16(header[0x14]) << 8 | UInt16(header[0x15]))
-            let secondCount = UInt64(UInt16(header[0x16]) << 8 | UInt16(header[0x17]))
-            let tableOffset = UInt64(be32(0x18))
-            let bodyOffset = be64(0x20)
-            let bodySize = be64(0x28)
-            let entryBytes = count * 32
-            let tableValid = count > 0 && count <= 100_000 && tableOffset <= size && entryBytes <= size - tableOffset
-            // Header offsets are displayed as diagnostics only; layout is not
-            // trusted as an authenticated or decrypted PKG index.
-            let countCheck = secondCount == count && scEntryCount <= count
-                ? "compteurs cohérents"
-                : "compteurs à vérifier"
-            let message = [
-                "Structure PKG • lecture seule",
-                "Taille réelle : \(size) octets",
-                "Corps PKG : offset \(bodyOffset), taille \(bodySize) octets",
-                "Entrées déclarées : \(count)",
-                "Compteur sécurisé : \(scEntryCount)",
-                "Compteur secondaire : \(secondCount)",
-                "Offset table : 0x\(String(tableOffset, radix: 16))",
-                "Table (\(entryBytes) octets) : \(tableValid ? "bornes valides" : "bornes invalides")",
-                "Contrôle : \(countCheck)",
-                "Entrées internes : non déchiffrées ni extraites",
-                "Déchiffrement et exécution : non disponibles"
-            ]
-            status = message.joined(separator: "\n")
-        } catch {
-            status = "Analyse de structure impossible : \(error.localizedDescription)"
-        }
-    }
-
-    /// Read-only readiness report: verifies package header and descriptor bounds.
-    /// Does not imply PS4 decryption, extraction or executable compatibility.
-    /// Read-only PS4 boot readiness probe: never treats a PKG signature as a decrypted executable.
-    func inspectPS4ExecutableReadiness(_ game: MaxPS4Game) {
-        guard game.fileName.lowercased().hasSuffix(".pkg") else {
-            status = "Chargeur PS4 : sélectionnez un PKG"
-            return
-        }
-        do {
-            let url = URL(fileURLWithPath: game.localPath)
-            let size = ((try fileManager.attributesOfItem(atPath: url.path))[.size] as? NSNumber)?.uint64Value ?? 0
-            let handle = try FileHandle(forReadingFrom: url)
-            defer { try? handle.close() }
-            let header = try handle.read(upToCount: 32) ?? Data()
-            guard header.count == 32, Array(header.prefix(4)) == [0x7F, 0x43, 0x4E, 0x54] else {
-                status = "Chargeur PS4 : signature PKG incorrecte"
-                return
-            }
-            let count = (0..<4).reduce(UInt64(0)) { ($0 << 8) | UInt64(header[0x10 + $1]) }
-            let tableOffset = (0..<4).reduce(UInt64(0)) { ($0 << 8) | UInt64(header[0x18 + $1]) }
-            guard count > 0, count <= 4096, tableOffset <= size,
-                  count <= (size - tableOffset) / 32 else {
-                status = "Chargeur PS4 : index hors limites"
-                return
-            }
-            try handle.seek(toOffset: tableOffset)
-            guard let table = try handle.read(upToCount: Int(count * 32)),
-                  table.count == Int(count * 32) else {
-                status = "Chargeur PS4 : index incomplet"
-                return
-            }
-            func be32(_ at: Int) -> UInt64 {
-                (0..<4).reduce(UInt64(0)) { ($0 << 8) | UInt64(table[at + $1]) }
-            }
-            var typeCounts: [UInt32: Int] = [:]
-            var emptyEntries = 0
-            var checked = 0
-            var readableELF = 0
-            var incompatibleELF = 0
-            var truncatedHeaders = 0
-            var completeELFHeaders = 0
-            var elfWithoutProgramTable = 0
-            var possibleSELF = 0
-            var invalid = 0
-            for i in 0..<Int(count) {
-                let base = i * 32
-                let entryType = UInt32(be32(base))
-                typeCounts[entryType, default: 0] += 1
-                let start = be32(base + 16)
-                let length = be32(base + 20)
-                guard start <= size, length <= size - start else {
-                    invalid += 1
-                    continue
-                }
-                checked += 1
-                if length == 0 { emptyEntries += 1 }
-                if length < 4 { continue }
-                try handle.seek(toOffset: start)
-                let prefix = try handle.read(upToCount: Int(min(length, 64))) ?? Data()
-                if prefix.count >= 4 && Array(prefix.prefix(4)) == [0x7F, 0x45, 0x4C, 0x46] {
-                    // Distinguish ELF magic from an actual x86-64 executable header.
-                    guard prefix.count >= 20 else { truncatedHeaders += 1; continue }
-                    if prefix[4] == 2 && prefix[5] == 1 && prefix[6] == 1 &&
-                        prefix[18] == 0x3E && prefix[19] == 0 {
-                        if prefix.count < 64 {
-                            truncatedHeaders += 1
-                            continue
-                        }
-                        let elfType = UInt16(prefix[16]) | (UInt16(prefix[17]) << 8)
-                        let elfVersion = (20..<24).reduce(UInt32(0)) {
-                            $0 | (UInt32(prefix[$1]) << (($1 - 20) * 8))
-                        }
-                        let programHeaderOffset = (32..<40).reduce(UInt64(0)) {
-                            $0 | (UInt64(prefix[$1]) << (($1 - 32) * 8))
-                        }
-                        let programHeaderStride = UInt16(prefix[54]) | (UInt16(prefix[55]) << 8)
-                        let programHeaderCount = UInt16(prefix[56]) | (UInt16(prefix[57]) << 8)
-                        if (elfType == 2 || elfType == 3) && elfVersion == 1 {
-                            readableELF += 1
-                            if programHeaderOffset > 0 && programHeaderStride == 56 &&
-                                programHeaderCount > 0 && programHeaderCount <= 64 {
-                                completeELFHeaders += 1
-                            } else {
-                                elfWithoutProgramTable += 1
-                            }
-                        } else {
-                            incompatibleELF += 1
-                        }
-                    } else {
-                        incompatibleELF += 1
-                    }
-                } else if prefix.count >= 4 && Array(prefix.prefix(4)) == [0x4F, 0x15, 0x3D, 0x1D] {
-                    possibleSELF += 1
-                }
-            }
-            let inventory = typeCounts.sorted { $0.key < $1.key }.prefix(20).map {
-                "Type 0x\(String($0.key, radix: 16)) : \($0.value) entrée(s)"
-            }
-            status = [
-                game.name + " • état du chargeur PS4",
-                "Index PKG : \(checked)/\(count) entrées dans les bornes ; invalides : \(invalid)",
-                "Entrées vides : \(emptyEntries)",
-                "Types d’entrées PKG (identifiants bruts) :",
-                inventory.joined(separator: "\n"),
-                "En-têtes ELF64 x86-64 aux débuts des entrées : \(readableELF)",
-                "Signatures SELF possibles aux débuts des entrées : \(possibleSELF)",
-                "ELF incompatibles : \(incompatibleELF) ; en-têtes incomplets : \(truncatedHeaders)",
-                "ELF avec table de segments déclarée : \(completeELFHeaders) ; sans table exploitable : \(elfWithoutProgramTable)",
-                "Une table déclarée ne prouve ni son accessibilité ni la possibilité de démarrer le jeu.",
-                "Compatibilité " + game.name + " PS4 : bloquée (SELF/ELF exploitable, exécution ARM64, services PS4 et graphismes manquants).",
-                "Ce relevé ne déchiffre pas les entrées et ne détecte pas les exécutables imbriqués.",
-                "Un PKG valide n'est pas un binaire exécutable.",
-                "Démarrage : bloqué tant qu'un SELF/ELF exploitable et les services PS4 sont absents."
-            ].joined(separator: "\n")
-        } catch {
-            status = "Chargeur PS4 : erreur de lecture — \(error.localizedDescription)"
-        }
-    }
-
-    /// Read-only search for executable signatures in bounded PKG entry prefixes.
-    func inspectPS4EntryPrefixes(_ game: MaxPS4Game) {
-        guard game.fileName.lowercased().hasSuffix(".pkg") else {
-            status = "Recherche SELF : choisir un PKG"
-            return
-        }
-        do {
-            let url = URL(fileURLWithPath: game.localPath)
-            let size = ((try fileManager.attributesOfItem(atPath: url.path))[.size] as? NSNumber)?.uint64Value ?? 0
-            let handle = try FileHandle(forReadingFrom: url)
-            defer { try? handle.close() }
-            let header = try handle.read(upToCount: 32) ?? Data()
-            guard header.count == 32, Array(header.prefix(4)) == [0x7F, 0x43, 0x4E, 0x54] else {
-                status = "Recherche SELF : en-tête PKG invalide"
-                return
-            }
-            func word(_ bytes: Data, _ at: Int) -> UInt64 {
-                (0..<4).reduce(UInt64(0)) { ($0 << 8) | UInt64(bytes[at + $1]) }
-            }
-            let count = word(header, 0x10), tableOffset = word(header, 0x18)
-            guard count > 0, count <= 4096, tableOffset <= size,
-                  count <= (size - tableOffset) / 32 else {
-                status = "Recherche SELF : table hors limites"
-                return
-            }
-            try handle.seek(toOffset: tableOffset)
-            guard let table = try handle.read(upToCount: Int(count * 32)),
-                  table.count == Int(count * 32) else {
-                status = "Recherche SELF : table incomplète"
-                return
-            }
-            let signatures: [(String, Data)] = [
-                ("ELF64", Data([0x7F, 0x45, 0x4C, 0x46, 0x02])),
-                ("SELF possible", Data([0x4F, 0x15, 0x3D, 0x1D]))
-            ]
-            var findings: [String] = []
-            var totalRead: UInt64 = 0
-            var valid = 0
-            for index in 0..<Int(count) {
-                let base = index * 32
-                let start = word(table, base + 16), length = word(table, base + 20)
-                guard start <= size, length <= size - start else { continue }
-                valid += 1
-                let probe = Int(min(length, 4096))
-                guard probe >= 4 else { continue }
-                try handle.seek(toOffset: start)
-                let data = try handle.read(upToCount: probe) ?? Data()
-                totalRead += UInt64(data.count)
-                for (name, pattern) in signatures {
-                    if let found = data.range(of: pattern) {
-                        findings.append("Entrée \(index + 1) • \(name) • offset +0x\(String(found.lowerBound, radix: 16))")
-                    }
-                }
-            }
-            status = ([
-                game.name + " • inspection des préfixes PKG",
-                "Entrées valides : \(valid)/\(count)",
-                "Lecture maximale : 4096 octets par entrée ; total \(totalRead) octets",
-                "Signatures possibles : \(findings.count)"
-            ] + (findings.isEmpty ? ["Aucune signature ELF64/SELF détectée dans les préfixes."] : findings.prefix(20).map { $0 }) + [
-                "Les signatures ne prouvent ni le déchiffrement ni l'exécutabilité.",
-                "Lancement PS4 toujours indisponible."
-            ]).joined(separator: "\n")
-        } catch {
-            status = "Recherche SELF : \(error.localizedDescription)"
-        }
-    }
-
-    func diagnosePKGBoot(_ game: MaxPS4Game) {
-        guard game.fileName.lowercased().hasSuffix(".pkg") else {
-            status = "Diagnostic démarrage : sélectionnez un PKG PS4"
-            return
-        }
-        do {
-            let url = URL(fileURLWithPath: game.localPath)
-            let handle = try FileHandle(forReadingFrom: url)
-            defer { try? handle.close() }
-            let attributes = try fileManager.attributesOfItem(atPath: url.path)
-            let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
-            let header = try handle.read(upToCount: 128) ?? Data()
-            guard size >= 128, header.count == 128,
-                  Array(header.prefix(4)) == [0x7F, 0x43, 0x4E, 0x54] else {
-                status = "Diagnostic démarrage : en-tête PKG invalide"
-                return
-            }
-            func be32(_ at: Int) -> UInt64 {
-                (0..<4).reduce(UInt64(0)) { ($0 << 8) | UInt64(header[at + $1]) }
-            }
-            let count = be32(0x10)
-            let offset = be32(0x18)
-            guard count > 0, count <= 4096, offset <= size,
-                  count <= (size - offset) / 32 else {
-                status = "Diagnostic démarrage : table PKG hors limites"
-                return
-            }
-            try handle.seek(toOffset: offset)
-            let table = try handle.read(upToCount: Int(count * 32)) ?? Data()
-            guard table.count == Int(count * 32) else {
-                status = "Diagnostic démarrage : table incomplète"
-                return
-            }
-            func word(_ at: Int) -> UInt64 {
-                (0..<4).reduce(UInt64(0)) { ($0 << 8) | UInt64(table[at + $1]) }
-            }
-            var valid = 0
-            var invalidEntries: [String] = []
-            for i in 0..<Int(count) {
-                let base = i * 32
-                let start = word(base + 16)
-                let length = word(base + 20)
-                if start <= size && length <= size - start {
-                    valid += 1
-                } else {
-                    invalidEntries.append(String(i + 1))
-                }
-            }
-            let descriptorState = invalidEntries.isEmpty
-                ? "OK (\(valid)/\(count) plages dans le fichier)"
-                : "ERREUR (\(valid)/\(count)) : " + invalidEntries.prefix(12).joined(separator: ", ")
-            status = [
-                "Diagnostic de démarrage PS4 — lecture seule",
-                "En-tête PKG : valide (signature seulement)",
-                "Table des entrées : \(descriptorState)",
-                "Contenu du jeu : non extrait",
-                "Protection et chiffrement : non analysés",
-                "Exécutable SELF/ELF : non disponible pour le moteur",
-                "Services système PS4 : non implémentés",
-                "Rendu graphique du jeu : non implémenté",
-                "Verdict : démarrage PS4 indisponible",
-                "Prochaine étape : analyse du format PKG et tests avec des ELF de démonstration non chiffrés."
-            ].joined(separator: "\n")
-        } catch {
-            status = "Diagnostic de démarrage impossible : \(error.localizedDescription)"
-        }
-    }
+    // Compatibility actions use the same checked inventory, never raw PFS scans.
+    func inspectPKGEntries(_ game: MaxPS4Game) { inspect(game) }
+    func inspectPKGAssetCandidates(_ game: MaxPS4Game) { inspect(game) }
+    func inspectPKGStructure(_ game: MaxPS4Game) { inspect(game) }
+    func inspectPS4ExecutableReadiness(_ game: MaxPS4Game) { inspect(game) }
+    func inspectPS4EntryPrefixes(_ game: MaxPS4Game) { inspect(game) }
+    func diagnosePKGBoot(_ game: MaxPS4Game) { inspect(game) }
 
     func rename(_ game: MaxPS4Game, to proposedName: String) {
         let name = proposedName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -958,42 +506,7 @@ final class MaxPS4Emulator: ObservableObject {
         let url = URL(fileURLWithPath: game.localPath)
         do {
             if name.hasSuffix(".pkg") {
-                let handle = try FileHandle(forReadingFrom: url)
-                defer { try? handle.close() }
-                let header = try handle.read(upToCount: 128) ?? Data()
-                guard header.count == 128 else {
-                    status = "Démarrage test • Étape 1/5 ❌ : en-tête PKG tronqué"
-                    return
-                }
-                guard Array(header.prefix(4)) == [0x7F, 0x43, 0x4E, 0x54] else {
-                    status = "Démarrage test • Étape 1/5 ❌ : signature PKG invalide"
-                    return
-                }
-                func be32(_ offset: Int) -> UInt64 {
-                    (0..<4).reduce(UInt64(0)) { ($0 << 8) | UInt64(header[offset + $1]) }
-                }
-                func be64(_ offset: Int) -> UInt64 {
-                    (0..<8).reduce(UInt64(0)) { ($0 << 8) | UInt64(header[offset + $1]) }
-                }
-                let attributes = try fileManager.attributesOfItem(atPath: url.path)
-                let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
-                let count = be32(0x10)
-                let tableOffset = be32(0x18)
-                let bodyOffset = be64(0x20)
-                let bodySize = be64(0x28)
-                let tableOK = count > 0 && count <= 100_000
-                    && tableOffset <= size && count <= (size - tableOffset) / 32
-                let bodyOK = bodyOffset <= size && bodySize <= size - bodyOffset
-                let details = [
-                    game.name + " / PKG PS4 • tentative de démarrage (lecture seule)",
-                    "1/5 ✅ Signature PKG reconnue",
-                    "2/5 " + (tableOK ? "✅" : "❌") + " Table d'entrées : " + String(count) + " entrées, offset 0x" + String(tableOffset, radix: 16),
-                    "3/5 " + (bodyOK ? "✅" : "❌") + " Zone de données : offset " + String(bodyOffset) + ", taille " + String(bodySize),
-                    "4/5 ⛔ Contenu exécutable non extrait/déchiffré",
-                    "5/5 ⛔ Aucun noyau, GPU ou runtime PS4 opérationnel",
-                    "Résultat : aucun code du jeu exécuté. Diagnostic terminé."
-                ]
-                status = details.joined(separator: "\n") + "\n\n" + (try pkgEntryReport(url))
+                status = try pkgEntryReport(url)
             } else if name.hasSuffix(".elf") || name == "eboot.bin" || name.hasSuffix(".self") {
                 let handle = try FileHandle(forReadingFrom: url)
                 defer { try? handle.close() }
