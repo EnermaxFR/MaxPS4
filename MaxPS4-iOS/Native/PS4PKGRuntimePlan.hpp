@@ -36,6 +36,79 @@ public:
         // No dependencies are inferred from arbitrary strings or PKG descriptors.
         std::vector<std::string> dependencies;
     };
+    // Validate a closed, explicitly supplied module graph before any ELF staging.
+    // Order is dependency-first; this does not resolve imports or execute code.
+    struct ModuleRequest {
+        std::string logicalPath;
+        std::vector<std::string> dependencies;
+    };
+    static bool orderModules(const std::vector<ModuleRequest>& modules,
+                             std::vector<size_t>& order, std::string& diagnostic) {
+        order.clear();
+        diagnostic.clear();
+        if (modules.empty() || modules.size() > maxDependencies) {
+            diagnostic = "Modules : nombre invalide (1 à 128 requis)"; return false;
+        }
+        for (size_t i = 0; i < modules.size(); ++i) {
+            const auto& module = modules[i];
+            if (!safePath(module.logicalPath) || module.dependencies.size() > maxDependencies) {
+                diagnostic = "Modules : chemin invalide ou trop de dépendances"; return false;
+            }
+            for (size_t j = 0; j < i; ++j) {
+                if (modules[j].logicalPath == module.logicalPath) {
+                    diagnostic = "Modules : chemin dupliqué"; return false;
+                }
+            }
+        }
+        std::vector<std::vector<size_t>> edges(modules.size());
+        for (size_t i = 0; i < modules.size(); ++i) {
+            for (const auto& dependency : modules[i].dependencies) {
+                if (!safePath(dependency) || dependency == modules[i].logicalPath) {
+                    diagnostic = "Modules : dépendance invalide ou réflexive"; return false;
+                }
+                size_t found = modules.size();
+                for (size_t j = 0; j < modules.size(); ++j)
+                    if (modules[j].logicalPath == dependency) { found = j; break; }
+                if (found == modules.size()) {
+                    diagnostic = "Modules : dépendance manquante : " + dependency; return false;
+                }
+                if (std::find(edges[i].begin(), edges[i].end(), found) != edges[i].end()) {
+                    diagnostic = "Modules : dépendance dupliquée"; return false;
+                }
+                edges[i].push_back(found);
+            }
+        }
+        std::vector<uint8_t> state(modules.size(), 0);
+        std::vector<size_t> pending;
+        pending.reserve(modules.size());
+        // Iterative DFS avoids recursion and returns a deterministic dependency-first order.
+        for (size_t root = 0; root < modules.size(); ++root) {
+            if (state[root]) continue;
+            std::vector<std::pair<size_t, size_t>> stack{{root, 0}};
+            state[root] = 1;
+            while (!stack.empty()) {
+                auto& frame = stack.back();
+                const size_t node = frame.first;
+                if (frame.second == edges[node].size()) {
+                    state[node] = 2;
+                    pending.push_back(node);
+                    stack.pop_back();
+                    continue;
+                }
+                const size_t next = edges[node][frame.second++];
+                if (state[next] == 1) {
+                    diagnostic = "Modules : dépendance circulaire"; return false;
+                }
+                if (state[next] == 0) {
+                    state[next] = 1;
+                    stack.push_back({next, 0});
+                }
+            }
+        }
+        order = std::move(pending);
+        diagnostic = "Graphe valide ; ordre de préparation établi, aucune exécution";
+        return true;
+    }
     static bool prepareStandalone(const std::string& logicalPath, const uint8_t* bytes, size_t size,
                                   const std::vector<std::string>& dependencies, PreparedModule& output,
                                   std::string& diagnostic) {
