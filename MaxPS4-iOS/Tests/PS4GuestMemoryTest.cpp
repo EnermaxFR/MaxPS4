@@ -33,6 +33,19 @@ int main() {
     assert(!memory.fetch(0x1000, nullptr, 1));
     assert(!memory.fetch(0x1000, &fetched, 0));
     assert(!memory.fetch(UINT64_MAX, &fetched, 1));
+    // Kernel-facing guest strings must terminate inside the caller's bound.
+    const char guest_path[] = "/app0/boot";
+    assert(memory.write(0x10020, guest_path, sizeof(guest_path)));
+    char path_buffer[32] = {};
+    assert(memory.read_cstring(0x10020, path_buffer, sizeof(path_buffer)));
+    assert(std::strcmp(path_buffer, guest_path) == 0);
+    char rejected_path[4] = {'X', 'Y', 'Z', '\0'};
+    assert(!memory.read_cstring(0x10020, rejected_path, sizeof(rejected_path)));
+    assert(rejected_path[0] == 'X' && rejected_path[1] == 'Y');
+    assert(!memory.read_cstring(UINT64_MAX, rejected_path, sizeof(rejected_path)));
+    assert(!memory.read_cstring(0x10020, nullptr, 4));
+    assert(!memory.read_cstring(0x10020, rejected_path, 0));
+    assert(!memory.read_cstring(0x10020, rejected_path, 4097));
     // An invalid instruction fetch must not change the destination buffer.
     fetched = 0xA7;
     assert(!memory.fetch(0x10000, &fetched, 1));
