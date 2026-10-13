@@ -14,10 +14,9 @@
 int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity) {
     if (!output || !capacity) return -EINVAL;
     output[0] = 0;
-    auto sourceError = [&](int code, const std::string& message) {
-        const std::string text = "Source PKG : " + message;
-        const size_t count = std::min(text.size(), capacity - 1);
-        std::memcpy(output, text.data(), count); output[count] = 0;
+    auto sourceError = [&](int code, const char* message) {
+        // Error handling must not allocate, especially after bad_alloc.
+        std::snprintf(output, capacity, "Source PKG : %s", message);
         return -code;
     };
     if (!path) return sourceError(EINVAL, "chemin absent");

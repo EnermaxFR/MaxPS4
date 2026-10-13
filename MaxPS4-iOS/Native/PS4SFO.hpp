@@ -12,6 +12,7 @@ public:
     bool parse(const std::vector<uint8_t>& bytes) {
         strings.clear(); error.clear();
         auto fail = [&](const char* why) { error = why; return false; };
+        if (bytes.size() > PS4PKGInventory::extractionBudget) return fail("SFO : budget de 1 Mio dépassé");
         if (bytes.size() < 20 || std::memcmp(bytes.data(), "\0PSF", 4))
             return fail("SFO : signature absente ou en-tête tronqué");
         auto le = [&](size_t at, size_t width) {
