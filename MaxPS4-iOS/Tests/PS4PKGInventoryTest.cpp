@@ -185,7 +185,7 @@ int main() {
     assert(fwrite(wrongElf.data(), 1, wrongElf.size(), file) == wrongElf.size());
     assert(fclose(file) == 0);
     assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
-    assert(std::string(report.data()).find("en-tête ELF64 x86-64 reconnu") != std::string::npos);
+    assert(std::string(report.data()).find("ELF64 x86-64 : 0 segments PT_LOAD bornés") != std::string::npos);
     wrongElf[0x712] = 3; // Unsupported machine: reject despite ELF magic.
     file = std::fopen(path, "wb"); assert(file);
     assert(fwrite(wrongElf.data(), 1, wrongElf.size(), file) == wrongElf.size());
@@ -212,6 +212,31 @@ int main() {
     assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
     assert(std::string(report.data()).find("ELF invalide : table de segments absente ou hors ressource") != std::string::npos);
     wrongElf[0x736] = 0; wrongElf[0x738] = 0; wrongElf[0x720] = 0;
+    // A fully contained program-header table can still reference payload
+    // outside the plaintext resource. Such PT_LOAD entries must be rejected.
+    auto badLoad = wrongElf;
+    badLoad.resize(0x778, 0);
+    put(badLoad, 0x430, badLoad.size(), 8);
+    put(badLoad, 0x28, badLoad.size() - 0x600, 8);
+    put(badLoad, 0x5d4, 120, 4);
+    badLoad[0x720] = 64; // e_phoff
+    badLoad[0x736] = 56; // e_phentsize
+    badLoad[0x738] = 1; // e_phnum
+    badLoad[0x740] = 1; // PT_LOAD
+    badLoad[0x748] = 119; // p_offset
+    badLoad[0x760] = 2; // p_filesz, one byte outside the resource
+    badLoad[0x768] = 2; // p_memsz
+    file = std::fopen(path, "wb"); assert(file);
+    assert(fwrite(badLoad.data(), 1, badLoad.size(), file) == badLoad.size());
+    assert(fclose(file) == 0);
+    assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
+    assert(std::string(report.data()).find("ELF invalide : segment PT_LOAD hors ressource") != std::string::npos);
+    badLoad[0x748] = 118; // Now the file range fits.
+    file = std::fopen(path, "wb"); assert(file);
+    assert(fwrite(badLoad.data(), 1, badLoad.size(), file) == badLoad.size());
+    assert(fclose(file) == 0);
+    assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
+    assert(std::string(report.data()).find("ELF64 x86-64 : 1 segments PT_LOAD bornés") != std::string::npos);
     // Protected entries must never be inspected as ELF, even if their bytes
     // happen to start with the ELF magic.
     wrongElf[0x712] = 0x3e;
@@ -222,7 +247,7 @@ int main() {
     assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
     const std::string protectedReport(report.data());
     assert(protectedReport.find("chiffrés déclarés=1") != std::string::npos);
-    assert(protectedReport.find("en-tête ELF64 x86-64 reconnu") == std::string::npos);
+    assert(protectedReport.find("ELF64 x86-64 :") == std::string::npos);
     assert(protectedReport.find("signature ELF candidate") == std::string::npos);
     // Malformed names cannot consume 1 MiB then restart the payload budget.
     auto large = original;
