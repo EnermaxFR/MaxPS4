@@ -62,6 +62,19 @@ int main() {
     const char duplicate_slash[] = "/app0//file";
     assert(memory.write(0x10020, duplicate_slash, sizeof(duplicate_slash)));
     assert(maxps4::PS4KernelPath::read(memory, 0x10020, kernel_path) == PathResult::invalid_path);
+    const char trailing_slash[] = "/app0/dir/";
+    assert(memory.write(0x10020, trailing_slash, sizeof(trailing_slash)));
+    assert(maxps4::PS4KernelPath::read(memory, 0x10020, kernel_path) == PathResult::invalid_path);
+    const char windows_separator[] = "/app0/dir\\file";
+    assert(memory.write(0x10020, windows_separator, sizeof(windows_separator)));
+    assert(maxps4::PS4KernelPath::read(memory, 0x10020, kernel_path) == PathResult::invalid_path);
+    const char control_character[] = "/app0/dir\nfile";
+    assert(memory.write(0x10020, control_character, sizeof(control_character)));
+    assert(maxps4::PS4KernelPath::read(memory, 0x10020, kernel_path) == PathResult::invalid_path);
+    const char valid_nested[] = "/app0/assets/sprite.png";
+    assert(memory.write(0x10020, valid_nested, sizeof(valid_nested)));
+    assert(maxps4::PS4KernelPath::read(memory, 0x10020, kernel_path) == PathResult::ok);
+    assert(std::strcmp(kernel_path, valid_nested) == 0);
     assert(maxps4::PS4KernelPath::read(memory, UINT64_MAX, kernel_path) == PathResult::invalid_guest_address);
     // Strings must not cross into an unmapped segment, even when the
     // destination has enough capacity. A failure leaves it untouched.
