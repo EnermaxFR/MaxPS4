@@ -283,6 +283,16 @@ int main() {
     assert(!Plan::translateModule(staged, "missing.prx", 0x1000, 1, 1));
     assert(!Plan::translateModule(staged, "../lib/b.prx", 0x1000, 1, 1));
     assert(!Plan::translateModule(staged, "lib/b.prx", 0x1000, 1, 2));
+    // Caller-constructed batches cannot bypass the unique-module contract.
+    auto ambiguous = staged;
+    ambiguous.push_back(staged.front());
+    assert(!Plan::translateModule(ambiguous, "lib/b.prx", 0x1000, 1, 1));
+    assert(Plan::translateModule(ambiguous, "eboot.bin", 0x2000, 1, 1));
+    // BSS bytes are zero-initialized and requests cannot cross a segment.
+    assert(Plan::translateModule(staged, "lib/b.prx", 0x1001, 1, 1) &&
+           *Plan::translateModule(staged, "lib/b.prx", 0x1001, 1, 1) == 0);
+    assert(!Plan::translateModule(staged, "lib/b.prx", 0x1000, 4097, 1));
+    assert(!Plan::translateModule(staged, "lib/b.prx", 0x1000, 0, 1));
     // A 32 MiB image is individually allowed, but three exceed the batch cap.
     auto largeElf = syntheticElf(0xfe18, 0x3000, 32 * 1024 * 1024);
     batch = {
