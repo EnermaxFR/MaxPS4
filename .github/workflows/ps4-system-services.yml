@@ -1,0 +1,29 @@
+name: PS4 system services
+on:
+  pull_request:
+    paths:
+      - 'MaxPS4-iOS/Native/maxps4_ps4_*'
+      - 'MaxPS4-iOS/Native/maxps4_guest_*'
+      - 'MaxPS4-iOS/Tests/PS4*'
+      - 'scripts/test-ps4-system-services.sh'
+      - '.github/workflows/ps4-system-services.yml'
+  push:
+    branches: ['codex/ps4-memory-translation-contract']
+    paths:
+      - 'MaxPS4-iOS/Native/maxps4_ps4_*'
+      - 'MaxPS4-iOS/Native/maxps4_guest_*'
+      - 'MaxPS4-iOS/Tests/PS4*'
+      - 'scripts/test-ps4-system-services.sh'
+      - '.github/workflows/ps4-system-services.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  services:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/test-ps4-system-services.sh
