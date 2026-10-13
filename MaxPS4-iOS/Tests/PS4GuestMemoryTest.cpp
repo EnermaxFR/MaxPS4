@@ -46,6 +46,22 @@ int main() {
     assert(!memory.read_cstring(0x10020, nullptr, 4));
     assert(!memory.read_cstring(0x10020, rejected_path, 0));
     assert(!memory.read_cstring(0x10020, rejected_path, 4097));
+    // Strings must not cross into an unmapped segment, even when the
+    // destination has enough capacity. A failure leaves it untouched.
+    for (const auto& segment : image.segments()) {
+        if ((segment.permissions & 6U) != 6U || segment.memory_size == 0) continue;
+        const uint64_t last = segment.address + segment.memory_size - 1;
+        const char unterminated = 'Q';
+        assert(memory.write(last, &unterminated, 1));
+        char boundary_string[3] = {'A', 'B', 'C'};
+        assert(!memory.read_cstring(last, boundary_string, sizeof(boundary_string)));
+        assert(boundary_string[0] == 'A' && boundary_string[1] == 'B' &&
+               boundary_string[2] == 'C');
+        const char terminator = '\0';
+        assert(memory.write(last, &terminator, 1));
+        assert(memory.read_cstring(last, boundary_string, sizeof(boundary_string)));
+        assert(boundary_string[0] == '\0');
+    }
     // An invalid instruction fetch must not change the destination buffer.
     fetched = 0xA7;
     assert(!memory.fetch(0x10000, &fetched, 1));
