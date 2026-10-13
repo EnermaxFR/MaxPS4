@@ -57,7 +57,7 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                 if (entry.id == 0x100 && entry.access == maxps4::PS4PKGInventory::Access::invalid &&
                     entry.size && entry.offset == pkg.tableOffset)
                     report << "Diagnostic metas : début à l'offset de la table PKG ; "
-                              "chevauchement détecté, lecture refusée.\n";
+                              "alias possible de la table des descripteurs ; non admis comme données à extraire.\n";
                 if (entry.id == 0x200 &&
                     entry.access == maxps4::PS4PKGInventory::Access::unsupported &&
                     entry.flags1 == 0x40000000U && entry.flags2 == 0 && entry.reserved == 0)
