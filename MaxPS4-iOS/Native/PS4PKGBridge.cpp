@@ -93,8 +93,14 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                                 } else {
                                     const uint16_t machine = uint16_t(bytes[18]) | (uint16_t(bytes[19]) << 8);
                                     const uint16_t headerSize = uint16_t(bytes[52]) | (uint16_t(bytes[53]) << 8);
-                                    if (machine != 62 || headerSize != 64) {
-                                        report << " ; ELF incompatible : machine x86-64 et en-tête 64 octets requis";
+                                    const uint16_t kind = uint16_t(bytes[16]) | (uint16_t(bytes[17]) << 8);
+                                    const uint32_t version = uint32_t(bytes[20]) | (uint32_t(bytes[21]) << 8) |
+                                        (uint32_t(bytes[22]) << 16) | (uint32_t(bytes[23]) << 24);
+                                    if (machine != 62 || headerSize != 64 || version != 1) {
+                                        report << " ; ELF incompatible : machine x86-64, version 1 et en-tête 64 octets requis";
+                                    } else if (kind != 2 && kind != 3 && kind != 0xfe10 &&
+                                               kind != 0xfe18) {
+                                        report << " ; ELF incompatible : type exécutable/dynamique non reconnu";
                                     } else {
                                         report << " ; en-tête ELF64 x86-64 reconnu (segments non validés, aucune admission)";
                                     }
