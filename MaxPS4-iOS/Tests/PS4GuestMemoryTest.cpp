@@ -70,6 +70,12 @@ int main() {
     assert(memory.contiguous(0x1000, 1, 5) == 1);
     assert(memory.contiguous(0x1000, 16, 2) == 0);
     assert(memory.contiguous(0x10000, 4, 6) == 4);
+    // CPU span queries must preserve the full permission mask and reject
+    // requests starting outside the segment or ending past its boundary.
+    assert(memory.contiguous(0x10000, SIZE_MAX, 6) > 4);
+    assert(memory.contiguous(0x10000, 4, 7) == 0);
+    assert(memory.contiguous(0x1000, 4, 7) == 0);
+    assert(memory.contiguous(0x10000 - 1, 4, 6) == 0);
     assert(memory.contiguous(0x10000, 4, 5) == 0);
     assert(memory.contiguous(0x10000, 0, 4) == 0);
     assert(memory.contiguous(0x10000, 4, 0) == 0);
@@ -79,6 +85,8 @@ int main() {
         const uint64_t last = segment.address + segment.memory_size - 1;
         assert(memory.contiguous(last, 4, 4) == 1);
         assert(memory.contiguous(last, SIZE_MAX, 4) == 1);
+        assert(memory.contiguous(last, SIZE_MAX, segment.permissions) == 1);
+        assert(memory.contiguous(last, 1, segment.permissions | 8U) == 0);
         assert(memory.contiguous(segment.address + segment.memory_size, 1,
                                  segment.permissions) == 0);
     }
