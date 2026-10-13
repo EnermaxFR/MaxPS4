@@ -244,7 +244,8 @@ int main() {
     // Two standalone synthetic Orbis ELF64 images, no proprietary payload.
     auto syntheticElf = [](uint16_t type, uint64_t address, uint64_t memorySize) {
         std::vector<uint8_t> elf(0x101, 0);
-        std::memcpy(elf.data(), "\\177ELF\\2\\1\\1\\11", 9);
+        const uint8_t elfMagic[9] = {0x7f, 'E', 'L', 'F', 2, 1, 1, 9, 0};
+        std::memcpy(elf.data(), elfMagic, sizeof(elfMagic));
         auto le = [&](size_t at, uint64_t value, size_t width) {
             for (size_t i = 0; i < width; ++i)
                 elf.at(at + i) = static_cast<uint8_t>(value >> (i * 8));
