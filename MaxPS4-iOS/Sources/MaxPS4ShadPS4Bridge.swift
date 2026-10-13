@@ -471,8 +471,14 @@ private func maxps4_ios_csops(
     _ buffer: UnsafeMutableRawPointer?, _ size: Int32
 ) -> Int32
 
+#if MAXPS4_FEX_APP
+// The C importer supplies the calling convention. Declaring the same linker
+// symbol with @_silgen_name also gives it a Swift thin ABI under Release WMO.
+private func maxps4NativeDebuggerAttached() -> Int32 { maxps4FEXDebuggerStatus() }
+#else
 @_silgen_name("maxps4_native_debugger_attached")
-private func maxps4_native_debugger_attached() -> Int32
+private func maxps4NativeDebuggerAttached() -> Int32
+#endif
 
 @_silgen_name("maxps4_stikdebug_jit26_protocol_available")
 private func maxps4_stikdebug_jit26_protocol_available() -> Int32
@@ -495,7 +501,7 @@ extension MaxPS4NativeLinkCheck {
     }
 
     static var debuggerAttachmentDescription: String {
-        switch maxps4_native_debugger_attached() {
+        switch maxps4NativeDebuggerAttached() {
         case 1: return "Débogueur détecté (identité non vérifiée)"
         case 0: return "Aucun débogueur détecté"
         default: return "État indéterminé"
@@ -643,7 +649,7 @@ extension MaxPS4NativeLinkCheck {
     }
 
     static var jitSafetyGateReport: String {
-        let debugger = maxps4_native_debugger_attached()
+        let debugger = maxps4NativeDebuggerAttached()
         let protocolPresent = isStikDebugProtocolPresent
         let backendReady = isARM64JITReady
         let reasons: [String] = [
