@@ -2,7 +2,7 @@ name: MaxPS4 FEXCore SideStore IPA
 on:
   workflow_dispatch:
   push:
-    branches: ['codex/ps4-memory-translation-contract']
+    branches: ['codex/ps4-memory-translation-contract', 'integration/ps4-fex-orbis-pkg-validation']
     paths:
       - 'MaxPS4-iOS/**'
       - 'scripts/*fexcore*'
@@ -24,6 +24,25 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Validate PKG metadata and runtime preparation before packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/diagnostics
+          xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            MaxPS4-iOS/Native/OrbisLinkerBridge.cpp MaxPS4-iOS/Tests/OrbisLinkerTest.cpp -o "$RUNNER_TEMP/orbis-test"
+          "$RUNNER_TEMP/orbis-test" | tee build/diagnostics/orbis-tests.txt
+          for suite in PS4PKGInventoryTest PS4PKGMetadataTest; do
+            xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+              MaxPS4-iOS/Native/PS4PKGBridge.cpp "MaxPS4-iOS/Tests/$suite.cpp" -o "$RUNNER_TEMP/$suite"
+            "$RUNNER_TEMP/$suite" | tee "build/diagnostics/$suite.txt"
+          done
+          swiftc -parse-as-library \
+            MaxPS4-iOS/Sources/MaxPS4GuestMemory.swift \
+            MaxPS4-iOS/Sources/MaxPS4ELFLoader.swift \
+            MaxPS4-iOS/Sources/MaxPS4CPUPrototype.swift \
+            MaxPS4-iOS/Tests/ELFLibraryRegressionTest.swift -o "$RUNNER_TEMP/elf-library-test"
+          "$RUNNER_TEMP/elf-library-test" | tee build/diagnostics/elf-library-tests.txt
       - name: Test native Metal triangle and compile iPhone shaders
         timeout-minutes: 3
         shell: bash
