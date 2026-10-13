@@ -274,6 +274,15 @@ int main() {
            *staged[0].image.translate(0x1000, 1, 1) == 0xc3);
     assert(staged[1].image.translate(0x2000, 1, 1) &&
            *staged[1].image.translate(0x2000, 1, 1) == 0xc3);
+    assert(Plan::translateModule(staged, "lib/b.prx", 0x1000, 1, 1) &&
+           *Plan::translateModule(staged, "lib/b.prx", 0x1000, 1, 1) == 0xc3);
+    assert(Plan::translateModule(staged, "eboot.bin", 0x2000, 1, 1) &&
+           *Plan::translateModule(staged, "eboot.bin", 0x2000, 1, 1) == 0xc3);
+    assert(!Plan::translateModule(staged, "eboot.bin", 0x1000, 1, 1));
+    assert(!Plan::translateModule(staged, "lib/b.prx", 0x2000, 1, 1));
+    assert(!Plan::translateModule(staged, "missing.prx", 0x1000, 1, 1));
+    assert(!Plan::translateModule(staged, "../lib/b.prx", 0x1000, 1, 1));
+    assert(!Plan::translateModule(staged, "lib/b.prx", 0x1000, 1, 2));
     // A 32 MiB image is individually allowed, but three exceed the batch cap.
     auto largeElf = syntheticElf(0xfe18, 0x3000, 32 * 1024 * 1024);
     batch = {
