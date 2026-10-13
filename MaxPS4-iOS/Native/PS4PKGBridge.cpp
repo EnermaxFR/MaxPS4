@@ -56,11 +56,11 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                 if (e.id == 0x100 && e.access == maxps4::PS4PKGInventory::Access::invalid &&
                     e.offset == pkg.tableOffset)
                     report << "Diagnostic metas : offset identique au début de la table PKG ; "
-                              "chevauchement réel, aucune extraction.\\n";
+                              "chevauchement réel, aucune extraction.\n";
                 if (e.id == 0x200 && e.access == maxps4::PS4PKGInventory::Access::unsupported &&
                     e.flags1 == 0x40000000U && !e.flags2 && !e.reserved)
                     report << "Diagnostic entry_names : descripteur présent, flag 0x40000000 "
-                              "non interprété ; noms non lus et aucune élévation de privilège.\\n";
+                              "non interprété ; noms non lus et aucune élévation de privilège.\n";
             }
             size_t inspected = 0;
             auto boundedRead = [&](uint64_t offset, uint8_t* bytes, size_t count) {
