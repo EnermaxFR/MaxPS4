@@ -103,7 +103,9 @@ static int animatedGuestTest() {
     CHECK(maxps4_fex_engine_open(&engine)==0);
     struct Close { maxps4_fex_engine* p; ~Close(){maxps4_fex_engine_close(p);} } close{engine};
     char reason[1024]{};
-    CHECK(maxps4_fex_engine_prepare_orbis(engine,modules,2,"app.elf",65536,reason,sizeof(reason))==0);
+    const int prepared=maxps4_fex_engine_prepare_orbis(engine,modules,2,"app.elf",65536,reason,sizeof(reason));
+    if (prepared) std::fprintf(stderr,"animated guest prepare failed: status=%d reason=%s ELF_bytes=%zu\\n",prepared,reason,file.size());
+    CHECK(prepared==0);
     CHECK(maxps4_fex_engine_configure_frame(engine,pixels,input,width,height)==0);
     CHECK(maxps4_fex_engine_initialize(engine)==0);
     std::vector<uint8_t> image(width*height*4);
