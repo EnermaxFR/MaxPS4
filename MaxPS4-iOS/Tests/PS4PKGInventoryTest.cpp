@@ -192,6 +192,16 @@ int main() {
     assert(fclose(file) == 0);
     assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
     assert(std::string(report.data()).find("ELF incompatible : machine x86-64") != std::string::npos);
+    // Reject an ELF64 header with a non-executable e_type even when its
+    // architecture, version and header length are otherwise valid.
+    wrongElf[0x712] = 0x3e;
+    wrongElf[0x710] = 1; // ET_REL: not admitted by this read-only probe.
+    file = std::fopen(path, "wb"); assert(file);
+    assert(fwrite(wrongElf.data(), 1, wrongElf.size(), file) == wrongElf.size());
+    assert(fclose(file) == 0);
+    assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
+    assert(std::string(report.data()).find("ELF incompatible : type exécutable/dynamique non reconnu") != std::string::npos);
+    wrongElf[0x710] = 2;
     // Protected entries must never be inspected as ELF, even if their bytes
     // happen to start with the ELF magic.
     wrongElf[0x712] = 0x3e;
