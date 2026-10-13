@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 build_dir=$(mktemp -d)
 trap 'rm -rf "$build_dir"' EXIT
 for test in PS4LibkernelTest PS4SystemMemoryTimeTest PS4ThreadsTest PS4DynamicLinkerTest \
-  PS4OrbisCPUPreparationTest GuestMemoryRangeTest GuestELFInterpreterTest GuestELFMemoryTest PS4GuestMemoryTest \
+  PS4GuestFrameTest PS4OrbisCPUPreparationTest GuestMemoryRangeTest GuestELFInterpreterTest GuestELFMemoryTest PS4GuestMemoryTest \
   PS4GuestStagingTest PS4StagedCPUAdmissionTest PS4ExecutableImageTest GuestRIPStoreAdmissionTest; do
 "${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror -pedantic -pthread \
   -I MaxPS4-iOS/Native \

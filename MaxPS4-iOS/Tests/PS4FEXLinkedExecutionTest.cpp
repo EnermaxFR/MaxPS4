@@ -1,6 +1,7 @@
 #include "../Native/maxps4_fex_runtime.h"
 #include "PS4LinkedELFFixture.h"
 #include "PS4OrbisExecutionFixture.h"
+#include "PS4PlayableFixture.h"
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -16,8 +17,94 @@ static uint64_t value(const uint8_t* bytes) {
     for (size_t i = 0; i < 8; ++i) result |= uint64_t(bytes[i]) << (8*i);
     return result;
 }
+static int playableTest(const char* evidence = nullptr) {
+    using namespace playable_fixture;
+    for (int restart=0;restart<2;++restart) {
+        auto file=app(), provider=orbis_execution::make(true);
+        if (restart) {
+            const std::vector<uint8_t> pattern{0xb8,0x18,0x20,0x30,0xff};
+            const auto at=std::search(file.begin()+0x1000,file.end(),pattern.begin(),pattern.end());
+            CHECK(at!=file.end()); *(at+1)=0x19; // Change actual guest pixel instruction.
+        }
+        const char* deps[]={"provider.prx"};
+        const maxps4_orbis_module modules[]={
+            {"app.elf",file.data(),file.size(),orbis_execution::app_bias,deps,1},
+            {"provider.prx",provider.data(),provider.size(),orbis_execution::provider_bias,nullptr,0}};
+        maxps4_fex_engine* process=nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        struct Close { maxps4_fex_engine* p; ~Close(){ maxps4_fex_engine_close(p); } } close{process};
+        char reason[1024]{};
+        CHECK(maxps4_fex_engine_prepare_orbis(process,modules,2,"app.elf",65536,reason,sizeof(reason))==0);
+        CHECK(maxps4_fex_engine_configure_frame(process,pixels,input,width,height)==0);
+        std::vector<uint8_t> out(width*height*4,0xa5), memory(out.size());
+        uint64_t sequence=99; uint32_t backend=99;
+        CHECK(maxps4_fex_engine_step_frame(process,0,out.data(),out.size(),&sequence,&backend)==-EAGAIN);
+        CHECK(!sequence && !backend && out[0]==0xa5);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        CHECK(maxps4_fex_engine_configure_frame(process,pixels,input,0,height)==-EINVAL);
+        CHECK(maxps4_fex_engine_step_frame(process,0,out.data(),out.size(),&sequence,&backend)!=0 && out[0]==0xa5);
+        CHECK(maxps4_fex_engine_configure_frame(process,UINT64_MAX-3,input,width,height)==-EFAULT);
+        CHECK(maxps4_fex_engine_configure_frame(process,pixels,pixels,width,height)==-EINVAL);
+        CHECK(maxps4_fex_engine_configure_frame(process,pixels,input,width,height)==0);
+        CHECK(maxps4_fex_engine_step_frame(process,32,out.data(),out.size(),&sequence,&backend)==-EINVAL);
+        CHECK(maxps4_fex_engine_step_frame(process,0,out.data(),out.size()-1,&sequence,&backend)==-EINVAL);
+        CHECK(out[0]==0xa5);
+        uint32_t expectedX=7,expectedY=3; uint64_t expectedSequence=0;
+        for (uint32_t buttons : {0u,2u,1u,8u,4u,16u,3u,12u,2u,2u,2u,2u}) {
+            expectedX=(expectedX+((buttons>>1)&1)-(buttons&1))&15;
+            expectedY=(expectedY+((buttons>>3)&1)-((buttons>>2)&1))&7;
+            CHECK(maxps4_fex_engine_step_frame(process,buttons,out.data(),out.size(),&sequence,&backend)==0);
+            CHECK(sequence==++expectedSequence);
+#ifdef VIXL_SIMULATOR
+            CHECK(backend==MAXPS4_CPU_FEX_ARM64_SIMULATOR);
+#else
+            CHECK(backend==MAXPS4_CPU_FEX_ARM64_JIT);
+#endif
+            CHECK(maxps4_fex_engine_read_ps4(process,pixels,memory.data(),memory.size())==0 && memory==out);
+            uint8_t state[16]{};
+            CHECK(maxps4_fex_engine_read_ps4(process,input,state,sizeof(state))==0);
+            CHECK(state[0]==buttons && state[4]==expectedX && state[8]==expectedY && state[12]==sequence);
+            for (uint32_t py=0;py<height;++py) for (uint32_t px=0;px<width;++px) {
+                const size_t off=(py*width+px)*4;
+                uint32_t pixel=0; for (int b=0;b<4;++b) pixel|=uint32_t(out[off+b])<<(8*b);
+                const uint32_t expected = py<16 && px/2==expectedX && py/2==expectedY ?
+                    (0xff2080e0 | ((buttons&16)<<16)) : 0xff302018;
+                CHECK(pixel==((restart && px==0 && py==0 && expected==0xff302018) ? 0xff302019 : expected));
+            }
+            uint64_t hash=14695981039346656037ull;
+            for (auto byte:out) hash=(hash^byte)*1099511628211ull;
+            std::printf("PASS guest-frame restart=%d sequence=%llu backend=%u input=%u x=%u y=%u bytes=%zu FNV64=%llx guest-memory-equal=yes\n",
+                restart,(unsigned long long)sequence,backend,buttons,expectedX,expectedY,out.size(),(unsigned long long)hash);
+            if (evidence && !restart) {
+                std::filesystem::create_directories(evidence);
+                std::ofstream rgba(std::filesystem::path(evidence)/("frame-"+std::to_string(sequence)+".rgba"),std::ios::binary);
+                rgba.write(reinterpret_cast<const char*>(out.data()),out.size()); CHECK(bool(rgba));
+                std::ofstream ppm(std::filesystem::path(evidence)/("frame-"+std::to_string(sequence)+".ppm"),std::ios::binary);
+                ppm << "P6\n32 24\n255\n";
+                for (size_t off=0;off<out.size();off+=4) ppm.write(reinterpret_cast<const char*>(out.data()+off),3);
+                CHECK(bool(ppm));
+            }
+        }
+        CHECK(maxps4_fex_engine_prepare_orbis(process,modules,1,"app.elf",65536,reason,sizeof(reason))!=0);
+        CHECK(maxps4_fex_engine_step_frame(process,0,out.data(),out.size(),&sequence,&backend)==-EFAULT);
+        CHECK(!sequence && !backend);
+    }
+    std::puts("PASS real FEX framebuffer, input-to-guest-state, successive images, action, machine-code mutation and close/restart");
+    return 0;
+}
 int main(int argc, char** argv) {
     using namespace ps4_linked_test;
+    if (argc==3 && !std::strcmp(argv[1],"--playable-evidence")) return playableTest(argv[2]);
+    if (argc==3 && !std::strcmp(argv[1],"--playable-bundle")) {
+        std::filesystem::create_directories(argv[2]);
+        const auto file=playable_fixture::app(), provider=orbis_execution::make(true);
+        for (bool prx : {false,true}) {
+            const auto& bytes=prx ? provider : file;
+            std::ofstream out(std::filesystem::path(argv[2])/(prx ? "provider.prx" : "app.elf"),std::ios::binary);
+            out.write(reinterpret_cast<const char*>(bytes.data()),bytes.size()); CHECK(bool(out));
+        }
+        return 0;
+    }
     std::setvbuf(stdout,nullptr,_IONBF,0);
     if (argc == 3 && !std::strcmp(argv[1],"--orbis-bundle")) {
         const std::filesystem::path directory(argv[2]);
@@ -43,6 +130,7 @@ int main(int argc, char** argv) {
         }
         return 0;
     }
+    CHECK(playableTest()==0);
     CHECK(maxps4_fex_test_ps4_libkernel(nullptr) == -EINVAL);
     for (size_t repeat = 0; repeat < 3; ++repeat) {
         maxps4_ps4_elf_test_report report{};

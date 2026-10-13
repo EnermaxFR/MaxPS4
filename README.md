@@ -80,3 +80,5 @@ Integration PR #157: the integration branch retains main's fail-closed iPhone FE
 Fondation runtime Orbis : [audit, préparation ELF/PRX et fonctionnalités manquantes](docs/orbis-runtime-foundation.md).
 
 Analyse ELF Orbis/SCE et préparation PRX non chiffrée : [périmètre, limites et recette iPhone](docs/orbis-sce-prx-analysis.md).
+
+Première scène synthétique interactive : [pixels invités, commandes et import iPhone](docs/first-playable-frame.md). Les preuves FEX natives et l’IPA ne remplacent pas une validation sur iPhone physique.

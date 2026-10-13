@@ -116,6 +116,25 @@ jobs:
             -o build/fex-app-host/swift-fex-test
           build/fex-app-host/Bin/maxps4-ps4-linked-test --orbis-bundle build/fex-app-host/orbis-bundle
           python3 scripts/run-bounded.py 60 build/fex-app-host/swift-diagnostic-tests.txt build/fex-app-host/swift-fex-test build/fex-app-host/ps4-libkernel-demo.elf build/fex-app-host/orbis-bundle
+      - name: Test playable guest pixels through real Swift import and native display
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          build/fex-app-host/Bin/maxps4-ps4-linked-test --playable-bundle build/fex-app-host/playable-bundle
+          cmp build/fex-app-host/playable-bundle/app.elf MaxPS4-iOS/Resources/PlayableDemo/app.elf
+          cmp build/fex-app-host/playable-bundle/provider.prx MaxPS4-iOS/Resources/PlayableDemo/provider.prx
+          cp MaxPS4-iOS/Resources/PlayableDemo/maxps4.json build/fex-app-host/playable-bundle/
+          python3 scripts/run-bounded.py 60 build/fex-app-host/playable-frames.txt build/fex-app-host/Bin/maxps4-ps4-linked-test --playable-evidence build/fex-app-host/playable-evidence
+          swiftc -parse-as-library -D MAXPS4_FEX_APP \
+            -import-objc-header MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h \
+            MaxPS4-iOS/Sources/MaxPS4PlayableBundle.swift \
+            MaxPS4-iOS/Sources/MaxPS4GuestFrameImage.swift \
+            MaxPS4-iOS/Tests/PlayableSwiftBridgeTest.swift \
+            -L build/fex-app-host -lMaxPS4FEXRuntime \
+            -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" \
+            -o build/fex-app-host/playable-swift-test
+          python3 scripts/run-bounded.py 60 build/fex-app-host/playable-swift.txt build/fex-app-host/playable-swift-test build/fex-app-host/playable-bundle
       - name: Test actual ELF FEX position transfer and offscreen Metal readback
         timeout-minutes: 3
         shell: bash
@@ -184,6 +203,8 @@ jobs:
             build/fex-app-host/*.txt
             build/fex-app-host/*.log
             build/fex-app-host/orbis-bundle/**
+            build/fex-app-host/playable-bundle/**
+            build/fex-app-host/playable-evidence/**
             build/fex-app-ios/*.txt
             build/fex-app-ios/*.log
           retention-days: 14

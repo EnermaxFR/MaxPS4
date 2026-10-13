@@ -115,6 +115,15 @@ int32_t maxps4_fex_engine_run_linked_ps4(maxps4_fex_engine *engine,
 int32_t maxps4_fex_engine_prepare_orbis(maxps4_fex_engine *engine,
     const maxps4_orbis_module *modules, size_t count, const char *root,
     uint32_t budget, char *diagnostic, size_t capacity);
+// Optional bounded RGBA8 output/input contract for an admitted SCE process.
+// buttons: left=1, right=2, up=4, down=8, action=16. No host pointer returned.
+// Invalid configuration clears previous output. Dimensions <=320x240; disjoint RW/non-X.
+int32_t maxps4_fex_engine_configure_frame(maxps4_fex_engine *engine,
+    uint64_t pixels, uint64_t input, uint32_t width, uint32_t height);
+// One finite FEX dispatch to HLT, then exact copy of guest pixels. Output pixels
+// unchanged on error; metadata zeroed. Caller serializes close against invocation.
+int32_t maxps4_fex_engine_step_frame(maxps4_fex_engine *engine,
+    uint32_t buttons, uint8_t *pixels, size_t capacity, uint64_t *sequence, uint32_t *backend);
 // Only an admitted SCE process may run. Real FEX only, with guarded private
 // SysV stack, acyclic guest CALL/RET and terminal HLT. No implicit init/fini,
 // syscall, TLS, arbitrary instructions, absolute pointer dereference or fallback.

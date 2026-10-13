@@ -63,6 +63,8 @@ jobs:
             build/ps4-linked/ps4-libkernel-combined.elf
             build/ps4-linked/Bin/maxps4-ps4-linked-test
             build/ps4-linked/orbis-bundle/**
+            build/ps4-linked/playable-bundle/**
+            build/ps4-linked/playable-evidence/**
   services:
     timeout-minutes: 10
     strategy:

@@ -17,6 +17,7 @@ struct MaxPS4FEXDiagnosticView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    NavigationLink("Première image jouable", destination: MaxPS4PlayableView())
                     Text("État du JIT FEXCore").font(.headline)
                     if let report {
                         let jitActive = report.succeeded && report.backend == "FEXCore JIT ARM64"
@@ -85,7 +86,7 @@ struct MaxPS4FEXDiagnosticView: View {
                         .disabled(running)
                     Button("Importer et exécuter un dossier Orbis compatible…") { importingOrbisDirectory = true }
                         .disabled(running)
-                    Text("Dossier autorisé avec maxps4.json, ELF et PRX en clair. Les fichiers, modules et instructions sont vérifiés avant l’exécution. Un PFS opaque reste bloqué. Image et audio de jeu indisponibles.")
+                    Text("Dossier autorisé avec maxps4.json, ELF et PRX en clair. Les fichiers, modules et instructions sont vérifiés avant l’exécution. Un PFS opaque reste bloqué. Pour la démo avec framebuffer et commandes, ouvrir « Première image jouable ». Audio de jeu indisponible.")
                         .font(.footnote)
                     if let importedReport {
                         Text(importedReport).font(.system(.body, design: .monospaced))

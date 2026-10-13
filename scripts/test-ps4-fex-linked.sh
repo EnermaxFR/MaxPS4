@@ -41,3 +41,10 @@ python3 "$ROOT/scripts/run-bounded.py" 10 "$OUT/fixture-export.txt" "$OUT/Bin/ma
   "$OUT/ps4-libkernel-demo.elf" "$OUT/ps4-libkernel-combined.elf"
 python3 "$ROOT/scripts/run-bounded.py" 10 "$OUT/orbis-fixture-export.txt" "$OUT/Bin/maxps4-ps4-linked-test" \
   --orbis-bundle "$OUT/orbis-bundle"
+
+python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/playable-frames.txt" "$OUT/Bin/maxps4-ps4-linked-test" \
+  --playable-evidence "$OUT/playable-evidence"
+"$OUT/Bin/maxps4-ps4-linked-test" --playable-bundle "$OUT/playable-bundle"
+cmp "$OUT/playable-bundle/app.elf" "$ROOT/MaxPS4-iOS/Resources/PlayableDemo/app.elf"
+cmp "$OUT/playable-bundle/provider.prx" "$ROOT/MaxPS4-iOS/Resources/PlayableDemo/provider.prx"
+cp "$ROOT/MaxPS4-iOS/Resources/PlayableDemo/maxps4.json" "$OUT/playable-bundle/"
