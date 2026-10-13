@@ -2,6 +2,9 @@ name: PS4 system services
 on:
   pull_request:
     paths:
+      - 'MaxPS4-iOS/Native/PS4PFS*'
+      - 'MaxPS4-iOS/Native/PS4PKG*'
+      - 'MaxPS4-iOS/Tests/PS4PFS*'
       - 'MaxPS4-iOS/Native/Orbis*'
       - 'MaxPS4-iOS/Tests/Orbis*'
       - 'MaxPS4-iOS/Native/maxps4_ps4_*'
@@ -17,6 +20,9 @@ on:
   push:
     branches: ['codex/ps4-memory-translation-contract']
     paths:
+      - 'MaxPS4-iOS/Native/PS4PFS*'
+      - 'MaxPS4-iOS/Native/PS4PKG*'
+      - 'MaxPS4-iOS/Tests/PS4PFS*'
       - 'MaxPS4-iOS/Native/Orbis*'
       - 'MaxPS4-iOS/Tests/Orbis*'
       - 'MaxPS4-iOS/Native/maxps4_ps4_*'

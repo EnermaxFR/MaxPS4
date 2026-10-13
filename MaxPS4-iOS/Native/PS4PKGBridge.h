@@ -8,6 +8,12 @@ extern "C" {
 // Zero means a complete report, which may describe a rejected/malformed PKG;
 // negative errno reports source I/O or report-generation failures with text.
 int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity);
+// Revalidates the PKG/PFS, reads one exact uroot-relative selection to memory.
+// No writes, path joining, decryption or execution. Maximum 64 Mio.
+// Query with output=NULL/capacity=0: -ENOSPC and length=required (0 for empty).
+// Other failures leave length=0; output is untouched. Source must remain stable.
+int maxps4_pkg_pfs_read_file(const char* path, const char* selected,
+                            unsigned char* output, size_t capacity, size_t* length);
 #ifdef __cplusplus
 }
 #endif

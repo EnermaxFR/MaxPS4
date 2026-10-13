@@ -34,6 +34,9 @@ jobs:
             -o "$RUNNER_TEMP/pkg-test"
           "$RUNNER_TEMP/pkg-test" | tee pkg-tests.txt
           c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer \
+            MaxPS4-iOS/Native/PS4PKGBridge.cpp MaxPS4-iOS/Tests/PS4PFSReadOnlyTest.cpp -o "$RUNNER_TEMP/pfs-test"
+          "$RUNNER_TEMP/pfs-test" build/pkg-fixtures | tee pfs-tests.txt
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer \
             MaxPS4-iOS/Native/PS4PKGBridge.cpp MaxPS4-iOS/Tests/PS4PKGMetadataTest.cpp \
             -o "$RUNNER_TEMP/pkg-metadata-test"
           "$RUNNER_TEMP/pkg-metadata-test" build/pkg-fixtures | tee pkg-metadata-tests.txt
@@ -43,6 +46,7 @@ jobs:
           name: PKG-sanitizer-report
           path: |
             pkg*-tests.txt
+            pfs-tests.txt
             orbis-linux-tests.txt
       - uses: actions/upload-artifact@v4
         with:
@@ -79,6 +83,9 @@ jobs:
           xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
             MaxPS4-iOS/Native/PS4PKGBridge.cpp MaxPS4-iOS/Tests/PS4PKGInventoryTest.cpp -o "$RUNNER_TEMP/pkg-test"
           "$RUNNER_TEMP/pkg-test" | tee pkg-native-macos.txt
+          xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer \
+            MaxPS4-iOS/Native/PS4PKGBridge.cpp MaxPS4-iOS/Tests/PS4PFSReadOnlyTest.cpp -o "$RUNNER_TEMP/pfs-test"
+          "$RUNNER_TEMP/pfs-test" build/pkg-fixtures | tee pfs-native-macos.txt
           xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
             MaxPS4-iOS/Native/PS4PKGBridge.cpp MaxPS4-iOS/Tests/PS4PKGMetadataTest.cpp -o "$RUNNER_TEMP/pkg-metadata-test"
           "$RUNNER_TEMP/pkg-metadata-test" | tee pkg-metadata-macos.txt
@@ -87,7 +94,7 @@ jobs:
           swiftc -parse-as-library -import-objc-header MaxPS4-iOS/Native/PS4PKGBridge.h \
             MaxPS4-iOS/Sources/MaxPS4PKGInspector.swift MaxPS4-iOS/Tests/PKGSwiftDiagnosticTest.swift \
             "$RUNNER_TEMP/pkg-bridge.o" -lc++ -o "$RUNNER_TEMP/pkg-swift-test"
-          "$RUNNER_TEMP/pkg-swift-test" | tee pkg-swift-macos.txt
+          "$RUNNER_TEMP/pkg-swift-test" build/pkg-fixtures | tee pkg-swift-macos.txt
       - name: Compile native parser and type-check Swift for iPhone arm64
         shell: bash
         run: |
@@ -111,4 +118,5 @@ jobs:
           name: PKG-Swift-macOS-report
           path: |
             pkg-*-macos.txt
+            pfs-native-macos.txt
             orbis-*-tests.txt

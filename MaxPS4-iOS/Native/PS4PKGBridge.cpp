@@ -1,6 +1,8 @@
 #include "PS4PKGBridge.h"
 #include "PS4PKGInventory.hpp"
 #include "PS4SFO.hpp"
+#include "PS4PFSReadOnly.hpp"
+#include <fcntl.h>
 #include "PS4PKGRuntimePlan.hpp"
 #include <algorithm>
 #include <cerrno>
@@ -22,8 +24,11 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
     if (!path) return sourceError(EINVAL, "chemin absent");
     try {
         const auto closeFile = [](FILE* f) { std::fclose(f); };
-        std::unique_ptr<FILE, decltype(closeFile)> file(std::fopen(path, "rb"), closeFile);
-        if (!file) { const int code = errno; return sourceError(code, std::strerror(code)); }
+        const int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0) { const int code = errno; return sourceError(code, std::strerror(code)); }
+        FILE* stream = fdopen(fd, "rb");
+        if (!stream) { const int code = errno; close(fd); return sourceError(code, std::strerror(code)); }
+        std::unique_ptr<FILE, decltype(closeFile)> file(stream, closeFile);
         struct stat info{};
         if (fstat(fileno(file.get()), &info)) { const int code = errno; return sourceError(code, std::strerror(code)); }
         if (!S_ISREG(info.st_mode) || info.st_size < 0) return sourceError(EINVAL, "fichier régulier requis");
@@ -50,7 +55,30 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
             if (!pkg.metadataDiagnostic.empty()) report << pkg.metadataDiagnostic << '\n';
             report << "Taille vérifiée : " << size << " octets ; entrées : " << pkg.entries.size()
                    << "\nCorps : " << pkg.bodyOffset << " + " << pkg.bodySize
-                   << "\nPFS : " << pkg.pfsOffset << " + " << pkg.pfsSize << " (opaque, non monté)\n";
+                   << "\nPFS : " << pkg.pfsOffset << " + " << pkg.pfsSize << " (plage déclarée ; statut ci-dessous)\n";
+            maxps4::PS4PFSReadOnly pfs;
+            auto pfsRead = [&](uint64_t offset, uint8_t* bytes, size_t count) {
+                return pkg.range(offset,count,pkg.pfsSize) && read(pkg.pfsOffset+offset,bytes,count);
+            };
+            const uint64_t tableEnd = uint64_t(pkg.tableOffset)+pkg.entries.size()*32;
+            bool overlap = pkg.pfsSize && pkg.pfsOffset < tableEnd && pkg.tableOffset < pkg.pfsOffset+pkg.pfsSize;
+            for (const auto& e : pkg.entries) overlap |= pkg.pfsSize && e.size &&
+                e.offset < pkg.pfsOffset+pkg.pfsSize && pkg.pfsOffset < uint64_t(e.offset)+e.size;
+            if (overlap) {
+                pfs.status = maxps4::PS4PFSReadOnly::Status::malformed;
+                pfs.diagnostic = "PFS : plage recouvre table/descripteurs, lecture refusée";
+            } else pfs.inspect(pkg.pfsSize,pfsRead);
+            report << "Diagnostic PKG/PFS : " << pfs.diagnostic << " ; mode=0x" << std::hex << pfs.mode
+                   << std::dec << " ; bloc=" << pfs.blockSize << '\n';
+            for (const auto& f : pfs.files)
+                report << "Fichier PFS uroot : " << f.path << " ; octets=" << f.size << '\n';
+            const bool pfsAccessible = pfs.status == maxps4::PS4PFSReadOnly::Status::accessible;
+            const bool pfsEboot = std::any_of(pfs.files.begin(),pfs.files.end(),[](const auto& f) { return f.path=="eboot.bin"; });
+            if (pfsAccessible)
+                report << "Contenu PFS : fichiers uroot accessibles ; eboot.bin " << (pfsEboot ? "présent" : "absent")
+                       << "; présence distincte de validation ELF et de démarrage.\n"
+                          "Précontrôle #185 : exporter les fichiers sélectionnés accessibles vers un dossier choisi, "
+                          "puis Import → Dossier de jeu accessible ; aucun manifeste/graphe/biais inventé.\n";
             // Descriptor counts are informational; no access to the opaque PFS is inferred.
             size_t readable = 0, encrypted = 0, unsupported = 0, unknown = 0, invalid = 0;
             for (const auto& entry : pkg.entries) {
@@ -66,7 +94,7 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                    << " ; chiffrés déclarés=" << encrypted
                    << " ; non pris en charge=" << unsupported
                    << " ; inconnus=" << unknown << " ; invalides=" << invalid << '\n';
-            if (pkg.pfsSize)
+            if (pkg.pfsSize && !pfsAccessible)
                 report << "PFS présent : contenu opaque ; aucun exécutable déduit de cet inventaire.\n"
                           "Contenu du jeu : non accessible par ce lecteur (PFS opaque, aucun déchiffrement).\n";
             // Kero Blaster field diagnostics: keep the extraction policy unchanged.
@@ -164,9 +192,9 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
             // PKG metadata and plaintext artwork are never executable admission.
             // The standalone ELF path is a distinct, explicit user-supplied workflow.
             report << "Diagnostic démarrage : NON PRÊT (inventaire PKG uniquement).\n";
-            report << "Blocage 1/3 : PFS "
-                   << (pkg.pfsSize ? "présent mais opaque/non monté" : "absent ou non exposé")
-                   << " ; aucun eboot.bin accessible par ce lecteur.\n";
+            report << (pfsAccessible ? "Accès PFS : " : "Blocage 1/3 : PFS ")
+                   << (pfsAccessible ? "lu en lecture seule (D32 contigu)" : (pkg.pfsSize ? "présent mais opaque/non monté" : "absent ou non exposé"))
+                   << (pfsAccessible && pfsEboot ? " ; eboot.bin accessible, non validé comme exécutable.\n" : " ; aucun eboot.bin accessible par ce lecteur.\n");
             report << "Blocage 2/3 : aucun binaire Orbis ELF autonome validé depuis ce PKG ; "
                       "noms, images et param.sfo ne sont pas exécutables.\n";
             report << "Blocage 3/3 : imports NID, modules PRX et relocations non résolus "
@@ -174,16 +202,18 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
             report << "Étape sûre : fournir séparément un ELF Orbis non chiffré et "
                       "autorisé, puis tester son staging et ses dépendances ; "
                       "aucun contournement DRM/PFS.\n";
-            report << "Obstacles : PFS non monté, entrées chiffrées/non interprétées exclues ; "
+            report << "Obstacles : " << (pfsAccessible ? "PFS lisible limité au sous-ensemble D32 ; " : "PFS non monté ; ")
+                   << "entrées chiffrées/non interprétées exclues ; "
                    << "eboot.bin et dépendances PRX accessibles requis.\n"
                    << "Contrat runtime : fichiers ELF Orbis autonomes non chiffrés fournis explicitement ; "
                    << "staging seulement, imports/dépendances et relocations à résoudre, aucun lancement automatique.\n";
-            report << "Octets inspectés (budget partagé) : " << inspected << "\n";
+            report << "Octets inspectés (budget partagé) : " << inspected << "\n"
+                   << "Ce budget concerne les ressources CNT ; PFS : budget distinct de 8 Mio, aucune lecture de payload chiffré.\n";
             report << "Octets copiés en mémoire : " << copied << "; aucun fichier exporté.\n"
                    << "Les flags déclarés ne constituent pas une authentification.\n"
                    << "Les noms de descripteurs ne constituent pas un système de fichiers ; aucune admission ELF/SELF ni exécution.\n"
                    << "Absence de signature dans ces ressources ≠ absence d'exécutable dans le PKG.\n"
-                   << "Aucun déchiffrement, aucune recherche dans les clés/licences ou le PFS.\n";
+                   << "Aucun déchiffrement ni recherche de clés/licences ; inspection PFS non chiffré documenté uniquement.\n";
         }
         const auto text = report.str();
         const auto count = text.size() < capacity - 1 ? text.size() : capacity - 1;
@@ -191,4 +221,56 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
         output[count] = 0;
         return count == text.size() ? 0 : -ENOSPC;
     } catch (const std::bad_alloc&) { return sourceError(ENOMEM, "budget mémoire indisponible"); }
+}
+
+// Host output remains a caller-owned byte buffer; no source-derived disk path.
+int maxps4_pkg_pfs_read_file(const char* path, const char* selected, unsigned char* output,
+                            size_t capacity, size_t* length) {
+    if (!length) return -EINVAL;
+    *length = 0;
+    if (!path || !selected || (!output && capacity)) return -EINVAL;
+    try {
+        const int fd = open(path,O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC);
+        if (fd<0) return -errno;
+        struct Close { int fd; ~Close() { close(fd); } } closeSource{fd};
+        struct stat st{};
+        if (fstat(fd,&st) || !S_ISREG(st.st_mode) || st.st_size<0) return -EINVAL;
+        const auto size=uint64_t(st.st_size);
+        auto read=[&](uint64_t at,uint8_t* bytes,size_t n) {
+            if (!maxps4::PS4PKGInventory::range(at,n,size) || at>uint64_t(std::numeric_limits<off_t>::max())) return false;
+            size_t done=0;
+            while (done<n) {
+                const auto r=pread(fd,bytes+done,n-done,off_t(at+done));
+                if (r<0 && errno==EINTR) continue;
+                if (r<=0) return false;
+                done+=size_t(r);
+            }
+            return true;
+        };
+        maxps4::PS4PKGInventory pkg;
+        if (!pkg.parse(size,read)) return -EINVAL;
+        const uint64_t end=pkg.pfsOffset+pkg.pfsSize;
+        if (pkg.pfsSize && pkg.pfsOffset<uint64_t(pkg.tableOffset)+pkg.entries.size()*32 && pkg.tableOffset<end) return -EINVAL;
+        for (const auto& e:pkg.entries) if (e.size && pkg.pfsSize && e.offset<end && pkg.pfsOffset<uint64_t(e.offset)+e.size) return -EINVAL;
+        auto slice=[&](uint64_t at,uint8_t* bytes,size_t n) {
+            return pkg.range(at,n,pkg.pfsSize) && read(pkg.pfsOffset+at,bytes,n);
+        };
+        maxps4::PS4PFSReadOnly pfs;
+        if (!pfs.inspect(pkg.pfsSize,slice)) return -EACCES;
+        const std::string name(selected);
+        if (!pfs.allowedSelection(name)) return -EACCES;
+        const auto it=std::find_if(pfs.files.begin(),pfs.files.end(),[&](const auto& f){return f.path==name;});
+        if (it==pfs.files.end()) return -ENOENT;
+        if (it->size>64*1024*1024) return -E2BIG;
+        *length=size_t(it->size);
+        if (capacity<*length) return -ENOSPC;
+        std::vector<uint8_t> bytes; std::string why;
+        if (!pfs.extract(name,slice,bytes,why)) { *length=0; return -EIO; }
+        struct stat after{};
+        if (fstat(fd,&after) || after.st_size!=st.st_size || after.st_mtime!=st.st_mtime || after.st_ctime!=st.st_ctime) {
+            *length=0; return -EIO;
+        }
+        if (!bytes.empty()) std::memcpy(output,bytes.data(),bytes.size());
+        return 0;
+    } catch (const std::bad_alloc&) { *length=0; return -ENOMEM; }
 }

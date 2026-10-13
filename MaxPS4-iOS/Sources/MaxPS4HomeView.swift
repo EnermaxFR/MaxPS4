@@ -235,7 +235,7 @@ struct MaxPS4HomeView: View {
                             detailsReport = emulator.status
                         }
                         .buttonStyle(.borderedProminent)
-                        Button(game.fileName.lowercased().hasSuffix(".pkg") ? "Analyser le PKG" : "Analyser l’exécutable") {
+                        Button(game.fileName.lowercased().hasSuffix(".pkg") ? "Analyser PKG/PFS" : "Analyser l’exécutable") {
                             if game.fileName.lowercased().hasSuffix(".pkg") {
                                 detailsReport = "Analyse du PKG en cours…"
                                 Task { detailsReport = await emulator.analyzePKG(game) }
@@ -268,7 +268,15 @@ struct MaxPS4HomeView: View {
                             }
                             .buttonStyle(.bordered)
                         }
+                        if game.fileName.lowercased().hasSuffix(".pkg") {
+                            NavigationLink("Exporter un fichier PFS accessible…") {
+                                MaxPS4PFSExportView(source: URL(fileURLWithPath: game.localPath))
+                            }
+                        }
                         if let report = detailsReport {
+                            ShareLink(item: report) {
+                                Label("Exporter le rapport texte", systemImage: "square.and.arrow.up")
+                            }
                             Text(report)
                                 .font(.subheadline)
                                 .textSelection(.enabled)
@@ -1028,7 +1036,7 @@ struct MaxPS4HomeView: View {
                             inspectionReport = emulator.status
                         }
                     } label: {
-                        Label(game.fileName.lowercased().hasSuffix(".pkg") ? "Analyser le PKG" : "Analyser l’exécutable", systemImage: "doc.text.magnifyingglass")
+                        Label(game.fileName.lowercased().hasSuffix(".pkg") ? "Analyser PKG/PFS" : "Analyser l’exécutable", systemImage: "doc.text.magnifyingglass")
                     }
                     Button(role: .destructive) {
                         gameToDelete = game
