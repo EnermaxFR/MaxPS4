@@ -51,6 +51,19 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
             report << "Taille vérifiée : " << size << " octets ; entrées : " << pkg.entries.size()
                    << "\nCorps : " << pkg.bodyOffset << " + " << pkg.bodySize
                    << "\nPFS : " << pkg.pfsOffset << " + " << pkg.pfsSize << " (opaque, non monté)\n";
+            // Kero Blaster field diagnostics: keep the extraction policy unchanged.
+            // These are descriptive only; neither flags nor names grant access.
+            for (const auto& entry : pkg.entries) {
+                if (entry.id == 0x100 && entry.access == maxps4::PS4PKGInventory::Access::invalid &&
+                    entry.size && entry.offset == pkg.tableOffset)
+                    report << "Diagnostic metas : début à l'offset de la table PKG ; "
+                              "chevauchement détecté, lecture refusée.\n";
+                if (entry.id == 0x200 &&
+                    entry.access == maxps4::PS4PKGInventory::Access::unsupported &&
+                    entry.flags1 == 0x40000000U && entry.flags2 == 0 && entry.reserved == 0)
+                    report << "Diagnostic entry_names : table déclarée, flag 0x40000000 "
+                              "non interprété ; noms non lus.\n";
+            }
             size_t inspected = 0;
             auto boundedRead = [&](uint64_t offset, uint8_t* bytes, size_t count) {
                 if (count > pkg.extractionBudget - inspected) return false;
