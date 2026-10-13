@@ -109,7 +109,7 @@ static int animatedGuestTest() {
     std::vector<uint8_t> image(width*height*4);
     uint64_t sequence=0; uint32_t backend=0;
     for (uint32_t frame=0;frame<20;++frame) {
-        CHECK(maxps4_fex_engine_step_frame(engine,0,image.data(),image.size(),&sequence,&backend)==0);
+        CHECK(maxps4_fex_engine_step_frame(engine,frame<2 ? 8u : 0u,image.data(),image.size(),&sequence,&backend)==0);
         CHECK(sequence==frame+1);
 #ifdef VIXL_SIMULATOR
         CHECK(backend==MAXPS4_CPU_FEX_ARM64_SIMULATOR);
@@ -120,7 +120,7 @@ static int animatedGuestTest() {
         const size_t enemyOffset=((enemyCell/16)*2*width+(enemyCell%16)*2)*4;
         uint32_t rgba=0;
         for(int b=0;b<4;++b) rgba|=uint32_t(image[enemyOffset+b])<<(8*b);
-        CHECK(rgba==0xff40d030);
+        CHECK(rgba==(frame==7 ? 0xff2080e0u : 0xff40d030u));
         if(frame>0) {
             const uint32_t oldCell=80+((frame-1)&15);
             if(oldCell!=enemyCell) {
@@ -131,7 +131,7 @@ static int animatedGuestTest() {
             }
         }
     }
-    std::puts("PASS guest x86-64 autonomous sprite animation across 20 real FEX frames");
+    std::puts("PASS guest x86-64 autonomous sprite animation and collision across 20 real FEX frames");
     return 0;
 }
 int main(int argc, char** argv) {
