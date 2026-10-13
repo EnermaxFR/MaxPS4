@@ -127,7 +127,14 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                                     if (key != "TITLE" && key != "TITLE_ID" &&
                                         key != "CONTENT_ID" && key != "APP_VER") continue;
                                     if (format != 0x204 || !length || length > 256 ||
-                                        bytes[dataAt + length - 1] != 0) continue;
+                                        bytes[static_cast<size_t>(dataAt + length - 1)] != 0) continue;
+                                    // Strings must have exactly one trailing NUL: reject embedded
+                                    // terminators rather than silently displaying a prefix.
+                                    bool embeddedNul = false;
+                                    for (size_t k = 0; k + 1 < length; ++k)
+                                        if (bytes[static_cast<size_t>(dataAt) + k] == 0)
+                                            embeddedNul = true;
+                                    if (embeddedNul) continue;
                                     bool printable = true;
                                     for (size_t k = 0; k + 1 < length; ++k)
                                         if (bytes[dataAt + k] < 0x20 || bytes[dataAt + k] > 0x7e)
