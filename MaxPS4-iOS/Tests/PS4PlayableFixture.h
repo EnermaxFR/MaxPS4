@@ -28,7 +28,7 @@ inline std::vector<uint8_t> app(bool animated = false) {
     // EDX becomes y*16+x. The sprite covers one 2x2 cell.
     emit({0xc1,0xe2,4}); rip(0x8b,0x05,x); emit({0x01,0xc2});
     // Action selects a different color in guest code.
-    rip(0x8b,0x05,input); immediate(0x25,16); emit({0xc1,0xe0,16});
+    rip(0x8b,0x05,input); immediate(0x25,16); emit({0xc1,0xe0,uint8_t(animated ? 19 : 16)});
     immediate(0x0d,0xff2080e0); emit({0x89,0xc3});
     // Optional second sprite: its x position is derived entirely from the
     // guest frame counter. On collision the guest changes its color.
