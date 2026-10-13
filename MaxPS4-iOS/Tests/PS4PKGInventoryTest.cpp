@@ -1,5 +1,6 @@
 #include "../Native/PS4PKGInventory.hpp"
 #include "../Native/PS4PKGBridge.h"
+#include "../Native/PS4PKGRuntimePlan.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
@@ -202,6 +203,30 @@ int main() {
     assert(maxps4_pkg_inventory_report(path, nullptr, 0) != 0);
     assert(unlink(path) == 0);
     assert(maxps4_pkg_inventory_report(path, tiny, sizeof(tiny)) != 0);
+    // Graph-only Orbis staging: no ELF bytes, no execution, no PFS access.
+    using Plan = maxps4::PS4PKGRuntimePlan;
+    std::vector<size_t> order;
+    std::string graphDiagnostic;
+    std::vector<Plan::ModuleRequest> modules{
+        {"eboot.bin", {"lib/a.prx"}},
+        {"lib/a.prx", {"lib/b.prx"}},
+        {"lib/b.prx", {}}
+    };
+    assert(Plan::orderModules(modules, order, graphDiagnostic));
+    assert((order == std::vector<size_t>{2, 1, 0}));
+    modules[2].dependencies = {"eboot.bin"};
+    assert(!Plan::orderModules(modules, order, graphDiagnostic) && order.empty());
+    modules[2].dependencies = {"missing.prx"};
+    assert(!Plan::orderModules(modules, order, graphDiagnostic) && order.empty());
+    modules[2].dependencies = {};
+    modules[0].dependencies = {"lib/a.prx", "lib/a.prx"};
+    assert(!Plan::orderModules(modules, order, graphDiagnostic) && order.empty());
+    modules[0].dependencies = {"lib/a.prx"};
+    modules[1].logicalPath = "../escape.prx";
+    assert(!Plan::orderModules(modules, order, graphDiagnostic) && order.empty());
+    modules[1].logicalPath = "lib/a.prx";
+    modules.push_back({"lib/a.prx", {}});
+    assert(!Plan::orderModules(modules, order, graphDiagnostic) && order.empty());
     std::puts("PASS PKG inventory: public layout, bounds, budgets, protection flags, ambiguity, exact I/O, C/Swift report ABI");
     std::puts("Synthetic fixtures only; no DRM, PFS extraction, PS4 executable admission or iPhone execution tested");
 }
