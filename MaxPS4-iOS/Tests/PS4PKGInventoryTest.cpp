@@ -169,6 +169,29 @@ int main() {
     assert(fclose(file) == 0);
     assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
     assert(std::string(report.data()).find("ELF tronqué : en-tête ELF64 incomplet") != std::string::npos);
+    // ELF64 identity alone does not prove a usable PS4 executable.
+    auto wrongElf = original;
+    wrongElf.resize(0x740, 0);
+    put(wrongElf, 0x430, wrongElf.size(), 8);
+    put(wrongElf, 0x28, wrongElf.size() - 0x600, 8);
+    put(wrongElf, 0x5d4, 64, 4);
+    std::memcpy(wrongElf.data() + 0x700, "\177ELF", 4);
+    wrongElf[0x704] = 2; wrongElf[0x705] = 1; wrongElf[0x706] = 1;
+    wrongElf[0x710] = 2; // ET_EXEC
+    wrongElf[0x712] = 0x3e; // EM_X86_64
+    wrongElf[0x714] = 1; // ELF version
+    wrongElf[0x734] = 64; // ELF64 e_ehsize
+    file = std::fopen(path, "wb"); assert(file);
+    assert(fwrite(wrongElf.data(), 1, wrongElf.size(), file) == wrongElf.size());
+    assert(fclose(file) == 0);
+    assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
+    assert(std::string(report.data()).find("en-tête ELF64 x86-64 reconnu") != std::string::npos);
+    wrongElf[0x712] = 3; // Unsupported machine: reject despite ELF magic.
+    file = std::fopen(path, "wb"); assert(file);
+    assert(fwrite(wrongElf.data(), 1, wrongElf.size(), file) == wrongElf.size());
+    assert(fclose(file) == 0);
+    assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
+    assert(std::string(report.data()).find("ELF incompatible : machine x86-64") != std::string::npos);
     // Malformed names cannot consume 1 MiB then restart the payload budget.
     auto large = original;
     large.resize(0x600 + PKG::extractionBudget + 16, 'x');
