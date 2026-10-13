@@ -167,12 +167,12 @@ int main() {
     assert(text.find("Blocage 3/3 : imports NID") != std::string::npos);
     assert(text.find("aucun contournement DRM/PFS") != std::string::npos);
     // iPhone regression: readiness diagnostics must use real line breaks, not literal backslash-n.
-    assert(text.find("Diagnostic démarrage : NON PRÊT (inventaire PKG uniquement).\\nBlocage 1/3") != std::string::npos);
-    assert(text.find("eboot.bin accessible par ce lecteur.\\nBlocage 2/3") != std::string::npos);
-    assert(text.find("exécutables.\\nBlocage 3/3") != std::string::npos);
-    assert(text.find("exécution non autorisée.\\nÉtape sûre") != std::string::npos);
-    assert(text.find("aucun contournement DRM/PFS.\\nObstacles") != std::string::npos);
-    assert(text.find("uniquement).\\\\nBlocage") == std::string::npos);
+    assert(text.find("Diagnostic démarrage : NON PRÊT (inventaire PKG uniquement).\nBlocage 1/3") != std::string::npos);
+    assert(text.find("eboot.bin accessible par ce lecteur.\nBlocage 2/3") != std::string::npos);
+    assert(text.find("exécutables.\nBlocage 3/3") != std::string::npos);
+    assert(text.find("exécution non autorisée.\nÉtape sûre") != std::string::npos);
+    assert(text.find("aucun contournement DRM/PFS.\nObstacles") != std::string::npos);
+    assert(text.find("uniquement).\\\nBlocage") == std::string::npos);
 
 
     // Reproduce the two descriptor classes observed in the real Kero Blaster
