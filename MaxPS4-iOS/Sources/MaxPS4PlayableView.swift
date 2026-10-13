@@ -26,7 +26,7 @@ struct MaxPS4PlayableView: View {
                 }.buttonStyle(.borderedProminent)
                 Button("Importer une démo Orbis…") { importing = true }.disabled(session.running)
                 Toggle("Commandes tactiles", isOn: $touchVisible)
-                    .onChange(of: touchVisible) { _, visible in if !visible { touch = 0; session.input(0) } }
+                    .onChange(of: touchVisible) { visible in if !visible { touch = 0; session.input(0) } }
                 if touchVisible {
                     VStack {
                         control("Haut", bit: 4)
@@ -65,7 +65,7 @@ struct MaxPS4PlayableView: View {
             }
             session.input(buttons)
         }
-        .onChange(of: scenePhase) { _, phase in if phase != .active { touch = 0; session.stop() } }
+        .onChange(of: scenePhase) { phase in if phase != .active { touch = 0; session.stop() } }
         .onDisappear { touch = 0; session.stop() }
     }
     private func control(_ name: String, bit: UInt32) -> some View {
