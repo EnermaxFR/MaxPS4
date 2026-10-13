@@ -1,6 +1,6 @@
 # Linker Orbis expérimental
 
-Le linker prépare deux ou plusieurs fichiers ELF/PRX Orbis autonomes en mémoire
+Le linker prépare un ELF Orbis statique ou plusieurs fichiers ELF/PRX Orbis autonomes en mémoire
 invitée isolée. Il ne lance aucun jeu. Il ne lit pas le PFS, ne déchiffre aucun
 conteneur et ne possède aucune clé, licence ni table NID Sony.
 
@@ -47,6 +47,8 @@ par pointeurs non bornés, leurs stubs d'import inconnu ou leur exécution.
   par défaut, SHN_UNDEF ou indice ordinaire. Les imports faibles manquants sont
   refusés, comme les imports globaux. Les exports dupliqués sont refusés même
   faibles ; aucune priorité dépendant de l'ordre d'entrée.
+- DT_NEEDED avec offset dans la table SCE de chaînes, vérification des descripteurs
+  module/bibliothèque même inutilisés : voir [Orbis Runtime Foundation](orbis-runtime-foundation.md).
 - Dépendances fournies explicitement par le demandeur : un fournisseur d'import
   doit être déclaré et chargé avant le consommateur. Graphe fermé, sans cycles,
   chemins dupliqués ou dépendances dupliquées. Tri lexical stable des racines et
@@ -136,3 +138,7 @@ synthétiques liés, puis une exécution bornée traversant un trampoline invit�
 validé. Le chargement de Kero Blaster nécessitera ultérieurement une source
 légalement accessible de modules plaintext et des imports/ABI réellement vérifiés.
 Aucune extraction ou décryption du PFS protégé n'est une étape de ce travail.
+
+La préparation et le diagnostic iOS renforcés sont décrits dans
+[Orbis Runtime Foundation](orbis-runtime-foundation.md), avec
+[les validations et limites de l’environnement](orbis-runtime-validation.md).

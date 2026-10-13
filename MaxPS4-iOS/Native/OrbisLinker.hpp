@@ -4,6 +4,7 @@
 #include <set>
 #include <tuple>
 #include <stdexcept>
+#include <sstream>
 
 namespace maxps4 {
 // Staging linker only. All addresses are guest addresses; vectors are ordinary
@@ -16,6 +17,32 @@ public:
         uint8_t type = 0;
         auto key() const { return std::tie(nid, library, module, libraryVersion, moduleVersion, type); }
         bool operator<(const Identity& b) const { return key() < b.key(); }
+    };
+    struct Report {
+        std::string phase = "inputs", failure;
+        size_t validatedModules = 0, segments = 0, memoryBytes = 0;
+        size_t dependencies = 0, imports = 0, resolvedImports = 0;
+        size_t relocations = 0, validatedRelocations = 0;
+        bool committed = false;
+        std::string text() const {
+            std::ostringstream out;
+            out << "Préparation runtime Orbis (aucune exécution)\n"
+                << "Étape : " << phase << "\n"
+                << "ELF validés : " << validatedModules << " ; segments validés : " << segments << "\n"
+                << "Dépendances PRX vérifiées : " << dependencies << "\n"
+                << "Imports NID examinés : " << imports << " ; résolus : " << resolvedImports << " ; non résolus : " << imports - resolvedImports << "\n"
+                << "Relocations examinées : " << relocations << " ; validées : " << validatedRelocations
+                << " ; appliquées : " << (committed ? validatedRelocations : 0)
+                << " ; différées : " << (committed ? 0 : validatedRelocations)
+                << " ; refusées : " << (relocations - validatedRelocations) << "\n"
+                << "Mémoire : " << memoryBytes << " octets validés ; "
+                << (committed ? "image engagée" : "image non engagée, allocations provisoires libérées") << "\n";
+            if (!failure.empty()) out << "Refus : " << failure << "\n";
+            out << "Préparation : " << (committed ? "réussie" : "refusée")
+                << " ; compteurs partiels, étapes suivantes non évaluées en cas de refus\n"
+                << "Exécution : impossible — backend d'espace d'adresses FEX Orbis, pile/TLS et ABI requis";
+            return out.str();
+        }
     };
     struct HLE { Identity identity; uint64_t guestAddress; }; // Guest trampoline, never host function pointer.
     struct Input { PS4PKGRuntimePlan::ModuleBytes file; uint64_t bias = 0; };
@@ -40,15 +67,21 @@ public:
     // Strong transaction: output is unchanged on every failure, including OOM.
     static bool link(const std::vector<Input>& inputs, const std::vector<HLE>& hle,
                      Image& output, std::string& diagnostic,
-                     size_t budget = PS4PKGRuntimePlan::batchMemoryBudget) {
+                     size_t budget = PS4PKGRuntimePlan::batchMemoryBudget, Report* report = nullptr) {
+        Report progress;
         try {
             Image pending;
-            build(inputs, hle, pending, budget);
+            build(inputs, hle, pending, budget, progress);
+            progress.phase = "complete"; progress.committed = true;
+            if (report) *report = progress;
             output = std::move(pending);
             diagnostic.clear();
             return true;
         } catch (const std::bad_alloc&) { diagnostic = "linker: allocation failed"; }
           catch (const std::runtime_error& e) { diagnostic = e.what(); }
+        progress.committed = false;
+        progress.failure = diagnostic;
+        if (report) *report = std::move(progress);
         return false;
     }
 private:
@@ -73,7 +106,11 @@ private:
     struct Descriptor { std::string name; uint16_t version; };
     struct Symbol { Identity identity; uint64_t value = 0, size = 0; bool defined = false, local = false; };
     struct Rela { uint64_t offset, info, addend; };
-    struct Dynamic { std::vector<Symbol> symbols; std::vector<Rela> relas; };
+    struct Dynamic {
+        std::vector<Symbol> symbols; std::vector<Rela> relas;
+        std::vector<Descriptor> imports, exports, importLibraries, exportLibraries;
+        std::vector<std::string> needed;
+    };
     static Dynamic parse(const Input& input, const Module& m, size_t& symbolBudget, size_t& relocationBudget) {
         const auto* bytes = input.file.bytes; const auto size = input.file.size;
         const PS4ExecutableImage::Header *dyn = nullptr, *data = nullptr;
@@ -81,17 +118,20 @@ private:
             if (h.type == 2) { require(!dyn, "duplicate PT_DYNAMIC"); dyn = &h; }
             if (h.type == 0x61000000) { require(!data, "duplicate PT_SCE_DYNLIBDATA"); data = &h; }
         }
+        if (!dyn && !data && m.image.type == 0xfe00 && !m.image.requiresLinker) return {};
         require(dyn && data, "SCE PT_DYNAMIC and PT_SCE_DYNLIBDATA required");
         require(dyn->fileSize && dyn->fileSize % 16 == 0 && dyn->fileSize / 16 <= 4096 &&
                 range(dyn->offset, dyn->fileSize, size) && range(data->offset, data->fileSize, size),
                 "dynamic metadata out of bounds");
         std::map<uint64_t, uint64_t> tags;
         std::vector<std::pair<uint64_t, uint64_t>> descriptors;
+        std::vector<uint64_t> needed;
         bool terminated = false;
         for (size_t i = 0; i < dyn->fileSize; i += 16) {
             const auto* p = bytes + dyn->offset + i;
             const auto tag = read(p, 8), value = read(p + 8, 8);
             if (!tag) { terminated = true; break; }
+            if (tag == 1) { needed.push_back(value); continue; } // DT_NEEDED, SCE string table offset
             if (tag == 0x6100000d || tag == 0x6100000f || tag == 0x61000013 || tag == 0x61000015) {
                 descriptors.push_back({tag, value}); continue;
             }
@@ -139,6 +179,16 @@ private:
         symbolBudget -= static_cast<size_t>(symbolSize / 24);
         const auto* symbols = table(get(0x61000039), symbolSize);
         Dynamic out;
+        for (const auto& d : importLib) out.importLibraries.push_back(d.second);
+        for (const auto& d : exportLib) out.exportLibraries.push_back(d.second);
+        for (const auto& d : importMod) out.imports.push_back(d.second);
+        for (const auto& d : exportMod) out.exports.push_back(d.second);
+        for (auto offset : needed) {
+            const auto name = stringAt(offset);
+            require(!name.empty() && std::find(out.needed.begin(), out.needed.end(), name) == out.needed.end(),
+                    "empty or duplicate DT_NEEDED");
+            out.needed.push_back(name);
+        }
         for (size_t i = 0; i < symbolSize; i += 24) {
             const auto* p = symbols + i;
             Symbol s; const auto name = stringAt(read(p, 4));
@@ -150,6 +200,16 @@ private:
                     "unsupported symbol binding/type/visibility/section");
             if (s.defined) require(m.image.translate(s.value, s.size ? s.size : 1, type == 2 ? 5 : 4), "export outside valid segment");
             else require(s.value == 0 && !s.local, "invalid undefined symbol");
+            if (s.defined && type == 2) {
+                bool backed = false;
+                for (const auto& region : m.image.segments) {
+                    if ((region.header.flags & 5) != 5 || s.value < region.header.address) continue;
+                    const auto offset = s.value - region.header.address;
+                    backed |= offset < region.header.fileSize &&
+                        (s.size ? s.size : 1) <= region.header.fileSize - offset;
+                }
+                require(backed, "function export outside file-backed code");
+            }
             if (!s.local) {
                 const auto a = name.find('#'), b = a == std::string::npos ? a : name.find('#', a + 1);
                 require(a == 11 && b != std::string::npos && name.find('#', b + 1) == std::string::npos, "invalid NID identity");
@@ -176,7 +236,14 @@ private:
         relocations(0x61000029, 0x6100002d, 0x6100002b, 7); // DT_RELA
         return out;
     }
-    static void build(const std::vector<Input>& inputs, const std::vector<HLE>& hle, Image& out, size_t budget) {
+    static void build(const std::vector<Input>& inputs, const std::vector<HLE>& hle, Image& out, size_t budget, Report& report) {
+        require(!inputs.empty() && inputs.size() <= PS4PKGRuntimePlan::maxDependencies, "invalid module count (1..128)");
+        for (const auto& input : inputs) {
+            require(input.file.request.logicalPath.size() <= 255 && input.file.request.dependencies.size() <= 128,
+                    "module request budget exceeded");
+            for (const auto& dependency : input.file.request.dependencies)
+                require(dependency.size() <= 255, "dependency path budget exceeded");
+        }
         require(budget <= PS4PKGRuntimePlan::batchMemoryBudget, "budget exceeds existing limit");
         require(hle.size() <= 65536, "HLE registry budget");
         std::vector<size_t> sorted(inputs.size());
@@ -189,14 +256,16 @@ private:
         std::vector<size_t> order; std::string error;
         require(PS4PKGRuntimePlan::orderModules(requests, order, error), error);
         std::vector<Dynamic> dynamic;
+        report.phase = "ELF/segments";
         // Check the complete segment budget before allocating any staged image.
         // The existing loader still validates every field independently below.
         size_t planned = 0;
-        for (const auto& input : inputs) {
+        for (auto index : sorted) {
+            const auto& input = inputs[index];
             const auto* b = input.file.bytes; const auto n = input.file.size;
-            require(b && n >= 64, "chargeur: truncated ELF header");
+            require(b && n >= 64 && n <= 64 * 1024 * 1024, "chargeur: invalid ELF file size");
             const auto phoff = read(b + 32, 8), phnum = read(b + 56, 2);
-            require(phnum && phnum <= 128 && range(phoff, phnum * 56, n), "chargeur: invalid program table");
+            require(phoff >= 64 && phnum && phnum <= 128 && range(phoff, phnum * 56, n), "chargeur: invalid program table");
             for (size_t i = 0; i < phnum; ++i) {
                 const auto* p = b + phoff + i * 56; const auto type = read(p, 4);
                 if (type != 1 && type != 0x61000010) continue;
@@ -206,21 +275,30 @@ private:
         }
         size_t allocated = 0, symbolBudget = 65536, relocationBudget = 65536;
         for (auto i : order) {
+            report.phase = "ELF/segments";
             const auto& in = inputs[sorted[i]];
             PS4PKGRuntimePlan::PreparedModule staged;
             require(PS4PKGRuntimePlan::prepareStandalone(in.file.request.logicalPath, in.file.bytes, in.file.size,
                     in.file.request.dependencies, staged, error), error);
+            ++report.validatedModules;
             require(!staged.image.requiresTLS, "TLS not supported");
             Module m {staged.logicalPath, in.bias, 0, std::move(staged.image)};
+            for (const auto& h : m.image.headers) {
+                require(h.type == 0 || h.type == 1 || h.type == 2 || h.type == 4 || h.type == 6 ||
+                        h.type == 7 || h.type == 0x61000000 || h.type == 0x61000010,
+                        "unsupported runtime program header " + std::to_string(h.type));
+            }
             for (const auto& s : m.image.segments) {
                 require(s.bytes.size() <= budget - allocated, "batch memory budget exceeded"); allocated += s.bytes.size();
                 require((s.header.flags & 3) != 3, "writable executable guest segment refused");
                 require(s.header.alignment <= 1 || m.bias % s.header.alignment == 0, "misaligned load bias");
                 const auto start = add(m.bias, s.header.address), end = add(start, s.header.memorySize);
+                require(end <= (uint64_t{1} << 47), "non-canonical user guest address");
                 for (const auto& old : out.modules) for (const auto& region : old.image.segments) {
                     const auto a = add(old.bias, region.header.address), b = add(a, region.header.memorySize);
                     require(start >= b || a >= end, "overlapping guest modules");
                 }
+                ++report.segments; report.memoryBytes += s.bytes.size();
             }
             if (m.image.entry) {
                 bool valid = false;
@@ -229,8 +307,42 @@ private:
                              m.image.entry - segment.header.address < segment.header.fileSize;
                 require(valid, "invalid module entry"); m.entry = add(m.bias, m.image.entry);
             }
+            report.phase = "dynamic metadata";
             dynamic.push_back(parse(in, m, symbolBudget, relocationBudget)); out.modules.push_back(std::move(m));
         }
+        report.phase = "PRX dependencies";
+        // Validate even unused module descriptors: symbols alone cannot prove a
+        // closed dependency graph. Only explicit supplied files can be providers.
+        for (size_t i = 0; i < dynamic.size(); ++i) {
+            const auto& deps = requests[order[i]].dependencies;
+            auto validateDescriptor = [&](const Descriptor& required, bool library) {
+                size_t named = 0, compatible = 0, declared = 0;
+                for (size_t j = 0; j < dynamic.size(); ++j) {
+                    const auto& offeredDescriptors = library ? dynamic[j].exportLibraries : dynamic[j].exports;
+                    for (const auto& offered : offeredDescriptors) if (offered.name == required.name) {
+                        ++named;
+                        if (offered.version != required.version) continue;
+                        ++compatible;
+                        if (std::find(deps.begin(), deps.end(), out.modules[j].path) != deps.end()) ++declared;
+                    }
+                }
+                const auto kind = library ? " PRX library: " : " PRX module: ";
+                require(named != 0, "missing" + std::string(kind) + required.name);
+                require(compatible != 0, "incompatible" + std::string(kind) + required.name);
+                require(declared != 0, "missing explicit dependency:" + std::string(kind) + required.name);
+                require(declared == 1, "ambiguous" + std::string(kind) + required.name);
+            };
+            for (const auto& required : dynamic[i].imports) {
+                validateDescriptor(required, false); ++report.dependencies;
+            }
+            for (const auto& required : dynamic[i].importLibraries) validateDescriptor(required, true);
+            for (const auto& required : dynamic[i].needed) {
+                require(std::find(deps.begin(), deps.end(), required) != deps.end(),
+                        "DT_NEEDED missing explicit dependency: " + required);
+                ++report.dependencies;
+            }
+        }
+        report.phase = "NID imports";
         struct Export { uint64_t address; size_t owner; };
         std::map<Identity, Export> exports;
         for (size_t i = 0; i < dynamic.size(); ++i) for (const auto& s : dynamic[i].symbols) if (s.defined && !s.local)
@@ -247,6 +359,7 @@ private:
                 const auto& s = dynamic[i].symbols[j]; uint64_t address = 0;
                 if (s.defined) address = add(out.modules[i].bias, s.value);
                 else if (j) {
+                    ++report.imports;
                     const auto it = exports.find(s.identity);
                     require(it != exports.end(), out.modules[i].path + ": unresolved NID " + s.identity.nid +
                             " library=" + s.identity.library + " module=" + s.identity.module);
@@ -256,17 +369,19 @@ private:
                         require(std::find(deps.begin(), deps.end(), out.modules[owner].path) != deps.end(), "import provider missing explicit dependency");
                         require(owner < i, "import provider not loaded first");
                     }
-                    address = it->second.address;
+                    address = it->second.address; ++report.resolvedImports;
                 }
                 resolved[i].push_back(address);
             }
         }
+        report.phase = "relocations";
         struct Write { uint8_t* target; uint64_t value; };
         std::vector<Write> writes;
         for (size_t i = 0; i < dynamic.size(); ++i) {
             std::set<uint64_t> targets;
             auto& m = out.modules[i];
             for (const auto& r : dynamic[i].relas) {
+                ++report.relocations;
                 const auto type = uint32_t(r.info); const auto symbol = r.info >> 32;
                 require(type == 1 || type == 6 || type == 7 || type == 8, "unsupported x86-64 relocation " + std::to_string(type));
                 require(symbol < resolved[i].size() && (type != 8 || symbol == 0) && (type == 8 || symbol != 0), "invalid relocation symbol");
@@ -278,9 +393,10 @@ private:
                 targets.insert(r.offset);
                 // GLOB_DAT/JUMP_SLOT = S; 64 = S+A; RELATIVE = B+A (AMD64 ABI).
                 const auto value = type == 8 ? signedAdd(m.bias, r.addend) : type == 1 ? signedAdd(resolved[i][symbol], r.addend) : resolved[i][symbol];
-                writes.push_back({target, value});
+                writes.push_back({target, value}); ++report.validatedRelocations;
             }
         }
+        report.phase = "memory permissions";
         for (const auto& w : writes) for (size_t i = 0; i < 8; ++i) w.target[i] = uint8_t(w.value >> (i * 8));
         // RELRO may be writable while linking, then becomes read-only for the backend.
         for (auto& m : out.modules) for (auto& s : m.image.segments)

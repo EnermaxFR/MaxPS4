@@ -11,6 +11,9 @@ struct OrbisAnalysisSwiftTest {
         precondition(report.contains("NID=aI+OeCz8xrQ"))
         precondition(report.contains("résolus : 1"))
         precondition(report.contains("aucune exécution"))
+        precondition(report.contains("Préparation runtime Orbis"))
+        precondition(report.contains("Préparation : refusée"))
+        precondition(report.contains("Exécution : impossible"))
         let invalid = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: invalid) }
         try Data([0]).write(to: invalid)

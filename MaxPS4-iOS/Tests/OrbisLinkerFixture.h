@@ -37,6 +37,19 @@ inline std::vector<uint8_t> make(bool provider) {
     if (!provider) { put(b,0x900,0x2000); put(b,0x908,(uint64_t{1}<<32)|7); }
     return b;
 }
+inline void appendTag(std::vector<uint8_t>& b, uint64_t tag, uint64_t value) {
+    for (size_t p = 0x400; p + 32 <= 0x600; p += 16) {
+        bool zero = true; for (size_t i = 0; i < 8; ++i) zero &= b[p + i] == 0;
+        if (zero) { put(b,p,tag); put(b,p+8,value); put(b,p+16,0); put(b,p+24,0); return; }
+    }
+    throw std::runtime_error("fixture dynamic table full");
+}
+inline std::vector<uint8_t> makeStatic() {
+    auto b = make(false);
+    put(b,16,0xfe00,2); put(b,56,2,2);
+    put(b,64+56+40,0x200); // File data + BSS, independently owned.
+    return b;
+}
 inline void setTag(std::vector<uint8_t>& b, uint64_t tag, uint64_t value) {
     for (size_t p = 0x400; p < 0x600; p += 16) {
         uint64_t t = 0; for (size_t i=0;i<8;++i) t |= uint64_t(b[p+i]) << (i*8);

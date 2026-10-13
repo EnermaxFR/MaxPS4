@@ -116,6 +116,9 @@ int main(int argc, char** argv) {
     std::vector<char> report(2*1024*1024);
     assert(maxps4_orbis_analysis_report(path,report.data(),report.size())==0);
     assert(std::strstr(report.data(),"NID=aI+OeCz8xrQ") && std::strstr(report.data(),"résolus : 1"));
+    assert(std::strstr(report.data(),"Préparation runtime Orbis") &&
+           std::strstr(report.data(),"Préparation : refusée") &&
+           std::strstr(report.data(),"Exécution : impossible"));
     char small[8]; assert(maxps4_orbis_analysis_report(path,small,sizeof(small))<0 && small[7]==0);
     unlink(path);
     assert(maxps4_orbis_analysis_report(path,report.data(),report.size())<0);

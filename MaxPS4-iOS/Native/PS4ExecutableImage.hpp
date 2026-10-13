@@ -86,6 +86,8 @@ private:
         if (std::memcmp(elf, "\177ELF\2\1\1\11\0", 9) ||
             read(elf + 18, 2) != 62 || read(elf + 20, 4) != 1 ||
             read(elf + 52, 2) != 64 || read(elf + 54, 2) != 56) return -ENOEXEC;
+        for (size_t i = 9; i < 16; ++i) if (elf[i]) return -ENOEXEC;
+        if (read(elf + 48, 4)) return -ENOEXEC; // No x86-64 processor flags supported.
         type = static_cast<uint16_t>(read(elf + 16, 2));
         if (type != 0xfe00 && type != 0xfe10 && type != 0xfe18) return -ENOEXEC;
         entry = read(elf + 24, 8);
@@ -96,6 +98,9 @@ private:
         const uint64_t shoff = read(elf + 40, 8), shnum = read(elf + 60, 2);
         if (shnum && (read(elf + 58, 2) != 64 || shnum > 4096 ||
             !range(shoff, shnum * 64, size - origin))) return -ENOEXEC;
+        const uint64_t shstr = read(elf + 62, 2);
+        if ((!shnum && (shoff || (read(elf + 58, 2) != 0 && read(elf + 58, 2) != 64) || shstr)) ||
+            (shnum && (shoff < 64 || shstr >= shnum))) return -ENOEXEC;
         for (const auto& s : selfSegments)
             if ((s.flags & 0x800) && ((s.flags >> 20) & 0xfff) >= count) return -ENOEXEC;
         size_t allocated = 0;
@@ -106,6 +111,7 @@ private:
             headers.push_back(h);
             requiresLinker |= h.type == 2 || h.type == 0x60000000 || h.type == 0x61000000;
             requiresTLS |= h.type == 7;
+            if (!isSelf && h.fileSize && !range(h.offset, h.fileSize, size)) return -ENOEXEC;
             if (h.type != 1 && h.type != 0x61000010) continue; // Metadata retained, not executed.
             if (!h.memorySize || h.fileSize > h.memorySize || h.memorySize > memoryBudget - allocated ||
                 h.address > UINT64_MAX - h.memorySize || (h.flags & ~7U) || !(h.flags & 4U) ||

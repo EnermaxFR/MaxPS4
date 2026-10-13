@@ -39,6 +39,13 @@ struct OrbisLinkerBridgeTest {
                                 var failed: OpaquePointer?
                                 precondition(maxps4_orbis_link(m.baseAddress, m.count, 1, &failed, &diagnostic, 256) < 0)
                                 precondition(failed == nil && diagnostic[0] != 0)
+                                var detailed = [CChar](repeating: 0, count: 4096)
+                                precondition(maxps4_orbis_link_with_report(m.baseAddress, m.count, 1024, &failed, &detailed, 4096) == 0)
+                                defer { maxps4_orbis_close(failed) }
+                                let report = detailed.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
+                                precondition(report.contains("Préparation : réussie"))
+                                precondition(report.contains("Exécution : impossible"))
+                                precondition(report.contains("appliquées : 1"))
                             }
                         }
                     }

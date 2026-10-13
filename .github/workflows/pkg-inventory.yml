@@ -4,10 +4,12 @@ on:
     paths:
       - 'MaxPS4-iOS/**'
       - '.github/workflows/pkg-inventory.yml'
+      - 'scripts/test-orbis-runtime.sh'
   pull_request:
     paths:
       - 'MaxPS4-iOS/**'
       - '.github/workflows/pkg-inventory.yml'
+      - 'scripts/test-orbis-runtime.sh'
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,10 +23,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build/orbis-fixtures
-          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer \
-            MaxPS4-iOS/Native/OrbisLinkerBridge.cpp MaxPS4-iOS/Tests/OrbisLinkerTest.cpp -o "$RUNNER_TEMP/orbis-test"
-          "$RUNNER_TEMP/orbis-test" build/orbis-fixtures | tee orbis-linux-tests.txt
+          bash scripts/test-orbis-runtime.sh build/orbis-fixtures
+          cat build/orbis-fixtures/linker-tests.txt build/orbis-fixtures/segments-tests.txt > orbis-linux-tests.txt
       - name: Test synthetic PKGs with address and undefined-behavior sanitizers
         shell: bash
         run: |
@@ -52,7 +52,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: MaxPS4-synthetic-Orbis-fixtures
-          path: build/orbis-fixtures/*
+          path: |
+            build/orbis-fixtures/*.prx
+            build/orbis-fixtures/*.elf
           if-no-files-found: error
   swift-ios:
     runs-on: macos-latest
@@ -63,10 +65,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build/orbis-fixtures
-          xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer \
-            MaxPS4-iOS/Native/OrbisLinkerBridge.cpp MaxPS4-iOS/Tests/OrbisLinkerTest.cpp -o "$RUNNER_TEMP/orbis-test"
-          "$RUNNER_TEMP/orbis-test" build/orbis-fixtures | tee orbis-macos-tests.txt
+          CXX=clang++ bash scripts/test-orbis-runtime.sh build/orbis-fixtures
+          cat build/orbis-fixtures/linker-tests.txt build/orbis-fixtures/segments-tests.txt > orbis-macos-tests.txt
           xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
             -c MaxPS4-iOS/Native/OrbisLinkerBridge.cpp -o "$RUNNER_TEMP/orbis-bridge.o"
           swiftc -parse-as-library -import-objc-header MaxPS4-iOS/Native/OrbisLinkerBridge.h \
