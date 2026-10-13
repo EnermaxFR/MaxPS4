@@ -227,6 +227,20 @@ int main() {
     modules[1].logicalPath = "lib/a.prx";
     modules.push_back({"lib/a.prx", {}});
     assert(!Plan::orderModules(modules, order, graphDiagnostic) && order.empty());
+    // Atomic staging: an invalid second module must not expose the first.
+    std::vector<Plan::ModuleBytes> batch{
+        {{"lib/b.prx", {}}, nullptr, 0},
+        {{"eboot.bin", {"lib/b.prx"}}, nullptr, 0}
+    };
+    std::vector<Plan::PreparedModule> staged;
+    staged.emplace_back();
+    assert(!Plan::prepareModules(batch, staged, graphDiagnostic));
+    assert(staged.empty());
+    assert(graphDiagnostic.find("lib/b.prx") != std::string::npos);
+    batch[1].request.dependencies = {"missing.prx"};
+    assert(!Plan::prepareModules(batch, staged, graphDiagnostic));
+    assert(staged.empty());
+    assert(graphDiagnostic.find("manquante") != std::string::npos);
     std::puts("PASS PKG inventory: public layout, bounds, budgets, protection flags, ambiguity, exact I/O, C/Swift report ABI");
     std::puts("Synthetic fixtures only; no DRM, PFS extraction, PS4 executable admission or iPhone execution tested");
 }
