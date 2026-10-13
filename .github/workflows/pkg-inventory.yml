@@ -3,10 +3,13 @@ on:
   pull_request:
     paths:
       - 'MaxPS4-iOS/Native/PS4PKG*'
+      - 'MaxPS4-iOS/Native/PS4SFO.hpp'
       - 'MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h'
       - 'MaxPS4-iOS/Sources/MaxPS4PKGInspector.swift'
       - 'MaxPS4-iOS/Sources/MaxPS4Emulator.swift'
+      - 'MaxPS4-iOS/Sources/MaxPS4HomeView.swift'
       - 'MaxPS4-iOS/Tests/PS4PKGInventoryTest.cpp'
+      - 'MaxPS4-iOS/Tests/PS4PKGMetadataTest.cpp'
       - 'MaxPS4-iOS/Tests/PKGSwiftDiagnosticTest.swift'
       - 'MaxPS4-iOS/project.yml'
       - '.github/workflows/pkg-inventory.yml'
@@ -27,11 +30,20 @@ jobs:
             MaxPS4-iOS/Native/PS4PKGBridge.cpp MaxPS4-iOS/Tests/PS4PKGInventoryTest.cpp \
             -o "$RUNNER_TEMP/pkg-test"
           "$RUNNER_TEMP/pkg-test" | tee pkg-tests.txt
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer \
+            MaxPS4-iOS/Native/PS4PKGBridge.cpp MaxPS4-iOS/Tests/PS4PKGMetadataTest.cpp \
+            -o "$RUNNER_TEMP/pkg-metadata-test"
+          "$RUNNER_TEMP/pkg-metadata-test" build/pkg-fixtures | tee pkg-metadata-tests.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: PKG-sanitizer-report
-          path: pkg-tests.txt
+          path: pkg*-tests.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-synthetic-PKG-fixtures
+          path: build/pkg-fixtures/*.pkg
+          if-no-files-found: error
   swift-ios:
     runs-on: macos-latest
     timeout-minutes: 10
@@ -44,6 +56,9 @@ jobs:
           xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
             MaxPS4-iOS/Native/PS4PKGBridge.cpp MaxPS4-iOS/Tests/PS4PKGInventoryTest.cpp -o "$RUNNER_TEMP/pkg-test"
           "$RUNNER_TEMP/pkg-test" | tee pkg-native-macos.txt
+          xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            MaxPS4-iOS/Native/PS4PKGBridge.cpp MaxPS4-iOS/Tests/PS4PKGMetadataTest.cpp -o "$RUNNER_TEMP/pkg-metadata-test"
+          "$RUNNER_TEMP/pkg-metadata-test" | tee pkg-metadata-macos.txt
           xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
             -c MaxPS4-iOS/Native/PS4PKGBridge.cpp -o "$RUNNER_TEMP/pkg-bridge.o"
           swiftc -parse-as-library -import-objc-header MaxPS4-iOS/Native/PS4PKGBridge.h \

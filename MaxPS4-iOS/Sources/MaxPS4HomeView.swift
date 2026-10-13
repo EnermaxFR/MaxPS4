@@ -221,9 +221,6 @@ struct MaxPS4HomeView: View {
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                         Text(game.fileName.lowercased().hasSuffix(".pkg") ? "Format : PKG PS4" : "Format : ELF / SELF")
-                        if game.fileName.uppercased().contains("SONICMANIA") {
-                            Text("Identifiant PS4 observé : CUSA07023").foregroundStyle(.cyan)
-                        }
                         if let attributes = try? FileManager.default.attributesOfItem(atPath: game.localPath),
                            let value = attributes[.size] as? NSNumber {
                             Text("Taille locale : " + ByteCountFormatter.string(fromByteCount: value.int64Value, countStyle: .file))
@@ -236,9 +233,14 @@ struct MaxPS4HomeView: View {
                             detailsReport = emulator.status
                         }
                         .buttonStyle(.borderedProminent)
-                        Button("Analyser les métadonnées") {
-                            emulator.inspect(game)
-                            detailsReport = emulator.status
+                        Button(game.fileName.lowercased().hasSuffix(".pkg") ? "Analyser le PKG" : "Analyser l’exécutable") {
+                            if game.fileName.lowercased().hasSuffix(".pkg") {
+                                detailsReport = "Analyse du PKG en cours…"
+                                Task { detailsReport = await emulator.analyzePKG(game) }
+                            } else {
+                                emulator.inspect(game)
+                                detailsReport = emulator.status
+                            }
                         }
                         .buttonStyle(.borderedProminent)
                         if game.fileName.lowercased().hasSuffix(".elf") || game.fileName.lowercased() == "eboot.bin" {
@@ -254,38 +256,6 @@ struct MaxPS4HomeView: View {
                             .buttonStyle(.bordered)
                         }
                         if game.fileName.lowercased().hasSuffix(".pkg") {
-                            Button("Diagnostiquer le lancement du PKG") {
-                                emulator.diagnosePKGBoot(game)
-                                let bootReport = emulator.status
-                                emulator.inspectPS4EntryPrefixes(game)
-                                detailsReport = bootReport + "\n\n--- Recherche d’exécutable ELF/SELF ---\n" + emulator.status + "\n\nAucun déchiffrement ni lancement PS4 effectué."
-                            }
-                            .buttonStyle(.borderedProminent)
-                            Button("Examiner les entrées du PKG") {
-                                emulator.inspectPKGEntries(game)
-                                detailsReport = emulator.status
-                            }
-                            .buttonStyle(.bordered)
-                            Button("Scanner les exécutables PS4") {
-                                emulator.inspectPS4EntryPrefixes(game)
-                                detailsReport = emulator.status
-                            }
-                            .buttonStyle(.bordered)
-                            Button("Vérifier le chargeur PS4 / SELF") {
-                                emulator.inspectPS4ExecutableReadiness(game)
-                                detailsReport = emulator.status
-                            }
-                            .buttonStyle(.bordered)
-                            Button("Rechercher ressources Sonic Mania") {
-                                emulator.inspectPKGAssetCandidates(game)
-                                detailsReport = emulator.status
-                            }
-                            .buttonStyle(.bordered)
-                            Button("Analyser la structure du PKG") {
-                                emulator.inspectPKGStructure(game)
-                                detailsReport = emulator.status
-                            }
-                            .buttonStyle(.bordered)
                             Button("Calculer SHA-256 du PKG") {
                                 detailsReport = "Calcul de l’empreinte SHA-256 en cours…"
                                 Task {
@@ -970,7 +940,7 @@ struct MaxPS4HomeView: View {
         let colors: [Color] = [.blue, .indigo, .purple, .cyan]
         let accent = colors[game.name.utf8.reduce(0) { ($0 + Int($1)) % colors.count }]
         let isPKG = game.fileName.lowercased().hasSuffix(".pkg")
-        let displayedTitle = isPKG && game.fileName.uppercased().contains("SONICMANIA") ? "Sonic Mania" : game.name
+        let displayedTitle = game.name
 
         return VStack(alignment: .leading, spacing: 10) {
             Button {
@@ -1048,30 +1018,15 @@ struct MaxPS4HomeView: View {
                         Label("Diagnostic de lancement", systemImage: "stethoscope")
                     }
                     Button {
-                        emulator.inspect(game)
-                        inspectionReport = emulator.status
+                        if game.fileName.lowercased().hasSuffix(".pkg") {
+                            inspectionReport = "Analyse du PKG en cours…"
+                            Task { inspectionReport = await emulator.analyzePKG(game) }
+                        } else {
+                            emulator.inspect(game)
+                            inspectionReport = emulator.status
+                        }
                     } label: {
                         Label(game.fileName.lowercased().hasSuffix(".pkg") ? "Analyser le PKG" : "Analyser l’exécutable", systemImage: "doc.text.magnifyingglass")
-                    }
-                    if game.fileName.lowercased().hasSuffix(".pkg") {
-                        Button {
-                            emulator.inspectPKGEntries(game)
-                            inspectionReport = emulator.status
-                        } label: {
-                            Label("Examiner les entrées du PKG", systemImage: "list.bullet.rectangle")
-                        }
-                        Button {
-                            emulator.inspectPKGStructure(game)
-                            inspectionReport = emulator.status
-                        } label: {
-                            Label("Vérifier la structure PKG", systemImage: "checkmark.shield")
-                        }
-                        Button {
-                            emulator.diagnosePKGBoot(game)
-                            inspectionReport = emulator.status
-                        } label: {
-                            Label("Diagnostiquer le démarrage", systemImage: "stethoscope")
-                        }
                     }
                     Button(role: .destructive) {
                         gameToDelete = game

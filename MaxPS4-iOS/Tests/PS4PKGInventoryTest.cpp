@@ -173,7 +173,7 @@ int main() {
     assert(capped.find("Octets inspectés (budget partagé) : 1048576") != std::string::npos);
     assert(capped.find("Octets copiés en mémoire : 0") != std::string::npos);
     char tiny[8]; assert(maxps4_pkg_inventory_report(path, tiny, sizeof(tiny)) != 0 && tiny[7] == 0);
-    assert(maxps4_pkg_inventory_report(nullptr, tiny, sizeof(tiny)) != 0 && tiny[0] == 0);
+    assert(maxps4_pkg_inventory_report(nullptr, tiny, sizeof(tiny)) != 0 && tiny[0] != 0 && tiny[7] == 0);
     assert(maxps4_pkg_inventory_report(path, nullptr, 0) != 0);
     assert(unlink(path) == 0);
     assert(maxps4_pkg_inventory_report(path, tiny, sizeof(tiny)) != 0);
