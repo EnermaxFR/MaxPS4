@@ -52,8 +52,15 @@ public:
             const auto* pointer = image->translate(segment.address, executable_bytes, 5);
             if (!pointer) continue;
             const auto begin = reinterpret_cast<uintptr_t>(pointer);
-            if (address >= begin && address - begin < executable_bytes)
+            if (address >= begin && address - begin < executable_bytes) {
+                // Verify the exact requested instruction address in the PS4
+                // logical address domain, not only the segment's first byte.
+                const uint64_t displacement = address - begin;
+                if (displacement > UINT64_MAX - segment.address) continue;
+                const uint64_t guest_address = segment.address + displacement;
+                if (memory.contiguous(guest_address, 1, 5) != 1) continue;
                 return {begin, executable_bytes, false};
+            }
         }
         return {0, 0, false};
     }
