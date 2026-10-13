@@ -84,8 +84,22 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                             if (std::search(bytes.begin(), bytes.end(), name, name + 9,
                                 [](uint8_t a, char b) { return (a | 0x20U) == static_cast<uint8_t>(b); }) != bytes.end())
                                 report << " ; indice texte eboot.bin (ne prouve pas un fichier accessible)";
-                            if (bytes.size() >= 4 && !std::memcmp(bytes.data(), "\177ELF", 4))
-                                report << " ; signature ELF candidate (non validée)";
+                            if (bytes.size() >= 4 && !std::memcmp(bytes.data(), "\177ELF", 4)) {
+                                // Header-only admission probe. No ELF segments are mapped or executed.
+                                if (bytes.size() < 64) {
+                                    report << " ; ELF tronqué : en-tête ELF64 incomplet";
+                                } else if (bytes[4] != 2 || bytes[5] != 1 || bytes[6] != 1) {
+                                    report << " ; ELF incompatible : ELF64 little-endian version 1 requis";
+                                } else {
+                                    const uint16_t machine = uint16_t(bytes[18]) | (uint16_t(bytes[19]) << 8);
+                                    const uint16_t headerSize = uint16_t(bytes[52]) | (uint16_t(bytes[53]) << 8);
+                                    if (machine != 62 || headerSize != 64) {
+                                        report << " ; ELF incompatible : machine x86-64 et en-tête 64 octets requis";
+                                    } else {
+                                        report << " ; en-tête ELF64 x86-64 reconnu (segments non validés, aucune admission)";
+                                    }
+                                }
+                            }
                             if (bytes.size() >= 4 && !std::memcmp(bytes.data(), "\117\025\075\035", 4))
                                 report << " ; signature SELF candidate (non validée)";
                         } else report << " ; " << why;
