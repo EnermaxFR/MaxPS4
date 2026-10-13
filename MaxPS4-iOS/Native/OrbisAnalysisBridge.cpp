@@ -1,5 +1,6 @@
 #include "OrbisAnalysisBridge.h"
 #include "OrbisMetadata.hpp"
+#include "OrbisLinker.hpp"
 #include "maxps4_fex_runtime.h"
 #include <cstdio>
 #include <cerrno>
@@ -33,7 +34,15 @@ int maxps4_orbis_analysis_report(const char* path, char* output, size_t capacity
             return s.moduleVersion == 0x0100 &&
                 maxps4_ps4_resolve_libkernel(s.nid.c_str(),s.library.c_str(),s.module.c_str(),s.libraryVersion) != 0;
         });
-        return copy(metadata.report(),valid ? 0 : -ENOEXEC);
+        // Inventory/HLE recognition is not a link binding. Prepare with an empty
+        // registry and no external files; missing PRX/NID remains a real refusal.
+        maxps4::OrbisLinker::Image image;
+        maxps4::OrbisLinker::Report preparation;
+        std::string diagnostic;
+        maxps4::OrbisLinker::Input input{{{"selected.elf", {}}, bytes.data(), bytes.size()}, 0};
+        maxps4::OrbisLinker::link({input}, {}, image, diagnostic,
+            maxps4::PS4PKGRuntimePlan::batchMemoryBudget, &preparation);
+        return copy(metadata.report() + "\nLes NID HLE reconnus ci-dessus ne constituent pas des bindings du runtime.\n\n" + preparation.text() + "\nImage de diagnostic temporaire ; aucune image conservée par l’application.", valid ? 0 : -ENOEXEC);
     } catch (const std::bad_alloc&) { return copy("Allocation du diagnostic impossible",-ENOMEM); }
       catch (const std::exception&) { return copy("Erreur interne du diagnostic Orbis",-EIO); }
 }

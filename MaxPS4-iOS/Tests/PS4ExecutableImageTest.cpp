@@ -17,6 +17,8 @@ int main() {
     assert(image.translate(0x10000, 64, 6)[12] == 0); // Zero-filled BSS.
     auto commands = maxps4::gpu::snapshotPM4(image, 0x10000, 3);
     assert(commands.error == 0 && commands.words[2] == 2);
+    auto sectionless=elf; guest_test::put(sectionless,64,58,2);
+    assert(image.load(sectionless.data(),sectionless.size())==0); // Legal entry size without sections.
     auto self = plainSELF();
     assert(image.load(self.data(), self.size()) == 0);
     assert(image.isSelf && image.entry == 0x1000 && image.segments.size() == 2);
@@ -38,6 +40,11 @@ int main() {
     reject(self, 32, 0x100802, 8); // Encrypted: no substitute/decryption.
     reject(self, 32, 0x100808, 8); // Compressed: no guessed layout.
     reject(self, 32, 0x100810, 8); // Unknown flags.
+    reject(elf, 9, 1, 1); reject(elf, 15, 1, 1); reject(elf, 48, 1, 4);
+    reject(elf, 40, 64, 8); reject(elf, 58, 56, 2); reject(elf, 62, 1, 2);
+    // Metadata file spans are validated even when not mapped into guest memory.
+    auto badMetadata=elf; guest_test::put(badMetadata,2,120,4);
+    reject(badMetadata,128,UINT64_MAX,8);
     reject(elf, 7, 0, 1); reject(elf, 16, 2, 2); reject(elf, 18, 183, 2);
     reject(elf, 32, UINT64_MAX, 8); reject(elf, 56, 129, 2);
     reject(elf, 24, 0x10000, 8); reject(elf, 96, 33, 8);

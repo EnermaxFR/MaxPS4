@@ -22,6 +22,12 @@ typedef struct {
 // always terminated when capacity > 0. Dependencies are explicit logical paths.
 int32_t maxps4_orbis_link(const maxps4_orbis_module* modules, size_t count,
     size_t memory_budget, maxps4_orbis_image** output, char* diagnostic, size_t capacity);
+// Same transaction with a readable preparation report on success and failure.
+// Counters on failure describe checks performed, never committed state.
+// A success report must fit in capacity (4096 recommended), otherwise -ENOSPC
+// leaves output null. No execution backend is available through this API.
+int32_t maxps4_orbis_link_with_report(const maxps4_orbis_module* modules, size_t count,
+    size_t memory_budget, maxps4_orbis_image** output, char* report, size_t capacity);
 void maxps4_orbis_close(maxps4_orbis_image* image);
 size_t maxps4_orbis_mapping_count(const maxps4_orbis_image* image);
 int32_t maxps4_orbis_get_mapping(const maxps4_orbis_image* image, size_t index,

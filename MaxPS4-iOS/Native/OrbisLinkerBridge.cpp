@@ -12,8 +12,8 @@ bool bounded(const char* text) {
     return false;
 }
 }
-extern "C" int32_t maxps4_orbis_link(const maxps4_orbis_module* modules, size_t count,
-    size_t budget, maxps4_orbis_image** output, char* diagnostic, size_t capacity) {
+static int32_t linkModules(const maxps4_orbis_module* modules, size_t count,
+    size_t budget, maxps4_orbis_image** output, char* diagnostic, size_t capacity, bool fullReport) {
     report(diagnostic, capacity, "invalid module input");
     if (!output || *output || !modules || !count || count > 128 || (!diagnostic && capacity)) return -EINVAL;
     try {
@@ -30,11 +30,24 @@ extern "C" int32_t maxps4_orbis_link(const maxps4_orbis_module* modules, size_t 
             inputs.push_back(std::move(in));
         }
         auto pending = std::make_unique<maxps4_orbis_image>(); std::string message;
-        if (!maxps4::OrbisLinker::link(inputs, {}, pending->image, message, budget)) {
-            report(diagnostic, capacity, message); return -ENOEXEC;
+        maxps4::OrbisLinker::Report preparation;
+        if (!maxps4::OrbisLinker::link(inputs, {}, pending->image, message, budget, &preparation)) {
+            report(diagnostic, capacity, fullReport ? preparation.text() : message); return -ENOEXEC;
         }
-        *output = pending.release(); report(diagnostic, capacity, ""); return 0;
+        const auto text = fullReport ? preparation.text() : std::string{};
+        if (fullReport && (!diagnostic || capacity <= text.size())) {
+            report(diagnostic, capacity, "Rapport tronqué ; image non engagée"); return -ENOSPC;
+        }
+        report(diagnostic, capacity, text); *output = pending.release(); return 0;
     } catch (const std::bad_alloc&) { report(diagnostic, capacity, "allocation failed"); return -ENOMEM; }
+}
+extern "C" int32_t maxps4_orbis_link(const maxps4_orbis_module* modules, size_t count,
+    size_t budget, maxps4_orbis_image** output, char* diagnostic, size_t capacity) {
+    return linkModules(modules, count, budget, output, diagnostic, capacity, false);
+}
+extern "C" int32_t maxps4_orbis_link_with_report(const maxps4_orbis_module* modules, size_t count,
+    size_t budget, maxps4_orbis_image** output, char* diagnostic, size_t capacity) {
+    return linkModules(modules, count, budget, output, diagnostic, capacity, true);
 }
 extern "C" void maxps4_orbis_close(maxps4_orbis_image* image) { delete image; }
 extern "C" size_t maxps4_orbis_mapping_count(const maxps4_orbis_image* image) {

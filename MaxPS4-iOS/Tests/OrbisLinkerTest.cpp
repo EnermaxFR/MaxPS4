@@ -7,7 +7,7 @@
 using Linker = maxps4::OrbisLinker;
 using namespace orbis_fixture;
 static size_t checks = 0;
-static void check(bool ok, const char* message) { ++checks; if (!ok) { std::cerr << message << '\n'; std::exit(1); } }
+static void check(bool ok, const char* message) { ++checks; if (!ok) { std::cerr << "check " << checks << ": " << message << '\n'; std::exit(1); } }
 static uint64_t value(const Linker::Image& image, uint64_t address) {
     const auto* p = image.translate(address,8,4); check(p != nullptr,"read relocation");
     uint64_t v = 0; for (size_t i=0;i<8;++i) v |= uint64_t(p[i])<<(i*8); return v;
@@ -53,6 +53,11 @@ int main(int argc, char** argv) {
     put(consumer,64+56+4,4,4); reject(batch(),"relocation target"); consumer=original;
     put(consumer,64+4,7,4); reject(batch(),"writable executable"); consumer=original;
     put(consumer,0x900,0x1000); reject(batch(),"relocation target"); consumer=original;
+    reject({},"invalid module count");
+    auto tooMany=std::vector<Linker::Input>(129,batch()[0]); reject(tooMany,"invalid module count");
+    auto tooManyDeps=batch(); tooManyDeps[0].file.request.dependencies.resize(129,"provider.prx"); reject(tooManyDeps,"request budget");
+    auto giantPath=batch(); giantPath[0].file.request.dependencies={std::string(256,'a')}; reject(giantPath,"path budget");
+    auto giantFile=batch(); giantFile[0].file.size=SIZE_MAX; reject(giantFile,"invalid ELF file size");
     auto truncated = batch(); truncated[0].file.size=63; reject(truncated,"chargeur");
     consumer[0]=0; reject(batch(),"ELF Orbis"); consumer=original;
     setTag(consumer,0x61000035,0x5ff); reject(batch(),"SCE table out of bounds"); consumer=original;
@@ -89,9 +94,9 @@ int main(int argc, char** argv) {
     Linker::Image plt; check(Linker::link(batch(),{},plt,diagnostic) && value(plt,0x102000)==0x201000, "SCE PLT RELA");
     put(consumer,0x498,17); reject(batch(), "relocation table encoding"); consumer=original;
     // Exact descriptor versions are part of the key; no guessed compatibility.
-    setTag(consumer,0x61000015,uint64_t{1}|(uint64_t{2}<<32)|(uint64_t{1}<<48)); reject(batch(), "unresolved NID"); consumer=original;
+    setTag(consumer,0x61000015,uint64_t{1}|(uint64_t{2}<<32)|(uint64_t{1}<<48)); reject(batch(), "PRX library"); consumer=original;
     put(consumer,0x460,0xdeadbeef); reject(batch(), "unsupported dynamic tag"); consumer=original;
-    put(consumer,64+3*56+8,UINT64_MAX); reject(batch(), "dynamic metadata out of bounds"); consumer=original;
+    put(consumer,64+3*56+8,UINT64_MAX); reject(batch(), "chargeur"); consumer=original;
     // A PRX entry in zero-filled memory is not admitted as file-backed code.
     put(provider,24,0x1100); put(provider,64+40,0x200); reject(batch(), "invalid module entry"); provider=make(true);
     put(consumer,64+2*56+32,160); reject(batch(), "unterminated dynamic table"); consumer=original;
@@ -101,13 +106,17 @@ int main(int argc, char** argv) {
     const size_t symbolName = 0x601 + std::string("FixtureLibrary").size()+1+std::string("FixtureModule").size()+1;
     consumer[symbolName]='!'; reject(batch(), "invalid NID alphabet"); consumer=original;
     consumer[symbolName+12]='C'; reject(batch(), "missing library/module ID"); consumer=original;
+    put(provider,64+40,0x200); put(provider,0x820,0x1100);
+    reject(batch(),"function export outside file-backed code"); provider=make(true);
+    put(provider,64+40,0x200); put(provider,0x820,0x10ff); put(provider,0x828,2);
+    reject(batch(),"function export outside file-backed code"); provider=make(true);
     put(provider,0x820,0x3000); reject(batch(), "export outside valid segment"); provider=make(true);
     put(consumer,64+3*56,7,4); reject(batch(), "TLS not supported"); consumer=original;
     put(consumer,64+56+40,33*1024*1024); reject(batch(), "chargeur"); consumer=original;
     // Overflow in S+A, independently of segment-address overflow.
     put(consumer,0x908,(uint64_t{1}<<32)|1); put(consumer,0x910,INT64_MAX);
     auto addOverflow=batch(); addOverflow[1].bias=UINT64_MAX-0x10000;
-    reject(addOverflow, "guest address overflow"); consumer=original;
+    reject(addOverflow, "non-canonical"); consumer=original;
     auto overlapping=batch(); overlapping[1].bias=0x100000; reject(overlapping,"overlapping guest modules");
     auto overflow=batch(); overflow[1].bias=UINT64_MAX-0x800; reject(overflow,"guest address overflow");
     auto names=batch(); names[1].file.request.logicalPath="../provider.prx"; reject(names,"chemin");
@@ -122,6 +131,64 @@ int main(int argc, char** argv) {
     check(!Linker::link(batch(),{{id,0x201000}},hleImage,diagnostic),"HLE/export collision rejected");
     check(!Linker::link(hleBatch,{{id,0x202000}},hleImage,diagnostic),"HLE data target refused");
     id.libraryVersion=2; check(!Linker::link(hleBatch,{{id,0x201000}},hleImage,diagnostic),"HLE version mismatch unresolved");
+    // Regression: unused dependency descriptors must not silently disappear.
+    put(consumer,0x81c,0x02,1); put(consumer,0x81e,1,2); put(consumer,0x820,0x1000); put(consumer,0x828,1);
+    setTag(consumer,0x61000031,0);
+    auto unused = batch(); unused[0].file.request.dependencies.clear();
+    reject(unused,"missing explicit dependency"); consumer=original;
+    // Multiple providers, even with an unreferenced second module identity.
+    auto second = provider;
+    const size_t moduleOffset = 0x601 + std::string("FixtureLibrary").size()+1;
+    second[moduleOffset] = 'S'; second[0x601] = 'S';
+    consumer[0x650] = 'S';
+    const std::string secondName = "SixtureModule";
+    std::copy(secondName.begin(),secondName.end(),consumer.begin()+0x650); consumer[0x650+secondName.size()]=0;
+    setTag(consumer,0x61000037,0x70);
+    appendTag(consumer,0x6100000f,0x50 | (uint64_t{0x100}<<32) | (uint64_t{2}<<48));
+    auto multiple = batch(); multiple[0].file.request.dependencies.push_back("second.prx");
+    multiple.push_back(input("second.prx",second,0x300000,{}));
+    Linker::Report progress; Linker::Image multi;
+    check(Linker::link(multiple,{},multi,diagnostic,4096,&progress),diagnostic.c_str());
+    check(multi.modules.size()==3 && progress.dependencies==2 && progress.committed,"multiple PRX metadata dependencies");
+    multiple.pop_back();
+    check(!Linker::link(multiple,{},multi,diagnostic,4096,&progress) && !progress.committed && multi.modules.size()==3,"missing PRX retains previous batch");
+    consumer=original;
+    // DT_NEEDED uses only a checked SCE string-table offset, never filename guessing.
+    const std::string needed="provider.prx";
+    std::copy(needed.begin(),needed.end(),consumer.begin()+0x650); consumer[0x650+needed.size()]=0;
+    setTag(consumer,0x61000037,0x70); appendTag(consumer,1,0x50);
+    check(Linker::link(batch(),{},multi,diagnostic,4096,&progress) && progress.dependencies==2,"DT_NEEDED closed graph");
+    auto noNeeded=batch(); noNeeded[0].file.request.dependencies.clear(); reject(noNeeded,"missing explicit dependency");
+    appendTag(consumer,1,0x50); reject(batch(),"duplicate DT_NEEDED"); consumer=original;
+    appendTag(consumer,1,UINT64_MAX); reject(batch(),"string offset"); consumer=original;
+    // A compatible identity supplied twice is ambiguous even without any exports.
+    auto noSymbols=provider; setTag(noSymbols,0x6100003f,24);
+    auto ambiguous=batch(); ambiguous[0].file.request.dependencies.push_back("duplicate.prx");
+    ambiguous.push_back(input("duplicate.prx",noSymbols,0x300000,{})); reject(ambiguous,"ambiguous PRX module");
+    setTag(provider,0x6100000d,uint64_t(moduleOffset-0x600)|(uint64_t{0x200}<<32)|(uint64_t{1}<<48));
+    reject(batch(),"incompatible"); provider=make(true);
+    // Static executable preparation needs no invented dynamic tables/imports.
+    put(consumer,64+3*56,3,4); reject(batch(),"unsupported runtime program header"); consumer=original;
+    auto standalone=makeStatic(); Linker::Image staticImage;
+    check(Linker::link({input("static.elf",standalone,0x400000,{})},{},staticImage,diagnostic,4096,&progress),diagnostic.c_str());
+    check(progress.committed && progress.imports==0 && progress.relocations==0 && progress.memoryBytes==0x300,"static report counts");
+    check(staticImage.translate(0x402100,0x100,6) && value(staticImage,0x402100)==0,"BSS is zero and writable");
+    check(!staticImage.translate(0x401000,1,2) && !staticImage.translate(0x402000,1,1),"guest W/X permissions");
+    check(!staticImage.translate(UINT64_MAX,8,4) && !staticImage.translate(0x4021ff,2,4),"exact memory boundaries");
+    auto snapshot=staticImage.mappings(); const auto* owned=snapshot[0].data;
+    auto moved=std::move(staticImage); check(moved.translate(snapshot[0].address,1,4)==owned,"mapping ownership follows moved image");
+    // Invalid later module/relocation yields no committed counters or writes.
+    setTag(consumer,0x61000031,48); put(consumer,0x918,0x2008); put(consumer,0x920,(uint64_t{1}<<32)|99);
+    check(!Linker::link(batch(),{},moved,diagnostic,4096,&progress),"late failure with report");
+    check(progress.phase=="relocations" && progress.validatedRelocations==1 && !progress.committed &&
+        progress.text().find("appliquées : 0")!=std::string::npos && moved.modules.size()==1,"failure report is not a positive result"); consumer=original;
+    auto nonCanonical=batch(); nonCanonical[1].bias=uint64_t{1}<<47; reject(nonCanonical,"non-canonical");
+    auto edgeCanonical=batch(); edgeCanonical[1].bias=(uint64_t{1}<<47)-0x2000; reject(edgeCanonical,"non-canonical");
+    // Every truncation before the last required metadata byte must fail safely.
+    for (size_t n=0;n<original.size();++n) {
+        auto shortBatch=batch(); shortBatch[0].file.size=n;
+        check(!Linker::link(shortBatch,{},moved,diagnostic,4096,&progress) && !progress.committed,"truncated file rejected transactionally");
+    }
     check(consumer==original,"source unchanged after successful links");
     const char* deps[]={"provider.prx"};
     maxps4_orbis_module native[]={{"app.elf",consumer.data(),consumer.size(),0x100000,deps,1},{"provider.prx",provider.data(),provider.size(),0x200000,nullptr,0}};
@@ -135,6 +202,15 @@ int main(int argc, char** argv) {
     check(maxps4_orbis_read(handle,0x1020ff,copied,8)<0 && copied[0]==0xa5 && copied[7]==0xa5,"failed native read preserves output");
     check(maxps4_orbis_get_mapping(handle,99,&mapping)<0,"invalid mapping index");
     maxps4_orbis_close(handle); handle=nullptr;
+    char detailed[4096];
+    check(maxps4_orbis_link_with_report(native,2,1024,&handle,detailed,sizeof(detailed))==0,"native detailed preparation");
+    check(std::string(detailed).find("Préparation : réussie")!=std::string::npos &&
+        std::string(detailed).find("Exécution : impossible")!=std::string::npos,"preparation distinct from execution");
+    maxps4_orbis_close(handle); handle=nullptr;
+    check(maxps4_orbis_link_with_report(native,2,1024,&handle,detailed,8)==-ENOSPC && !handle,"truncated report cannot commit image");
+    native[0].size=63;
+    check(maxps4_orbis_link_with_report(native,2,1024,&handle,detailed,sizeof(detailed))<0 && !handle &&
+        std::string(detailed).find("image non engagée")!=std::string::npos,"native rejected report");
     native[0].size=1;
     check(maxps4_orbis_link(native,2,1024,&handle,report,sizeof(report))<0 && !handle && report[0],"failed native transaction");
     std::cout << "Orbis linker: " << checks << " checks passed\n";

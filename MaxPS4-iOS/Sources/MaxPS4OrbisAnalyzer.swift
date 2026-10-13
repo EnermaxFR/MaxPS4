@@ -1,6 +1,7 @@
 import Foundation
 
-/// File inventory only. Does not enter FEX or allocate guest/JIT memory.
+/// Inventory and transient native preparation of one standalone plaintext file.
+/// Missing external PRX remain missing. Does not enter FEX or allocate JIT memory.
 enum MaxPS4OrbisAnalyzer {
     static func inspect(url: URL) -> String {
         var output = [CChar](repeating: 0, count: 2 * 1_048_576)
