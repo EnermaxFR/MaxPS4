@@ -241,6 +241,46 @@ int main() {
     assert(!Plan::prepareModules(batch, staged, graphDiagnostic));
     assert(staged.empty());
     assert(graphDiagnostic.find("manquante") != std::string::npos);
+    // Two standalone synthetic Orbis ELF64 images, no proprietary payload.
+    auto syntheticElf = [](uint16_t type, uint64_t address, uint64_t memorySize) {
+        std::vector<uint8_t> elf(0x101, 0);
+        std::memcpy(elf.data(), "\\177ELF\\2\\1\\1\\11", 9);
+        auto le = [&](size_t at, uint64_t value, size_t width) {
+            for (size_t i = 0; i < width; ++i)
+                elf.at(at + i) = static_cast<uint8_t>(value >> (i * 8));
+        };
+        le(16, type, 2); le(18, 62, 2); le(20, 1, 4);
+        le(24, address, 8); le(32, 64, 8);
+        le(52, 64, 2); le(54, 56, 2); le(56, 1, 2);
+        le(64, 1, 4); le(68, 5, 4);
+        le(72, 0x100, 8); le(80, address, 8);
+        le(96, 1, 8); le(104, memorySize, 8);
+        elf[0x100] = 0xc3;
+        return elf;
+    };
+    auto libElf = syntheticElf(0xfe18, 0x1000, 4096);
+    auto mainElf = syntheticElf(0xfe00, 0x2000, 4096);
+    batch = {
+        {{"eboot.bin", {"lib/b.prx"}}, mainElf.data(), mainElf.size()},
+        {{"lib/b.prx", {}}, libElf.data(), libElf.size()}
+    };
+    assert(Plan::prepareModules(batch, staged, graphDiagnostic));
+    assert(staged.size() == 2);
+    assert(staged[0].logicalPath == "lib/b.prx" && staged[1].logicalPath == "eboot.bin");
+    assert(staged[0].image.translate(0x1000, 1, 1) &&
+           *staged[0].image.translate(0x1000, 1, 1) == 0xc3);
+    assert(staged[1].image.translate(0x2000, 1, 1) &&
+           *staged[1].image.translate(0x2000, 1, 1) == 0xc3);
+    // A 32 MiB image is individually allowed, but three exceed the batch cap.
+    auto largeElf = syntheticElf(0xfe18, 0x3000, 32 * 1024 * 1024);
+    batch = {
+        {{"lib/a.prx", {}}, largeElf.data(), largeElf.size()},
+        {{"lib/b.prx", {}}, largeElf.data(), largeElf.size()},
+        {{"lib/c.prx", {}}, largeElf.data(), largeElf.size()}
+    };
+    assert(!Plan::prepareModules(batch, staged, graphDiagnostic));
+    assert(staged.empty());
+    assert(graphDiagnostic.find("64 Mio") != std::string::npos);
     std::puts("PASS PKG inventory: public layout, bounds, budgets, protection flags, ambiguity, exact I/O, C/Swift report ABI");
     std::puts("Synthetic fixtures only; no DRM, PFS extraction, PS4 executable admission or iPhone execution tested");
 }
