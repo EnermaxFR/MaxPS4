@@ -180,7 +180,7 @@ int main() {
     assert(fclose(file) == 0);
     assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
     const std::string descriptorReport(report.data());
-    assert(descriptorReport.find("Diagnostic metas : début à l'offset") != std::string::npos);
+    assert(descriptorReport.find("Diagnostic metas : début à l'offset de la table PKG ; alias possible") != std::string::npos);
     assert(descriptorReport.find("Diagnostic entry_names : table déclarée") != std::string::npos);
     f = original;
     // Malformed names cannot consume 1 MiB then restart the payload budget.
