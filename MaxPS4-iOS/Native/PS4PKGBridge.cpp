@@ -33,6 +33,23 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
             report << "Taille vérifiée : " << size << " octets ; entrées : " << pkg.entries.size()
                    << "\nCorps : " << pkg.bodyOffset << " + " << pkg.bodySize
                    << "\nPFS : " << pkg.pfsOffset << " + " << pkg.pfsSize << " (opaque, non monté)\n";
+            // An explicit inventory summary distinguishes inaccessible payloads from
+            // missing executables. No signature scan of the opaque PFS is attempted.
+            size_t readable = 0, encrypted = 0, unsupported = 0, unknown = 0, invalid = 0;
+            for (const auto& entry : pkg.entries) {
+                switch (entry.access) {
+                case maxps4::PS4PKGInventory::Access::plaintext: ++readable; break;
+                case maxps4::PS4PKGInventory::Access::encrypted: ++encrypted; break;
+                case maxps4::PS4PKGInventory::Access::unsupported: ++unsupported; break;
+                case maxps4::PS4PKGInventory::Access::unknown: ++unknown; break;
+                case maxps4::PS4PKGInventory::Access::invalid: ++invalid; break;
+                }
+            }
+            report << "Bilan des descripteurs : lisibles déclarés=" << readable
+                   << " ; chiffrés déclarés=" << encrypted
+                   << " ; non pris en charge=" << unsupported
+                   << " ; inconnus=" << unknown << " ; invalides=" << invalid << '\n';
+            if (pkg.pfsSize) report << "PFS présent : contenu opaque ; aucun exécutable déduit de cet inventaire.\\n";
             size_t inspected = 0;
             auto boundedRead = [&](uint64_t offset, uint8_t* bytes, size_t count) {
                 if (count > pkg.extractionBudget - inspected) return false;
