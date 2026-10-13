@@ -5,6 +5,7 @@ on:
     branches: ['codex/ps4-memory-translation-contract']
     paths:
       - 'scripts/*fexcore*'
+      - 'scripts/run-bounded.py'
       - 'cmake/FEXCoreIOSLinkage.cmake'
       - '.github/workflows/fexcore-ios-linkage.yml'
       - 'MaxPS4-iOS/Native/**'
@@ -13,6 +14,7 @@ on:
   pull_request:
     paths:
       - 'scripts/*fexcore*'
+      - 'scripts/run-bounded.py'
       - 'cmake/FEXCoreIOSLinkage.cmake'
       - '.github/workflows/fexcore-ios-linkage.yml'
       - 'MaxPS4-iOS/Native/**'

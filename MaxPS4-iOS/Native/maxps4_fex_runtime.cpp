@@ -4,6 +4,7 @@
 #include "maxps4_ps4_guest_memory.h"
 #include "maxps4_ps4_libkernel.h"
 #include "maxps4_ps4_linker.h"
+#include "maxps4_ps4_synthetic_elf.h"
 #include "PM4GuestSubmission.hpp"
 #include "Common/HostFeatures.h"
 #include <FEXCore/Config/Config.h>
@@ -451,6 +452,86 @@ extern "C" int32_t maxps4_fex_engine_run_linked_ps4(maxps4_fex_engine* engine,
     *entry = engine->staged_ps4.entry();
     *calls = engine->probe.calls;
     return 0;
+}
+extern "C" int32_t maxps4_fex_test_ps4_libkernel(maxps4_ps4_elf_test_report* report) {
+    if (!report) return -EINVAL;
+    *report = {};
+    report->open_status = report->load_status = report->link_status =
+        report->initialize_status = report->execute_status = report->read_status =
+        report->verification_status = -ECANCELED;
+    report->jit_regions_before = maxps4_jit_leases();
+    maxps4_fex_engine* engine = nullptr;
+    // Scope owns the engine even when fixture construction throws. The public
+    // execution APIs remain the sole path to CPU dispatch and kernel services.
+    int32_t status = [&]() -> int32_t {
+        auto fail = [&](int32_t code, const char* operation, const char* detail = "") {
+            std::snprintf(report->error, sizeof(report->error), "%s: %d %s", operation, code, detail);
+            return code;
+        };
+        try {
+            const auto file = maxps4_ps4_synthetic::minimal();
+            report->open_status = maxps4_fex_engine_open(&engine);
+            if (report->open_status) return fail(report->open_status, "open FEX");
+            uint32_t blockers = 0;
+            report->load_status = maxps4_fex_engine_stage_ps4(engine, file.data(), file.size(),
+                &report->entry, &report->segments, &blockers);
+            if (report->load_status) return fail(report->load_status, "load Orbis ELF");
+            uint64_t linked_entry = 0;
+            report->link_status = maxps4_fex_engine_link_ps4(engine, file.data(), file.size(),
+                10, &linked_entry, &report->imports);
+            {
+                std::lock_guard lock(runtime_lock);
+                if (report->link_status)
+                    return fail(report->link_status, "link NID/RELA", engine->linker.diagnostic().c_str());
+                if (engine->linker.imports().size() == 1)
+                    report->resolved_service = static_cast<uint32_t>(engine->linker.imports()[0].service);
+            }
+            const auto self = maxps4_ps4_resolve_libkernel("aI+OeCz8xrQ", "libkernel", "libkernel", 1);
+            if (!self || report->resolved_service != self || linked_entry != report->entry)
+                return fail(-ENOENT, "resolve scePthreadSelf NID");
+            report->initialize_status = maxps4_fex_engine_initialize(engine);
+            if (report->initialize_status) return fail(report->initialize_status, "initialize FEX ARM64 JIT");
+            uint64_t executed_entry = 0;
+            report->execute_status = maxps4_fex_engine_run_linked_ps4(engine,
+                &report->rax, &report->backend, &executed_entry, &report->calls);
+            if (report->execute_status) return fail(report->execute_status, "execute linked ELF");
+            uint8_t output[16]{};
+            report->read_status = maxps4_fex_engine_read_ps4(engine,
+                maxps4_ps4_synthetic::data + 0x100, output, sizeof(output));
+            if (report->read_status) return fail(report->read_status, "read guest memory");
+            for (size_t i = 0; i < 8; ++i) {
+                report->final_memory |= uint64_t(output[i]) << (8 * i);
+                report->kernel_return |= uint64_t(output[8 + i]) << (8 * i);
+            }
+            // Both stores follow CALL/RET. The second value is observed before
+            // ADD, the first after ADD. Neither is assigned by this harness.
+            report->resumed = report->calls == 1 && report->kernel_return == 1 &&
+                report->final_memory == 2 && report->rax == 2 && executed_entry == report->entry;
+            report->verification_status = report->resumed &&
+                (report->backend == MAXPS4_CPU_FEX_ARM64_JIT ||
+                 report->backend == MAXPS4_CPU_FEX_ARM64_SIMULATOR) ? 0 : -EIO;
+            if (report->verification_status) return fail(report->verification_status, "verify call/return/stores");
+            return 0;
+        } catch (const std::bad_alloc&) { return fail(-ENOMEM, "allocate ELF/FEX"); }
+    }();
+    if (engine) {
+        {
+            std::lock_guard lock(runtime_lock);
+            engine->libkernel.reset();
+            engine->dynamic_ps4.reset();
+            engine->linker.reset();
+            engine->staged_ps4.clear();
+            report->guest_segments_after = static_cast<uint32_t>(engine->staged_ps4.segments().size());
+        }
+        maxps4_fex_engine_close(engine);
+    }
+    report->jit_regions_after = maxps4_jit_leases();
+    if (!status && (report->guest_segments_after || report->jit_regions_after != report->jit_regions_before)) {
+        status = -EBUSY;
+        std::snprintf(report->error, sizeof(report->error), "cleanup: guest segments=%u, RX/RW leases=%u (before=%u)",
+            report->guest_segments_after, report->jit_regions_after, report->jit_regions_before);
+    }
+    return status;
 }
 extern "C" int32_t maxps4_fex_engine_run_staged_ps4(maxps4_fex_engine* engine,
     uint32_t budget, uint64_t* result, uint32_t* backend, uint64_t* entry) {

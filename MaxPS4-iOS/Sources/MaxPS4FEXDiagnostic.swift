@@ -147,6 +147,68 @@ struct MaxPS4FEXDiagnostic: Sendable {
 #endif
     }
 
+    /// Built-in ELF bytes are shared with the native linked-execution tests.
+    /// This path never invokes the restricted interpreter.
+    static func testPS4Libkernel() -> String {
+#if MAXPS4_FEX_APP
+        var report = maxps4_ps4_elf_test_report()
+        let status = maxps4_fex_test_ps4_libkernel(&report)
+        let error = withUnsafeBytes(of: report.error) {
+            String(decoding: $0.prefix(while: { $0 != 0 }), as: UTF8.self)
+        }
+        let backend: String
+        switch report.backend {
+        case UInt32(MAXPS4_CPU_FEX_ARM64_JIT): backend = "FEXCore JIT ARM64 natif (2)"
+        case UInt32(MAXPS4_CPU_FEX_ARM64_SIMULATOR): backend = "FEXCore ARM64 simulé par VIXL (3)"
+        default: backend = "Aucun — exécution non validée"
+        }
+#if targetEnvironment(simulator)
+        let environment = "simulateur iOS — aucune preuve iPhone"
+#elseif os(iOS)
+        let environment = "appareil iOS physique"
+#else
+        let environment = "hôte macOS — aucune preuve iPhone"
+#endif
+        func step(_ value: Int32) -> String {
+            value == -ECANCELED ? "non tenté" : value == 0 ? "réussi (0)" : "échoué (\(value))"
+        }
+        let observed = report.read_status == 0
+        let revision = Bundle.main.object(forInfoDictionaryKey: "MaxPS4SourceRevision") as? String ?? "non renseignée"
+        return [
+            "Test ELF PS4 / libkernel synthétique v1",
+            "Date UTC : " + ISO8601DateFormatter().string(from: Date()),
+            "Révision source : " + revision,
+            "Environnement : " + environment + " ; " + ProcessInfo.processInfo.operatingSystemVersionString,
+            "Ouverture FEX : " + step(report.open_status),
+            "Chargement ELF : " + step(report.load_status) + " ; segments PT_LOAD : \(report.segments)",
+            "Point d’entrée invité : " + (report.load_status == 0 ? "0x" + String(report.entry, radix: 16) : "indisponible"),
+            "NID recherché : aI+OeCz8xrQ (libkernel, version 1)",
+            "Fonction résolue : " + (report.resolved_service != 0 ? "scePthreadSelf (service \(report.resolved_service))" : "aucune"),
+            "Liaison NID / relocation JUMP_SLOT : " + step(report.link_status) + " ; imports : \(report.imports)",
+            "Initialisation JIT : " + step(report.initialize_status),
+            "Fournisseur RX/RW : état \(maxps4_jit_state()), erreur \(maxps4_jit_error())",
+            "Préparation JIT : étape \(maxps4_jit_failure_stage()), code Mach \(maxps4_jit_failure_mach()), région \(maxps4_jit_failure_region())",
+            "Backend d’exécution réel : " + backend,
+            "Exécution : " + step(report.execute_status) + " ; appels libkernel observés : \(report.calls)",
+            "Lecture mémoire invitée : " + step(report.read_status),
+            "Résultat appel libkernel [0x10108] : " + (observed ? String(report.kernel_return) + " (attendu 1)" : "indisponible"),
+            "Retour au code invité : " + (report.resumed == 1 ? "confirmé par CALL/RET → store du retour → ADD → store final → HLT" : "non confirmé"),
+            "Valeur finale en mémoire invitée [0x10100] : " + (observed ? String(report.final_memory) + " (attendu 2)" : "indisponible"),
+            "RAX final : " + (report.execute_status == 0 ? String(report.rax) : "indisponible"),
+            "Vérification : " + step(report.verification_status),
+            "Erreurs précises : " + (error.isEmpty ? "aucune" : error),
+            "Segments invités après retrait : \(report.guest_segments_after)",
+            "Régions RX/RW utilisées après nettoyage : \(report.jit_regions_after) (avant : \(report.jit_regions_before))",
+            "Validation globale : " + (status == 0 ? "réussie" : "échouée (\(status))"),
+            "RIP final et instructions terminées FEX : non exposés par cette API.",
+            "Les régions StikDebug préparées restent réservées jusqu’à leur libération explicite.",
+            "Démo bornée avec tables DT_* standard ; adressage PS4 général, tables SCE, PRX et TLS restent indisponibles."
+        ].joined(separator: "\n")
+#else
+        return "Test ELF PS4 / libkernel : moteur FEXCore natif absent de cette compilation"
+#endif
+    }
+
     static func run() -> Self {
 #if MAXPS4_FEX_APP
         let elfMemoryBridgePassed = MaxPS4ELFLoader.importDemoSelfTest() &&
@@ -197,6 +259,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
         var elfEntry: UInt64 = 0
         var guestRIP: UInt64 = 0
         var instructions: UInt32 = 0
+        var fallbackAttempted = false
         var status: Int32
         if initialized == 0 {
             let file = MaxPS4SyntheticELFFEXBridge.syntheticELF()
@@ -207,6 +270,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
             status = jitStatus
         } else { status = initialized }
         if status != 0 {
+            fallbackAttempted = true
             // Preserve the actual JIT error separately from the interpreter result.
             let file = MaxPS4SyntheticELFFEXBridge.syntheticELF()
             status = file.withUnsafeBytes {
@@ -239,7 +303,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
         Confirmation StikDebug : \(mailboxDescription) (code \(mailboxDiagnostic))
         Exécution FEX JIT : statut \(jitStatus) (0 requis pour un succès JIT)
         Point d’entrée ELF64 invité : 0x\(String(elfEntry, radix: 16))
-        RIP invité après repli : 0x\(String(guestRIP, radix: 16)), instructions terminées : \(instructions)
+        \(selected == UInt32(MAXPS4_CPU_RESTRICTED_INTERPRETER) ? "RIP invité après repli : 0x" + String(guestRIP, radix: 16) + ", instructions terminées : \(instructions)" : fallbackAttempted ? "Repli interpréteur : échec avant mesure. RIP et compteur indisponibles." : "Repli interpréteur : non utilisé. RIP final et instructions terminées FEX : non exposés par cette API.")
         Fournisseur RX/RW : état \(maxps4_jit_state()), erreur \(maxps4_jit_error())
         Échec JIT précis : \(failureName) (étape \(failureStage))
         Code Mach : \(maxps4_jit_failure_mach()), région : \(maxps4_jit_failure_region())

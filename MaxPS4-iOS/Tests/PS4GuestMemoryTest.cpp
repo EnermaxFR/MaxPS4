@@ -7,6 +7,9 @@
 int main() {
     maxps4::GuestELF image;
     auto file = guest_test::generated_pm4();
+    // This test also writes 1025-byte path fixtures at data+0x100. The PM4
+    // fixture's default 64-byte data extent cannot contain those strings.
+    guest_test::put(file, 0x2000, 160, 8);
     assert(image.load(file.data(), file.size(), 6) == 0);
     maxps4::PS4GuestMemory memory(image);
     uint8_t bytes[4] = {1, 2, 3, 4};

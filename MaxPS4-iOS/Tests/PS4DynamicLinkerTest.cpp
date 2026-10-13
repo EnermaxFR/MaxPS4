@@ -67,8 +67,8 @@ int main() {
     uninitialized_saved.call("scePthreadSelf"); uninitialized_saved.store(data+0x100,3);
     uninitialized_saved.bytes({0xf4}); rejected(uninitialized_saved.elf(),-ENOTSUP);
     assert(load(good,1) == -E2BIG && image.segments().empty());
-    assert(load(good,9) == 0); // CALL + generated thunk + NOP + ADD + store + HLT.
-    assert(load(good,8) == -E2BIG);
+    assert(load(good,10) == 0); // CALL + thunk + NOP + return store + ADD + final store + HLT.
+    assert(load(good,9) == -E2BIG);
     assert(load(combined()) == 0 && linker.imports().size() == 5);
     auto defined = [&](uint32_t type, uint64_t symbol, uint64_t addend = 0) {
         auto file = good;
@@ -112,7 +112,7 @@ int main() {
     rejected(distant(11,0x80000000ULL),-EOVERFLOW); // Signed R32S.
     // Mutate the final writable-store proof after a valid import: no mapping
     // or partial image can escape a rejected late instruction.
-    bad = good; put(bad,entry-(entry+18),entry+14,4); rejected(bad,-EFAULT);
+    bad = good; put(bad,entry-(entry+25),entry+21,4); rejected(bad,-EFAULT);
     // Deterministic mutation coverage complements targeted malformed cases.
     for (size_t i = 0; i < 232; ++i) {
         bad = good; bad[i] ^= 0xff;

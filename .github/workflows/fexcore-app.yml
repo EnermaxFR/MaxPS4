@@ -6,12 +6,14 @@ on:
     paths:
       - 'MaxPS4-iOS/**'
       - 'scripts/*fexcore*'
+      - 'scripts/run-bounded.py'
       - 'cmake/FEXCoreIOSLinkage.cmake'
       - '.github/workflows/fexcore-app.yml'
   pull_request:
     paths:
       - 'MaxPS4-iOS/**'
       - 'scripts/*fexcore*'
+      - 'scripts/run-bounded.py'
       - 'cmake/FEXCoreIOSLinkage.cmake'
       - '.github/workflows/fexcore-app.yml'
 permissions:
@@ -23,6 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Test native Metal triangle and compile iPhone shaders
+        timeout-minutes: 3
         shell: bash
         run: |
           set -euo pipefail
@@ -41,6 +44,7 @@ jobs:
           xcrun -sdk iphoneos metallib build/diagnostics/triangle.air \
             -o build/diagnostics/triangle.metallib
       - name: Checkout coherent pinned runtime
+        timeout-minutes: 5
         run: |
           git clone --filter=blob:none --no-checkout https://github.com/Leviidev/AetherPS4.git build/aether-app
           git -C build/aether-app sparse-checkout set runtime/sources/fexcore-darwin src/core/guest_cpu src/core/ios
@@ -72,9 +76,10 @@ jobs:
           build/jit-memory-test | tee build/diagnostics/jit-memory-tests.txt
           echo "::endgroup::"
           echo "::group::Inspect JIT memory leaks"
-          leaks --atExit -- build/jit-memory-test 2>&1 | tee build/diagnostics/jit-memory-leaks.txt
+          python3 scripts/run-bounded.py 60 build/diagnostics/jit-memory-leaks.txt leaks --atExit -- build/jit-memory-test
           echo "::endgroup::"
       - name: Preserve native runtime tests and test the real Swift C bridge on macOS
+        timeout-minutes: 12
         shell: bash
         run: |
           set -euo pipefail
@@ -90,8 +95,9 @@ jobs:
             -L build/fex-app-host -lMaxPS4FEXRuntime \
             -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" \
             -o build/fex-app-host/swift-fex-test
-          build/fex-app-host/swift-fex-test build/fex-app-host/ps4-libkernel-demo.elf | tee build/fex-app-host/swift-diagnostic-tests.txt
+          python3 scripts/run-bounded.py 60 build/fex-app-host/swift-diagnostic-tests.txt build/fex-app-host/swift-fex-test build/fex-app-host/ps4-libkernel-demo.elf
       - name: Test actual ELF FEX position transfer and offscreen Metal readback
+        timeout-minutes: 3
         shell: bash
         run: |
           set -euo pipefail
@@ -108,8 +114,9 @@ jobs:
             -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" \
             -o build/fex-app-host/fex-metal-test
           build/fex-app-host/fex-metal-test | tee build/fex-app-host/fex-metal-tests.txt
-          leaks --atExit -- build/fex-app-host/fex-metal-test 2>&1 | tee build/fex-app-host/fex-metal-leaks.txt
+          python3 scripts/run-bounded.py 60 build/fex-app-host/fex-metal-leaks.txt leaks --atExit -- build/fex-app-host/fex-metal-test
       - name: Test same ELF arena FEX completion to C++ PM4 to Metal
+        timeout-minutes: 3
         shell: bash
         run: |
           set -euo pipefail
@@ -122,6 +129,7 @@ jobs:
             -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" -o build/pm4-fex-metal-test
           build/pm4-fex-metal-test | tee build/diagnostics/pm4-fex-metal-tests.txt
       - name: Validate safe Stik trap handling
+        timeout-minutes: 2
         shell: bash
         run: |
           set -euo pipefail
@@ -131,12 +139,13 @@ jobs:
             -o build/fex-app-host/stik-trap-safety-test
           build/fex-app-host/stik-trap-safety-test | tee build/fex-app-host/stik-trap-safety.txt
       - name: Check actual native and Swift heap cleanup on macOS
+        timeout-minutes: 3
         shell: bash
         run: |
           set -euo pipefail
-          leaks --atExit -- build/fex-app-host/swift-fex-test \
-            2>&1 | tee build/fex-app-host/swift-diagnostic-leaks.txt
+          python3 scripts/run-bounded.py 60 build/fex-app-host/swift-diagnostic-leaks.txt leaks --atExit -- build/fex-app-host/swift-fex-test
       - name: Build full Xcode application and verified re-signable IPA
+        timeout-minutes: 15
         run: bash scripts/build-fexcore-app.sh build/aether-app
       - name: Record exact pre-resigning signature and entitlements
         run: python3 scripts/audit-ios-signature.py build/Payload/MaxPS4.app > build/diagnostics/ios-signature.json

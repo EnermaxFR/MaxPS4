@@ -8,6 +8,7 @@ struct MaxPS4FEXDiagnosticView: View {
     @State private var activationMessage: String?
     @State private var importingELF = false
     @State private var importedReport: String?
+    @State private var ps4LibkernelReport: String?
 
     var body: some View {
         NavigationStack {
@@ -48,6 +49,25 @@ struct MaxPS4FEXDiagnosticView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(running)
+                    Button("Tester ELF PS4 / libkernel") {
+                        running = true
+                        Task {
+                            ps4LibkernelReport = await withCheckedContinuation { continuation in
+                                MaxPS4FEXMetalExecution.queue.async {
+                                    continuation.resume(returning: MaxPS4FEXDiagnostic.testPS4Libkernel())
+                                }
+                            }
+                            running = false
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(running)
+                    .accessibilityIdentifier("maxps4-ps4-libkernel-test")
+                    if let ps4LibkernelReport {
+                        Text(ps4LibkernelReport).font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                        ShareLink(item: ps4LibkernelReport) { Label("Partager le rapport ELF PS4", systemImage: "square.and.arrow.up") }
+                    }
                     Button("Exécuter un ELF de test ou une démo PS4…") { importingELF = true }
                         .disabled(running)
                     if let importedReport {

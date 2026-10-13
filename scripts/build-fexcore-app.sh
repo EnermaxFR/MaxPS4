@@ -49,6 +49,15 @@ xcodebuild -project MaxPS4-iOS/MaxPS4.xcodeproj -scheme MaxPS4 \
 mkdir -p build/Payload
 rm -rf build/Payload/MaxPS4.app
 cp -R build/xcode-fex/Build/Products/Release-iphoneos/MaxPS4.app build/Payload/
+# Record the tested source revision before signing, for shareable device proof.
+python3 - <<'PYREVISION'
+import plistlib, subprocess
+from pathlib import Path
+path = Path('build/Payload/MaxPS4.app/Info.plist')
+info = plistlib.loads(path.read_bytes())
+info['MaxPS4SourceRevision'] = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+path.write_bytes(plistlib.dumps(info))
+PYREVISION
 # Xcode strips development Headers/Modules during embedding. Re-seal the exact
 # shipped framework, then verify it; SideStore will replace this ad-hoc identity.
 EMBEDDED=build/Payload/MaxPS4.app/Frameworks/MaxPS4FEXRuntime.framework
@@ -70,13 +79,13 @@ xcrun nm -gU "$FRAMEWORK/MaxPS4FEXRuntime" > build/diagnostics/fex-app-runtime-e
 # Every public ABI entry must be exported by the embedded runtime. Only
 # entries actually called by the Swift app are required in its undefined imports;
 # the compiler may legitimately omit unused public functions.
-for symbol in maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_run maxps4_fex_engine_run_elf maxps4_jit_begin maxps4_jit_cancel; do
+for symbol in maxps4_fex_test_ps4_libkernel maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_run maxps4_fex_engine_run_elf maxps4_jit_begin maxps4_jit_cancel; do
   if ! grep -q "_${symbol}$" build/diagnostics/fex-app-runtime-exports.txt; then
     echo "Missing FEXCore runtime export: ${symbol}" >&2
     exit 1
   fi
 done
-for symbol in maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_run_elf maxps4_jit_begin; do
+for symbol in maxps4_fex_test_ps4_libkernel maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_run_elf maxps4_jit_begin; do
   if ! grep -q "_${symbol}$" build/diagnostics/fex-app-imports.txt; then
     echo "Missing required app import: ${symbol}" >&2
     exit 1

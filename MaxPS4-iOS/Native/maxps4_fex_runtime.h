@@ -7,6 +7,20 @@ extern "C" {
 #endif
 // Opaque engine: no FEX C++ types cross the native/Swift boundary.
 typedef struct maxps4_fex_engine maxps4_fex_engine;
+// Self-contained synthetic Orbis test, using the existing loader/linker/FEX
+// runtime. Status -ECANCELED means an operation was not attempted. Values are
+// valid only when their operation succeeded; no interpreter fallback occurs.
+typedef struct maxps4_ps4_elf_test_report {
+    int32_t open_status, load_status, link_status, initialize_status;
+    int32_t execute_status, read_status, verification_status;
+    uint32_t backend, segments, imports, resolved_service, calls, resumed;
+    uint32_t jit_regions_before, jit_regions_after, guest_segments_after;
+    uint64_t entry, kernel_return, final_memory, rax;
+    char error[256];
+} maxps4_ps4_elf_test_report;
+// Returns 0 only for verified FEX execution (backend 2 native, 3 simulator).
+// Owns and closes its engine on every path. Call from the app's CPU queue.
+int32_t maxps4_fex_test_ps4_libkernel(maxps4_ps4_elf_test_report *report);
 // PS4 System V entry registers, not native ARM64 registers or host pointers.
 typedef struct maxps4_ps4_kernel_call {
     uint64_t rdi, rsi, rdx, rcx, r8, r9, rsp;

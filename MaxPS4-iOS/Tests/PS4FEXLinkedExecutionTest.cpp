@@ -26,6 +26,26 @@ int main(int argc, char** argv) {
         }
         return 0;
     }
+    CHECK(maxps4_fex_test_ps4_libkernel(nullptr) == -EINVAL);
+    for (size_t repeat = 0; repeat < 3; ++repeat) {
+        maxps4_ps4_elf_test_report report{};
+        CHECK(maxps4_fex_test_ps4_libkernel(&report) == 0);
+        CHECK(!report.open_status && !report.load_status && !report.link_status);
+        CHECK(!report.initialize_status && !report.execute_status && !report.read_status && !report.verification_status);
+        CHECK(report.entry == entry && report.segments == 2 && report.imports == 1);
+        CHECK(report.resolved_service == maxps4_ps4_resolve_libkernel("aI+OeCz8xrQ", "libkernel", "libkernel", 1));
+        CHECK(report.calls == 1 && report.resumed == 1 && report.kernel_return == 1);
+        CHECK(report.final_memory == 2 && report.rax == 2 && !report.error[0]);
+        CHECK(report.guest_segments_after == 0 && report.jit_regions_after == report.jit_regions_before);
+#ifdef VIXL_SIMULATOR
+        CHECK(report.backend == MAXPS4_CPU_FEX_ARM64_SIMULATOR);
+#else
+        CHECK(report.backend == MAXPS4_CPU_FEX_ARM64_JIT);
+#endif
+        std::printf("PASS built-in app ELF diagnostic: entry=0x%llx NID=aI+OeCz8xrQ kernel=%llu resumed=%u memory=%llu backend=%u guest_segments_after=%u jit_leases_after=%u\n",
+            (unsigned long long)report.entry, (unsigned long long)report.kernel_return, report.resumed,
+            (unsigned long long)report.final_memory, report.backend, report.guest_segments_after, report.jit_regions_after);
+    }
     maxps4_fex_engine* engine = nullptr;
     std::puts("BEGIN real FEX context and linked Orbis execution");
     CHECK(maxps4_fex_engine_open(&engine) == 0 && engine);
@@ -33,12 +53,14 @@ int main(int argc, char** argv) {
     uint64_t entry_out = 99, result = 99;
     uint32_t imports = 99, backend = 99, calls = 99;
     auto file = minimal();
-    CHECK(maxps4_fex_engine_link_ps4(engine,file.data(),file.size(),9,&entry_out,&imports) == 0);
+    CHECK(maxps4_fex_engine_link_ps4(engine,file.data(),file.size(),10,&entry_out,&imports) == 0);
     CHECK(entry_out == entry && imports == 1);
     CHECK(maxps4_fex_engine_run_linked_ps4(engine,&result,&backend,&entry_out,&calls) == -EAGAIN);
     CHECK(!result && !backend && !entry_out && !calls);
     std::puts("PASS linking and pre-initialization refusal; initialize real FEX dispatcher");
     CHECK(maxps4_fex_engine_initialize(engine) == 0);
+    CHECK(maxps4_fex_engine_probe(engine,&result,&backend) == 0 && result == 42);
+    std::puts("PASS existing real FEX JIT 40+2 diagnostic regression (42)");
     std::puts("PASS dispatcher initialization; begin CPU execution");
     for (size_t repeat = 0; repeat < 3; ++repeat) {
         CHECK(maxps4_fex_engine_run_linked_ps4(engine,&result,&backend,&entry_out,&calls) == 0);
@@ -50,8 +72,18 @@ int main(int argc, char** argv) {
 #endif
         uint8_t output[8]{};
         CHECK(maxps4_fex_engine_read_ps4(engine,data+0x100,output,8) == 0 && value(output) == 2);
+        CHECK(maxps4_fex_engine_read_ps4(engine,data+0x108,output,8) == 0 && value(output) == 1);
     }
     std::printf("PASS linked Orbis ELF -> NID -> FEX -> libkernel -> resumed ADD/store/HLT (backend=%u)\n",backend);
+    // Different post-return arithmetic must produce a different observed value.
+    // This detects a bridge that simply substitutes the demo's expected 2.
+    file = minimal(); file[entry+14] = 7;
+    CHECK(maxps4_fex_engine_link_ps4(engine,file.data(),file.size(),10,&entry_out,&imports) == 0);
+    CHECK(maxps4_fex_engine_run_linked_ps4(engine,&result,&backend,&entry_out,&calls) == 0 && result == 8 && calls == 1);
+    uint8_t changed[16]{};
+    CHECK(maxps4_fex_engine_read_ps4(engine,data+0x100,changed,sizeof(changed)) == 0);
+    CHECK(value(changed) == 8 && value(changed+8) == 1);
+    std::puts("PASS changed guest ADD produces memory=8, kernel return remains 1; no fixed demo result");
     Program preserved;
     const uint8_t saved[] = {3,5,12,13,14,15}; // RBX, RBP, R12-R15.
     for (auto reg : saved) preserved.reg(reg,0x12340000+reg);

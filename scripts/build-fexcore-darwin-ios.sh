@@ -115,24 +115,9 @@ if [[ "$RUNTIME" == ON ]]; then
     exit 1
   fi
   if [[ "$SYSTEM" == Darwin ]]; then
-    python3 - "$OUT" <<'PY'
-import subprocess, sys
-from pathlib import Path
-out = Path(sys.argv[1])
-run = subprocess.run([str(out / 'Bin/maxps4-ps4-linked-test')], timeout=60,
-                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-(out / 'ps4-linked-tests.txt').write_text(run.stdout)
-print(run.stdout)
-if run.returncode:
-    raise SystemExit(run.returncode)
-subprocess.run([str(out / 'Bin/maxps4-ps4-linked-test'), str(out / 'ps4-libkernel-demo.elf'),
-                str(out / 'ps4-libkernel-combined.elf')], check=True)
-PY
-    if ! "$OUT/Bin/maxps4-fex-runtime-test" 2>&1 | tee "$OUT/runtime-tests.txt"; then
-      xcrun lldb --batch -o run -k 'thread backtrace all' \
-        -- "$OUT/Bin/maxps4-fex-runtime-test" > "$OUT/runtime-backtrace.txt" 2>&1 || true
-      cat "$OUT/runtime-backtrace.txt"
-      exit 1
-    fi
+    python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/ps4-linked-tests.txt" "$OUT/Bin/maxps4-ps4-linked-test"
+    python3 "$ROOT/scripts/run-bounded.py" 10 "$OUT/fixture-export.txt" "$OUT/Bin/maxps4-ps4-linked-test" \
+      "$OUT/ps4-libkernel-demo.elf" "$OUT/ps4-libkernel-combined.elf"
+    python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/runtime-tests.txt" "$OUT/Bin/maxps4-fex-runtime-test"
   fi
 fi

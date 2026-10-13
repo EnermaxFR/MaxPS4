@@ -36,16 +36,6 @@ cmake -S "$FEX" -B "$OUT" -G Ninja \
   -DOVERRIDE_VERSION=MaxPS4-Linked -DOVERRIDE_HASH=f2b679f6028ce1c38875233aecfcf5d3f8ebecec \
   "${options[@]}" > "$OUT/configure.log" 2>&1
 cmake --build "$OUT" --target maxps4-ps4-linked-test --parallel "${MAXPS4_BUILD_JOBS:-3}" > "$OUT/build.log" 2>&1
-python3 - "$OUT" <<'PY'
-import subprocess, sys
-from pathlib import Path
-out = Path(sys.argv[1])
-run = subprocess.run([str(out / 'Bin/maxps4-ps4-linked-test')], timeout=60,
-                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-(out / 'ps4-linked-tests.txt').write_text(run.stdout)
-print(run.stdout)
-if run.returncode:
-    raise SystemExit(run.returncode)
-subprocess.run([str(out / 'Bin/maxps4-ps4-linked-test'), str(out / 'ps4-libkernel-demo.elf'),
-                str(out / 'ps4-libkernel-combined.elf')], check=True)
-PY
+python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/ps4-linked-tests.txt" "$OUT/Bin/maxps4-ps4-linked-test"
+python3 "$ROOT/scripts/run-bounded.py" 10 "$OUT/fixture-export.txt" "$OUT/Bin/maxps4-ps4-linked-test" \
+  "$OUT/ps4-libkernel-demo.elf" "$OUT/ps4-libkernel-combined.elf"
