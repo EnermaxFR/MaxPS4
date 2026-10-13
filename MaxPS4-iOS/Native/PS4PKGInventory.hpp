@@ -27,11 +27,37 @@ public:
     uint64_t fileSize = 0, packageSize = 0, bodyOffset = 0, bodySize = 0;
     uint64_t pfsOffset = 0, pfsSize = 0, pfsFlags = 0;
     uint32_t tableOffset = 0;
+    uint32_t headerFlags = 0, contentType = 0, contentFlags = 0, drmType = 0;
+    std::string contentID, titleID, metadataDiagnostic;
     std::vector<Entry> entries;
     std::string error;
 
     static bool range(uint64_t offset, uint64_t size, uint64_t total) {
         return offset <= total && size <= total - offset;
+    }
+    static const char* packageType(uint32_t type, uint32_t flags) {
+        switch (type) {
+        case 0x1a:
+            if (flags & 0x40100000U) return "application / mise à jour (flags déclarés)";
+            if (flags & 0x00400000U) return "application remaster (flag déclaré)";
+            return "application";
+        case 0x1b: return "contenu additionnel / thème";
+        case 0x1c: return "contenu additionnel sans données";
+        case 0x1e: return "mise à jour delta";
+        default: return "type non pris en charge (valeur brute conservée)";
+        }
+    }
+    static bool validTitleID(const std::string& id) {
+        return id.size() == 9 && id.compare(0, 4, "CUSA") == 0 &&
+            id.find_first_not_of("0123456789", 4) == std::string::npos;
+    }
+    static bool validContentID(const std::string& id) {
+        if (id.size() != 36 || id[6] != '-' || id[16] != '_' || id[19] != '-') return false;
+        for (size_t i = 0; i < id.size(); ++i) {
+            if (i == 6 || i == 16 || i == 19) continue;
+            if (!((id[i] >= 'A' && id[i] <= 'Z') || (id[i] >= '0' && id[i] <= '9'))) return false;
+        }
+        return validTitleID(id.substr(7, 9));
     }
     static const char* type(uint32_t id) {
         switch (id) {
@@ -135,7 +161,20 @@ private:
     bool parseImpl(const Reader& read) {
         std::array<uint8_t, headerSize> h{};
         if (fileSize < h.size() || !read(0, h.data(), h.size())) return fail("En-tête PKG tronqué / lecture incomplète");
-        if (std::memcmp(h.data(), "\177CNT", 4)) return fail("Signature PKG invalide");
+        if (std::memcmp(h.data(), "\177CNT", 4)) {
+            if (!std::memcmp(h.data(), "\177ELF", 4)) return fail("Format ELF détecté : ce fichier n'est pas un PKG PS4");
+            if (!std::memcmp(h.data(), "\177PKG", 4)) return fail("Format PKG PS3/PSP détecté : non pris en charge");
+            return fail("Signature PKG PS4 invalide (0x7f434e54 attendue)");
+        }
+        headerFlags = static_cast<uint32_t>(be(h.data() + 4, 4));
+        drmType = static_cast<uint32_t>(be(h.data() + 0x70, 4));
+        contentType = static_cast<uint32_t>(be(h.data() + 0x74, 4));
+        contentFlags = static_cast<uint32_t>(be(h.data() + 0x78, 4));
+        size_t idLength = 0;
+        while (idLength < 48 && h[0x40 + idLength]) ++idLength;
+        const std::string id(reinterpret_cast<const char*>(h.data() + 0x40), idLength);
+        if (validContentID(id)) { contentID = id; titleID = id.substr(7, 9); }
+        else metadataDiagnostic = "Content ID absent ou invalide dans l'en-tête ; aucune déduction du nom du fichier";
         const uint64_t count = be(h.data() + 0x10, 4);
         const uint64_t secureCount = be(h.data() + 0x14, 2), secondary = be(h.data() + 0x16, 2);
         tableOffset = static_cast<uint32_t>(be(h.data() + 0x18, 4));
