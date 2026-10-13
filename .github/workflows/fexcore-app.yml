@@ -1,6 +1,13 @@
 name: MaxPS4 FEXCore SideStore IPA
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/ps4-pkg-analysis]
+    paths:
+      - 'MaxPS4-iOS/**'
+      - 'scripts/*fexcore*'
+      - 'cmake/FEXCoreIOSLinkage.cmake'
+      - '.github/workflows/fexcore-app.yml'
   pull_request:
     paths:
       - 'MaxPS4-iOS/**'
@@ -20,6 +27,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/diagnostics
+          xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            MaxPS4-iOS/Native/OrbisLinkerBridge.cpp MaxPS4-iOS/Tests/OrbisLinkerTest.cpp -o "$RUNNER_TEMP/orbis-test"
+          "$RUNNER_TEMP/orbis-test" | tee build/diagnostics/orbis-tests.txt
           for suite in PS4PKGInventoryTest PS4PKGMetadataTest; do
             xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
               MaxPS4-iOS/Native/PS4PKGBridge.cpp "MaxPS4-iOS/Tests/$suite.cpp" -o "$RUNNER_TEMP/$suite"
