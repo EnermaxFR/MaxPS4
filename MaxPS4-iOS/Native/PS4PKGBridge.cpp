@@ -65,9 +65,9 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
             report << "Bilan des descripteurs : lisibles déclarés=" << readable
                    << " ; chiffrés déclarés=" << encrypted
                    << " ; non pris en charge=" << unsupported
-                   << " ; inconnus=" << unknown << " ; invalides=" << invalid << '\\n';
+                   << " ; inconnus=" << unknown << " ; invalides=" << invalid << '\n';
             if (pkg.pfsSize)
-                report << "PFS présent : contenu opaque ; aucun exécutable déduit de cet inventaire.\\n";
+                report << "PFS présent : contenu opaque ; aucun exécutable déduit de cet inventaire.\n";
             // Kero Blaster field diagnostics: keep the extraction policy unchanged.
             // These are descriptive only; neither flags nor names grant access.
             for (const auto& entry : pkg.entries) {
