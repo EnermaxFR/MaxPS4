@@ -161,6 +161,12 @@ int main() {
     assert(text.find("Bilan des descripteurs : lisibles déclarés=2") != std::string::npos);
     assert(text.find("chiffrés déclarés=0") != std::string::npos);
     assert(text.find("Octets copiés en mémoire : 32") != std::string::npos);
+    assert(text.find("Diagnostic démarrage : NON PRÊT") != std::string::npos);
+    assert(text.find("Blocage 1/3 : PFS") != std::string::npos);
+    assert(text.find("Blocage 2/3 : aucun binaire Orbis ELF autonome validé") != std::string::npos);
+    assert(text.find("Blocage 3/3 : imports NID") != std::string::npos);
+    assert(text.find("aucun contournement DRM/PFS") != std::string::npos);
+
     // Reproduce the two descriptor classes observed in the real Kero Blaster
     // report, without including or reading any proprietary game payload.
     auto descriptors = original;
