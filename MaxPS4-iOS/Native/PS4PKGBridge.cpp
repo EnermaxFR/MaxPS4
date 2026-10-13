@@ -159,6 +159,20 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
             for (const auto& reference : plan.references)
                 report << "Référence : " << reference.path << " ; " << pkg.accessName(reference.descriptorAccess)
                        << " ; référence seule, données exécutables non admises\n";
+            // A readiness verdict is deliberately separate from descriptor names:
+            // PKG metadata and plaintext artwork are never executable admission.
+            // The standalone ELF path is a distinct, explicit user-supplied workflow.
+            report << "Diagnostic démarrage : NON PRÊT (inventaire PKG uniquement).\\n";
+            report << "Blocage 1/3 : PFS "
+                   << (pkg.pfsSize ? "présent mais opaque/non monté" : "absent ou non exposé")
+                   << " ; aucun eboot.bin accessible par ce lecteur.\\n";
+            report << "Blocage 2/3 : aucun binaire Orbis ELF autonome validé depuis ce PKG ; "
+                      "noms, images et param.sfo ne sont pas exécutables.\\n";
+            report << "Blocage 3/3 : imports NID, modules PRX et relocations non résolus "
+                      "pour ce titre ; exécution non autorisée.\\n";
+            report << "Étape sûre : fournir séparément un ELF Orbis non chiffré et "
+                      "autorisé, puis tester son staging et ses dépendances ; "
+                      "aucun contournement DRM/PFS.\\n";
             report << "Obstacles : PFS non monté, entrées chiffrées/non interprétées exclues ; "
                    << "eboot.bin et dépendances PRX accessibles requis.\n"
                    << "Contrat runtime : fichiers ELF Orbis autonomes non chiffrés fournis explicitement ; "
