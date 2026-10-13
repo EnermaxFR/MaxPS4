@@ -25,7 +25,7 @@ public:
         for (size_t i = 0; i < capacity; ++i) {
             if (address > UINT64_MAX - i ||
                 !read(address + i, &scratch[i], 1)) return false;
-            if (scratch[i] == '\\0') {
+            if (scratch[i] == '\0') {
                 std::memmove(destination, scratch, i + 1);
                 return true;
             }
