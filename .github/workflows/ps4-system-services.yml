@@ -39,7 +39,7 @@ jobs:
         run: |
           set -euo pipefail
           sdk=$(xcrun --sdk iphoneos --show-sdk-path)
-          for source in maxps4_guest_elf maxps4_ps4_libkernel maxps4_ps4_virtual_memory maxps4_ps4_threads; do
+          for source in maxps4_guest_elf maxps4_ps4_libkernel maxps4_ps4_virtual_memory maxps4_ps4_threads maxps4_ps4_linker; do
             xcrun --sdk iphoneos clang++ -target arm64-apple-ios18.0 -isysroot "$sdk" \
               -std=c++17 -Wall -Wextra -Werror -pedantic -fsyntax-only \
               "MaxPS4-iOS/Native/$source.cpp"

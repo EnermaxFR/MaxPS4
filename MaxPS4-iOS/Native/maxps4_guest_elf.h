@@ -40,6 +40,7 @@ public:
     const uint8_t* entry_pointer() const { return translate(guest_entry, 1, 5); }
     const std::vector<Segment>& segments() const { return regions; }
 private:
+    friend class PS4DynamicLinker;
     int map_segments(std::vector<Segment> parsed, const std::vector<const uint8_t*>& sources,
                      uint64_t entry);
     uint32_t blockers = 0;

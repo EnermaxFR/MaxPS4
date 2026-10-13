@@ -3,13 +3,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 build_dir=$(mktemp -d)
 trap 'rm -rf "$build_dir"' EXIT
-for test in PS4LibkernelTest PS4SystemMemoryTimeTest PS4ThreadsTest; do
+for test in PS4LibkernelTest PS4SystemMemoryTimeTest PS4ThreadsTest PS4DynamicLinkerTest; do
 "${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror -pedantic -pthread \
   -fsanitize=address,undefined -fno-omit-frame-pointer \
   MaxPS4-iOS/Native/maxps4_guest_elf.cpp \
   MaxPS4-iOS/Native/maxps4_ps4_libkernel.cpp \
   MaxPS4-iOS/Native/maxps4_ps4_virtual_memory.cpp \
   MaxPS4-iOS/Native/maxps4_ps4_threads.cpp \
+  MaxPS4-iOS/Native/maxps4_ps4_linker.cpp \
   "MaxPS4-iOS/Tests/$test.cpp" -o "$build_dir/$test"
 "$build_dir/$test"
 done
