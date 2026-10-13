@@ -1,5 +1,7 @@
 #include "PS4PKGBridge.h"
 #include "PS4PKGInventory.hpp"
+#include "PS4SFO.hpp"
+#include "PS4PKGRuntimePlan.hpp"
 #include <algorithm>
 #include <cerrno>
 #include <cstdio>
@@ -7,20 +9,28 @@
 #include <sstream>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <limits>
 
 int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity) {
     if (!output || !capacity) return -EINVAL;
     output[0] = 0;
-    if (!path) return -EINVAL;
+    auto sourceError = [&](int code, const char* message) {
+        // Error handling must not allocate, especially after bad_alloc.
+        std::snprintf(output, capacity, "Source PKG : %s", message);
+        return -code;
+    };
+    if (!path) return sourceError(EINVAL, "chemin absent");
     try {
         const auto closeFile = [](FILE* f) { std::fclose(f); };
         std::unique_ptr<FILE, decltype(closeFile)> file(std::fopen(path, "rb"), closeFile);
-        if (!file) return -errno;
+        if (!file) { const int code = errno; return sourceError(code, std::strerror(code)); }
         struct stat info{};
-        if (fstat(fileno(file.get()), &info) || !S_ISREG(info.st_mode) || info.st_size < 0) return -EINVAL;
+        if (fstat(fileno(file.get()), &info)) { const int code = errno; return sourceError(code, std::strerror(code)); }
+        if (!S_ISREG(info.st_mode) || info.st_size < 0) return sourceError(EINVAL, "fichier régulier requis");
         const uint64_t size = static_cast<uint64_t>(info.st_size);
         auto read = [&](uint64_t offset, uint8_t* bytes, size_t count) {
-            if (!maxps4::PS4PKGInventory::range(offset, count, size)) return false;
+            if (!maxps4::PS4PKGInventory::range(offset, count, size) ||
+                offset > static_cast<uint64_t>(std::numeric_limits<off_t>::max())) return false;
             return !fseeko(file.get(), static_cast<off_t>(offset), SEEK_SET) &&
                 std::fread(bytes, 1, count, file.get()) == count;
         };
@@ -30,9 +40,47 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
         if (!pkg.parse(size, read)) {
             report << "Rejet : " << pkg.error << '\n';
         } else {
+            report << "Format : PKG PS4 / CNT (signature reconnue, authenticité non vérifiée)\n"
+                   << "Content ID (en-tête) : " << (pkg.contentID.empty() ? "indisponible" : pkg.contentID)
+                   << "\nTitle ID (en-tête Content ID) : " << (pkg.titleID.empty() ? "indisponible" : pkg.titleID)
+                   << "\nType : " << pkg.packageType(pkg.contentType, pkg.contentFlags)
+                   << " ; content_type=0x" << std::hex << pkg.contentType
+                   << " ; content_flags=0x" << pkg.contentFlags << " ; header_flags=0x" << pkg.headerFlags
+                   << " ; drm_type=0x" << pkg.drmType << std::dec << '\n';
+            if (!pkg.metadataDiagnostic.empty()) report << pkg.metadataDiagnostic << '\n';
             report << "Taille vérifiée : " << size << " octets ; entrées : " << pkg.entries.size()
                    << "\nCorps : " << pkg.bodyOffset << " + " << pkg.bodySize
                    << "\nPFS : " << pkg.pfsOffset << " + " << pkg.pfsSize << " (opaque, non monté)\n";
+            // Descriptor counts are informational; no access to the opaque PFS is inferred.
+            size_t readable = 0, encrypted = 0, unsupported = 0, unknown = 0, invalid = 0;
+            for (const auto& entry : pkg.entries) {
+                switch (entry.access) {
+                case maxps4::PS4PKGInventory::Access::plaintext: ++readable; break;
+                case maxps4::PS4PKGInventory::Access::encrypted: ++encrypted; break;
+                case maxps4::PS4PKGInventory::Access::unsupported: ++unsupported; break;
+                case maxps4::PS4PKGInventory::Access::unknown: ++unknown; break;
+                case maxps4::PS4PKGInventory::Access::invalid: ++invalid; break;
+                }
+            }
+            report << "Bilan des descripteurs : lisibles déclarés=" << readable
+                   << " ; chiffrés déclarés=" << encrypted
+                   << " ; non pris en charge=" << unsupported
+                   << " ; inconnus=" << unknown << " ; invalides=" << invalid << '\n';
+            if (pkg.pfsSize)
+                report << "PFS présent : contenu opaque ; aucun exécutable déduit de cet inventaire.\n";
+            // Kero Blaster field diagnostics: keep the extraction policy unchanged.
+            // These are descriptive only; neither flags nor names grant access.
+            for (const auto& entry : pkg.entries) {
+                if (entry.id == 0x100 && entry.access == maxps4::PS4PKGInventory::Access::invalid &&
+                    entry.size && entry.offset == pkg.tableOffset)
+                    report << "Diagnostic metas : début à l'offset de la table PKG ; "
+                              "alias possible de la table des descripteurs ; non admis comme données à extraire.\n";
+                if (entry.id == 0x200 &&
+                    entry.access == maxps4::PS4PKGInventory::Access::unsupported &&
+                    entry.flags1 == 0x40000000U && entry.flags2 == 0 && entry.reserved == 0)
+                    report << "Diagnostic entry_names : table déclarée, flag 0x40000000 "
+                              "non interprété ; noms non lus.\n";
+            }
             size_t inspected = 0;
             auto boundedRead = [&](uint64_t offset, uint8_t* bytes, size_t count) {
                 if (count > pkg.extractionBudget - inspected) return false;
@@ -45,6 +93,9 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
             report << (namesResolved ? "Noms de descripteurs résolus (affichage seulement)" : nameDiagnostic) << '\n';
             // Count the names read against the same total inspection budget.
             size_t copied = 0;
+            maxps4::PS4SFO sfo;
+            bool sfoRead = false;
+            std::string sfoDiagnostic = "param.sfo absent ou non lisible (voir l'inventaire)";
             if (namesResolved) for (const auto& e : pkg.entries)
                 if (e.id == 0x200) copied += e.size;
             for (size_t i = 0; i < pkg.entries.size(); ++i) {
@@ -63,6 +114,10 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                         if (pkg.extract(i, boundedRead, bytes, why)) {
                             copied += bytes.size();
                             report << " ; copie mémoire=" << bytes.size() << " octets";
+                            if (e.id == 0x1000) {
+                                sfoRead = sfo.parse(bytes);
+                                sfoDiagnostic = sfoRead ? "param.sfo lisible, tables vérifiées" : sfo.error;
+                            }
                             const char name[] = "eboot.bin";
                             if (std::search(bytes.begin(), bytes.end(), name, name + 9,
                                 [](uint8_t a, char b) { return (a | 0x20U) == static_cast<uint8_t>(b); }) != bytes.end())
@@ -71,11 +126,43 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                                 report << " ; signature ELF candidate (non validée)";
                             if (bytes.size() >= 4 && !std::memcmp(bytes.data(), "\117\025\075\035", 4))
                                 report << " ; signature SELF candidate (non validée)";
-                        } else report << " ; " << why;
-                    } else report << " ; copie non réalisée : budget total de 1 Mio";
+                        } else {
+                            report << " ; " << why;
+                            if (e.id == 0x1000) sfoDiagnostic = "SFO non lu : " + why;
+                        }
+                    } else {
+                        report << " ; copie non réalisée : budget total de 1 Mio";
+                        if (e.id == 0x1000) sfoDiagnostic = "SFO non lu : budget total de 1 Mio";
+                    }
                 }
                 report << '\n';
             }
+            report << "Métadonnées SFO : " << sfoDiagnostic << '\n';
+            for (const auto* key : {"TITLE", "TITLE_ID", "CONTENT_ID", "APP_VER", "VERSION", "CATEGORY"}) {
+                const auto value = sfo.strings.find(key);
+                report << key << " (param.sfo) : ";
+                if (!sfoRead || value == sfo.strings.end()) report << "indisponible";
+                else if ((std::strcmp(key, "TITLE_ID") == 0 && !pkg.validTitleID(value->second)) ||
+                         (std::strcmp(key, "CONTENT_ID") == 0 && !pkg.validContentID(value->second)))
+                    report << "invalide";
+                else report << value->second;
+                report << '\n';
+                if (sfoRead && value != sfo.strings.end() &&
+                    ((std::strcmp(key, "TITLE_ID") == 0 && !pkg.titleID.empty() && value->second != pkg.titleID) ||
+                     (std::strcmp(key, "CONTENT_ID") == 0 && !pkg.contentID.empty() && value->second != pkg.contentID)))
+                    report << "Avertissement : identifiant SFO différent de l'en-tête PKG\n";
+            }
+            maxps4::PS4PKGRuntimePlan plan;
+            plan.inventory(pkg, names);
+            report << "Préparation runtime ELF/PRX : " << plan.references.size() << " références de descripteurs\n";
+            report << "Une référence absente de ces descripteurs peut exister dans le PFS opaque.\n";
+            for (const auto& reference : plan.references)
+                report << "Référence : " << reference.path << " ; " << pkg.accessName(reference.descriptorAccess)
+                       << " ; référence seule, données exécutables non admises\n";
+            report << "Obstacles : PFS non monté, entrées chiffrées/non interprétées exclues ; "
+                   << "eboot.bin et dépendances PRX accessibles requis.\n"
+                   << "Contrat runtime : fichiers ELF Orbis autonomes non chiffrés fournis explicitement ; "
+                   << "staging seulement, imports/dépendances et relocations à résoudre, aucun lancement automatique.\n";
             report << "Octets inspectés (budget partagé) : " << inspected << "\n";
             report << "Octets copiés en mémoire : " << copied << "; aucun fichier exporté.\n"
                    << "Les flags déclarés ne constituent pas une authentification.\n"
@@ -88,5 +175,5 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
         std::memcpy(output, text.data(), count);
         output[count] = 0;
         return count == text.size() ? 0 : -ENOSPC;
-    } catch (const std::bad_alloc&) { return -ENOMEM; }
+    } catch (const std::bad_alloc&) { return sourceError(ENOMEM, "budget mémoire indisponible"); }
 }
