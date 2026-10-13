@@ -172,8 +172,7 @@ int main() {
     assert(text.find("exécutables.\nBlocage 3/3") != std::string::npos);
     assert(text.find("exécution non autorisée.\nÉtape sûre") != std::string::npos);
     assert(text.find("aucun contournement DRM/PFS.\nObstacles") != std::string::npos);
-    assert(text.find("uniquement).\\\nBlocage") == std::string::npos);
-
+    assert(text.find("uniquement).\\\\nBlocage") == std::string::npos);
 
     // Reproduce the two descriptor classes observed in the real Kero Blaster
     // report, without including or reading any proprietary game payload.
