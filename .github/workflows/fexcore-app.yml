@@ -1,6 +1,11 @@
 name: MaxPS4 FEXCore SideStore IPA
 on:
   workflow_dispatch:
+    inputs:
+      publish_pkg_delivery:
+        description: 'Publish the verified PKG diagnostic IPA as a test prerelease'
+        type: boolean
+        default: false
   pull_request:
     paths:
       - 'MaxPS4-iOS/**'
@@ -23,7 +28,7 @@ jobs:
           for suite in PS4PKGInventoryTest PS4PKGMetadataTest; do
             xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
               MaxPS4-iOS/Native/PS4PKGBridge.cpp "MaxPS4-iOS/Tests/$suite.cpp" -o "$RUNNER_TEMP/$suite"
-            "$RUNNER_TEMP/$suite" | tee "build/diagnostics/$suite.txt"
+            "$RUNNER_TEMP/$suite" build/pkg-fixtures | tee "build/diagnostics/$suite.txt"
           done
           swiftc -parse-as-library \
             MaxPS4-iOS/Sources/MaxPS4GuestMemory.swift \
@@ -143,6 +148,11 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-PKG-delivery-fixtures
+          path: build/pkg-fixtures/*.pkg
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: MaxPS4-FEXCore-app-diagnostics
@@ -153,4 +163,56 @@ jobs:
             build/fex-app-ios/*.txt
             build/fex-app-ios/*.log
           retention-days: 14
+  publish-pkg-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_pkg_delivery
+    needs: application
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: MaxPS4-FEXCore-SideStore
+          path: build/delivery
+      - uses: actions/download-artifact@v4
+        with:
+          name: MaxPS4-PKG-delivery-fixtures
+          path: build/delivery/pkg-fixtures
+      - name: Verify and publish test artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/verify-fexcore-ipa.py build/delivery/MaxPS4-FEXCore-SideStore.ipa
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, os, zipfile
+          folder = Path('build/delivery')
+          ipa = folder / 'MaxPS4-FEXCore-SideStore.ipa'
+          (folder / 'SHA256SUMS.txt').write_text(hashlib.sha256(ipa.read_bytes()).hexdigest() + '  ' + ipa.name + '\n')
+          with zipfile.ZipFile(folder / 'MaxPS4-synthetic-PKG-fixtures.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
+              for fixture in sorted((folder / 'pkg-fixtures').glob('*.pkg')):
+                  archive.write(fixture, fixture.name)
+          (folder / 'PKG-ANALYSIS-iPhone.md').write_text(Path('docs/PKG-ANALYSIS.md').read_text())
+          (folder / 'release-notes.md').write_text(
+              'Préversion de diagnostic PKG PS4, PR #173 en brouillon, sans fusion dans main.\n\n'
+              'Source : ' + os.environ['GITHUB_SHA'] + '\n'
+              'CI : https://github.com/' + os.environ['GITHUB_REPOSITORY'] + '/actions/runs/' + os.environ['GITHUB_RUN_ID'] + '\n\n'
+              'iPhone/iPad ARM64, iOS 18.0 minimum. IPA à re-signer avec SideStore (application et framework). '
+              'Le JIT ne sert pas à l’analyse PKG. Protocole iPhone et quatre fixtures entièrement synthétiques joints.\n\n'
+              'Tests PKG/SFO, FEXCore 42 et les deux diagnostics ELF/libkernel : PASS. '
+              'IPA vérifiée après téléchargement. Installation sur iPhone réel et analyse de Kero Blaster à valider.\n\n'
+              'Aucun lancement automatique, déchiffrement, contournement DRM, gestion de clés protégées ou extraction PFS.\n')
+          PY
+          # A distinct immutable tag identifies this exact diagnostic build.
+          TAG="pkg-analysis-pr173-${GITHUB_SHA:0:7}"
+          gh release create "$TAG" --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title 'MaxPS4 — analyse PKG PS4 (PR #173, test SideStore)' \
+            --notes-file build/delivery/release-notes.md
+          gh release upload "$TAG" build/delivery/MaxPS4-FEXCore-SideStore.ipa \
+            build/delivery/MaxPS4-synthetic-PKG-fixtures.zip build/delivery/PKG-ANALYSIS-iPhone.md \
+            build/delivery/SHA256SUMS.txt
 
