@@ -7,6 +7,7 @@ struct MaxPS4FEXDiagnosticView: View {
     @State private var report: MaxPS4FEXDiagnostic?
     @State private var activationMessage: String?
     @State private var importingELF = false
+    @State private var importingOrbisDirectory = false
     @State private var importedReport: String?
     @State private var ps4LibkernelReport: String?
     @State private var analyzingOrbis = false
@@ -82,6 +83,10 @@ struct MaxPS4FEXDiagnosticView: View {
                     }
                     Button("Exécuter un ELF de test ou une démo PS4…") { analyzingOrbis = false; importingELF = true }
                         .disabled(running)
+                    Button("Importer et exécuter un dossier Orbis compatible…") { importingOrbisDirectory = true }
+                        .disabled(running)
+                    Text("Dossier autorisé avec maxps4.json, ELF et PRX en clair. Les fichiers, modules et instructions sont vérifiés avant l’exécution. Un PFS opaque reste bloqué. Image et audio de jeu indisponibles.")
+                        .font(.footnote)
                     if let importedReport {
                         Text(importedReport).font(.system(.body, design: .monospaced))
                             .textSelection(.enabled)
@@ -133,6 +138,25 @@ struct MaxPS4FEXDiagnosticView: View {
                 case .failure(let error):
                     if analyzingOrbis { orbisReport = error.localizedDescription }
                     else { importedReport = error.localizedDescription }
+                }
+            }
+            .fileImporter(isPresented: $importingOrbisDirectory, allowedContentTypes: [.folder]) { selection in
+                switch selection {
+                case .success(let url):
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    running = true
+                    Task {
+                        defer {
+                            if scoped { url.stopAccessingSecurityScopedResource() }
+                            running = false
+                        }
+                        importedReport = await withCheckedContinuation { continuation in
+                            MaxPS4FEXMetalExecution.queue.async {
+                                continuation.resume(returning: MaxPS4FEXDiagnostic.executeOrbisDirectory(url: url))
+                            }
+                        }
+                    }
+                case .failure(let error): importedReport = error.localizedDescription
                 }
             }
             .navigationTitle("Diagnostic FEXCore")

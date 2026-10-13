@@ -140,6 +140,7 @@ struct maxps4_fex_engine {
     FEXCore::SignalDelegator signals;
     ProbeAddressSpace probe;
     maxps4::GuestELF staged_ps4;
+    bool orbis_admitted = false;
     maxps4::PS4VirtualMemory dynamic_ps4{staged_ps4};
     maxps4::PS4GuestMemory system_memory{staged_ps4, &dynamic_ps4};
     maxps4::PS4Libkernel libkernel{system_memory, &dynamic_ps4};
@@ -409,6 +410,7 @@ extern "C" int32_t maxps4_fex_engine_stage_ps4(maxps4_fex_engine* engine,
     engine->libkernel.reset();
     engine->linker.reset();
     engine->staged_ps4.clear();
+    engine->orbis_admitted = false;
     if (!entry || !segments || !blockers) return -EINVAL;
     const int error = engine->staged_ps4.stage_ps4(file, length);
     if (error) return error;
@@ -429,6 +431,7 @@ extern "C" int32_t maxps4_fex_engine_link_ps4(maxps4_fex_engine* engine,
     engine->dynamic_ps4.reset();
     engine->linker.reset();
     engine->staged_ps4.clear();
+    engine->orbis_admitted = false;
     if (!entry || !imports) return -EINVAL;
     const int error = engine->linker.load(engine->staged_ps4,file,length,budget);
     if (error) return error;
@@ -452,6 +455,59 @@ extern "C" int32_t maxps4_fex_engine_run_linked_ps4(maxps4_fex_engine* engine,
     *entry = engine->staged_ps4.entry();
     *calls = engine->probe.calls;
     return 0;
+}
+extern "C" int32_t maxps4_fex_engine_prepare_orbis(maxps4_fex_engine* engine,
+    const maxps4_orbis_module* modules, size_t count, const char* root,
+    uint32_t budget, char* diagnostic, size_t capacity) {
+    if (diagnostic && capacity) diagnostic[0] = 0;
+    if (!engine) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    engine->libkernel.reset(); engine->dynamic_ps4.reset(); engine->linker.reset();
+    engine->staged_ps4.clear(); engine->orbis_admitted = false;
+    auto message = [&](const std::string& text) {
+        if (diagnostic && capacity) std::snprintf(diagnostic,capacity,"%s",text.c_str());
+    };
+    if (!modules || !count || count > 128 || !root || !diagnostic || capacity < 2)
+        return -EINVAL;
+    if (::strnlen(root,256)>255) return -E2BIG;
+    try {
+        std::vector<maxps4::OrbisLinker::Input> inputs;
+        for (size_t i=0;i<count;++i) {
+            const auto& m = modules[i];
+            if (!m.path || !m.bytes || m.dependency_count > 128 ||
+                (m.dependency_count && !m.dependencies)) return -EINVAL;
+            if (::strnlen(m.path,256)>255 || m.size>32*1024*1024) return -E2BIG;
+            maxps4::OrbisLinker::Input in{{{m.path,{}},m.bytes,m.size},m.load_bias};
+            for (size_t j=0;j<m.dependency_count;++j) {
+                if (!m.dependencies[j] || ::strnlen(m.dependencies[j],256)>255) return -EINVAL;
+                in.file.request.dependencies.emplace_back(m.dependencies[j]);
+            }
+            inputs.push_back(std::move(in));
+        }
+        maxps4::OrbisLinker::Image linked;
+        std::string reason;
+        if (!maxps4::OrbisLinker::link(inputs,{},linked,reason)) {
+            message(reason); return -ENOEXEC;
+        }
+        const int status = engine->staged_ps4.prepare_orbis(linked,root,budget,reason);
+        message(status ? reason : "SCE image linked, mapped and CPU-admitted; execution not attempted");
+        engine->orbis_admitted = status == 0;
+        return status;
+    } catch (const std::bad_alloc&) { message("Orbis allocation failed"); return -ENOMEM; }
+}
+extern "C" int32_t maxps4_fex_engine_run_orbis(maxps4_fex_engine* engine,
+    uint64_t* result, uint32_t* backend, uint64_t* entry) {
+    if (result) *result = 0;
+    if (backend) *backend = 0;
+    if (entry) *entry = 0;
+    if (!engine || !result || !backend || !entry) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    if (!engine->orbis_admitted) return -EFAULT;
+    try {
+        const int status = executeImage(engine,engine->staged_ps4,result,backend,nullptr);
+        if (!status) *entry = engine->staged_ps4.entry();
+        return status;
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
 }
 extern "C" int32_t maxps4_fex_test_ps4_libkernel(maxps4_ps4_elf_test_report* report) {
     if (!report) return -EINVAL;
@@ -521,6 +577,7 @@ extern "C" int32_t maxps4_fex_test_ps4_libkernel(maxps4_ps4_elf_test_report* rep
             engine->dynamic_ps4.reset();
             engine->linker.reset();
             engine->staged_ps4.clear();
+            engine->orbis_admitted = false;
             report->guest_segments_after = static_cast<uint32_t>(engine->staged_ps4.segments().size());
         }
         maxps4_fex_engine_close(engine);

@@ -1,10 +1,13 @@
 #include "../Native/maxps4_fex_runtime.h"
 #include "PS4LinkedELFFixture.h"
+#include "PS4OrbisExecutionFixture.h"
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <filesystem>
+#include <fstream>
 #include <unistd.h>
 
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); return 1; } } while (0)
@@ -16,6 +19,20 @@ static uint64_t value(const uint8_t* bytes) {
 int main(int argc, char** argv) {
     using namespace ps4_linked_test;
     std::setvbuf(stdout,nullptr,_IONBF,0);
+    if (argc == 3 && !std::strcmp(argv[1],"--orbis-bundle")) {
+        const std::filesystem::path directory(argv[2]);
+        std::filesystem::create_directories(directory);
+        for (bool provider : {false,true}) {
+            const auto bytes = orbis_execution::make(provider);
+            std::ofstream file(directory/(provider ? "provider.prx" : "app.elf"),std::ios::binary);
+            file.write(reinterpret_cast<const char*>(bytes.data()),bytes.size());
+            CHECK(bool(file));
+        }
+        std::ofstream manifest(directory/"maxps4.json");
+        manifest << R"({"root":"app.elf","modules":[{"path":"app.elf","loadBias":1048576,"dependencies":["provider.prx"]},{"path":"provider.prx","loadBias":2097152,"dependencies":[]}]})";
+        CHECK(bool(manifest));
+        return 0;
+    }
     // Export the identical tested bytes for the application's import picker.
     if (argc == 2 || argc == 3) {
         for (int i = 1; i < argc; ++i) {
@@ -45,6 +62,42 @@ int main(int argc, char** argv) {
         std::printf("PASS built-in app ELF diagnostic: entry=0x%llx NID=aI+OeCz8xrQ kernel=%llu resumed=%u memory=%llu backend=%u guest_segments_after=%u jit_leases_after=%u\n",
             (unsigned long long)report.entry, (unsigned long long)report.kernel_return, report.resumed,
             (unsigned long long)report.final_memory, report.backend, report.guest_segments_after, report.jit_regions_after);
+    }
+    // SCE tables and fabricated NID supplied by an explicit PRX dependency.
+    // Observe different provider machine code results; never substitute 42.
+    for (uint32_t provider_value : {40U,7U}) {
+        auto app = orbis_execution::make(false);
+        auto provider = orbis_execution::make(true,provider_value);
+        const char* dependency[] = {"provider.prx"};
+        const maxps4_orbis_module modules[] = {
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,dependency,1},
+            {"provider.prx",provider.data(),provider.size(),orbis_execution::provider_bias,nullptr,0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        char diagnostic[512]{};
+        CHECK(maxps4_fex_engine_prepare_orbis(process,modules,2,"app.elf",6,diagnostic,sizeof(diagnostic))==0);
+        uint64_t observed=99, logical_entry=99; uint32_t cpu=99;
+        CHECK(maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry)==-EAGAIN);
+        CHECK(!observed && !cpu && !logical_entry);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        for (int repeat=0;repeat<2;++repeat) {
+            CHECK(maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry)==0);
+            CHECK(observed==provider_value+2 && logical_entry==orbis_execution::entry);
+#ifdef VIXL_SIMULATOR
+            CHECK(cpu==MAXPS4_CPU_FEX_ARM64_SIMULATOR);
+#else
+            CHECK(cpu==MAXPS4_CPU_FEX_ARM64_JIT);
+#endif
+            uint8_t stored[4]{};
+            CHECK(maxps4_fex_engine_read_ps4(process,orbis_execution::data+8,stored,4)==0);
+            CHECK(stored[0]==0x34 && stored[1]==0x12 && !stored[2] && !stored[3]);
+        }
+        std::printf("PASS SCE ELF -> PRX NID/RELA -> FEX CALL/RET -> ADD: RAX=%llu backend=%u entry=0x%llx store=0x1234\n",
+            (unsigned long long)observed,cpu,(unsigned long long)logical_entry);
+        CHECK(maxps4_fex_engine_prepare_orbis(process,modules,1,"app.elf",6,diagnostic,sizeof(diagnostic))!=0);
+        CHECK(maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry)==-EFAULT);
+        CHECK(!observed && !cpu && !logical_entry);
+        maxps4_fex_engine_close(process);
     }
     maxps4_fex_engine* engine = nullptr;
     std::puts("BEGIN real FEX context and linked Orbis execution");

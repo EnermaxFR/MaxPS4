@@ -588,7 +588,7 @@ final class MaxPS4Emulator: ObservableObject {
             return "Fichier introuvable : \\(game.fileName). Vérifie les données importées."
         }
         if fileURL.pathExtension.lowercased() == "pkg" {
-            return "\\(game.name) : paquet PKG conservé dans la bibliothèque. Installation/exécution PS4 indisponible."
+            return "\(game.name) : PKG reconnu et conservé. Lancement bloqué : eboot.bin, modules PRX et ressources du PFS ne sont pas accessibles par cet import. Fournir un dossier obtenu par une voie autorisée avec des ELF/PRX en clair et maxps4.json, puis utiliser « Importer et exécuter un dossier Orbis compatible » dans le diagnostic FEXCore. Aucun jeu lancé depuis ce PKG."
         }
         guard let nativeEngine else {
             let cpuProbeStatus = maxps4NativeAetherCPUProbe() == 1 ? "réussi" : "échoué"

@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include "OrbisLinker.hpp"
 
 namespace maxps4 {
 // A deliberately bounded position-independent ELF demonstration, not a PS4 ABI.
@@ -21,6 +22,10 @@ public:
     // Maps validated plaintext PS4 segments into the same FEX arena, without
     // instruction admission or execution. Guest addresses remain logical;
     // absolute addressing requires an address-space backend before execution.
+    // Copies a linked SCE image into owned pages; admits finite, acyclic GOT
+    // calls to bounded guest functions. No TLS, arbitrary addressing or HLE.
+    int prepare_orbis(const OrbisLinker::Image& linked, const std::string& root,
+                      uint32_t budget, std::string& diagnostic);
     int stage_ps4(const uint8_t* file, size_t length);
     // Admission for the bounded rebased FEX path only. Does not remove the
     // general PS4 address-space blocker or authorize arbitrary instructions.

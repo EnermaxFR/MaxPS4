@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "maxps4_jit_memory.h"
+#include "OrbisLinkerBridge.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -108,6 +109,17 @@ int32_t maxps4_fex_engine_link_ps4(maxps4_fex_engine *engine, const uint8_t *fil
 // Only the program admitted at link time can execute; no interpreter fallback.
 int32_t maxps4_fex_engine_run_linked_ps4(maxps4_fex_engine *engine,
     uint64_t *result, uint32_t *backend, uint64_t *entry, uint32_t *calls);
+// SCE ELF/PRX graph -> exact NID/RELA linker -> owned pages -> finite CPU
+// admission. Dependencies supplied explicitly; no disk discovery or decryption.
+// Diagnostic describes the first refusal. Invalid preparation clears old state.
+int32_t maxps4_fex_engine_prepare_orbis(maxps4_fex_engine *engine,
+    const maxps4_orbis_module *modules, size_t count, const char *root,
+    uint32_t budget, char *diagnostic, size_t capacity);
+// Only an admitted SCE process may run. Real FEX only, with guarded private
+// SysV stack, acyclic guest CALL/RET and terminal HLT. No implicit init/fini,
+// syscall, TLS, arbitrary instructions, absolute pointer dereference or fallback.
+int32_t maxps4_fex_engine_run_orbis(maxps4_fex_engine *engine,
+    uint64_t *result, uint32_t *backend, uint64_t *entry);
 // Exact read from staged or anonymous readable memory; no host pointers cross the ABI.
 // Failure leaves caller bytes untouched. Serialized against stage/close.
 int32_t maxps4_fex_engine_read_ps4(maxps4_fex_engine *engine, uint64_t address,

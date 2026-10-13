@@ -209,6 +209,102 @@ struct MaxPS4FEXDiagnostic: Sendable {
 #endif
     }
 
+    // An authorized plaintext bundle has an explicit graph. A recognized PKG
+    // or opaque PFS never supplies these bytes implicitly.
+    static func executeOrbisDirectory(url: URL) -> String {
+#if MAXPS4_FEX_APP
+        struct Manifest: Decodable {
+            struct Module: Decodable { let path: String; let loadBias: UInt64; let dependencies: [String] }
+            let root: String
+            let modules: [Module]
+        }
+        func basename(_ value: String) -> Bool {
+            !value.isEmpty && value.utf8.count <= 255 && value != "." && value != ".." &&
+                !value.contains("/") && !value.contains("\\") && !value.contains("\0")
+        }
+        do {
+            let directory = url.resolvingSymlinksInPath().standardizedFileURL
+            func read(_ name: String, limit: UInt64) throws -> Data {
+                guard basename(name) else { throw CocoaError(.fileReadInvalidFileName) }
+                let fileURL = directory.appendingPathComponent(name)
+                guard fileURL.resolvingSymlinksInPath().deletingLastPathComponent() == directory else {
+                    throw CocoaError(.fileReadNoPermission)
+                }
+                let handle = try FileHandle(forReadingFrom: fileURL)
+                defer { try? handle.close() }
+                let size = try handle.seekToEnd()
+                guard size > 0, size <= limit else { throw CocoaError(.fileReadTooLarge) }
+                try handle.seek(toOffset: 0)
+                let bytes = try handle.read(upToCount: Int(size)) ?? Data()
+                guard bytes.count == Int(size) else { throw CocoaError(.fileReadCorruptFile) }
+                return bytes
+            }
+            let manifest = try JSONDecoder().decode(Manifest.self, from: read("maxps4.json", limit: 65536))
+            guard basename(manifest.root), !manifest.modules.isEmpty, manifest.modules.count <= 128,
+                  Set(manifest.modules.map(\.path)).count == manifest.modules.count,
+                  manifest.modules.contains(where: { $0.path == manifest.root }),
+                  manifest.modules.allSatisfy({ basename($0.path) && $0.dependencies.count <= 128 && $0.dependencies.allSatisfy(basename) }) else {
+                return "Import Orbis refusé : manifeste invalide (racine, chemins ou dépendances)."
+            }
+            var storage: [NSData] = []
+            var total = 0
+            for module in manifest.modules {
+                let bytes = try read(module.path, limit: 32 * 1024 * 1024)
+                total += bytes.count
+                guard total <= 64 * 1024 * 1024 else { return "Import Orbis refusé : budget total de 64 Mio dépassé." }
+                storage.append(bytes as NSData)
+            }
+            var strings: [UnsafeMutablePointer<CChar>] = []
+            defer { strings.forEach { free($0) } }
+            func cstring(_ value: String) throws -> UnsafePointer<CChar> {
+                guard let pointer = strdup(value) else { throw CocoaError(.fileReadUnknown) }
+                strings.append(pointer); return UnsafePointer(pointer)
+            }
+            var dependencies: [UnsafeMutablePointer<UnsafePointer<CChar>?>] = []
+            defer { dependencies.forEach { $0.deallocate() } }
+            var modules: [maxps4_orbis_module] = []
+            for (index, module) in manifest.modules.enumerated() {
+                let pointers = UnsafeMutablePointer<UnsafePointer<CChar>?>.allocate(capacity: max(1, module.dependencies.count))
+                dependencies.append(pointers)
+                for (i, name) in module.dependencies.enumerated() { pointers[i] = try cstring(name) }
+                modules.append(maxps4_orbis_module(path: try cstring(module.path),
+                    bytes: storage[index].bytes.assumingMemoryBound(to: UInt8.self), size: storage[index].length,
+                    load_bias: module.loadBias, dependencies: UnsafePointer(pointers), dependency_count: module.dependencies.count))
+            }
+            var engine: OpaquePointer?
+            let opened = maxps4_fex_engine_open(&engine)
+            guard opened == 0, let engine else { return "Ouverture FEX refusée (\(opened))." }
+            defer { maxps4_fex_engine_close(engine) }
+            var diagnostic = [CChar](repeating: 0, count: 1024)
+            let root = try cstring(manifest.root)
+            let prepared = withExtendedLifetime(storage) {
+                modules.withUnsafeBufferPointer { modules in
+                    diagnostic.withUnsafeMutableBufferPointer { text in
+                        maxps4_fex_engine_prepare_orbis(engine, modules.baseAddress, modules.count,
+                            root, 65536, text.baseAddress, text.count)
+                    }
+                }
+            }
+            let reason = diagnostic.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
+            guard prepared == 0 else { return "Fichiers disponibles : \(modules.count). Préparation Orbis refusée (\(prepared)) : \(reason)" }
+            let initialized = maxps4_fex_engine_initialize(engine)
+            guard initialized == 0 else {
+                return "Fichiers vérifiés, modules liés, mémoire préparée. Exécution non tentée : JIT FEX indisponible (\(initialized)). Activer StikDebug puis réessayer."
+            }
+            var value: UInt64 = 0; var entry: UInt64 = 0; var backend: UInt32 = 0
+            let status = maxps4_fex_engine_run_orbis(engine, &value, &backend, &entry)
+            guard status == 0 else { return "Processus Orbis préparé ; exécution FEX refusée (\(status))." }
+            let cpu = backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT) ? "ARM64 natif" : "simulateur ARM64"
+            return "Fichiers vérifiés : \(modules.count). SCE/NID/relocations résolus.\nExécution FEX \(cpu) terminée : RAX = \(value), entrée = 0x" + String(entry, radix: 16) +
+                "\nAppels invités CALL/RET bornés ; arrêt HLT et nettoyage du processus.\nImage, commandes de jeu et audio : indisponibles. Aucun jeu jouable validé."
+        } catch {
+            return "Import Orbis refusé : \(error.localizedDescription). Fournir un dossier autorisé contenant maxps4.json et les ELF/PRX en clair. Un PKG à PFS opaque ne permet pas ce lancement."
+        }
+#else
+        return "Import Orbis : moteur FEXCore absent de cette compilation."
+#endif
+    }
+
     static func run() -> Self {
 #if MAXPS4_FEX_APP
         let elfMemoryBridgePassed = MaxPS4ELFLoader.importDemoSelfTest() &&
