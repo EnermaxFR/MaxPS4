@@ -23,6 +23,14 @@ struct FEXSwiftDiagnosticTest {
             precondition(linked.contains("RAX : 2") && linked.contains("appels libkernel : 1"))
             print("PASS Swift imported Orbis ELF -> native linker -> real FEX/libkernel -> RAX 2")
         }
+        if CommandLine.arguments.count > 2 {
+            let directory = URL(fileURLWithPath: CommandLine.arguments[2])
+            let result = MaxPS4FEXDiagnostic.executeOrbisDirectory(url: directory)
+            precondition(result.contains("Exécution FEX ARM64 natif terminée : RAX = 42"), result)
+            print("PASS Swift authorized manifest -> SCE ELF/PRX -> FEX native ARM64 -> RAX 42")
+            let missing = MaxPS4FEXDiagnostic.executeOrbisDirectory(url: directory.appendingPathComponent("absent"))
+            precondition(missing.contains("Import Orbis refusé"))
+        }
         for iteration in 0..<8 {
             let report = autoreleasepool { MaxPS4FEXDiagnostic.run() }
             precondition(report.succeeded && report.result == 42)

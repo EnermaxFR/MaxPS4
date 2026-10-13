@@ -39,3 +39,5 @@ cmake --build "$OUT" --target maxps4-ps4-linked-test --parallel "${MAXPS4_BUILD_
 python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/ps4-linked-tests.txt" "$OUT/Bin/maxps4-ps4-linked-test"
 python3 "$ROOT/scripts/run-bounded.py" 10 "$OUT/fixture-export.txt" "$OUT/Bin/maxps4-ps4-linked-test" \
   "$OUT/ps4-libkernel-demo.elf" "$OUT/ps4-libkernel-combined.elf"
+python3 "$ROOT/scripts/run-bounded.py" 10 "$OUT/orbis-fixture-export.txt" "$OUT/Bin/maxps4-ps4-linked-test" \
+  --orbis-bundle "$OUT/orbis-bundle"

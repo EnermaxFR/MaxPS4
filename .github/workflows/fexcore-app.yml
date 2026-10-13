@@ -114,7 +114,8 @@ jobs:
             -L build/fex-app-host -lMaxPS4FEXRuntime \
             -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" \
             -o build/fex-app-host/swift-fex-test
-          python3 scripts/run-bounded.py 60 build/fex-app-host/swift-diagnostic-tests.txt build/fex-app-host/swift-fex-test build/fex-app-host/ps4-libkernel-demo.elf
+          build/fex-app-host/Bin/maxps4-ps4-linked-test --orbis-bundle build/fex-app-host/orbis-bundle
+          python3 scripts/run-bounded.py 60 build/fex-app-host/swift-diagnostic-tests.txt build/fex-app-host/swift-fex-test build/fex-app-host/ps4-libkernel-demo.elf build/fex-app-host/orbis-bundle
       - name: Test actual ELF FEX position transfer and offscreen Metal readback
         timeout-minutes: 3
         shell: bash
@@ -182,6 +183,7 @@ jobs:
             build/diagnostics/
             build/fex-app-host/*.txt
             build/fex-app-host/*.log
+            build/fex-app-host/orbis-bundle/**
             build/fex-app-ios/*.txt
             build/fex-app-ios/*.log
           retention-days: 14

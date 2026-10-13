@@ -30,7 +30,14 @@ permissions:
   contents: read
 jobs:
   linked-fex:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            backend: simulator
+          - os: ubuntu-24.04-arm
+            backend: native-arm64
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -48,13 +55,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ps4-linked-fex-simulator
+          name: ps4-linked-fex-${{ matrix.backend }}
           path: |
             build/ps4-linked/*.log
             build/ps4-linked/*.txt
             build/ps4-linked/ps4-libkernel-demo.elf
             build/ps4-linked/ps4-libkernel-combined.elf
             build/ps4-linked/Bin/maxps4-ps4-linked-test
+            build/ps4-linked/orbis-bundle/**
   services:
     timeout-minutes: 10
     strategy:

@@ -6,6 +6,8 @@
 #include <cerrno>
 #include <cstring>
 #include <limits>
+#include <functional>
+#include <set>
 #include <new>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -179,6 +181,132 @@ int GuestELF::interpret(uint32_t budget, Execution& out) {
         if (op == 0xF4) return initialized ? 0 : -ENOTSUP;
     }
     return -E2BIG;
+}
+int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string& root,
+    uint32_t budget, std::string& diagnostic) {
+    clear(); diagnostic.clear();
+    auto fail = [&](int error, const char* message) {
+        clear(); diagnostic = message; return error;
+    };
+    if (!budget || budget > 65536) return fail(-EINVAL, "invalid Orbis CPU budget");
+    try {
+        // Patch only our private copy. Linker's logical relocations stay intact.
+        auto copy = linked;
+        uint64_t entry = 0;
+        for (const auto& module : copy.modules) {
+            if (module.image.requiresTLS) return fail(-ENOTSUP, "Orbis TLS execution unavailable");
+            if (module.path == root) entry = module.entry;
+        }
+        if (!entry) return fail(-ENOEXEC, "root has no process entry");
+        auto fetch = [&](uint64_t address, size_t count) -> uint8_t* {
+            for (auto& module : copy.modules) for (auto& segment : module.image.segments) {
+                const uint64_t begin = module.bias + segment.header.address;
+                if ((segment.header.flags & 5) == 5 && address >= begin &&
+                    address - begin <= segment.header.fileSize &&
+                    count <= segment.header.fileSize - (address - begin))
+                    return segment.bytes.data() + address - begin;
+            }
+            return nullptr;
+        };
+        struct Patch { uint8_t* code; uint32_t displacement; };
+        std::vector<Patch> patches;
+        std::set<uint64_t> active;
+        std::map<uint64_t,size_t> instruction_ranges;
+        bool initialized = false;
+        uint32_t remaining = budget;
+        uint64_t refusal_pc = entry;
+        uint8_t refusal_opcode = 0;
+        std::function<int(uint64_t,bool,size_t)> admit = [&](uint64_t pc, bool function, size_t depth) -> int {
+            if (depth > 32 || !active.insert(pc).second) return -ELOOP;
+            const uint64_t start = pc;
+            struct Erase { std::set<uint64_t>& active; uint64_t start; ~Erase() { active.erase(start); } } erase{active,start};
+            while (remaining) {
+                --remaining;
+                refusal_pc = pc; refusal_opcode = 0;
+                auto* code = fetch(pc,1);
+                if (!code) return -EFAULT;
+                const uint8_t op = code[0];
+                refusal_opcode = op;
+                size_t width = op == 0xb8 || op == 0x05 ? 5 : op == 0xff ? 6 : op == 0xc7 ? 10 : 1;
+                if (!fetch(pc,width)) return -EFAULT;
+                // A CALL target may not enter another instruction's operand.
+                // Otherwise rewriting one decoded stream could invalidate a
+                // different stream that was admitted over overlapping bytes.
+                const auto next = instruction_ranges.lower_bound(pc);
+                if (next != instruction_ranges.end() && next->first == pc) {
+                    if (next->second != width) return -ENOTSUP;
+                } else {
+                    if (next != instruction_ranges.end() && next->first < pc+width) return -ENOTSUP;
+                    if (next != instruction_ranges.begin()) {
+                        const auto previous = std::prev(next);
+                        if (previous->first+previous->second > pc) return -ENOTSUP;
+                    }
+                    instruction_ranges.emplace_hint(next,pc,width);
+                }
+                if (op == 0xb8 || op == 0x05) {
+                    width = 5;
+                    if (!fetch(pc,width) || (op == 0x05 && !initialized)) return -ENOTSUP;
+                    initialized = true;
+                } else if (op == 0xff) {
+                    width = 6;
+                    if (!fetch(pc,width) || code[1] != 0x15) return -ENOTSUP;
+                    const int64_t disp = static_cast<int32_t>(number(code+2,4));
+                    const uint64_t slot = static_cast<uint64_t>(static_cast<int64_t>(pc+6)+disp);
+                    const auto* pointer = copy.translate(slot,8,4);
+                    if (!pointer) return -EFAULT;
+                    const uint64_t target = number(pointer,8);
+                    if (target >= (uint64_t{1}<<47) || pc >= (uint64_t{1}<<47)) return -EFAULT;
+                    const int64_t relative = static_cast<int64_t>(target)-static_cast<int64_t>(pc+5);
+                    if (relative < INT32_MIN || relative > INT32_MAX) return -EOVERFLOW;
+                    const int error = admit(target,true,depth+1);
+                    if (error) return error;
+                    patches.push_back({code,static_cast<uint32_t>(relative)});
+                } else if (op == 0xc7) {
+                    width = 10;
+                    if (!fetch(pc,width) || code[1] != 5) return -ENOTSUP;
+                    const int64_t disp = static_cast<int32_t>(number(code+2,4));
+                    const uint64_t target = static_cast<uint64_t>(static_cast<int64_t>(pc+10)+disp);
+                    if (!copy.translate(target,4,2) || copy.translate(target,4,1)) return -EFAULT;
+                } else if (op == 0xc3 || op == 0xf4) {
+                    if (!initialized || (function ? op != 0xc3 : op != 0xf4)) return -ENOTSUP;
+                    return 0;
+                } else if (op != 0x90) return -ENOTSUP;
+                pc += width;
+            }
+            return -E2BIG;
+        };
+        const int admitted = admit(entry,false,0);
+        if (admitted) {
+            const char* cause = admitted == -EFAULT ? "invalid guest memory range" :
+                admitted == -ELOOP ? "recursive call or depth limit" :
+                admitted == -E2BIG ? "instruction admission budget exhausted" :
+                admitted == -EOVERFLOW ? "CALL displacement overflow" : "unsupported instruction or termination";
+            std::ostringstream detail;
+            detail << "Orbis CPU admission refused: " << cause << "; guest PC=0x" << std::hex
+                   << refusal_pc << "; opcode=0x" << unsigned(refusal_opcode);
+            clear(); diagnostic = detail.str(); return admitted;
+        }
+        for (const auto& patch : patches) {
+            patch.code[0] = 0xe8;
+            for (size_t i=0;i<4;++i) patch.code[1+i] = uint8_t(patch.displacement >> (8*i));
+            patch.code[5] = 0x90;
+        }
+        std::vector<Segment> parsed;
+        std::vector<const uint8_t*> sources;
+        for (const auto& module : copy.modules) for (const auto& segment : module.image.segments) {
+            const auto& h = segment.header;
+            // Copy relocated BSS as well as file bytes; retain file extent for CPU queries.
+            parsed.push_back({module.bias+h.address,h.offset,h.memorySize,h.memorySize,h.flags});
+            sources.push_back(segment.bytes.data());
+        }
+        const int mapped = map_segments(std::move(parsed),sources,entry);
+        if (mapped) return fail(mapped,"Orbis page mapping refused (page overlap, span or protection)");
+        size_t i=0;
+        for (const auto& module : copy.modules) for (const auto& segment : module.image.segments)
+            regions[i++].file_size = segment.header.fileSize;
+        blockers = 4; // Restricted rebasing never establishes general PS4 addressing.
+        return 0;
+    } catch (const std::bad_alloc&) { clear(); return -ENOMEM; }
 }
 int GuestELF::stage_ps4(const uint8_t* file, size_t length) {
     clear();
