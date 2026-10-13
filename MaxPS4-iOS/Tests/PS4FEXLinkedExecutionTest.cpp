@@ -111,7 +111,7 @@ static int animatedGuestTest() {
     std::vector<uint8_t> image(width*height*4);
     uint64_t sequence=0; uint32_t backend=0;
     for (uint32_t frame=0;frame<20;++frame) {
-        CHECK(maxps4_fex_engine_step_frame(engine,frame<2 ? 8u : 0u,image.data(),image.size(),&sequence,&backend)==0);
+        CHECK(maxps4_fex_engine_step_frame(engine,frame<2 ? 8u : (frame==9 ? 16u : 0u),image.data(),image.size(),&sequence,&backend)==0);
         CHECK(sequence==frame+1);
 #ifdef VIXL_SIMULATOR
         CHECK(backend==MAXPS4_CPU_FEX_ARM64_SIMULATOR);
@@ -123,6 +123,12 @@ static int animatedGuestTest() {
         uint32_t rgba=0;
         for(int b=0;b<4;++b) rgba|=uint32_t(image[enemyOffset+b])<<(8*b);
         CHECK(rgba==(frame==7 ? 0xff2080e0u : 0xff40d030u));
+        if (frame==9) {
+            const size_t playerOffset=((5u*2u)*width+(7u*2u))*4u;
+            uint32_t player=0;
+            for (int b=0;b<4;++b) player|=uint32_t(image[playerOffset+b])<<(8*b);
+            CHECK(player==0xffa080e0u); // Action visibly changes red channel in guest code.
+        }
         if(frame>0) {
             const uint32_t oldCell=80+((frame-1)&15);
             if(oldCell!=enemyCell) {
