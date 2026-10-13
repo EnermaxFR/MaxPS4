@@ -213,6 +213,7 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
         std::set<uint64_t> active;
         std::map<uint64_t,size_t> instruction_ranges;
         bool initialized = false;
+        bool edx_initialized = false, ebx_initialized = false, compared = false;
         uint32_t remaining = budget;
         uint64_t refusal_pc = entry;
         uint8_t refusal_opcode = 0;
@@ -227,8 +228,12 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                 if (!code) return -EFAULT;
                 const uint8_t op = code[0];
                 refusal_opcode = op;
-                size_t width = op == 0xb8 || op == 0x05 ? 5 : op == 0xff ? 6 : op == 0xc7 ? 10 : 1;
+                size_t width = op == 0xb8 || op == 0xba || op == 0xbb || op == 0x05 || op == 0x25 || op == 0x0d ? 5 :
+                    op == 0xff || op == 0x8b || op == 0x89 || op == 0x81 ? 6 :
+                    op == 0xc7 ? 10 : op == 0xc1 || op == 0x0f ? 3 :
+                    op == 0x01 || op == 0x29 ? 2 : 1;
                 if (!fetch(pc,width)) return -EFAULT;
+                if (op == 0x89 && code[1] == 0xc3) width = 2;
                 // A CALL target may not enter another instruction's operand.
                 // Otherwise rewriting one decoded stream could invalidate a
                 // different stream that was admitted over overlapping bytes.
@@ -247,6 +252,42 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                     width = 5;
                     if (!fetch(pc,width) || (op == 0x05 && !initialized)) return -ENOTSUP;
                     initialized = true;
+                    if (op == 0x05) compared = false;
+                } else if (op == 0xba || op == 0xbb) {
+                    if (op == 0xba) edx_initialized = true; else ebx_initialized = true;
+                } else if (op == 0x89 && code[1] == 0xc3) {
+                    if (!initialized) return -ENOTSUP;
+                    ebx_initialized = true; // MOV EBX,EAX
+                } else if (op == 0x8b || op == 0x89) {
+                    // Only EAX/EDX RIP-relative operands, never register pointers.
+                    const bool eax = code[1] == 0x05, edx = code[1] == 0x15;
+                    if (!eax && !edx) return -ENOTSUP;
+                    const uint64_t target = static_cast<uint64_t>(static_cast<int64_t>(pc+6) +
+                        static_cast<int32_t>(number(code+2,4)));
+                    if (op == 0x8b) {
+                        if (!copy.translate(target,4,4) || copy.translate(target,4,1)) return -EFAULT;
+                        if (eax) initialized = true; else edx_initialized = true;
+                    } else {
+                        if (!(eax ? initialized : edx_initialized)) return -ENOTSUP;
+                        if (!copy.translate(target,4,2) || copy.translate(target,4,1)) return -EFAULT;
+                    }
+                } else if (op == 0x25 || op == 0x0d) {
+                    if (!initialized) return -ENOTSUP;
+                    compared = false;
+                } else if (op == 0xc1) {
+                    // SHL/SHR EAX or SHL EDX, with bounded immediate count.
+                    if (code[2] > 31 || (code[1] != 0xe0 && code[1] != 0xe8 && code[1] != 0xe2)) return -ENOTSUP;
+                    if (!(code[1] == 0xe2 ? edx_initialized : initialized)) return -ENOTSUP;
+                    compared = false;
+                } else if (op == 0x01 || op == 0x29) {
+                    if (code[1] != 0xc2 || !initialized || !edx_initialized) return -ENOTSUP;
+                    compared = false; // ADD/SUB EDX,EAX
+                } else if (op == 0x81) {
+                    if (!edx_initialized || (code[1] != 0xfa && code[1] != 0xe2)) return -ENOTSUP;
+                    compared = code[1] == 0xfa; // CMP or AND EDX,imm32
+                } else if (op == 0x0f) {
+                    if (code[1] != 0x44 || code[2] != 0xc3 || !compared || !initialized || !ebx_initialized) return -ENOTSUP;
+                    // CMOVE EAX,EBX; MOV does not alter the comparison flags.
                 } else if (op == 0xff) {
                     width = 6;
                     if (!fetch(pc,width) || code[1] != 0x15) return -ENOTSUP;

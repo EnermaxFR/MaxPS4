@@ -19,6 +19,9 @@ targets:
     sources:
       - path: Sources
       - path: Resources
+        excludes: [PlayableDemo]
+      - path: Resources/PlayableDemo
+        type: folder
       - path: Native/PM4MetalDrawBridge.mm
       - path: Native/PS4PKGBridge.cpp
       - path: Native/OrbisAnalysisBridge.cpp
@@ -39,6 +42,7 @@ targets:
         MARKETING_VERSION: '0.3.0'
         CURRENT_PROJECT_VERSION: '1000175'
     dependencies:
+      - sdk: GameController.framework
       - sdk: Metal.framework
       - sdk: MetalKit.framework
       - framework: ../build/frameworks/MaxPS4FEXRuntime.framework

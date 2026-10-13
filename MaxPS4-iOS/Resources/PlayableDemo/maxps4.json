@@ -1,0 +1,23 @@
+{
+  "root": "app.elf",
+  "modules": [
+    {
+      "path": "app.elf",
+      "loadBias": 1048576,
+      "dependencies": [
+        "provider.prx"
+      ]
+    },
+    {
+      "path": "provider.prx",
+      "loadBias": 2097152,
+      "dependencies": []
+    }
+  ],
+  "frame": {
+    "pixels": 1114368,
+    "input": 1114128,
+    "width": 32,
+    "height": 24
+  }
+}

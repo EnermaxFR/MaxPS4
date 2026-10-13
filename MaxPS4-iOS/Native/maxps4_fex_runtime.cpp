@@ -1,3 +1,4 @@
+#include "maxps4_guest_frame.h"
 #include "maxps4_fex_runtime.h"
 #include "maxps4_jit_memory.h"
 #include "maxps4_guest_elf.h"
@@ -141,6 +142,9 @@ struct maxps4_fex_engine {
     ProbeAddressSpace probe;
     maxps4::GuestELF staged_ps4;
     bool orbis_admitted = false;
+    maxps4::GuestFrame frame;
+    uint64_t frame_sequence = 0;
+    bool frame_code_cached = false;
     maxps4::PS4VirtualMemory dynamic_ps4{staged_ps4};
     maxps4::PS4GuestMemory system_memory{staged_ps4, &dynamic_ps4};
     maxps4::PS4Libkernel libkernel{system_memory, &dynamic_ps4};
@@ -289,7 +293,7 @@ struct PM4Request {
     size_t* written;
 };
 int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
-    uint64_t* result, uint32_t* backend, const PM4Request* submission, bool linked = false) {
+    uint64_t* result, uint32_t* backend, const PM4Request* submission, bool linked = false, bool persistent_frame = false) {
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
     // FEX still uses rebased host addresses for the admitted instruction set.
     // Check the logical PS4 entry via the shared guest-memory contract before
@@ -356,7 +360,8 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     // mmap can reuse a previous image's address. The context retains a shared
     // L3 guest-to-host cache across threads: discard those old translations
     // without allocating another iOS JIT buffer. All engine execution is locked.
-    engine->context->ClearCodeCache(thread, false);
+    if (!persistent_frame || !engine->frame_code_cached) engine->context->ClearCodeCache(thread, false);
+    engine->frame_code_cached = persistent_frame;
     engine->context->ExecuteThread(thread);
     if (engine->probe.callback_error) return engine->probe.callback_error;
     if (submission) {
@@ -410,7 +415,7 @@ extern "C" int32_t maxps4_fex_engine_stage_ps4(maxps4_fex_engine* engine,
     engine->libkernel.reset();
     engine->linker.reset();
     engine->staged_ps4.clear();
-    engine->orbis_admitted = false;
+    engine->orbis_admitted = false; engine->frame = {}; engine->frame_sequence = 0; engine->frame_code_cached = false;
     if (!entry || !segments || !blockers) return -EINVAL;
     const int error = engine->staged_ps4.stage_ps4(file, length);
     if (error) return error;
@@ -431,7 +436,7 @@ extern "C" int32_t maxps4_fex_engine_link_ps4(maxps4_fex_engine* engine,
     engine->dynamic_ps4.reset();
     engine->linker.reset();
     engine->staged_ps4.clear();
-    engine->orbis_admitted = false;
+    engine->orbis_admitted = false; engine->frame = {}; engine->frame_sequence = 0; engine->frame_code_cached = false;
     if (!entry || !imports) return -EINVAL;
     const int error = engine->linker.load(engine->staged_ps4,file,length,budget);
     if (error) return error;
@@ -463,7 +468,7 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis(maxps4_fex_engine* engine,
     if (!engine) return -EINVAL;
     std::lock_guard lock(runtime_lock);
     engine->libkernel.reset(); engine->dynamic_ps4.reset(); engine->linker.reset();
-    engine->staged_ps4.clear(); engine->orbis_admitted = false;
+    engine->staged_ps4.clear(); engine->orbis_admitted = false; engine->frame = {}; engine->frame_sequence = 0; engine->frame_code_cached = false;
     auto message = [&](const std::string& text) {
         if (diagnostic && capacity) std::snprintf(diagnostic,capacity,"%s",text.c_str());
     };
@@ -494,6 +499,43 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis(maxps4_fex_engine* engine,
         engine->orbis_admitted = status == 0;
         return status;
     } catch (const std::bad_alloc&) { message("Orbis allocation failed"); return -ENOMEM; }
+}
+extern "C" int32_t maxps4_fex_engine_configure_frame(maxps4_fex_engine* engine,
+    uint64_t pixels, uint64_t input, uint32_t width, uint32_t height) {
+    if (!engine) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    engine->frame = {}; engine->frame_sequence = 0; engine->frame_code_cached = false;
+    if (!engine->orbis_admitted) return -EFAULT;
+    const maxps4::GuestFrame candidate{pixels,input,width,height};
+    const int status = candidate.validate(engine->staged_ps4);
+    if (!status) engine->frame = candidate;
+    return status;
+}
+extern "C" int32_t maxps4_fex_engine_step_frame(maxps4_fex_engine* engine,
+    uint32_t buttons, uint8_t* pixels, size_t capacity, uint64_t* sequence, uint32_t* backend) {
+    if (sequence) *sequence = 0;
+    if (backend) *backend = 0;
+    if (!engine || !pixels || !sequence || !backend) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    if (!engine->orbis_admitted) return -EFAULT;
+    // Validate every output before dispatch: failures never publish partial frames.
+    const int valid = engine->frame.validate(engine->staged_ps4);
+    if (valid) return valid;
+    if (capacity != engine->frame.bytes() || (buttons & ~31u)) return -EINVAL;
+    if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
+    try {
+        const int input_status = engine->frame.setInput(engine->staged_ps4,buttons);
+        if (input_status) return input_status;
+        uint64_t result = 0; uint32_t cpu = 0;
+        const int status = executeImage(engine,engine->staged_ps4,&result,&cpu,nullptr,false,true);
+        if (status) { engine->orbis_admitted = false; engine->frame = {}; return status; }
+        const int copied = engine->frame.snapshot(engine->staged_ps4,pixels,capacity);
+        if (copied) return copied;
+        *sequence = ++engine->frame_sequence; *backend = cpu;
+        return 0;
+    } catch (const std::bad_alloc&) {
+        engine->orbis_admitted = false; engine->frame = {}; return -ENOMEM;
+    }
 }
 extern "C" int32_t maxps4_fex_engine_run_orbis(maxps4_fex_engine* engine,
     uint64_t* result, uint32_t* backend, uint64_t* entry) {
@@ -577,7 +619,7 @@ extern "C" int32_t maxps4_fex_test_ps4_libkernel(maxps4_ps4_elf_test_report* rep
             engine->dynamic_ps4.reset();
             engine->linker.reset();
             engine->staged_ps4.clear();
-            engine->orbis_admitted = false;
+            engine->orbis_admitted = false; engine->frame = {}; engine->frame_sequence = 0; engine->frame_code_cached = false;
             report->guest_segments_after = static_cast<uint32_t>(engine->staged_ps4.segments().size());
         }
         maxps4_fex_engine_close(engine);
