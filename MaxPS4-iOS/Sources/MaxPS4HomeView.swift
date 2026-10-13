@@ -29,6 +29,7 @@ struct MaxPS4HomeView: View {
     @State private var jitStatusReport: String?
     @State private var showingFEXDiagnostic = false
     @State private var showingMetalDiagnostic = false
+    @State private var showingGameDirectory = false
 
     @AppStorage("showFPS") private var showFPS = false
     @AppStorage("networkEnabled") private var networkEnabled = false
@@ -99,6 +100,7 @@ struct MaxPS4HomeView: View {
         }
         .sheet(isPresented: $showingFEXDiagnostic) { MaxPS4FEXDiagnosticView() }
         .sheet(isPresented: $showingMetalDiagnostic) { MaxPS4MetalDiagnosticView() }
+        .sheet(isPresented: $showingGameDirectory) { MaxPS4GameDirectoryView() }
         .sheet(isPresented: $showingDuplicates) {
             NavigationStack {
                 List {
@@ -1152,6 +1154,9 @@ struct MaxPS4HomeView: View {
                     .padding(.top, 8)
                 primaryAction(icon: "square.and.arrow.down.fill", title: "Importer un jeu", subtitle: "Sélectionner un fichier local") {
                     importingGame = true
+                }
+                secondaryAction(icon: "folder", title: "Dossier de jeu accessible", subtitle: "Précontrôle eboot.bin / PRX en lecture seule • rapport exportable") {
+                    showingGameDirectory = true
                 }
                 secondaryAction(icon: "internaldrive", title: "Gestion du stockage", subtitle: "\(emulator.games.count) fichiers enregistrés localement") {
                     selectedTab = .games

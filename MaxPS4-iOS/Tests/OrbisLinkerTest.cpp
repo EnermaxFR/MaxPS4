@@ -83,6 +83,21 @@ int main(int argc, char** argv) {
     put(consumer,0x908,(uint64_t{1}<<32)|1); put(consumer,0x910,uint64_t{1}<<63); reject(batch(),"underflow");
     consumer=original;
     // RELRO is protected after relocation, not left writable for the backend.
+    // NONE may contain unused, unmapped offsets/symbols and must not write.
+    setTag(consumer,0x61000031,72);
+    put(consumer,0x918,UINT64_MAX); put(consumer,0x920,uint64_t{UINT32_MAX}<<32);
+    put(consumer,0x928,UINT64_MAX);
+    put(consumer,0x930,0x2000); put(consumer,0x938,0); put(consumer,0x940,123);
+    Linker::Image none; Linker::Report noneReport;
+    check(Linker::link(batch(),{},none,diagnostic,4096,&noneReport),diagnostic.c_str());
+    check(value(none,0x102000)==0x201000 && noneReport.ignoredRelocations==2 &&
+        noneReport.relocations==1 && noneReport.validatedRelocations==1,"NONE has no write or symbol lookup");
+    check(noneReport.text().find("aucune écriture) : 2")!=std::string::npos,"NONE distinct from applied relocations");
+    // A real invalid relocation after NONE still rolls back the transaction.
+    put(consumer,0x938,99);
+    check(!Linker::link(batch(),{},none,diagnostic,4096,&noneReport) &&
+        value(none,0x102000)==0x201000 && !noneReport.committed,"NONE preserves late failure rollback");
+    consumer=original;
     put(consumer,64+56,0x61000010,4);
     Linker::Image relro; check(Linker::link(batch(),{},relro,diagnostic), "RELRO links");
     check(value(relro,0x102000)==0x201000 && !relro.translate(0x102000,8,2), "RELRO final read-only permissions"); consumer=original;

@@ -198,6 +198,50 @@ int main() {
     const std::string descriptorReport(report.data());
     assert(descriptorReport.find("Diagnostic metas : début à l'offset de la table PKG ; alias possible") != std::string::npos);
     assert(descriptorReport.find("Diagnostic entry_names : table déclarée") != std::string::npos);
+    // Reproduce the complete descriptor layout from the user-provided #184
+    // inventory. All payload bytes are fabricated zeros, including PFS, SFO,
+    // licenses and keys. This tests access policy, not the commercial package.
+    struct Observed { uint32_t id, offset, size, flags1, flags2; };
+    const Observed observed[] = {
+        {0x1,11712,832,0x40000000,0}, {0x10,8192,2048,0x60000000,0},
+        {0x20,10240,256,0xe0000000,0x3000}, {0x80,10496,384,0x60000000,0},
+        {0x100,10880,832,0x60000000,0}, {0x200,12544,227,0x40000000,0},
+        {0x400,14192,1024,0x80000000,0x3000}, {0x401,15216,512,0x80000000,0x2000},
+        {0x402,1401264,160,0x80000000,0x3000}, {0x403,1401424,532,0x80000000,0x3000},
+        {0x409,1401968,8192,0,0}, {0x1000,15728,3208,0,0},
+        {0x1001,12784,416,0,0}, {0x1002,13200,624,0,0}, {0x1003,13824,368,0,0},
+        {0x1004,1333328,3039,0,0}, {0x1005,1336368,20,0,0}, {0x1006,24384,9604,0,0},
+        {0x100b,1401104,145,0,0}, {0x1200,18944,2773,0,0}, {0x1201,21728,2651,0,0},
+        {0x1260,1336400,168,0,0}, {0x1280,34000,131200,0,0}, {0x1281,165200,131200,0,0},
+        {0x12c0,296400,1036928,0,0}, {0x1400,1336576,64528,0,0}
+    };
+    f.assign(10223616,0); std::memcpy(f.data(),"\177CNT",4);
+    put(f,4,1,4); put(f,0x10,26,4); put(f,0x16,26,2); put(f,0x18,10880,4);
+    put(f,0x20,8192,8); put(f,0x28,1564672,8);
+    put(f,0x70,0xf,4); put(f,0x74,0x1a,4); put(f,0x78,0xa000000,4);
+    put(f,0x410,1572864,8); put(f,0x418,8650752,8); put(f,0x430,f.size(),8);
+    for (size_t i=0;i<26;++i) {
+        const auto at=10880+i*32; const auto& e=observed[i];
+        put(f,at,e.id,4); put(f,at+8,e.flags1,4); put(f,at+12,e.flags2,4);
+        put(f,at+16,e.offset,4); put(f,at+20,e.size,4);
+    }
+    reads=bytesRead=0; assert(parse());
+    assert(pkg.pfsSize==8650752 && reads==27 && bytesRead==PKG::headerSize+26*32);
+    const auto observedAccess=[&](Access access) { return std::count_if(pkg.entries.begin(),pkg.entries.end(),[&](const auto& e){ return e.access==access; }); };
+    assert(observedAccess(Access::plaintext)==3 && observedAccess(Access::encrypted)==5 &&
+        observedAccess(Access::unsupported)==4 && observedAccess(Access::unknown)==13 && observedAccess(Access::invalid)==1);
+    reads=0;
+    for (size_t i=0;i<pkg.entries.size();++i) if (pkg.entries[i].access!=Access::plaintext)
+        assert(!pkg.extract(i,read,output,why) && output.empty());
+    assert(reads==0); // No keys/licenses/PFS read, even when caller asks.
+    file=std::fopen(path,"wb"); assert(file);
+    assert(fwrite(f.data(),1,f.size(),file)==f.size()); assert(fclose(file)==0);
+    assert(maxps4_pkg_inventory_report(path,report.data(),report.size())==0);
+    const std::string observedReport(report.data());
+    assert(observedReport.find("lisibles déclarés=3 ; chiffrés déclarés=5 ; non pris en charge=4 ; inconnus=13 ; invalides=1")!=std::string::npos);
+    assert(observedReport.find("PFS présent mais opaque/non monté ; aucun eboot.bin accessible")!=std::string::npos);
+    assert(observedReport.find("Contenu du jeu : non accessible par ce lecteur")!=std::string::npos);
+    assert(observedReport.find("Octets inspectés (budget partagé) : 15585")!=std::string::npos);
     f = original;
     // Malformed names cannot consume 1 MiB then restart the payload budget.
     auto large = original;
