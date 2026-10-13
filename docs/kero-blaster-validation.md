@@ -33,6 +33,20 @@ La détection LeakSanitizer est désactivée localement parce que cet environnem
 tracé ne la supporte pas ; ASan et UBSan restent actifs. La CI conserve sa
 configuration normale et le workflow macOS conserve sa vérification `leaks`.
 
+## Exécution ARM64 native observée
+
+Le commit `d74408e` a passé le [job ARM64 natif](https://github.com/EnermaxFR/MaxPS4/actions/runs/38396773169/job/115293868570)
+sur `ubuntu-24.04-arm`. Les journaux donnent RAX=42 puis RAX=9,
+`backend=2`, entrée 0x104000, store 0x1234, et les appels libkernel
+open/read/close/clock/mmap réussis. La compilation avec le SDK iPhone ARM64
+est également réussie dans ce run. Ce sont des observations d’exécution native
+Linux ARM64 et de compilation iPhone, pas d’exécution iPhone.
+
+Le test Swift réel de l’import et la construction IPA ont aussi réussi pour
+`3b28e25` dans [ce run](https://github.com/EnermaxFR/MaxPS4/actions/runs/38396484592).
+Consulter la PR pour les résultats et l’IPA du dernier commit ; ces résultats
+intermédiaires n’anticipent pas sa réussite.
+
 ## Vérifications distantes à distinguer
 
 La PR déclenche les tests ARM64 Linux natifs, l’import Swift réel sur macOS,
