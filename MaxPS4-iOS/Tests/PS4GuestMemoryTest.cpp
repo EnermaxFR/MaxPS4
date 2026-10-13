@@ -86,6 +86,25 @@ int main() {
     assert(maxps4::PS4KernelPath::read(memory, 0x10020, kernel_path) == PathResult::ok);
     assert(std::strcmp(kernel_path, valid_nested) == 0);
     assert(maxps4::PS4KernelPath::read(memory, UINT64_MAX, kernel_path) == PathResult::invalid_guest_address);
+    // libkernel paths are bounded to 1024 bytes including the NUL.
+    // A nonterminated guest path must be rejected without changing output.
+    char long_path[maxps4::PS4KernelPath::max_path + 1];
+    long_path[0] = '/';
+    long_path[1] = 'a';
+    long_path[2] = 'p';
+    long_path[3] = 'p';
+    long_path[4] = '0';
+    long_path[5] = '/';
+    for (size_t i = 6; i < sizeof(long_path) - 1; ++i) long_path[i] = 'x';
+    long_path[sizeof(long_path) - 1] = '\0';
+    assert(memory.write(0x10100, long_path, sizeof(long_path)));
+    assert(maxps4::PS4KernelPath::read(memory, 0x10100, kernel_path) == PathResult::invalid_guest_address);
+    assert(std::strcmp(kernel_path, valid_nested) == 0);
+    // The last legal byte is the terminator at index 1023.
+    long_path[maxps4::PS4KernelPath::max_path - 1] = '\0';
+    assert(memory.write(0x10100, long_path, maxps4::PS4KernelPath::max_path));
+    assert(maxps4::PS4KernelPath::read(memory, 0x10100, kernel_path) == PathResult::ok);
+    assert(std::strlen(kernel_path) == maxps4::PS4KernelPath::max_path - 1);
     // Strings must not cross into an unmapped segment, even when the
     // destination has enough capacity. A failure leaves it untouched.
     for (const auto& segment : image.segments()) {
