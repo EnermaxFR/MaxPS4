@@ -1,4 +1,5 @@
 #include "../Native/maxps4_ps4_guest_memory.h"
+#include "../Native/maxps4_ps4_kernel_path.h"
 #include "GuestELFFixture.h"
 #include <cassert>
 #include <cstdint>
@@ -46,6 +47,22 @@ int main() {
     assert(!memory.read_cstring(0x10020, nullptr, 4));
     assert(!memory.read_cstring(0x10020, rejected_path, 0));
     assert(!memory.read_cstring(0x10020, rejected_path, 4097));
+    // Minimal libkernel pathname admission: no host path resolution yet.
+    char kernel_path[maxps4::PS4KernelPath::max_path] = {};
+    using PathResult = maxps4::PS4KernelPathResult;
+    assert(maxps4::PS4KernelPath::read(memory, 0x10020, kernel_path) == PathResult::ok);
+    assert(std::strcmp(kernel_path, guest_path) == 0);
+    const char traversal[] = "/app0/../secret";
+    assert(memory.write(0x10020, traversal, sizeof(traversal)));
+    assert(maxps4::PS4KernelPath::read(memory, 0x10020, kernel_path) == PathResult::invalid_path);
+    assert(std::strcmp(kernel_path, guest_path) == 0);
+    const char other_mount[] = "/savedata/file";
+    assert(memory.write(0x10020, other_mount, sizeof(other_mount)));
+    assert(maxps4::PS4KernelPath::read(memory, 0x10020, kernel_path) == PathResult::unsupported_mount);
+    const char duplicate_slash[] = "/app0//file";
+    assert(memory.write(0x10020, duplicate_slash, sizeof(duplicate_slash)));
+    assert(maxps4::PS4KernelPath::read(memory, 0x10020, kernel_path) == PathResult::invalid_path);
+    assert(maxps4::PS4KernelPath::read(memory, UINT64_MAX, kernel_path) == PathResult::invalid_guest_address);
     // Strings must not cross into an unmapped segment, even when the
     // destination has enough capacity. A failure leaves it untouched.
     for (const auto& segment : image.segments()) {
