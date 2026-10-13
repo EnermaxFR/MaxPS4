@@ -14,6 +14,7 @@ public:
     struct Reference { std::string path; Kind kind; PS4PKGInventory::Access descriptorAccess; };
     std::vector<Reference> references;
     static constexpr size_t maxDependencies = 128;
+    static constexpr size_t batchMemoryBudget = 64 * 1024 * 1024;
     void inventory(const PS4PKGInventory& pkg, const std::vector<std::string>& names) {
         references.clear();
         if (names.size() != pkg.entries.size()) return;
@@ -128,6 +129,7 @@ public:
         if (!orderModules(requests, order, diagnostic)) return false;
         std::vector<PreparedModule> pending;
         pending.reserve(inputs.size());
+        size_t stagedBytes = 0;
         for (size_t index : order) {
             PreparedModule module;
             if (!prepareStandalone(inputs[index].request.logicalPath,
@@ -135,6 +137,13 @@ public:
                                    inputs[index].request.dependencies, module, diagnostic)) {
                 diagnostic = "Modules : " + inputs[index].request.logicalPath + " : " + diagnostic;
                 return false;
+            }
+            for (const auto& segment : module.image.segments) {
+                if (segment.bytes.size() > batchMemoryBudget - stagedBytes) {
+                    diagnostic = "Modules : budget mémoire total de 64 Mio dépassé";
+                    return false;
+                }
+                stagedBytes += segment.bytes.size();
             }
             pending.push_back(std::move(module));
         }
