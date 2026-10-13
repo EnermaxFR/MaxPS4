@@ -80,6 +80,61 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                         if (pkg.extract(i, boundedRead, bytes, why)) {
                             copied += bytes.size();
                             report << " ; copie mémoire=" << bytes.size() << " octets";
+                            if (e.id == 0x1000 && bytes.size() >= 4 &&
+                                !std::memcmp(bytes.data(), "\\0PSF", 4)) {
+                                // Bounded PSF metadata preview: no path use, extraction or execution.
+                                auto le16 = [&](size_t at) -> uint16_t {
+                                    return uint16_t(bytes[at]) | (uint16_t(bytes[at + 1]) << 8);
+                                };
+                                auto le32 = [&](size_t at) -> uint32_t {
+                                    return uint32_t(bytes[at]) | (uint32_t(bytes[at + 1]) << 8) |
+                                        (uint32_t(bytes[at + 2]) << 16) | (uint32_t(bytes[at + 3]) << 24);
+                                };
+                                bool valid = bytes.size() >= 20;
+                                uint32_t keyStart = 0, valueStart = 0, count = 0;
+                                if (valid) {
+                                    keyStart = le32(8); valueStart = le32(12); count = le32(16);
+                                    valid = count <= 256 &&
+                                        maxps4::PS4PKGInventory::range(20, uint64_t(count) * 16, bytes.size()) &&
+                                        keyStart >= 20 + uint64_t(count) * 16 &&
+                                        keyStart <= valueStart && valueStart <= bytes.size();
+                                }
+                                std::string metadata;
+                                for (uint32_t j = 0; valid && j < count; ++j) {
+                                    const size_t at = 20 + size_t(j) * 16;
+                                    const uint16_t keyOffset = le16(at);
+                                    const uint16_t format = le16(at + 2);
+                                    const uint32_t length = le32(at + 4);
+                                    const uint32_t maximum = le32(at + 8);
+                                    const uint32_t valueOffset = le32(at + 12);
+                                    const uint64_t keyAt = uint64_t(keyStart) + keyOffset;
+                                    const uint64_t dataAt = uint64_t(valueStart) + valueOffset;
+                                    valid = keyAt < valueStart && length <= maximum &&
+                                        maxps4::PS4PKGInventory::range(dataAt, maximum, bytes.size());
+                                    if (!valid) break;
+                                    size_t keyEnd = static_cast<size_t>(keyAt);
+                                    while (keyEnd < valueStart && bytes[keyEnd] &&
+                                           keyEnd - keyAt <= 32) ++keyEnd;
+                                    valid = keyEnd < valueStart && keyEnd - keyAt <= 32;
+                                    if (!valid) break;
+                                    const std::string key(reinterpret_cast<const char*>(bytes.data() + keyAt),
+                                                          keyEnd - static_cast<size_t>(keyAt));
+                                    if (key != "TITLE" && key != "TITLE_ID" &&
+                                        key != "CONTENT_ID" && key != "APP_VER") continue;
+                                    if (format != 0x204 || !length || length > 256 ||
+                                        bytes[dataAt + length - 1] != 0) continue;
+                                    bool printable = true;
+                                    for (size_t k = 0; k + 1 < length; ++k)
+                                        if (bytes[dataAt + k] < 0x20 || bytes[dataAt + k] > 0x7e)
+                                            printable = false;
+                                    if (printable)
+                                        metadata += " ; " + key + "=" +
+                                            std::string(reinterpret_cast<const char*>(bytes.data() + dataAt),
+                                                        length - 1);
+                                }
+                                if (valid) report << " ; PSF valide (" << count << " entrées)" << metadata;
+                                else report << " ; PSF invalide : table ou chaînes hors limites";
+                            }
                             const char name[] = "eboot.bin";
                             if (std::search(bytes.begin(), bytes.end(), name, name + 9,
                                 [](uint8_t a, char b) { return (a | 0x20U) == static_cast<uint8_t>(b); }) != bytes.end())
