@@ -51,6 +51,23 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
             report << "Taille vérifiée : " << size << " octets ; entrées : " << pkg.entries.size()
                    << "\nCorps : " << pkg.bodyOffset << " + " << pkg.bodySize
                    << "\nPFS : " << pkg.pfsOffset << " + " << pkg.pfsSize << " (opaque, non monté)\n";
+            // Descriptor counts are informational; no access to the opaque PFS is inferred.
+            size_t readable = 0, encrypted = 0, unsupported = 0, unknown = 0, invalid = 0;
+            for (const auto& entry : pkg.entries) {
+                switch (entry.access) {
+                case maxps4::PS4PKGInventory::Access::plaintext: ++readable; break;
+                case maxps4::PS4PKGInventory::Access::encrypted: ++encrypted; break;
+                case maxps4::PS4PKGInventory::Access::unsupported: ++unsupported; break;
+                case maxps4::PS4PKGInventory::Access::unknown: ++unknown; break;
+                case maxps4::PS4PKGInventory::Access::invalid: ++invalid; break;
+                }
+            }
+            report << "Bilan des descripteurs : lisibles déclarés=" << readable
+                   << " ; chiffrés déclarés=" << encrypted
+                   << " ; non pris en charge=" << unsupported
+                   << " ; inconnus=" << unknown << " ; invalides=" << invalid << '\\n';
+            if (pkg.pfsSize)
+                report << "PFS présent : contenu opaque ; aucun exécutable déduit de cet inventaire.\\n";
             // Kero Blaster field diagnostics: keep the extraction policy unchanged.
             // These are descriptive only; neither flags nor names grant access.
             for (const auto& entry : pkg.entries) {
