@@ -15,7 +15,7 @@ for test in PS4LibkernelTest PS4SystemMemoryTimeTest PS4ThreadsTest PS4DynamicLi
   MaxPS4-iOS/Native/maxps4_ps4_threads.cpp \
   MaxPS4-iOS/Native/maxps4_ps4_linker.cpp \
   "MaxPS4-iOS/Tests/$test.cpp" -o "$build_dir/$test"
-"$build_dir/$test"
+python3 scripts/run-bounded.py 30 "$build_dir/$test.txt" "$build_dir/$test"
 done
 "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -pedantic -c \
   MaxPS4-iOS/Tests/PS4SystemServicesABITest.c -o "$build_dir/services-abi.o"

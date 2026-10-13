@@ -21,6 +21,7 @@ targets:
       - path: Resources
       - path: Native/PM4MetalDrawBridge.mm
       - path: Native/PS4PKGBridge.cpp
+      - path: Native/OrbisAnalysisBridge.cpp
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.enermaxfr.maxps4
@@ -35,7 +36,7 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: 'UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight'
         TARGETED_DEVICE_FAMILY: '1,2'
         MARKETING_VERSION: '0.3.0'
-        CURRENT_PROJECT_VERSION: '1000171'
+        CURRENT_PROJECT_VERSION: '1000172'
     dependencies:
       - sdk: Metal.framework
       - sdk: MetalKit.framework
