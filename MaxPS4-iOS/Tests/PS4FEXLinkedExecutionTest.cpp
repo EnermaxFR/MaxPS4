@@ -92,6 +92,48 @@ static int playableTest(const char* evidence = nullptr) {
     std::puts("PASS real FEX framebuffer, input-to-guest-state, successive images, action, machine-code mutation and close/restart");
     return 0;
 }
+static int animatedGuestTest() {
+    using namespace playable_fixture;
+    auto file=app(true), provider=orbis_execution::make(true);
+    const char* deps[]={"provider.prx"};
+    const maxps4_orbis_module modules[]={
+        {"app.elf",file.data(),file.size(),orbis_execution::app_bias,deps,1},
+        {"provider.prx",provider.data(),provider.size(),orbis_execution::provider_bias,nullptr,0}};
+    maxps4_fex_engine* engine=nullptr;
+    CHECK(maxps4_fex_engine_open(&engine)==0);
+    struct Close { maxps4_fex_engine* p; ~Close(){maxps4_fex_engine_close(p);} } close{engine};
+    char reason[1024]{};
+    CHECK(maxps4_fex_engine_prepare_orbis(engine,modules,2,"app.elf",65536,reason,sizeof(reason))==0);
+    CHECK(maxps4_fex_engine_configure_frame(engine,pixels,input,width,height)==0);
+    CHECK(maxps4_fex_engine_initialize(engine)==0);
+    std::vector<uint8_t> image(width*height*4);
+    uint64_t sequence=0; uint32_t backend=0;
+    for (uint32_t frame=0;frame<20;++frame) {
+        CHECK(maxps4_fex_engine_step_frame(engine,0,image.data(),image.size(),&sequence,&backend)==0);
+        CHECK(sequence==frame+1);
+#ifdef VIXL_SIMULATOR
+        CHECK(backend==MAXPS4_CPU_FEX_ARM64_SIMULATOR);
+#else
+        CHECK(backend==MAXPS4_CPU_FEX_ARM64_JIT);
+#endif
+        const uint32_t enemyCell=80+(frame&15);
+        const size_t enemyOffset=((enemyCell/16)*2*width+(enemyCell%16)*2)*4;
+        uint32_t rgba=0;
+        for(int b=0;b<4;++b) rgba|=uint32_t(image[enemyOffset+b])<<(8*b);
+        CHECK(rgba==0xff40d030);
+        if(frame>0) {
+            const uint32_t oldCell=80+((frame-1)&15);
+            if(oldCell!=enemyCell) {
+                const size_t oldOffset=((oldCell/16)*2*width+(oldCell%16)*2)*4;
+                uint32_t oldRGBA=0;
+                for(int b=0;b<4;++b) oldRGBA|=uint32_t(image[oldOffset+b])<<(8*b);
+                CHECK(oldRGBA==0xff302018);
+            }
+        }
+    }
+    std::puts("PASS guest x86-64 autonomous sprite animation across 20 real FEX frames");
+    return 0;
+}
 int main(int argc, char** argv) {
     using namespace ps4_linked_test;
     if (argc==3 && !std::strcmp(argv[1],"--playable-evidence")) return playableTest(argv[2]);
@@ -131,6 +173,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     CHECK(playableTest()==0);
+    CHECK(animatedGuestTest()==0);
     CHECK(maxps4_fex_test_ps4_libkernel(nullptr) == -EINVAL);
     for (size_t repeat = 0; repeat < 3; ++repeat) {
         maxps4_ps4_elf_test_report report{};
