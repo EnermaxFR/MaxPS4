@@ -27,7 +27,12 @@ public:
         if (scratch[0] != '/') return PS4KernelPathResult::invalid_path;
         const size_t length = std::strlen(scratch);
         if (length == 0 || length == 1) return PS4KernelPathResult::invalid_path;
+        if (scratch[length - 1] == '/') return PS4KernelPathResult::invalid_path;
         for (size_t i = 1; i < length; ++i) {
+            // Keep virtual paths portable and unambiguous before host mapping.
+            const unsigned char byte = static_cast<unsigned char>(scratch[i]);
+            if (byte < 0x20 || byte == 0x7f || byte == '\\')
+                return PS4KernelPathResult::invalid_path;
             if (scratch[i] == '/' && scratch[i - 1] == '/')
                 return PS4KernelPathResult::invalid_path;
             const bool component_start = scratch[i - 1] == '/';
