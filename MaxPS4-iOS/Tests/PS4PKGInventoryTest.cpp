@@ -158,6 +158,8 @@ int main() {
     const std::string text(report.data());
     assert(text.find("MaxPS4") != std::string::npos);
     assert(text.find("eboot.bin") != std::string::npos);
+    assert(text.find("Bilan des descripteurs : lisibles déclarés=2") != std::string::npos);
+    assert(text.find("chiffrés déclarés=0") != std::string::npos);
     assert(text.find("Octets copiés en mémoire : 32") != std::string::npos);
     // Reproduce the two descriptor classes observed in the real Kero Blaster
     // report, without including or reading any proprietary game payload.
