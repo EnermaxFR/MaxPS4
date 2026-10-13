@@ -158,10 +158,15 @@ public:
                                           uint64_t address, size_t count,
                                           uint32_t permissions) {
         if (!safePath(logicalPath)) return nullptr;
-        for (const auto& module : modules)
-            if (module.logicalPath == logicalPath)
-                return module.image.translate(address, count, permissions);
-        return nullptr;
+        const PreparedModule* found = nullptr;
+        for (const auto& module : modules) {
+            if (module.logicalPath != logicalPath) continue;
+            // Reject ambiguous caller-constructed batches, even though
+            // prepareModules itself already rejects duplicate paths.
+            if (found) return nullptr;
+            found = &module;
+        }
+        return found ? found->image.translate(address, count, permissions) : nullptr;
     }
     static bool prepareStandalone(const std::string& logicalPath, const uint8_t* bytes, size_t size,
                                   const std::vector<std::string>& dependencies, PreparedModule& output,
