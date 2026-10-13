@@ -81,4 +81,6 @@ Fondation runtime Orbis : [audit, préparation ELF/PRX et fonctionnalités manqu
 
 Analyse ELF Orbis/SCE et préparation PRX non chiffrée : [périmètre, limites et recette iPhone](docs/orbis-sce-prx-analysis.md).
 
+Pré-démarrage d'un dossier de jeu accessible : [audit PKG/ELF/PRX/FEX, rapport exportable et procédure Kero Blaster](docs/kero-blaster-preflight.md). Le PFS opaque reste inaccessible ; aucun démarrage du jeu n'est validé.
+
 Première scène synthétique interactive : [pixels invités, commandes et import iPhone](docs/first-playable-frame.md). Les preuves FEX natives et l’IPA ne remplacent pas une validation sur iPhone physique.

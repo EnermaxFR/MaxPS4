@@ -1,11 +1,22 @@
 #include "OrbisAnalysisBridge.h"
 #include "OrbisMetadata.hpp"
 #include "OrbisLinker.hpp"
+#include "GameDirectoryPreflight.hpp"
 #include "maxps4_fex_runtime.h"
 #include <cstdio>
 #include <cerrno>
 #include <memory>
 #include <sys/stat.h>
+
+int maxps4_game_directory_report(const char* path, char* output, size_t capacity) {
+    if (!output || !capacity) return -EINVAL;
+    output[0] = 0;
+    std::string report;
+    const int status = maxps4::GameDirectoryPreflight::report(path,report);
+    const auto count = std::min(report.size(),capacity-1);
+    std::memcpy(output,report.data(),count); output[count] = 0;
+    return count == report.size() ? status : -ENOSPC;
+}
 
 int maxps4_orbis_analysis_report(const char* path, char* output, size_t capacity) {
     if (!output || !capacity) return -EINVAL;

@@ -22,7 +22,7 @@ public:
         std::string phase = "inputs", failure;
         size_t validatedModules = 0, segments = 0, memoryBytes = 0;
         size_t dependencies = 0, imports = 0, resolvedImports = 0;
-        size_t relocations = 0, validatedRelocations = 0;
+        size_t relocations = 0, validatedRelocations = 0, ignoredRelocations = 0;
         bool committed = false;
         std::string text() const {
             std::ostringstream out;
@@ -35,6 +35,7 @@ public:
                 << " ; appliquées : " << (committed ? validatedRelocations : 0)
                 << " ; différées : " << (committed ? 0 : validatedRelocations)
                 << " ; refusées : " << (relocations - validatedRelocations) << "\n"
+                << "Relocations NONE ignorées (aucune écriture) : " << ignoredRelocations << "\n"
                 << "Mémoire : " << memoryBytes << " octets validés ; "
                 << (committed ? "image engagée" : "image non engagée, allocations provisoires libérées") << "\n";
             if (!failure.empty()) out << "Refus : " << failure << "\n";
@@ -381,8 +382,11 @@ private:
             std::set<uint64_t> targets;
             auto& m = out.modules[i];
             for (const auto& r : dynamic[i].relas) {
-                ++report.relocations;
                 const auto type = uint32_t(r.info); const auto symbol = r.info >> 32;
+                // AMD64 R_X86_64_NONE has no effect: neither the target nor the
+                // symbol/addend is used, and it cannot overlap a real write.
+                if (type == 0) { ++report.ignoredRelocations; continue; }
+                ++report.relocations;
                 require(type == 1 || type == 6 || type == 7 || type == 8, "unsupported x86-64 relocation " + std::to_string(type));
                 require(symbol < resolved[i].size() && (type != 8 || symbol == 0) && (type == 8 || symbol != 0), "invalid relocation symbol");
                 auto* target = const_cast<uint8_t*>(m.image.translate(r.offset, 8, 6));

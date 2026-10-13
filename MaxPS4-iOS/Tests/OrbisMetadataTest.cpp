@@ -72,6 +72,8 @@ int main(int argc, char** argv) {
         bad=good; put(bad,type,16,2); put(bad,0x1000,24); assert(m.parse(bad.data(),bad.size()));
     }
     bad=good; put(bad,0xdead,0xc08); assert(m.parse(bad.data(),bad.size()) && !m.relocations[0].supported);
+    bad=good; put(bad,UINT64_MAX,0xc00); put(bad,uint64_t{UINT32_MAX}<<32,0xc08);
+    assert(m.parse(bad.data(),bad.size()) && m.relocations[0].type==0 && m.relocations[0].supported);
     // Bounded deterministic malformed-header coverage.
     for (size_t i=0; i<288; ++i) { bad=good; bad[i]^=0xff;
         if (!m.parse(bad.data(),bad.size())) assert(m.segments.empty()); }
