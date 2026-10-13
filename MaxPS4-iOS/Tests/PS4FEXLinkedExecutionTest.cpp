@@ -67,7 +67,7 @@ static int playableTest(const char* evidence = nullptr) {
             for (uint32_t py=0;py<height;++py) for (uint32_t px=0;px<width;++px) {
                 const size_t off=(py*width+px)*4;
                 uint32_t pixel=0; for (int b=0;b<4;++b) pixel|=uint32_t(out[off+b])<<(8*b);
-                const uint32_t expected = px/2==expectedX && py/3==expectedY ?
+                const uint32_t expected = py<16 && px/2==expectedX && py/2==expectedY ?
                     (0xff2080e0 | ((buttons&16)<<16)) : 0xff302018;
                 CHECK(pixel==((restart && px==0 && py==0 && expected==0xff302018) ? 0xff302019 : expected));
             }

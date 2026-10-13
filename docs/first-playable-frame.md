@@ -15,7 +15,8 @@ n'est pas l'ABI graphique PS4 et ne rend pas Kero Blaster jouable.
 2. Ouvrir **Diagnostic FEXCore → Première image jouable → Lancer / relancer**.
    L'app contient exactement les ELF/PRX fabriqués et comparés par les tests.
 3. Maintenir Gauche/Droite/Haut/Bas pour déplacer le carré. Action change sa
-   couleur. La position boucle aux bords ; deux directions opposées s'annulent.
+   couleur. La position boucle sur une grille de 16 × 8 cases (carré 2 × 2 pixels), au-dessus
+   de la marge inférieure ; deux directions opposées s'annulent.
 4. Connecter une manette iOS : pavé directionnel ou stick gauche, bouton A.
    Désactiver « Commandes tactiles » masque le pavé et efface les boutons tactiles.
 5. Arrêter, relancer, puis passer en arrière-plan : l'arrêt annule la cadence

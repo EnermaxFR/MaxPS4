@@ -25,14 +25,14 @@ inline std::vector<uint8_t> app() {
         emit({0x81,0xe2}); imm(mask); rip(0x89,0x15,state);
     };
     move(x,1,2,0,15); move(y,4,8,2,7);
-    // EDX becomes y*16+x. The sprite covers one 2x3 cell.
+    // EDX becomes y*16+x. The sprite covers one 2x2 cell.
     emit({0xc1,0xe2,4}); rip(0x8b,0x05,x); emit({0x01,0xc2});
     // Action selects a different color in guest code.
     rip(0x8b,0x05,input); immediate(0x25,16); emit({0xc1,0xe0,16});
     immediate(0x0d,0xff2080e0); emit({0x89,0xc3});
     for (uint32_t py=0;py<height;++py) for (uint32_t px=0;px<width;++px) {
         immediate(0xb8,0xff302018); // RGBA little endian: dark background.
-        emit({0x81,0xfa}); imm((py/3)*16+px/2);
+        emit({0x81,0xfa}); imm(py < 16 ? (py/2)*16+px/2 : UINT32_MAX);
         emit({0x0f,0x44,0xc3}); rip(0x89,0x05,pixels+(py*width+px)*4);
     }
     rip(0x8b,0x05,counter); immediate(0x05,1); rip(0x89,0x05,counter); emit({0xf4});
