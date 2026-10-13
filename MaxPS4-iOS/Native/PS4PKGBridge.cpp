@@ -119,7 +119,31 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                                                 phoff, phnum * phentsize, bytes.size()))) {
                                             report << " ; ELF invalide : table de segments absente ou hors ressource";
                                         } else {
-                                            report << " ; en-tête ELF64 x86-64 reconnu (segments non validés, aucune admission)";
+                                            size_t loadCount = 0;
+                                            bool invalidLoad = false;
+                                            for (uint64_t n = 0; n < phnum; ++n) {
+                                                const size_t at = static_cast<size_t>(phoff + n * phentsize);
+                                                const uint32_t segmentType = uint32_t(bytes[at]) |
+                                                    (uint32_t(bytes[at + 1]) << 8) |
+                                                    (uint32_t(bytes[at + 2]) << 16) |
+                                                    (uint32_t(bytes[at + 3]) << 24);
+                                                if (segmentType != 1) continue; // PT_LOAD only
+                                                ++loadCount;
+                                                const uint64_t fileOffset = le64(at + 8);
+                                                const uint64_t fileLength = le64(at + 32);
+                                                const uint64_t memoryLength = le64(at + 40);
+                                                if (memoryLength < fileLength ||
+                                                    !maxps4::PS4PKGInventory::range(
+                                                        fileOffset, fileLength, bytes.size())) {
+                                                    invalidLoad = true;
+                                                    break;
+                                                }
+                                            }
+                                            if (invalidLoad)
+                                                report << " ; ELF invalide : segment PT_LOAD hors ressource ou mémoire trop petite";
+                                            else
+                                                report << " ; ELF64 x86-64 : " << loadCount
+                                                       << " segments PT_LOAD bornés (aucune admission ni exécution)";
                                         }
                                     }
                                 }
