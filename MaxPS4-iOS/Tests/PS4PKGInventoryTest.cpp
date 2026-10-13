@@ -203,15 +203,15 @@ int main() {
     assert(std::string(report.data()).find("ELF incompatible : type exécutable/dynamique non reconnu") != std::string::npos);
     wrongElf[0x710] = 2;
     // A program-header table outside the bounded plaintext resource is invalid.
-    wrongElf[0x738] = 56; // e_phentsize
-    wrongElf[0x73a] = 1;  // e_phnum
+    wrongElf[0x736] = 56; // e_phentsize (ELF offset 54)
+    wrongElf[0x738] = 1;  // e_phnum (ELF offset 56)
     wrongElf[0x720] = 0x40; // e_phoff=64, past the 64-byte resource
     file = std::fopen(path, "wb"); assert(file);
     assert(fwrite(wrongElf.data(), 1, wrongElf.size(), file) == wrongElf.size());
     assert(fclose(file) == 0);
     assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
     assert(std::string(report.data()).find("ELF invalide : table de segments absente ou hors ressource") != std::string::npos);
-    wrongElf[0x738] = 0; wrongElf[0x73a] = 0; wrongElf[0x720] = 0;
+    wrongElf[0x736] = 0; wrongElf[0x738] = 0; wrongElf[0x720] = 0;
     // Protected entries must never be inspected as ELF, even if their bytes
     // happen to start with the ELF magic.
     wrongElf[0x712] = 0x3e;
