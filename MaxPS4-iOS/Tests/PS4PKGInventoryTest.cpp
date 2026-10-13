@@ -160,6 +160,31 @@ int main() {
     assert(text.find("Bilan des descripteurs : lisibles déclarés=2 ; chiffrés déclarés=0") != std::string::npos);
     assert(text.find("inconnus=0 ; invalides=0") != std::string::npos);
     assert(text.find("Octets copiés en mémoire : 32") != std::string::npos);
+    // Plaintext param.sfo: metadata is displayed, never used as a filesystem path.
+    auto sfo = original;
+    sfo.resize(0x750, 0);
+    put(sfo, 0x430, sfo.size(), 8);
+    put(sfo, 0x28, sfo.size() - 0x600, 8);
+    put(sfo, 0x5d4, 80, 4);
+    sfo[0x704] = 1; // PSF version
+    sfo[0x708] = 36; // key table
+    sfo[0x70c] = 48; // value table
+    sfo[0x710] = 1; // entry count
+    sfo[0x716] = 0x04; sfo[0x717] = 0x02; // UTF-8 string format 0x204
+    sfo[0x718] = 5; sfo[0x71c] = 5; // actual/max length
+    std::memcpy(sfo.data() + 0x724, "TITLE\\0", 6);
+    std::memcpy(sfo.data() + 0x730, "Demo", 4);
+    file = std::fopen(path, "wb"); assert(file);
+    assert(fwrite(sfo.data(), 1, sfo.size(), file) == sfo.size());
+    assert(fclose(file) == 0);
+    assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
+    assert(std::string(report.data()).find("PSF valide (1 entrées) ; TITLE=Demo") != std::string::npos);
+    sfo[0x70c] = 0xff; // invalid data table offset
+    file = std::fopen(path, "wb"); assert(file);
+    assert(fwrite(sfo.data(), 1, sfo.size(), file) == sfo.size());
+    assert(fclose(file) == 0);
+    assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
+    assert(std::string(report.data()).find("PSF invalide") != std::string::npos);
     // A plaintext ELF magic with only 16 bytes must be diagnosed as truncated,
     // never accepted as an executable or dispatched to FEX.
     auto shortElf = original;
