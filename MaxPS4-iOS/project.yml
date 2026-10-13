@@ -21,6 +21,7 @@ targets:
       - path: Resources
       - path: Native/PM4MetalDrawBridge.mm
       - path: Native/PS4PKGBridge.cpp
+      - path: Native/OrbisLinkerBridge.cpp
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.enermaxfr.maxps4
