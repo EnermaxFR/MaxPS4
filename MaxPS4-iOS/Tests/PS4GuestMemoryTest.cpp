@@ -71,6 +71,16 @@ int main() {
     const char control_character[] = "/app0/dir\nfile";
     assert(memory.write(0x10020, control_character, sizeof(control_character)));
     assert(maxps4::PS4KernelPath::read(memory, 0x10020, kernel_path) == PathResult::invalid_path);
+    const char current_directory[] = "/app0/./file";
+    assert(memory.write(0x10020, current_directory, sizeof(current_directory)));
+    assert(maxps4::PS4KernelPath::read(memory, 0x10020, kernel_path) == PathResult::invalid_path);
+    const char parent_directory[] = "/app0/assets/../file";
+    assert(memory.write(0x10020, parent_directory, sizeof(parent_directory)));
+    assert(maxps4::PS4KernelPath::read(memory, 0x10020, kernel_path) == PathResult::invalid_path);
+    const char dot_filename[] = "/app0/.config";
+    assert(memory.write(0x10020, dot_filename, sizeof(dot_filename)));
+    assert(maxps4::PS4KernelPath::read(memory, 0x10020, kernel_path) == PathResult::ok);
+    assert(std::strcmp(kernel_path, dot_filename) == 0);
     const char valid_nested[] = "/app0/assets/sprite.png";
     assert(memory.write(0x10020, valid_nested, sizeof(valid_nested)));
     assert(maxps4::PS4KernelPath::read(memory, 0x10020, kernel_path) == PathResult::ok);
