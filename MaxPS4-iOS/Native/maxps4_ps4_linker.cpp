@@ -264,6 +264,8 @@ int PS4DynamicLinker::load(GuestELF& image, const uint8_t* file, size_t length, 
                 if (!add(parsed.entry + offset + 6,signed32(u(p+2,4)),slot)) return fail(-EOVERFLOW,"CALL slot overflow");
                 auto found = std::find_if(imports_.begin(),imports_.end(),[&](const Import& i){return i.slot == slot;});
                 if (found == imports_.end()) return fail(-ENOENT,"CALL to unresolved GOT slot");
+                if (found->service == PS4KernelService::mmap && !(initialized & (1U<<1)))
+                    return fail(-ENOTSUP,"mmap requires an explicit fourth SysV argument");
                 // Four generated instructions plus the callee RET count too.
                 if (budget - instructions < 4) return fail(-E2BIG,"trampoline budget exhausted");
                 instructions += 4;
@@ -271,6 +273,7 @@ int PS4DynamicLinker::load(GuestELF& image, const uint8_t* file, size_t length, 
                 if (!relative(found->thunk,parsed.entry+offset+5,displacement)) return fail(-EOVERFLOW,"CALL displacement overflow");
                 p[0] = 0xe8; put(p+1,displacement,4); p[5] = 0x90; width = 6;
                 initialized |= 1; // A verified service returns a logical value in RAX.
+                initialized &= ~(1U<<1); // SYSCALL RCX contains a private CPU return address.
                 if (++instructions > budget) return fail(-E2BIG,"CALL padding budget exhausted");
             } else if ((left >= 7 && (p[0] == 0x48 || p[0] == 0x4c) && p[1] == 0x89 && (p[2] & 0xc7) == 5) ||
                        (left >= 10 && p[0] == 0xc7 && p[1] == 0x05)) {

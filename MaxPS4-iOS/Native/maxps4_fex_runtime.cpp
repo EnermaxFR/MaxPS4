@@ -70,7 +70,8 @@ public:
                 result = maxps4::ps4::kernel_error(maxps4::ps4::fault);
             } else {
                 const maxps4::PS4KernelCall call{r[x86::REG_RDI],r[x86::REG_RSI],r[x86::REG_RDX],
-                    r[x86::REG_R10],r[x86::REG_R8],r[x86::REG_R9],guest_rsp};
+                    service == maxps4::PS4KernelService::mmap ? r[x86::REG_R10] : 0,
+                    r[x86::REG_R8],r[x86::REG_R9],guest_rsp};
                 result = kernel->invoke(service,call,1);
                 ++calls;
             }

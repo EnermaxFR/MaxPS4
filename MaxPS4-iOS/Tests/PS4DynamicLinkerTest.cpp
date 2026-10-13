@@ -56,6 +56,16 @@ int main() {
     Program unknown; unknown.call("missingKernelNID"); unknown.bytes({0xf4});
     rejected(unknown.elf(),-ENOENT);
     assert(linker.diagnostic().find("missingKernelNID") != std::string::npos);
+    Program missing_fourth;
+    missing_fourth.call("sceKernelMmap"); missing_fourth.bytes({0xf4});
+    rejected(missing_fourth.elf(),-ENOTSUP);
+    Program private_rcx;
+    private_rcx.reg(1,123); private_rcx.call("scePthreadSelf");
+    private_rcx.store(data+0x100,1); private_rcx.bytes({0xf4});
+    rejected(private_rcx.elf(),-ENOTSUP); // SYSCALL's host-domain return RIP cannot escape.
+    Program uninitialized_saved;
+    uninitialized_saved.call("scePthreadSelf"); uninitialized_saved.store(data+0x100,3);
+    uninitialized_saved.bytes({0xf4}); rejected(uninitialized_saved.elf(),-ENOTSUP);
     assert(load(good,1) == -E2BIG && image.segments().empty());
     assert(load(good,9) == 0); // CALL + generated thunk + NOP + ADD + store + HLT.
     assert(load(good,8) == -E2BIG);
