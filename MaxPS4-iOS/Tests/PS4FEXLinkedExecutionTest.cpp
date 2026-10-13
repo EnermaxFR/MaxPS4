@@ -139,9 +139,9 @@ static int animatedGuestTest() {
 int main(int argc, char** argv) {
     using namespace ps4_linked_test;
     if (argc==3 && !std::strcmp(argv[1],"--playable-evidence")) return playableTest(argv[2]);
-    if (argc==3 && !std::strcmp(argv[1],"--playable-bundle")) {
+    if (argc==3 && (!std::strcmp(argv[1],"--playable-bundle") || !std::strcmp(argv[1],"--animated-playable-bundle"))) {
         std::filesystem::create_directories(argv[2]);
-        const auto file=playable_fixture::app(), provider=orbis_execution::make(true);
+        const auto file=playable_fixture::app(!std::strcmp(argv[1],"--animated-playable-bundle")), provider=orbis_execution::make(true);
         for (bool prx : {false,true}) {
             const auto& bytes=prx ? provider : file;
             std::ofstream out(std::filesystem::path(argv[2])/(prx ? "provider.prx" : "app.elf"),std::ios::binary);
