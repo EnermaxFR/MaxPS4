@@ -4,7 +4,9 @@ on:
     paths:
       - 'MaxPS4-iOS/Native/maxps4_ps4_*'
       - 'MaxPS4-iOS/Native/maxps4_guest_*'
+      - 'MaxPS4-iOS/Native/maxps4_fex_runtime.*'
       - 'MaxPS4-iOS/Tests/PS4*'
+      - 'cmake/FEXCoreIOSLinkage.cmake'
       - 'scripts/test-ps4-system-services.sh'
       - '.github/workflows/ps4-system-services.yml'
   push:
@@ -12,7 +14,9 @@ on:
     paths:
       - 'MaxPS4-iOS/Native/maxps4_ps4_*'
       - 'MaxPS4-iOS/Native/maxps4_guest_*'
+      - 'MaxPS4-iOS/Native/maxps4_fex_runtime.*'
       - 'MaxPS4-iOS/Tests/PS4*'
+      - 'cmake/FEXCoreIOSLinkage.cmake'
       - 'scripts/test-ps4-system-services.sh'
       - '.github/workflows/ps4-system-services.yml'
   workflow_dispatch:
@@ -27,3 +31,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: bash scripts/test-ps4-system-services.sh
+  iphone-arm64-compile:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile system services for the real iPhone ARM64 SDK
+        run: |
+          set -euo pipefail
+          sdk=$(xcrun --sdk iphoneos --show-sdk-path)
+          for source in maxps4_guest_elf maxps4_ps4_libkernel maxps4_ps4_virtual_memory maxps4_ps4_threads; do
+            xcrun --sdk iphoneos clang++ -target arm64-apple-ios18.0 -isysroot "$sdk" \
+              -std=c++17 -Wall -Wextra -Werror -pedantic -fsyntax-only \
+              "MaxPS4-iOS/Native/$source.cpp"
+          done
+          xcrun --sdk iphoneos clang -target arm64-apple-ios18.0 -isysroot "$sdk" \
+            -std=c11 -Wall -Wextra -Werror -pedantic -fsyntax-only \
+            MaxPS4-iOS/Tests/PS4SystemServicesABITest.c

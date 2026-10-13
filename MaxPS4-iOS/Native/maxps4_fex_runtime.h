@@ -7,6 +7,22 @@ extern "C" {
 #endif
 // Opaque engine: no FEX C++ types cross the native/Swift boundary.
 typedef struct maxps4_fex_engine maxps4_fex_engine;
+// PS4 System V entry registers, not native ARM64 registers or host pointers.
+typedef struct maxps4_ps4_kernel_call {
+    uint64_t rdi, rsi, rdx, rcx, r8, r9, rsp;
+} maxps4_ps4_kernel_call;
+// Resolve a decoded sceKernel/scePthread import to an opaque service ID.
+// Returns 0 for unknown symbols/versions. Does not apply ELF/PRX relocations.
+uint32_t maxps4_ps4_resolve_libkernel(const char *symbol, const char *library,
+    const char *module, uint32_t version);
+// Mount configuration is host-side. Return 0 or signed Orbis kernel error.
+// Must mount AFTER staging; each staging attempt resets all system services.
+int64_t maxps4_fex_engine_mount_app0(maxps4_fex_engine *engine, const char *directory);
+// Explicit service dispatch, serialized against staging and engine accesses.
+// Returns a guest ABI result, including signed Orbis errors. Default bootstrap
+// guest thread identity is 1. No guest CPU import trampoline is installed.
+int64_t maxps4_fex_engine_call_libkernel(maxps4_fex_engine *engine, uint32_t service,
+    const maxps4_ps4_kernel_call *call, uint64_t guest_thread);
 enum { MAXPS4_CPU_RESTRICTED_INTERPRETER = 1, MAXPS4_CPU_FEX_ARM64_JIT = 2 };
 enum { MAXPS4_FEX_CONTEXT_CREATED = 1, MAXPS4_FEX_DISPATCHER_INITIALIZED = 2 };
 // Creates the real executable dispatcher; does not execute guest code.
@@ -66,7 +82,7 @@ int32_t maxps4_fex_engine_stage_ps4(maxps4_fex_engine *engine, const uint8_t *fi
 // logical entry; on any failure outputs are zero. Stage/execute are serialized.
 int32_t maxps4_fex_engine_run_staged_ps4(maxps4_fex_engine *engine,
     uint32_t budget, uint64_t *result, uint32_t *backend, uint64_t *entry);
-// Exact read from a staged readable segment; no host pointers cross the ABI.
+// Exact read from staged or anonymous readable memory; no host pointers cross the ABI.
 // Failure leaves caller bytes untouched. Serialized against stage/close.
 int32_t maxps4_fex_engine_read_ps4(maxps4_fex_engine *engine, uint64_t address,
     uint8_t *output, size_t length);
@@ -74,7 +90,7 @@ int32_t maxps4_fex_engine_read_ps4(maxps4_fex_engine *engine, uint64_t address,
 // Invalid ranges leave output unchanged. No host pointers cross the C ABI.
 int32_t maxps4_fex_engine_fetch_ps4(maxps4_fex_engine *engine, uint64_t address,
     uint8_t *output, size_t length);
-// Exact write to a staged writable, non-executable guest segment.
+// Exact write to staged or anonymous writable, non-executable guest memory.
 // No host pointers cross the ABI. Rejected accesses leave guest bytes intact.
 // Serialized against stage/close; does not dispatch CPU or initialize JIT.
 int32_t maxps4_fex_engine_write_ps4(maxps4_fex_engine *engine, uint64_t address,
@@ -99,6 +115,7 @@ int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine, const uint8_t *code,
 #ifdef __cplusplus
 }
 #endif
+
 
 
 

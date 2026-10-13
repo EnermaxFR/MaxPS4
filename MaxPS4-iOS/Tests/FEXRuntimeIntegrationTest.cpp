@@ -10,6 +10,8 @@
 #include <array>
 #include <csignal>
 #include <pthread.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <TargetConditionals.h>
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); return 1; } } while (0)
 // Real CPU -> the already staged arena -> logical-address readback.
@@ -79,6 +81,56 @@ static int stagedCPU(maxps4_fex_engine* engine, bool initialized) {
                            "PASS staged CPU refuses dispatch before initialization");
     return 0;
 }
+// Exercise the engine's actual staged-memory/service bridge without InitCore
+// or guest CPU dispatch. The plaintext PS4 fixture remains blocked for linking.
+static int systemServices(maxps4_fex_engine* engine) {
+    auto file = guest_test::elf(40, 2, true);
+    file[7] = 9;
+    guest_test::put(file, 0xfe00, 16, 2);
+    guest_test::put(file, 8192, 160, 8);
+    uint64_t entry = 0; uint32_t segments = 0, blockers = 0;
+    CHECK(maxps4_fex_engine_stage_ps4(engine, file.data(), file.size(), &entry, &segments, &blockers) == 0);
+    CHECK(blockers == MAXPS4_PS4_CPU_ADDRESS_SPACE_REQUIRED);
+    char directory[] = "/tmp/maxps4-service-bridge-XXXXXX";
+    CHECK(::mkdtemp(directory));
+    char host_path[1024]; std::snprintf(host_path, sizeof(host_path), "%s/fixture", directory);
+    const int host = ::open(host_path, O_CREAT | O_EXCL | O_WRONLY, 0600);
+    CHECK(host >= 0 && ::write(host, "Kero", 4) == 4 && ::close(host) == 0);
+    CHECK(maxps4_fex_engine_mount_app0(engine, directory) == 0);
+    const char guest_path[] = "/app0/fixture";
+    CHECK(maxps4_fex_engine_write_ps4(engine, 0x10000,
+        reinterpret_cast<const uint8_t*>(guest_path), sizeof(guest_path)) == 0);
+    auto resolve = [](const char* symbol) { return maxps4_ps4_resolve_libkernel(symbol, "libkernel", "libkernel", 1); };
+    maxps4_ps4_kernel_call registers{0x10000, 0, 0, 0, 0, 0, 0};
+    const int64_t descriptor = maxps4_fex_engine_call_libkernel(engine, resolve("1G3lF1Gg1k8"), &registers, 1);
+    CHECK(descriptor == 3);
+    registers = {uint64_t(descriptor), 0x11000, 4, 0, 0, 0, 0};
+    CHECK(maxps4_fex_engine_call_libkernel(engine, resolve("sceKernelRead"), &registers, 1) == 4);
+    uint8_t bytes[16]{};
+    CHECK(maxps4_fex_engine_read_ps4(engine, 0x11000, bytes, 4) == 0 && std::memcmp(bytes, "Kero", 4) == 0);
+    registers = {4, 0x11000, 0, 0, 0, 0, 0};
+    CHECK(maxps4_fex_engine_call_libkernel(engine, resolve("sceKernelClockGettime"), &registers, 1) == 0);
+    const uint8_t output_pointer[] = {0, 1, 1, 0, 0, 0, 0, 0}; // logical 0x10100
+    CHECK(maxps4_fex_engine_write_ps4(engine, 0x11108, output_pointer, 8) == 0);
+    registers = {0, 0x4000, 3, 0x1002, uint64_t(-1LL), 0, 0x11100};
+    CHECK(maxps4_fex_engine_call_libkernel(engine, resolve("sceKernelMmap"), &registers, 1) == 0);
+    CHECK(maxps4_fex_engine_read_ps4(engine, 0x10100, bytes, 8) == 0);
+    uint64_t mapped = 0;
+    for (size_t i = 0; i < 8; ++i) mapped |= uint64_t(bytes[i]) << (8 * i);
+    CHECK(mapped >= 0x1000000000ULL);
+    CHECK(maxps4_fex_engine_write_ps4(engine, mapped, reinterpret_cast<const uint8_t*>("test"), 4) == 0);
+    CHECK(maxps4_fex_engine_read_ps4(engine, mapped, bytes, 4) == 0 && std::memcmp(bytes, "test", 4) == 0);
+    CHECK(maxps4_fex_engine_call_libkernel(engine, 0, &registers, 1) == -2147352498LL); // Orbis ENOSYS
+    // A failed restage must close descriptors, clear the mount and drop mappings.
+    CHECK(maxps4_fex_engine_stage_ps4(engine, nullptr, 0, &entry, &segments, &blockers) != 0);
+    CHECK(maxps4_fex_engine_read_ps4(engine, mapped, bytes, 4) == -EFAULT);
+    CHECK(maxps4_fex_engine_stage_ps4(engine, file.data(), file.size(), &entry, &segments, &blockers) == 0);
+    registers = {uint64_t(descriptor), 0, 0, 0, 0, 0, 0};
+    CHECK(maxps4_fex_engine_call_libkernel(engine, resolve("sceKernelClose"), &registers, 1) == -2147352567LL); // EBADF
+    CHECK(::unlink(host_path) == 0 && ::rmdir(directory) == 0);
+    std::puts("PASS staged libkernel VFS, virtual memory and clock bridge; no guest CPU dispatch");
+    return 0;
+}
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::puts("BEGIN native ABI and real FEX context lifecycle test");
@@ -123,6 +175,7 @@ int main() {
         CHECK(maxps4_fex_engine_open(&first) == 0 && first);
         CHECK(maxps4_fex_engine_open(&second) == 0 && second);
         CHECK(maxps4_fex_engine_stage(first) == MAXPS4_FEX_CONTEXT_CREATED);
+        CHECK(systemServices(first) == 0);
         CHECK(stagedCPU(first, false) == 0);
         auto not_initialized = guest_test::elf();
         uint64_t pending_entry = 99;
@@ -264,5 +317,6 @@ int main() {
     }
     std::puts("PASS real FEX context lifecycle/CPUID and explicit interpreter fallback; device JIT NOT tested");
 }
+
 
 

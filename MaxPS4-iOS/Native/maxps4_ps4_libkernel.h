@@ -1,6 +1,7 @@
 #pragma once
 #include "maxps4_ps4_abi.h"
 #include "maxps4_ps4_guest_memory.h"
+#include "maxps4_ps4_threads.h"
 #include <array>
 #include <mutex>
 #include <string_view>
@@ -11,7 +12,8 @@ namespace maxps4 {
 struct PS4KernelCall { uint64_t rdi = 0, rsi = 0, rdx = 0, rcx = 0, r8 = 0, r9 = 0, rsp = 0; };
 enum class PS4KernelService : uint32_t {
     unresolved, open, read, close, lseek, stat, fstat,
-    mmap, munmap, mprotect, clock_gettime, clock_getres, gettimeofday, process_time
+    mmap, munmap, mprotect, clock_gettime, clock_getres, gettimeofday, process_time,
+    thread_self, mutex_init, mutex_trylock, mutex_unlock, mutex_destroy
 };
 // Library/module/version are decoded by an ELF/PRX loader before resolution.
 // This resolver deliberately does not guess the meaning of encoded # IDs.
@@ -31,10 +33,12 @@ public:
     // preserves the previous mount. Successful remount closes guest descriptors.
     int64_t mount_app0(const char* host_directory);
     void reset();
-    int64_t invoke(PS4KernelService service, const PS4KernelCall& call);
+    int64_t invoke(PS4KernelService service, const PS4KernelCall& call, uint64_t thread = 1);
+    PS4Threads& threads() { return threads_; }
 private:
     PS4GuestMemory& memory_;
     PS4VirtualMemory* dynamic_;
+    PS4Threads threads_;
     std::mutex lock_;
     int root_ = -1;
     std::array<int, descriptor_limit> files_;

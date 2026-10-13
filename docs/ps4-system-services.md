@@ -42,8 +42,6 @@ relocations or install guest trampolines. Existing linker/TLS/address-space
 execution blockers remain in force, and the restricted FEX syscall handler
 remains ENOSYS.
 
-## Validation
-
 ## Anonymous virtual memory and clocks
 
 `PS4VirtualMemory` supplies zero-filled logical anonymous PRIVATE mappings in
@@ -67,6 +65,46 @@ MONOTONIC=4, using the corresponding host clocks. `sceKernelGettimeofday`
 returns Unix seconds/microseconds; `sceKernelGetProcessTime` returns elapsed
 monotonic microseconds since service creation/reset (elapsed time, not CPU time).
 Unsupported clock IDs return EINVAL. No fabricated network/TSC clock is exposed.
+
+## Thread and synchronization preparation
+
+`PS4Threads` registers up to 64 guest identities; identity 1 is the bootstrap
+thread and the CPU scheduler may attach/detach additional identities. This
+does not create or run x86 threads. `scePthreadSelf` returns the dispatcher's
+registered identity. Up to 256 explicit default private/error-check mutexes
+support `scePthreadMutexInit`, `scePthreadMutexTrylock`, `scePthreadMutexUnlock`
+and `scePthreadMutexDestroy`. Guest slots contain opaque 64-bit handles, never
+host pointers. Ownership is checked, locked mutex destruction/detach returns
+EBUSY, and stale handles are invalid after reset. Named mutexes validate the
+guest string; attributes are unsupported. Mutexes require explicit init;
+static/adaptive initialization and guest libc access to internal mutex layouts
+are not supported. ScePthread errors use Orbis kernel codes, as their upstream
+Orbis wrappers do, rather than the POSIX pthread positive-errno convention.
+`scePthreadCreate/Join`, blocking lock/wait, condition variables, semaphores,
+TLS, scheduling and cancellation remain unresolved. Host-worker tests verify
+nonblocking mutual exclusion across eight registered guest identities.
+
+## Engine integration
+
+The engine owns a virtual-memory provider, checked memory adapter and libkernel
+instance referencing its existing staged ELF. The C/Swift ABI exposes
+`maxps4_ps4_resolve_libkernel`, `maxps4_fex_engine_mount_app0` and
+`maxps4_fex_engine_call_libkernel`. Stage first, mount second, resolve a decoded
+import, then dispatch a PS4 register snapshot with bootstrap guest_thread=1.
+The return is the guest ABI result. IDs from the resolver are opaque and valid
+only for this runtime's registry; they are not guest code addresses. Staging
+attempts reset descriptors, mount, anonymous mappings and mutex/thread state,
+including failed staging. Existing engine read/write/fetch/query calls also
+access anonymous mappings. All engine operations use the existing runtime lock.
+The Darwin/iOS CMake target includes the service implementations. This enables
+explicit host-driven service calls; a guest CPU-to-HLE trampoline and dynamic
+ELF/PRX relocation processing are still required to call them from a real game.
+
+The full FEX runtime integration test now checks these APIs before InitCore:
+file reads reach the existing staged image, mmap addresses are usable by engine
+read/write, and failed restaging discards services. The local Linux environment
+has no Apple SDK or vendored FEX dependencies, so the complete FEX/iPhone ARM64
+build and this integration test must run in the existing macOS linkage CI.
 
 ## Validation
 

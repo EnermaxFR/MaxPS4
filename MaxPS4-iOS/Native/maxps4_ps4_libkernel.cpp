@@ -1,4 +1,5 @@
 #include "maxps4_ps4_libkernel.h"
+#include "maxps4_fex_runtime.h"
 #include "maxps4_ps4_kernel_path.h"
 #include <cerrno>
 #include <cstring>
@@ -57,7 +58,12 @@ constexpr Binding bindings[] = {
     {"sceKernelClockGettime", "QBi7HCK03hw", PS4KernelService::clock_gettime},
     {"sceKernelClockGetres", "wRYVA5Zolso", PS4KernelService::clock_getres},
     {"sceKernelGettimeofday", "ejekcaNQNq0", PS4KernelService::gettimeofday},
-    {"sceKernelGetProcessTime", "4J2sUJmuHZQ", PS4KernelService::process_time}
+    {"sceKernelGetProcessTime", "4J2sUJmuHZQ", PS4KernelService::process_time},
+    {"scePthreadSelf", "aI+OeCz8xrQ", PS4KernelService::thread_self},
+    {"scePthreadMutexInit", "cmo1RIYva9o", PS4KernelService::mutex_init},
+    {"scePthreadMutexTrylock", "upoVrzMHFeE", PS4KernelService::mutex_trylock},
+    {"scePthreadMutexUnlock", "tn3VlD0hG60", PS4KernelService::mutex_unlock},
+    {"scePthreadMutexDestroy", "2Of0f+3mhhE", PS4KernelService::mutex_destroy}
 };
 uint64_t monotonic_us() {
     timespec t{};
@@ -82,7 +88,7 @@ PS4KernelService resolve_libkernel(std::string_view symbol, std::string_view lib
     return PS4KernelService::unresolved;
 }
 PS4Libkernel::PS4Libkernel(PS4GuestMemory& memory, PS4VirtualMemory* dynamic)
-    : memory_(memory), dynamic_(dynamic), started_us_(monotonic_us()) { files_.fill(-1); }
+    : memory_(memory), dynamic_(dynamic), threads_(memory), started_us_(monotonic_us()) { files_.fill(-1); }
 PS4Libkernel::~PS4Libkernel() { reset(); }
 void PS4Libkernel::close_files() {
     for (int& fd : files_) { if (fd >= 0) ::close(fd); fd = -1; }
@@ -93,6 +99,7 @@ void PS4Libkernel::reset() {
     if (root_ >= 0) ::close(root_);
     root_ = -1;
     if (dynamic_) dynamic_->reset();
+    threads_.reset();
     started_us_ = monotonic_us();
 }
 int64_t PS4Libkernel::mount_app0(const char* directory) {
@@ -283,9 +290,10 @@ int64_t PS4Libkernel::gettimeofday(uint64_t output) {
     put_le(wire, 0, time.tv_sec, 8); put_le(wire, 8, time.tv_usec, 8);
     return memory_.write(output, wire, sizeof(wire)) ? 0 : kernel_error(fault);
 }
-int64_t PS4Libkernel::invoke(PS4KernelService service, const PS4KernelCall& c) {
+int64_t PS4Libkernel::invoke(PS4KernelService service, const PS4KernelCall& c, uint64_t thread) {
     std::lock_guard<std::mutex> guard(lock_);
     try {
+        if (!threads_.known(thread)) return kernel_error(inval);
         switch (service) {
         case PS4KernelService::open: return open(c);
         case PS4KernelService::read: return read(c);
@@ -303,8 +311,18 @@ int64_t PS4Libkernel::invoke(PS4KernelService service, const PS4KernelCall& c) {
             const uint64_t now = monotonic_us();
             return now >= started_us_ ? int64_t(now - started_us_) : 0;
         }
+        case PS4KernelService::thread_self: return int64_t(thread);
+        case PS4KernelService::mutex_init: return kernel_error(threads_.init(c.rdi, c.rsi, c.rdx));
+        case PS4KernelService::mutex_trylock: return kernel_error(threads_.trylock(c.rdi, thread));
+        case PS4KernelService::mutex_unlock: return kernel_error(threads_.unlock(c.rdi, thread));
+        case PS4KernelService::mutex_destroy: return kernel_error(threads_.destroy(c.rdi));
         default: return kernel_error(nosys);
         }
     } catch (const std::bad_alloc&) { return kernel_error(nomem); }
 }
 } // namespace maxps4
+extern "C" uint32_t maxps4_ps4_resolve_libkernel(const char* symbol, const char* library,
+                                               const char* module, uint32_t version) {
+    if (!symbol || !library || !module) return 0;
+    return uint32_t(maxps4::resolve_libkernel(symbol, library, module, version));
+}

@@ -2,6 +2,7 @@
 #include "maxps4_jit_memory.h"
 #include "maxps4_guest_elf.h"
 #include "maxps4_ps4_guest_memory.h"
+#include "maxps4_ps4_libkernel.h"
 #include "PM4GuestSubmission.hpp"
 #include "Common/HostFeatures.h"
 #include <FEXCore/Config/Config.h>
@@ -91,6 +92,9 @@ struct maxps4_fex_engine {
     FEXCore::SignalDelegator signals;
     ProbeAddressSpace probe;
     maxps4::GuestELF staged_ps4;
+    maxps4::PS4VirtualMemory dynamic_ps4{staged_ps4};
+    maxps4::PS4GuestMemory system_memory{staged_ps4, &dynamic_ps4};
+    maxps4::PS4Libkernel libkernel{system_memory, &dynamic_ps4};
     fextl::unique_ptr<FEXCore::Context::Context> context;
     int32_t stage = MAXPS4_FEX_CONTEXT_CREATED;
 };
@@ -333,6 +337,7 @@ extern "C" int32_t maxps4_fex_engine_stage_ps4(maxps4_fex_engine* engine,
     if (blockers) *blockers = 0;
     if (!engine) return -EINVAL;
     std::lock_guard lock(runtime_lock);
+    engine->libkernel.reset();
     engine->staged_ps4.clear();
     if (!entry || !segments || !blockers) return -EINVAL;
     const int error = engine->staged_ps4.stage_ps4(file, length);
@@ -359,25 +364,40 @@ extern "C" int32_t maxps4_fex_engine_run_staged_ps4(maxps4_fex_engine* engine,
         return status;
     } catch (const std::bad_alloc&) { return -ENOMEM; }
 }
+extern "C" int64_t maxps4_fex_engine_mount_app0(maxps4_fex_engine* engine, const char* directory) {
+    if (!engine) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
+    std::lock_guard lock(runtime_lock);
+    if (engine->staged_ps4.segments().empty()) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
+    return engine->libkernel.mount_app0(directory);
+}
+extern "C" int64_t maxps4_fex_engine_call_libkernel(maxps4_fex_engine* engine, uint32_t service,
+    const maxps4_ps4_kernel_call* call, uint64_t guest_thread) {
+    if (!engine || !call) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
+    std::lock_guard lock(runtime_lock);
+    if (engine->staged_ps4.segments().empty()) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
+    const maxps4::PS4KernelCall registers{call->rdi, call->rsi, call->rdx, call->rcx,
+        call->r8, call->r9, call->rsp};
+    return engine->libkernel.invoke(static_cast<maxps4::PS4KernelService>(service), registers, guest_thread);
+}
 extern "C" int32_t maxps4_fex_engine_read_ps4(maxps4_fex_engine* engine,
     uint64_t address, uint8_t* output, size_t length) {
     if (!engine || !output || !length || length > 1024 * 1024) return -EINVAL;
     std::lock_guard lock(runtime_lock);
-    maxps4::PS4GuestMemory memory(engine->staged_ps4);
+    auto& memory = engine->system_memory;
     return memory.read(address, output, length) ? 0 : -EFAULT;
 }
 extern "C" int32_t maxps4_fex_engine_fetch_ps4(maxps4_fex_engine* engine,
     uint64_t address, uint8_t* output, size_t length) {
     if (!engine || !output || !length || length > 1024 * 1024) return -EINVAL;
     std::lock_guard lock(runtime_lock);
-    maxps4::PS4GuestMemory memory(engine->staged_ps4);
+    auto& memory = engine->system_memory;
     return memory.fetch(address, output, length) ? 0 : -EFAULT;
 }
 extern "C" int32_t maxps4_fex_engine_write_ps4(maxps4_fex_engine* engine,
     uint64_t address, const uint8_t* input, size_t length) {
     if (!engine || !input || !length || length > 1024 * 1024) return -EINVAL;
     std::lock_guard lock(runtime_lock);
-    maxps4::PS4GuestMemory memory(engine->staged_ps4);
+    auto& memory = engine->system_memory;
     return memory.write(address, input, length) ? 0 : -EFAULT;
 }
 extern "C" int32_t maxps4_fex_engine_query_ps4(maxps4_fex_engine* engine,
@@ -386,7 +406,7 @@ extern "C" int32_t maxps4_fex_engine_query_ps4(maxps4_fex_engine* engine,
     if (!engine || !permitted || !length || length > 1024 * 1024 ||
         !permissions || (permissions & ~7U)) return -EINVAL;
     std::lock_guard lock(runtime_lock);
-    maxps4::PS4GuestMemory memory(engine->staged_ps4);
+    auto& memory = engine->system_memory;
     *permitted = memory.permitted(address, length, permissions) ? 1U : 0U;
     return 0;
 }
@@ -396,7 +416,7 @@ extern "C" int32_t maxps4_fex_engine_contiguous_ps4(maxps4_fex_engine* engine,
     if (!engine || !available || !limit || limit > 1024 * 1024 ||
         !permissions || (permissions & ~7U)) return -EINVAL;
     std::lock_guard lock(runtime_lock);
-    maxps4::PS4GuestMemory memory(engine->staged_ps4);
+    auto& memory = engine->system_memory;
     *available = memory.contiguous(address, limit, permissions);
     return 0;
 }
@@ -444,4 +464,5 @@ extern "C" int32_t maxps4_fex_engine_interpret_elf(maxps4_fex_engine* engine,
         return status;
     } catch (const std::bad_alloc&) { return -ENOMEM; }
 }
+
 

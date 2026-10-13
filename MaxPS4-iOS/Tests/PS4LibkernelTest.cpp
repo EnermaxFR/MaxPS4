@@ -1,4 +1,5 @@
 #include "../Native/maxps4_ps4_libkernel.h"
+#include "../Native/maxps4_fex_runtime.h"
 #include "GuestELFFixture.h"
 #include <cassert>
 #include <cstdio>
@@ -38,6 +39,7 @@ int main() {
     const int host = ::open(file.c_str(), O_CREAT | O_WRONLY | O_EXCL, 0600);
     assert(host >= 0 && ::write(host, payload, sizeof(payload) - 1) == sizeof(payload) - 1);
     assert(::close(host) == 0);
+    assert(::link(file.c_str(), (dir + "/nested").c_str()) == 0);
     assert(::symlink(file.c_str(), (base + "/link").c_str()) == 0);
     assert(::symlink("/tmp", (base + "/escape").c_str()) == 0);
     assert(::mkfifo((base + "/fifo").c_str(), 0600) == 0);
@@ -73,6 +75,10 @@ int main() {
     assert(call(S::close, fd) == 0 && call(S::close, fd) == kernel_error(badf));
     assert(call(S::read, fd, 0x11000, 0) == kernel_error(badf));
     assert(call(S::read, 0, 0x11000, 1) == kernel_error(badf));
+    path("/app0/sub/nested");
+    const auto nested = call(S::open, 0x10000);
+    assert(nested == 3 && call(S::read, nested, 0x11000, 4) == 4);
+    assert(call(S::close, nested) == 0);
     for (const char* invalid : {"/app0/../data.bin", "/app0//data.bin", "/app0/./data.bin", "relative"}) {
         path(invalid); assert(call(S::open, 0x10000) == kernel_error(inval));
     }
@@ -109,6 +115,8 @@ int main() {
     assert(call(S::open, 0x10000) == 3);
     assert(resolve_libkernel("1G3lF1Gg1k8", "libkernel", "libkernel", 1) == S::open);
     assert(resolve_libkernel("sceKernelRead", "libkernel", "libkernel", 1) == S::read);
+    assert(maxps4_ps4_resolve_libkernel("sceKernelRead", "libkernel", "libkernel", 1) == uint32_t(S::read));
+    assert(maxps4_ps4_resolve_libkernel(nullptr, "libkernel", "libkernel", 1) == 0);
     assert(resolve_libkernel("bY-PO6JhzhQ", "libkernel", "libkernel", 1) == S::unresolved);
     assert(resolve_libkernel("sceKernelOpen", "libScePosix", "libkernel", 1) == S::unresolved);
     assert(resolve_libkernel("sceKernelOpen", "libkernel", "other", 1) == S::unresolved);
@@ -119,6 +127,7 @@ int main() {
     assert(call(S::close, 3) == kernel_error(badf));
     for (const char* name : {"data.bin", "link", "escape", "fifo"})
         assert(::unlink((base + "/" + name).c_str()) == 0);
+    assert(::unlink((dir + "/nested").c_str()) == 0);
     assert(::rmdir(dir.c_str()) == 0 && ::rmdir(root) == 0);
     std::puts("PS4 libkernel filesystem and import checks passed");
 }
