@@ -102,7 +102,25 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                                                kind != 0xfe18) {
                                         report << " ; ELF incompatible : type exécutable/dynamique non reconnu";
                                     } else {
-                                        report << " ; en-tête ELF64 x86-64 reconnu (segments non validés, aucune admission)";
+                                        const auto le16 = [&](size_t at) {
+                                            return uint16_t(bytes[at]) | (uint16_t(bytes[at + 1]) << 8);
+                                        };
+                                        const auto le64 = [&](size_t at) {
+                                            uint64_t value = 0;
+                                            for (size_t n = 0; n < 8; ++n)
+                                                value |= uint64_t(bytes[at + n]) << (8 * n);
+                                            return value;
+                                        };
+                                        const uint64_t phoff = le64(32);
+                                        const uint64_t phnum = le16(56);
+                                        const uint64_t phentsize = le16(54);
+                                        if (phnum && (phentsize != 56 ||
+                                            !maxps4::PS4PKGInventory::range(
+                                                phoff, phnum * phentsize, bytes.size()))) {
+                                            report << " ; ELF invalide : table de segments absente ou hors ressource";
+                                        } else {
+                                            report << " ; en-tête ELF64 x86-64 reconnu (segments non validés, aucune admission)";
+                                        }
                                     }
                                 }
                             }
