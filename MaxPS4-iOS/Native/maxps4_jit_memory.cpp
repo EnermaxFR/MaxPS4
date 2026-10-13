@@ -1,7 +1,11 @@
 #include "maxps4_jit_memory.h"
-#include <TargetConditionals.h>
 #include <cerrno>
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
 #include <os/log.h>
+#else
+#define TARGET_OS_IPHONE 0
+#endif
 #if TARGET_OS_IPHONE || defined(MAXPS4_TEST_DARWIN_JIT_POOL)
 #include <mach/mach.h>
 #include <mach/vm_map.h>

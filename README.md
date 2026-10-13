@@ -76,3 +76,5 @@ Le diagnostic GPU propose un triangle animé natif Metal, sans émulation GPU PS
 Voir [les limites, tests et contrôles sur iPhone](docs/metal-gpu-prototype.md).
 
 Integration PR #157: the integration branch retains main's fail-closed iPhone FEX JIT gate. PM4/FEX/Metal execution is validated separately on macOS; the prepared-region provider does not enable iPhone FEX execution. See [integration validation](docs/integration-157-validation.md).
+
+Analyse ELF Orbis/SCE et préparation PRX non chiffrée : [périmètre, limites et recette iPhone](docs/orbis-sce-prx-analysis.md).

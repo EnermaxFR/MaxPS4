@@ -1,21 +1,50 @@
 name: MaxPS4 FEXCore SideStore IPA
 on:
   workflow_dispatch:
+  push:
+    branches: ['codex/ps4-memory-translation-contract', 'integration/ps4-fex-orbis-pkg-validation']
+    paths:
+      - 'MaxPS4-iOS/**'
+      - 'scripts/*fexcore*'
+      - 'scripts/run-bounded.py'
+      - 'cmake/FEXCoreIOSLinkage.cmake'
+      - '.github/workflows/fexcore-app.yml'
   pull_request:
     paths:
       - 'MaxPS4-iOS/**'
       - 'scripts/*fexcore*'
+      - 'scripts/run-bounded.py'
       - 'cmake/FEXCoreIOSLinkage.cmake'
       - '.github/workflows/fexcore-app.yml'
 permissions:
   contents: read
 jobs:
   application:
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Validate PKG metadata and runtime preparation before packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/diagnostics
+          xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            MaxPS4-iOS/Native/OrbisLinkerBridge.cpp MaxPS4-iOS/Tests/OrbisLinkerTest.cpp -o "$RUNNER_TEMP/orbis-test"
+          "$RUNNER_TEMP/orbis-test" | tee build/diagnostics/orbis-tests.txt
+          for suite in PS4PKGInventoryTest PS4PKGMetadataTest; do
+            xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+              MaxPS4-iOS/Native/PS4PKGBridge.cpp "MaxPS4-iOS/Tests/$suite.cpp" -o "$RUNNER_TEMP/$suite"
+            "$RUNNER_TEMP/$suite" | tee "build/diagnostics/$suite.txt"
+          done
+          swiftc -parse-as-library \
+            MaxPS4-iOS/Sources/MaxPS4GuestMemory.swift \
+            MaxPS4-iOS/Sources/MaxPS4ELFLoader.swift \
+            MaxPS4-iOS/Sources/MaxPS4CPUPrototype.swift \
+            MaxPS4-iOS/Tests/ELFLibraryRegressionTest.swift -o "$RUNNER_TEMP/elf-library-test"
+          "$RUNNER_TEMP/elf-library-test" | tee build/diagnostics/elf-library-tests.txt
       - name: Test native Metal triangle and compile iPhone shaders
+        timeout-minutes: 3
         shell: bash
         run: |
           set -euo pipefail
@@ -34,6 +63,7 @@ jobs:
           xcrun -sdk iphoneos metallib build/diagnostics/triangle.air \
             -o build/diagnostics/triangle.metallib
       - name: Checkout coherent pinned runtime
+        timeout-minutes: 5
         run: |
           git clone --filter=blob:none --no-checkout https://github.com/Leviidev/AetherPS4.git build/aether-app
           git -C build/aether-app sparse-checkout set runtime/sources/fexcore-darwin src/core/guest_cpu src/core/ios
@@ -41,20 +71,34 @@ jobs:
           brew install ninja xcodegen
       - name: Test fixed Stik script and real Mach memory ownership
         shell: bash
+        timeout-minutes: 8
         run: |
           set -euo pipefail
           mkdir -p build/diagnostics
+          echo "::group::Compile guest ELF memory test"
           xcrun clang++ -std=c++23 -Wall -Wextra -Werror -I MaxPS4-iOS/Native \
             MaxPS4-iOS/Native/maxps4_guest_elf.cpp \
             MaxPS4-iOS/Tests/GuestELFMemoryTest.cpp -o build/guest-elf-memory-test
+          echo "::endgroup::"
+          echo "::group::Run guest ELF memory test"
           build/guest-elf-memory-test | tee build/diagnostics/guest-elf-memory-tests.txt
+          echo "::endgroup::"
+          echo "::group::Run Stik script test"
           node MaxPS4-iOS/Tests/StikScriptTest.js | tee build/diagnostics/stik-script-tests.txt
+          echo "::endgroup::"
+          echo "::group::Compile JIT memory test"
           xcrun clang++ -std=c++23 -DMAXPS4_TEST_DARWIN_JIT_POOL=1 \
             -I MaxPS4-iOS/Native MaxPS4-iOS/Native/maxps4_jit_memory.cpp \
             MaxPS4-iOS/Tests/FEXJITMemoryTest.cpp -o build/jit-memory-test
+          echo "::endgroup::"
+          echo "::group::Run JIT memory test"
           build/jit-memory-test | tee build/diagnostics/jit-memory-tests.txt
-          leaks --atExit -- build/jit-memory-test 2>&1 | tee build/diagnostics/jit-memory-leaks.txt
+          echo "::endgroup::"
+          echo "::group::Inspect JIT memory leaks"
+          python3 scripts/run-bounded.py 60 build/diagnostics/jit-memory-leaks.txt leaks --atExit -- build/jit-memory-test
+          echo "::endgroup::"
       - name: Preserve native runtime tests and test the real Swift C bridge on macOS
+        timeout-minutes: 12
         shell: bash
         run: |
           set -euo pipefail
@@ -70,8 +114,9 @@ jobs:
             -L build/fex-app-host -lMaxPS4FEXRuntime \
             -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" \
             -o build/fex-app-host/swift-fex-test
-          build/fex-app-host/swift-fex-test | tee build/fex-app-host/swift-diagnostic-tests.txt
+          python3 scripts/run-bounded.py 60 build/fex-app-host/swift-diagnostic-tests.txt build/fex-app-host/swift-fex-test build/fex-app-host/ps4-libkernel-demo.elf
       - name: Test actual ELF FEX position transfer and offscreen Metal readback
+        timeout-minutes: 3
         shell: bash
         run: |
           set -euo pipefail
@@ -88,8 +133,9 @@ jobs:
             -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" \
             -o build/fex-app-host/fex-metal-test
           build/fex-app-host/fex-metal-test | tee build/fex-app-host/fex-metal-tests.txt
-          leaks --atExit -- build/fex-app-host/fex-metal-test 2>&1 | tee build/fex-app-host/fex-metal-leaks.txt
+          python3 scripts/run-bounded.py 60 build/fex-app-host/fex-metal-leaks.txt leaks --atExit -- build/fex-app-host/fex-metal-test
       - name: Test same ELF arena FEX completion to C++ PM4 to Metal
+        timeout-minutes: 3
         shell: bash
         run: |
           set -euo pipefail
@@ -102,6 +148,7 @@ jobs:
             -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" -o build/pm4-fex-metal-test
           build/pm4-fex-metal-test | tee build/diagnostics/pm4-fex-metal-tests.txt
       - name: Validate safe Stik trap handling
+        timeout-minutes: 2
         shell: bash
         run: |
           set -euo pipefail
@@ -111,12 +158,13 @@ jobs:
             -o build/fex-app-host/stik-trap-safety-test
           build/fex-app-host/stik-trap-safety-test | tee build/fex-app-host/stik-trap-safety.txt
       - name: Check actual native and Swift heap cleanup on macOS
+        timeout-minutes: 3
         shell: bash
         run: |
           set -euo pipefail
-          leaks --atExit -- build/fex-app-host/swift-fex-test \
-            2>&1 | tee build/fex-app-host/swift-diagnostic-leaks.txt
+          python3 scripts/run-bounded.py 60 build/fex-app-host/swift-diagnostic-leaks.txt leaks --atExit -- build/fex-app-host/swift-fex-test
       - name: Build full Xcode application and verified re-signable IPA
+        timeout-minutes: 15
         run: bash scripts/build-fexcore-app.sh build/aether-app
       - name: Record exact pre-resigning signature and entitlements
         run: python3 scripts/audit-ios-signature.py build/Payload/MaxPS4.app > build/diagnostics/ios-signature.json

@@ -1,12 +1,20 @@
 #include "maxps4_fex_runtime.h"
 #include "maxps4_jit_memory.h"
 #include "maxps4_guest_elf.h"
+#include "maxps4_ps4_guest_memory.h"
+#include "maxps4_ps4_libkernel.h"
+#include "maxps4_ps4_linker.h"
+#include "maxps4_ps4_synthetic_elf.h"
 #include "PM4GuestSubmission.hpp"
 #include "Common/HostFeatures.h"
 #include <FEXCore/Config/Config.h>
 #include <FEXCore/Core/Context.h>
 #include <FEXCore/Core/SignalDelegator.h>
+#if defined(__APPLE__)
 #include <TargetConditionals.h>
+#else
+#define TARGET_OS_IPHONE 0
+#endif
 #include <FEXCore/Core/CoreState.h>
 #include <FEXCore/Core/X86Enums.h>
 #include <FEXCore/Debug/InternalThreadState.h>
@@ -29,18 +37,79 @@ namespace {
 class ProbeAddressSpace final : public FEXCore::HLE::SyscallHandler {
 public:
     ProbeAddressSpace() { OSABI = FEXCore::HLE::SyscallOSABI::OS_GENERIC; }
-    const maxps4::GuestELF* image = nullptr;
-    uint64_t HandleSyscall(FEXCore::Core::CpuStateFrame*, FEXCore::HLE::SyscallArguments*) override {
-        return static_cast<uint64_t>(-ENOSYS);
+    maxps4::GuestELF* image = nullptr;
+    maxps4::PS4DynamicLinker* linker = nullptr;
+    maxps4::PS4Libkernel* kernel = nullptr;
+    maxps4::PS4GuestMemory* memory = nullptr;
+    uint64_t private_stack = 0;
+    size_t private_stack_size = 0;
+    uint32_t calls = 0;
+    int callback_error = 0;
+    uint64_t HandleSyscall(FEXCore::Core::CpuStateFrame* frame, FEXCore::HLE::SyscallArguments*) override {
+        namespace x86 = FEXCore::X86State;
+        auto& state = frame->State;
+        auto& r = state.gregs;
+        maxps4::PS4KernelService service{};
+        const uint64_t rsp = r[x86::REG_RSP];
+        int64_t result = maxps4::ps4::kernel_error(maxps4::ps4::nosys);
+        if (!image || !linker || !kernel || !memory || r[x86::REG_RAX] > UINT32_MAX ||
+            !linker->gate(*image,state.rip,static_cast<uint32_t>(r[x86::REG_RAX]),service)) {
+            callback_error = -EPERM;
+        } else if (rsp < private_stack || private_stack_size < 16 ||
+                   rsp - private_stack > private_stack_size - 16 || (rsp & 7)) {
+            callback_error = -EFAULT;
+            result = maxps4::ps4::kernel_error(maxps4::ps4::fault);
+        } else {
+            // Never expose the rebased CPU RSP or CALL return pointer. Copy only
+            // the seventh argument from the proven private CPU stack into a
+            // logical guest frame consumed by existing sceKernelMmap.
+            uint8_t argument[8];
+            std::memcpy(argument,reinterpret_cast<const void*>(rsp+8),sizeof(argument));
+            const uint64_t guest_rsp = linker->stack_top()-16;
+            if (!memory->write(guest_rsp+8,argument,sizeof(argument))) {
+                callback_error = -EFAULT;
+                result = maxps4::ps4::kernel_error(maxps4::ps4::fault);
+            } else {
+                const maxps4::PS4KernelCall call{r[x86::REG_RDI],r[x86::REG_RSI],r[x86::REG_RDX],
+                    service == maxps4::PS4KernelService::mmap ? r[x86::REG_R10] : 0,
+                    r[x86::REG_R8],r[x86::REG_R9],guest_rsp};
+                result = kernel->invoke(service,call,1);
+                ++calls;
+            }
+        }
+        // OS_GENERIC spills/refills CPU registers, ignores the C++ return value
+        // and resumes from State.rip. SYSCALL has already clobbered RCX/R11.
+        r[x86::REG_RAX] = static_cast<uint64_t>(result);
+        state.rip += 2;
+        return static_cast<uint64_t>(result);
     }
     FEXCore::HLE::ExecutableRangeInfo QueryGuestExecutableRange(
         FEXCore::Core::InternalThreadState*, uint64_t address) override {
         if (image) for (const auto& segment : image->segments()) {
             if (!(segment.permissions & 1)) continue;
-            const auto* pointer = image->translate(segment.address, segment.memory_size, 5);
+            // FEX receives rebased host addresses only for the restricted
+            // admitted program. Resolve executable ranges through the same
+            // guest permission contract used by entry dispatch.
+            maxps4::PS4GuestMemory memory(*image);
+            const size_t executable_bytes = memory.contiguous(
+                segment.address, segment.file_size, 5);
+            if (!executable_bytes) continue;
+            // The executable file extent must be entirely backed by a
+            // permission-checked segment. Never advertise a truncated range
+            // to FEX as though the complete code extent were mapped.
+            if (executable_bytes != segment.file_size) continue;
+            const auto* pointer = image->translate(segment.address, executable_bytes, 5);
+            if (!pointer) continue;
             const auto begin = reinterpret_cast<uintptr_t>(pointer);
-            if (pointer && address >= begin && address - begin < segment.file_size)
-                return {begin, segment.file_size, false};
+            if (address >= begin && address - begin < executable_bytes) {
+                // Verify the exact requested instruction address in the PS4
+                // logical address domain, not only the segment's first byte.
+                const uint64_t displacement = address - begin;
+                if (displacement > UINT64_MAX - segment.address) continue;
+                const uint64_t guest_address = segment.address + displacement;
+                if (memory.contiguous(guest_address, 1, 5) != 1) continue;
+                return {begin, executable_bytes, false};
+            }
         }
         return {0, 0, false};
     }
@@ -71,6 +140,10 @@ struct maxps4_fex_engine {
     FEXCore::SignalDelegator signals;
     ProbeAddressSpace probe;
     maxps4::GuestELF staged_ps4;
+    maxps4::PS4VirtualMemory dynamic_ps4{staged_ps4};
+    maxps4::PS4GuestMemory system_memory{staged_ps4, &dynamic_ps4};
+    maxps4::PS4Libkernel libkernel{system_memory, &dynamic_ps4};
+    maxps4::PS4DynamicLinker linker;
     fextl::unique_ptr<FEXCore::Context::Context> context;
     int32_t stage = MAXPS4_FEX_CONTEXT_CREATED;
 };
@@ -95,6 +168,11 @@ extern "C" int32_t maxps4_fex_engine_open(maxps4_fex_engine **out) {
         FEXCore::Config::Set(FEXCore::Config::CONFIG_IS64BIT_MODE, "1");
         FEXCore::Config::Set(FEXCore::Config::CONFIG_DISABLETELEMETRY, "1");
         FEXCore::Config::Set(FEXCore::Config::CONFIG_ENABLECODECACHINGWIP, "0");
+#if defined(VIXL_SIMULATOR)
+        // The Darwin dependency defaults to native indirect runtime calls.
+        // x86 CI's upstream ARM64 simulator must use its real C++ ABI wrappers.
+        FEXCore::Config::Set(FEXCore::Config::CONFIG_DISABLE_VIXL_INDIRECT_RUNTIME_CALLS, "0");
+#endif
     }
     // Real Darwin sysctl-based feature discovery; never fabricated features.
     const auto features = FEX::FetchHostFeatures();
@@ -209,28 +287,23 @@ struct PM4Request {
     uint32_t* words;
     size_t* written;
 };
-int32_t runELF(maxps4_fex_engine *engine,
-    const uint8_t *file, size_t length, uint32_t budget, uint64_t *result,
-    uint32_t *backend, uint64_t *entry, const PM4Request* submission) {
-    if (result) *result = 0;
-    if (backend) *backend = 0;
-    if (entry) *entry = 0;
-    if (!engine || !result || !backend || !entry) return -EINVAL;
-    std::lock_guard lock(runtime_lock);
-    // iOS uses the bounded Darwin ELF execution path after verified InitCore.
-    try {
-    maxps4::GuestELF image;
-    const int loaded = image.load(file, length, budget);
-    if (loaded) return loaded;
-    *entry = image.entry();
-    if (submission) {
-        if ((submission->address & 3U) ||
-            submission->address > UINT64_MAX - submission->count * 4) return -EINVAL;
-        if (!image.translate(submission->address, submission->count * 4, 4)) return -EFAULT;
-        // The CPU may produce PM4 in initially zero-filled RW data. Interpret
-        // only after FEX completes; range/permissions are checked before execution.
-    }
+int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
+    uint64_t* result, uint32_t* backend, const PM4Request* submission, bool linked = false) {
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
+    // FEX still uses rebased host addresses for the admitted instruction set.
+    // Check the logical PS4 entry via the shared guest-memory contract before
+    // giving FEX a host pointer. This is not general address-space translation.
+    maxps4::PS4GuestMemory guest_memory(image);
+    if (guest_memory.contiguous(image.entry(), 1, 5) != 1) return -EFAULT;
+    // Fetch a bounded instruction window through the same permission-checked
+    // guest contract used by CPU clients. Never cross the executable segment.
+    // The decoder still enforces the admitted instruction whitelist.
+    std::array<uint8_t, 15> entry_bytes {};
+    const size_t fetch_length = guest_memory.contiguous(image.entry(), entry_bytes.size(), 5);
+    if (!fetch_length || !guest_memory.fetch(image.entry(), entry_bytes.data(), fetch_length))
+        return -EFAULT;
+    const auto* entry_pointer = image.entry_pointer();
+    if (!entry_pointer) return -EFAULT;
     const long host_page = ::sysconf(_SC_PAGESIZE);
     if (host_page <= 0) return -EIO;
     const size_t page = static_cast<size_t>(host_page);
@@ -245,11 +318,21 @@ int32_t runELF(maxps4_fex_engine *engine,
         ::mprotect(callret_base, callret_size, PROT_READ | PROT_WRITE) != 0) return -errno;
     std::array<FEXCore::Core::CPUState::gdt_segment, 32> gdt {};
     engine->probe.image = &image;
+    engine->probe.linker = linked ? &engine->linker : nullptr;
+    engine->probe.kernel = linked ? &engine->libkernel : nullptr;
+    engine->probe.memory = linked ? &engine->system_memory : nullptr;
+    engine->probe.private_stack = reinterpret_cast<uintptr_t>(stack_base);
+    engine->probe.private_stack_size = page;
+    engine->probe.calls = 0;
+    engine->probe.callback_error = 0;
     struct ClearRange {
         ProbeAddressSpace& space;
-        ~ClearRange() { space.image = nullptr; }
+        ~ClearRange() {
+            space.image = nullptr; space.linker = nullptr; space.kernel = nullptr;
+            space.memory = nullptr; space.private_stack = 0; space.private_stack_size = 0;
+        }
     } clear_range {engine->probe};
-    auto* thread = engine->context->CreateThread(reinterpret_cast<uintptr_t>(image.entry_pointer()),
+    auto* thread = engine->context->CreateThread(reinterpret_cast<uintptr_t>(entry_pointer),
         reinterpret_cast<uintptr_t>(stack_base) + page - 16);
     if (!thread) return -ENOMEM;
     struct DestroyThread {
@@ -274,6 +357,7 @@ int32_t runELF(maxps4_fex_engine *engine,
     // without allocating another iOS JIT buffer. All engine execution is locked.
     engine->context->ClearCodeCache(thread, false);
     engine->context->ExecuteThread(thread);
+    if (engine->probe.callback_error) return engine->probe.callback_error;
     if (submission) {
         const auto snapshot = maxps4::gpu::snapshotPM4(image, submission->address, submission->count);
         if (snapshot.error) return snapshot.error;
@@ -281,8 +365,35 @@ int32_t runELF(maxps4_fex_engine *engine,
         *submission->written = snapshot.words.size();
     }
     *result = state.gregs[FEXCore::X86State::REG_RAX];
+#if defined(VIXL_SIMULATOR)
+    *backend = MAXPS4_CPU_FEX_ARM64_SIMULATOR;
+#else
     *backend = MAXPS4_CPU_FEX_ARM64_JIT;
+#endif
     return 0;
+}
+int32_t runELF(maxps4_fex_engine *engine,
+    const uint8_t *file, size_t length, uint32_t budget, uint64_t *result,
+    uint32_t *backend, uint64_t *entry, const PM4Request* submission) {
+    if (result) *result = 0;
+    if (backend) *backend = 0;
+    if (entry) *entry = 0;
+    if (!engine || !result || !backend || !entry) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    // iOS uses the bounded Darwin ELF execution path after verified InitCore.
+    try {
+    maxps4::GuestELF image;
+    const int loaded = image.load(file, length, budget);
+    if (loaded) return loaded;
+    *entry = image.entry();
+    if (submission) {
+        if ((submission->address & 3U) ||
+            submission->address > UINT64_MAX - submission->count * 4) return -EINVAL;
+        if (!image.translate(submission->address, submission->count * 4, 4)) return -EFAULT;
+        // The CPU may produce PM4 in initially zero-filled RW data. Interpret
+        // only after FEX completes; range/permissions are checked before execution.
+    }
+    return executeImage(engine, image, result, backend, submission);
     } catch (const std::bad_alloc&) { return -ENOMEM; }
 }
 
@@ -295,6 +406,8 @@ extern "C" int32_t maxps4_fex_engine_stage_ps4(maxps4_fex_engine* engine,
     if (blockers) *blockers = 0;
     if (!engine) return -EINVAL;
     std::lock_guard lock(runtime_lock);
+    engine->libkernel.reset();
+    engine->linker.reset();
     engine->staged_ps4.clear();
     if (!entry || !segments || !blockers) return -EINVAL;
     const int error = engine->staged_ps4.stage_ps4(file, length);
@@ -306,13 +419,189 @@ extern "C" int32_t maxps4_fex_engine_stage_ps4(maxps4_fex_engine* engine,
         static_cast<unsigned long long>(*entry), *segments, *blockers);
     return 0;
 }
+extern "C" int32_t maxps4_fex_engine_link_ps4(maxps4_fex_engine* engine,
+    const uint8_t* file, size_t length, uint32_t budget, uint64_t* entry, uint32_t* imports) {
+    if (entry) *entry = 0;
+    if (imports) *imports = 0;
+    if (!engine) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    engine->libkernel.reset();
+    engine->dynamic_ps4.reset();
+    engine->linker.reset();
+    engine->staged_ps4.clear();
+    if (!entry || !imports) return -EINVAL;
+    const int error = engine->linker.load(engine->staged_ps4,file,length,budget);
+    if (error) return error;
+    *entry = engine->staged_ps4.entry();
+    *imports = static_cast<uint32_t>(engine->linker.imports().size());
+    return 0;
+}
+extern "C" int32_t maxps4_fex_engine_run_linked_ps4(maxps4_fex_engine* engine,
+    uint64_t* result, uint32_t* backend, uint64_t* entry, uint32_t* calls) {
+    if (result) *result = 0;
+    if (backend) *backend = 0;
+    if (entry) *entry = 0;
+    if (calls) *calls = 0;
+    if (!engine || !result || !backend || !entry || !calls) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    if (engine->linker.imports().empty()) return -EFAULT;
+    try {
+        const int error = executeImage(engine,engine->staged_ps4,result,backend,nullptr,true);
+        if (error) return error;
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
+    *entry = engine->staged_ps4.entry();
+    *calls = engine->probe.calls;
+    return 0;
+}
+extern "C" int32_t maxps4_fex_test_ps4_libkernel(maxps4_ps4_elf_test_report* report) {
+    if (!report) return -EINVAL;
+    *report = {};
+    report->open_status = report->load_status = report->link_status =
+        report->initialize_status = report->execute_status = report->read_status =
+        report->verification_status = -ECANCELED;
+    report->jit_regions_before = maxps4_jit_leases();
+    maxps4_fex_engine* engine = nullptr;
+    // Scope owns the engine even when fixture construction throws. The public
+    // execution APIs remain the sole path to CPU dispatch and kernel services.
+    int32_t status = [&]() -> int32_t {
+        auto fail = [&](int32_t code, const char* operation, const char* detail = "") {
+            std::snprintf(report->error, sizeof(report->error), "%s: %d %s", operation, code, detail);
+            return code;
+        };
+        try {
+            const auto file = maxps4_ps4_synthetic::minimal();
+            report->open_status = maxps4_fex_engine_open(&engine);
+            if (report->open_status) return fail(report->open_status, "open FEX");
+            uint32_t blockers = 0;
+            report->load_status = maxps4_fex_engine_stage_ps4(engine, file.data(), file.size(),
+                &report->entry, &report->segments, &blockers);
+            if (report->load_status) return fail(report->load_status, "load Orbis ELF");
+            uint64_t linked_entry = 0;
+            report->link_status = maxps4_fex_engine_link_ps4(engine, file.data(), file.size(),
+                10, &linked_entry, &report->imports);
+            {
+                std::lock_guard lock(runtime_lock);
+                if (report->link_status)
+                    return fail(report->link_status, "link NID/RELA", engine->linker.diagnostic().c_str());
+                if (engine->linker.imports().size() == 1)
+                    report->resolved_service = static_cast<uint32_t>(engine->linker.imports()[0].service);
+            }
+            const auto self = maxps4_ps4_resolve_libkernel("aI+OeCz8xrQ", "libkernel", "libkernel", 1);
+            if (!self || report->resolved_service != self || linked_entry != report->entry)
+                return fail(-ENOENT, "resolve scePthreadSelf NID");
+            report->initialize_status = maxps4_fex_engine_initialize(engine);
+            if (report->initialize_status) return fail(report->initialize_status, "initialize FEX ARM64 JIT");
+            uint64_t executed_entry = 0;
+            report->execute_status = maxps4_fex_engine_run_linked_ps4(engine,
+                &report->rax, &report->backend, &executed_entry, &report->calls);
+            if (report->execute_status) return fail(report->execute_status, "execute linked ELF");
+            uint8_t output[16]{};
+            report->read_status = maxps4_fex_engine_read_ps4(engine,
+                maxps4_ps4_synthetic::data + 0x100, output, sizeof(output));
+            if (report->read_status) return fail(report->read_status, "read guest memory");
+            for (size_t i = 0; i < 8; ++i) {
+                report->final_memory |= uint64_t(output[i]) << (8 * i);
+                report->kernel_return |= uint64_t(output[8 + i]) << (8 * i);
+            }
+            // Both stores follow CALL/RET. The second value is observed before
+            // ADD, the first after ADD. Neither is assigned by this harness.
+            report->resumed = report->calls == 1 && report->kernel_return == 1 &&
+                report->final_memory == 2 && report->rax == 2 && executed_entry == report->entry;
+            report->verification_status = report->resumed &&
+                (report->backend == MAXPS4_CPU_FEX_ARM64_JIT ||
+                 report->backend == MAXPS4_CPU_FEX_ARM64_SIMULATOR) ? 0 : -EIO;
+            if (report->verification_status) return fail(report->verification_status, "verify call/return/stores");
+            return 0;
+        } catch (const std::bad_alloc&) { return fail(-ENOMEM, "allocate ELF/FEX"); }
+    }();
+    if (engine) {
+        {
+            std::lock_guard lock(runtime_lock);
+            engine->libkernel.reset();
+            engine->dynamic_ps4.reset();
+            engine->linker.reset();
+            engine->staged_ps4.clear();
+            report->guest_segments_after = static_cast<uint32_t>(engine->staged_ps4.segments().size());
+        }
+        maxps4_fex_engine_close(engine);
+    }
+    report->jit_regions_after = maxps4_jit_leases();
+    if (!status && (report->guest_segments_after || report->jit_regions_after != report->jit_regions_before)) {
+        status = -EBUSY;
+        std::snprintf(report->error, sizeof(report->error), "cleanup: guest segments=%u, RX/RW leases=%u (before=%u)",
+            report->guest_segments_after, report->jit_regions_after, report->jit_regions_before);
+    }
+    return status;
+}
+extern "C" int32_t maxps4_fex_engine_run_staged_ps4(maxps4_fex_engine* engine,
+    uint32_t budget, uint64_t* result, uint32_t* backend, uint64_t* entry) {
+    if (result) *result = 0;
+    if (backend) *backend = 0;
+    if (entry) *entry = 0;
+    if (!engine || !result || !backend || !entry) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    try {
+        const int admitted = engine->staged_ps4.admit_staged_cpu(budget);
+        if (admitted) return admitted;
+        const int status = executeImage(engine, engine->staged_ps4, result, backend, nullptr);
+        if (!status) *entry = engine->staged_ps4.entry();
+        return status;
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
+}
+extern "C" int64_t maxps4_fex_engine_mount_app0(maxps4_fex_engine* engine, const char* directory) {
+    if (!engine) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
+    std::lock_guard lock(runtime_lock);
+    if (engine->staged_ps4.segments().empty()) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
+    return engine->libkernel.mount_app0(directory);
+}
+extern "C" int64_t maxps4_fex_engine_call_libkernel(maxps4_fex_engine* engine, uint32_t service,
+    const maxps4_ps4_kernel_call* call, uint64_t guest_thread) {
+    if (!engine || !call) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
+    std::lock_guard lock(runtime_lock);
+    if (engine->staged_ps4.segments().empty()) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
+    const maxps4::PS4KernelCall registers{call->rdi, call->rsi, call->rdx, call->rcx,
+        call->r8, call->r9, call->rsp};
+    return engine->libkernel.invoke(static_cast<maxps4::PS4KernelService>(service), registers, guest_thread);
+}
 extern "C" int32_t maxps4_fex_engine_read_ps4(maxps4_fex_engine* engine,
     uint64_t address, uint8_t* output, size_t length) {
     if (!engine || !output || !length || length > 1024 * 1024) return -EINVAL;
     std::lock_guard lock(runtime_lock);
-    const auto* bytes = engine->staged_ps4.translate(address, length, 4);
-    if (!bytes) return -EFAULT;
-    std::memcpy(output, bytes, length);
+    auto& memory = engine->system_memory;
+    return memory.read(address, output, length) ? 0 : -EFAULT;
+}
+extern "C" int32_t maxps4_fex_engine_fetch_ps4(maxps4_fex_engine* engine,
+    uint64_t address, uint8_t* output, size_t length) {
+    if (!engine || !output || !length || length > 1024 * 1024) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    auto& memory = engine->system_memory;
+    return memory.fetch(address, output, length) ? 0 : -EFAULT;
+}
+extern "C" int32_t maxps4_fex_engine_write_ps4(maxps4_fex_engine* engine,
+    uint64_t address, const uint8_t* input, size_t length) {
+    if (!engine || !input || !length || length > 1024 * 1024) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    auto& memory = engine->system_memory;
+    return memory.write(address, input, length) ? 0 : -EFAULT;
+}
+extern "C" int32_t maxps4_fex_engine_query_ps4(maxps4_fex_engine* engine,
+    uint64_t address, size_t length, uint32_t permissions, uint32_t* permitted) {
+    if (permitted) *permitted = 0;
+    if (!engine || !permitted || !length || length > 1024 * 1024 ||
+        !permissions || (permissions & ~7U)) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    auto& memory = engine->system_memory;
+    *permitted = memory.permitted(address, length, permissions) ? 1U : 0U;
+    return 0;
+}
+extern "C" int32_t maxps4_fex_engine_contiguous_ps4(maxps4_fex_engine* engine,
+    uint64_t address, size_t limit, uint32_t permissions, size_t* available) {
+    if (available) *available = 0;
+    if (!engine || !available || !limit || limit > 1024 * 1024 ||
+        !permissions || (permissions & ~7U)) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    auto& memory = engine->system_memory;
+    *available = memory.contiguous(address, limit, permissions);
     return 0;
 }
 extern "C" int32_t maxps4_fex_engine_run_elf(maxps4_fex_engine* engine,
@@ -359,3 +648,5 @@ extern "C" int32_t maxps4_fex_engine_interpret_elf(maxps4_fex_engine* engine,
         return status;
     } catch (const std::bad_alloc&) { return -ENOMEM; }
 }
+
+

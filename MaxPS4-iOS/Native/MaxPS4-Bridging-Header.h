@@ -7,3 +7,6 @@
 int32_t maxps4_native_debugger_attached(void)
     __attribute__((swift_name("maxps4FEXDebuggerStatus()")));
 
+
+#include "OrbisAnalysisBridge.h"
+#include "OrbisLinkerBridge.h"

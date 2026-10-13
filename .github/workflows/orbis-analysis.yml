@@ -1,0 +1,61 @@
+name: Orbis SCE analysis and PRX preparation
+on:
+  pull_request:
+    paths:
+      - 'MaxPS4-iOS/**'
+      - 'scripts/test-orbis-analysis.sh'
+      - '.github/workflows/orbis-analysis.yml'
+  push:
+    branches: ['codex/ps4-memory-translation-contract']
+    paths:
+      - 'MaxPS4-iOS/**'
+      - 'scripts/test-orbis-analysis.sh'
+      - '.github/workflows/orbis-analysis.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/test-orbis-analysis.sh
+      - name: Preserve restricted ELF, libkernel and guest memory regressions
+        run: bash scripts/test-ps4-system-services.sh
+  swift-arm64:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/test-orbis-analysis.sh
+      - name: Test actual Swift report bridge
+        run: |
+          set -euo pipefail
+          clang++ -std=c++17 -Wall -Wextra -Werror -pedantic -dynamiclib \
+            MaxPS4-iOS/Native/OrbisAnalysisBridge.cpp MaxPS4-iOS/Native/maxps4_guest_elf.cpp \
+            MaxPS4-iOS/Native/maxps4_ps4_libkernel.cpp MaxPS4-iOS/Native/maxps4_ps4_virtual_memory.cpp \
+            MaxPS4-iOS/Native/maxps4_ps4_threads.cpp -o build/orbis/libOrbisAnalysis.dylib
+          swiftc -parse-as-library -import-objc-header MaxPS4-iOS/Native/OrbisAnalysisBridge.h \
+            MaxPS4-iOS/Sources/MaxPS4OrbisAnalyzer.swift MaxPS4-iOS/Tests/OrbisAnalysisSwiftTest.swift \
+            -L build/orbis -lOrbisAnalysis -Xlinker -rpath -Xlinker "$PWD/build/orbis" -o build/orbis/swift-orbis-test
+          python3 scripts/run-bounded.py 30 build/orbis/swift-tests.txt build/orbis/swift-orbis-test build/orbis/synthetic-sce.prx
+      - name: Compile analysis and PRX preparation for iPhone ARM64
+        run: |
+          set -euo pipefail
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Native/OrbisAnalysisBridge.cpp -o build/orbis/bridge-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/OrbisMetadataTest.cpp -o build/orbis/prx-ios.o
+          xcrun lipo -archs build/orbis/bridge-ios.o | grep -w arm64
+          xcrun --sdk iphoneos swiftc -parse-as-library -target arm64-apple-ios18.0 -sdk "$SDK" \
+            -import-objc-header MaxPS4-iOS/Native/OrbisAnalysisBridge.h \
+            -emit-object MaxPS4-iOS/Sources/MaxPS4OrbisAnalyzer.swift -o build/orbis/swift-ios.o
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Orbis-analysis-diagnostics
+          path: |
+            build/orbis/*.txt
+            build/orbis/synthetic-sce.prx

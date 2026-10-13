@@ -1,14 +1,12 @@
 name: Generic PS4 PKG inventory
 on:
+  push:
+    paths:
+      - 'MaxPS4-iOS/**'
+      - '.github/workflows/pkg-inventory.yml'
   pull_request:
     paths:
-      - 'MaxPS4-iOS/Native/PS4PKG*'
-      - 'MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h'
-      - 'MaxPS4-iOS/Sources/MaxPS4PKGInspector.swift'
-      - 'MaxPS4-iOS/Sources/MaxPS4Emulator.swift'
-      - 'MaxPS4-iOS/Tests/PS4PKGInventoryTest.cpp'
-      - 'MaxPS4-iOS/Tests/PKGSwiftDiagnosticTest.swift'
-      - 'MaxPS4-iOS/project.yml'
+      - 'MaxPS4-iOS/**'
       - '.github/workflows/pkg-inventory.yml'
   workflow_dispatch:
 permissions:
@@ -19,6 +17,14 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - name: Test Orbis linking transactions with address and undefined-behavior sanitizers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/orbis-fixtures
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer \
+            MaxPS4-iOS/Native/OrbisLinkerBridge.cpp MaxPS4-iOS/Tests/OrbisLinkerTest.cpp -o "$RUNNER_TEMP/orbis-test"
+          "$RUNNER_TEMP/orbis-test" build/orbis-fixtures | tee orbis-linux-tests.txt
       - name: Test synthetic PKGs with address and undefined-behavior sanitizers
         shell: bash
         run: |
@@ -27,16 +33,45 @@ jobs:
             MaxPS4-iOS/Native/PS4PKGBridge.cpp MaxPS4-iOS/Tests/PS4PKGInventoryTest.cpp \
             -o "$RUNNER_TEMP/pkg-test"
           "$RUNNER_TEMP/pkg-test" | tee pkg-tests.txt
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer \
+            MaxPS4-iOS/Native/PS4PKGBridge.cpp MaxPS4-iOS/Tests/PS4PKGMetadataTest.cpp \
+            -o "$RUNNER_TEMP/pkg-metadata-test"
+          "$RUNNER_TEMP/pkg-metadata-test" build/pkg-fixtures | tee pkg-metadata-tests.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: PKG-sanitizer-report
-          path: pkg-tests.txt
+          path: |
+            pkg*-tests.txt
+            orbis-linux-tests.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-synthetic-PKG-fixtures
+          path: build/pkg-fixtures/*.pkg
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MaxPS4-synthetic-Orbis-fixtures
+          path: build/orbis-fixtures/*
+          if-no-files-found: error
   swift-ios:
     runs-on: macos-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - name: Test Orbis linker on macOS with sanitizers and real Swift C ABI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/orbis-fixtures
+          xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer \
+            MaxPS4-iOS/Native/OrbisLinkerBridge.cpp MaxPS4-iOS/Tests/OrbisLinkerTest.cpp -o "$RUNNER_TEMP/orbis-test"
+          "$RUNNER_TEMP/orbis-test" build/orbis-fixtures | tee orbis-macos-tests.txt
+          xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -c MaxPS4-iOS/Native/OrbisLinkerBridge.cpp -o "$RUNNER_TEMP/orbis-bridge.o"
+          swiftc -parse-as-library -import-objc-header MaxPS4-iOS/Native/OrbisLinkerBridge.h \
+            MaxPS4-iOS/Tests/OrbisLinkerBridgeTest.swift "$RUNNER_TEMP/orbis-bridge.o" -lc++ -o "$RUNNER_TEMP/orbis-swift-test"
+          "$RUNNER_TEMP/orbis-swift-test" build/orbis-fixtures | tee orbis-swift-tests.txt
       - name: Test native parser and actual Swift report bridge
         shell: bash
         run: |
@@ -44,6 +79,9 @@ jobs:
           xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
             MaxPS4-iOS/Native/PS4PKGBridge.cpp MaxPS4-iOS/Tests/PS4PKGInventoryTest.cpp -o "$RUNNER_TEMP/pkg-test"
           "$RUNNER_TEMP/pkg-test" | tee pkg-native-macos.txt
+          xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            MaxPS4-iOS/Native/PS4PKGBridge.cpp MaxPS4-iOS/Tests/PS4PKGMetadataTest.cpp -o "$RUNNER_TEMP/pkg-metadata-test"
+          "$RUNNER_TEMP/pkg-metadata-test" | tee pkg-metadata-macos.txt
           xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
             -c MaxPS4-iOS/Native/PS4PKGBridge.cpp -o "$RUNNER_TEMP/pkg-bridge.o"
           swiftc -parse-as-library -import-objc-header MaxPS4-iOS/Native/PS4PKGBridge.h \
@@ -57,6 +95,12 @@ jobs:
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
             -target arm64-apple-ios18.0 -isysroot "$SDK" \
+            -c MaxPS4-iOS/Native/OrbisLinkerBridge.cpp -o "$RUNNER_TEMP/orbis-ios.o"
+          xcrun lipo -archs "$RUNNER_TEMP/orbis-ios.o" | grep -w arm64
+          xcrun swiftc -parse-as-library -typecheck -target arm64-apple-ios18.0 -sdk "$SDK" \
+            -import-objc-header MaxPS4-iOS/Native/OrbisLinkerBridge.h MaxPS4-iOS/Tests/OrbisLinkerBridgeTest.swift
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" \
             -c MaxPS4-iOS/Native/PS4PKGBridge.cpp -o "$RUNNER_TEMP/pkg-ios.o"
           xcrun swiftc -typecheck -target arm64-apple-ios18.0 -sdk "$SDK" \
             -import-objc-header MaxPS4-iOS/Native/PS4PKGBridge.h \
@@ -65,4 +109,6 @@ jobs:
         if: always()
         with:
           name: PKG-Swift-macOS-report
-          path: pkg-*-macos.txt
+          path: |
+            pkg-*-macos.txt
+            orbis-*-tests.txt

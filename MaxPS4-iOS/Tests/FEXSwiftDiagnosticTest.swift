@@ -4,6 +4,25 @@ import Darwin
 @main
 struct FEXSwiftDiagnosticTest {
     static func main() {
+        for _ in 0..<3 {
+            let linked = MaxPS4FEXDiagnostic.testPS4Libkernel()
+            precondition(linked.contains("Chargement ELF : réussi (0)"))
+            precondition(linked.contains("NID recherché : aI+OeCz8xrQ") && linked.contains("Fonction résolue : scePthreadSelf"))
+            precondition(linked.contains("FEXCore JIT ARM64 natif (2)"))
+            precondition(linked.contains("Résultat appel libkernel [0x10108] : 1 (attendu 1)"))
+            precondition(linked.contains("Retour au code invité : confirmé"))
+            precondition(linked.contains("Valeur finale en mémoire invitée [0x10100] : 2 (attendu 2)"))
+            precondition(linked.contains("Segments invités après retrait : 0") && linked.contains("Validation globale : réussie"))
+            precondition(linked.contains("hôte macOS — aucune preuve iPhone"))
+            print(linked)
+        }
+        if CommandLine.arguments.count > 1 {
+            let demo = URL(fileURLWithPath: CommandLine.arguments[1])
+            let linked = MaxPS4FEXDiagnostic.executeTestELF(url: demo)
+            precondition(linked.contains("Exécution FEX ARM64 : réussie"))
+            precondition(linked.contains("RAX : 2") && linked.contains("appels libkernel : 1"))
+            print("PASS Swift imported Orbis ELF -> native linker -> real FEX/libkernel -> RAX 2")
+        }
         for iteration in 0..<8 {
             let report = autoreleasepool { MaxPS4FEXDiagnostic.run() }
             precondition(report.succeeded && report.result == 42)
@@ -11,6 +30,8 @@ struct FEXSwiftDiagnosticTest {
             precondition(report.details.contains("GenuineIntel"))
             precondition(report.details.contains("Debugger détecté"))
             precondition(report.details.contains("Point d’entrée ELF64 invité : 0x1000"))
+            precondition(report.details.contains("RIP final et instructions terminées FEX : non exposés"))
+            precondition(!report.details.contains("RIP invité après repli : 0x0"))
             print("PASS Swift opaque-C FEX diagnostic iteration=\(iteration) result=42 backend=\(report.backend)")
         }
         do {

@@ -7,7 +7,38 @@ extern "C" {
 #endif
 // Opaque engine: no FEX C++ types cross the native/Swift boundary.
 typedef struct maxps4_fex_engine maxps4_fex_engine;
-enum { MAXPS4_CPU_RESTRICTED_INTERPRETER = 1, MAXPS4_CPU_FEX_ARM64_JIT = 2 };
+// Self-contained synthetic Orbis test, using the existing loader/linker/FEX
+// runtime. Status -ECANCELED means an operation was not attempted. Values are
+// valid only when their operation succeeded; no interpreter fallback occurs.
+typedef struct maxps4_ps4_elf_test_report {
+    int32_t open_status, load_status, link_status, initialize_status;
+    int32_t execute_status, read_status, verification_status;
+    uint32_t backend, segments, imports, resolved_service, calls, resumed;
+    uint32_t jit_regions_before, jit_regions_after, guest_segments_after;
+    uint64_t entry, kernel_return, final_memory, rax;
+    char error[256];
+} maxps4_ps4_elf_test_report;
+// Returns 0 only for verified FEX execution (backend 2 native, 3 simulator).
+// Owns and closes its engine on every path. Call from the app's CPU queue.
+int32_t maxps4_fex_test_ps4_libkernel(maxps4_ps4_elf_test_report *report);
+// PS4 System V entry registers, not native ARM64 registers or host pointers.
+typedef struct maxps4_ps4_kernel_call {
+    uint64_t rdi, rsi, rdx, rcx, r8, r9, rsp;
+} maxps4_ps4_kernel_call;
+// Resolve a decoded sceKernel/scePthread import to an opaque service ID.
+// Returns 0 for unknown symbols/versions. Does not apply ELF/PRX relocations.
+uint32_t maxps4_ps4_resolve_libkernel(const char *symbol, const char *library,
+    const char *module, uint32_t version);
+// Mount configuration is host-side. Return 0 or signed Orbis kernel error.
+// Must mount AFTER staging; each staging attempt resets all system services.
+int64_t maxps4_fex_engine_mount_app0(maxps4_fex_engine *engine, const char *directory);
+// Explicit service dispatch, serialized against staging and engine accesses.
+// Returns a guest ABI result, including signed Orbis errors. Default bootstrap
+// guest thread identity is 1. No guest CPU import trampoline is installed.
+int64_t maxps4_fex_engine_call_libkernel(maxps4_fex_engine *engine, uint32_t service,
+    const maxps4_ps4_kernel_call *call, uint64_t guest_thread);
+enum { MAXPS4_CPU_RESTRICTED_INTERPRETER = 1, MAXPS4_CPU_FEX_ARM64_JIT = 2,
+       MAXPS4_CPU_FEX_ARM64_SIMULATOR = 3 };
 enum { MAXPS4_FEX_CONTEXT_CREATED = 1, MAXPS4_FEX_DISPATCHER_INITIALIZED = 2 };
 // Creates the real executable dispatcher; does not execute guest code.
 // iOS requires successful authorized debugger-region preparation first.
@@ -58,10 +89,50 @@ enum { MAXPS4_PS4_LINKER_REQUIRED = 1, MAXPS4_PS4_TLS_REQUIRED = 2,
 // On failure output fields are zero and any previous staging is discarded.
 int32_t maxps4_fex_engine_stage_ps4(maxps4_fex_engine *engine, const uint8_t *file,
     size_t length, uint64_t *entry, uint32_t *segments, uint32_t *blockers);
-// Exact read from a staged readable segment; no host pointers cross the ABI.
+// Real FEX execution of the already staged image, limited to the same finite
+// instruction whitelist as run_elf. RIP-relative stores reach staged RW/non-X
+// data in place. Requires initialized FEX; no fallback, linker or TLS support.
+// Uses rebased CPU addresses internally, NOT a general PS4 virtual address
+// translator. The CPU_ADDRESS_SPACE_REQUIRED blocker remains set. Returns the
+// logical entry; on any failure outputs are zero. Stage/execute are serialized.
+int32_t maxps4_fex_engine_run_staged_ps4(maxps4_fex_engine *engine,
+    uint32_t budget, uint64_t *result, uint32_t *backend, uint64_t *entry);
+// Link and admit a bounded Orbis ELF with standard dynamic tables, one
+// libkernel dependency and imported GOT calls. No fallback, SCE tables, TLS,
+// general PRX graph or arbitrary guest memory instructions. Clears old staging
+// and services on each attempt. CPU_ADDRESS_SPACE_REQUIRED remains set.
+int32_t maxps4_fex_engine_link_ps4(maxps4_fex_engine *engine, const uint8_t *file,
+    size_t length, uint32_t budget, uint64_t *entry, uint32_t *imports);
+// Execute that linked program through real FEX. The syscall trampoline captures
+// SysV arguments, dispatches existing libkernel, updates RAX and resumes CPU.
+// Only the program admitted at link time can execute; no interpreter fallback.
+int32_t maxps4_fex_engine_run_linked_ps4(maxps4_fex_engine *engine,
+    uint64_t *result, uint32_t *backend, uint64_t *entry, uint32_t *calls);
+// Exact read from staged or anonymous readable memory; no host pointers cross the ABI.
 // Failure leaves caller bytes untouched. Serialized against stage/close.
 int32_t maxps4_fex_engine_read_ps4(maxps4_fex_engine *engine, uint64_t address,
     uint8_t *output, size_t length);
+// Fetch instructions only from staged readable AND executable guest memory.
+// Invalid ranges leave output unchanged. No host pointers cross the C ABI.
+int32_t maxps4_fex_engine_fetch_ps4(maxps4_fex_engine *engine, uint64_t address,
+    uint8_t *output, size_t length);
+// Exact write to staged or anonymous writable, non-executable guest memory.
+// No host pointers cross the ABI. Rejected accesses leave guest bytes intact.
+// Serialized against stage/close; does not dispatch CPU or initialize JIT.
+int32_t maxps4_fex_engine_write_ps4(maxps4_fex_engine *engine, uint64_t address,
+    const uint8_t *input, size_t length);
+// Query whether a staged PS4 guest range is readable (4), writable (2)
+// or executable (1). Requires nonzero valid permission bits and a nonempty
+// fully mapped range. Writes 0 or 1 to permitted, never a host pointer.
+// Does not dispatch guest instructions.
+int32_t maxps4_fex_engine_query_ps4(maxps4_fex_engine *engine, uint64_t address,
+    size_t length, uint32_t permissions, uint32_t *permitted);
+// Query the maximum contiguous bytes at a staged guest address, capped by
+// limit (1 MiB). Never exposes a host pointer or crosses a segment boundary.
+// On invalid arguments, available is zero; an unmapped address returns zero
+// with success. Serialized against staging and close.
+int32_t maxps4_fex_engine_contiguous_ps4(maxps4_fex_engine *engine,
+    uint64_t address, size_t limit, uint32_t permissions, size_t *available);
 // Existing bounded interpreter fallback; never describes its output as FEX JIT.
 // Caller keeps engine alive during calls and serializes close against them.
 int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine, const uint8_t *code,
@@ -70,5 +141,7 @@ int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine, const uint8_t *code,
 #ifdef __cplusplus
 }
 #endif
+
+
 
 

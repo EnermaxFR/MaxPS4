@@ -7,6 +7,9 @@ enum MaxPS4PKGInspector {
         var errorDescription: String? {
             switch self {
             case .failed(let code, let partial):
+                if code == -Int32(POSIXErrorCode.ENOSPC.rawValue) {
+                    return partial + "\nRapport tronqué : limite de stockage de 4 Mio atteinte."
+                }
                 return partial + "\nLecture du rapport PKG interrompue (code \(code))"
             }
         }
@@ -14,7 +17,8 @@ enum MaxPS4PKGInspector {
 
     static func inspect(url: URL) throws -> String {
         // At most 4096 descriptors; bounded report storage independent of PKG size.
-        var output = [CChar](repeating: 0, count: 2 * 1_048_576)
+        // Includes descriptor names and the separate executable-reference list.
+        var output = [CChar](repeating: 0, count: 4 * 1_048_576)
         let result = url.path.withCString { path in
             output.withUnsafeMutableBufferPointer { buffer in
                 maxps4_pkg_inventory_report(path, buffer.baseAddress, buffer.count)

@@ -22,6 +22,9 @@ public:
     // instruction admission or execution. Guest addresses remain logical;
     // absolute addressing requires an address-space backend before execution.
     int stage_ps4(const uint8_t* file, size_t length);
+    // Admission for the bounded rebased FEX path only. Does not remove the
+    // general PS4 address-space blocker or authorize arbitrary instructions.
+    int admit_staged_cpu(uint32_t budget) const;
     uint32_t ps4_blockers() const { return blockers; }
     struct Execution { uint64_t rax = 0, rip = 0; uint32_t instructions = 0; };
     // Executes only loader-admitted instructions, with logical guest RIP and
@@ -37,6 +40,7 @@ public:
     const uint8_t* entry_pointer() const { return translate(guest_entry, 1, 5); }
     const std::vector<Segment>& segments() const { return regions; }
 private:
+    friend class PS4DynamicLinker;
     int map_segments(std::vector<Segment> parsed, const std::vector<const uint8_t*>& sources,
                      uint64_t entry);
     uint32_t blockers = 0;
@@ -52,5 +56,6 @@ private:
 // No branches, stack operations, arbitrary memory accesses or syscalls.
 int validate_guest_program(const uint8_t* bytes, size_t length, uint32_t budget);
 }
+
 
 

@@ -19,7 +19,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
             "\(elfControlFlowPassed ? "✓" : "✗") ELF → mémoire → CPU prototype : \(elfControlFlowPassed ? "exécution synthétique validée" : "non validé")",
             "◌ Chargeur SELF/ELF PS4 : prototype d’analyse, pas de chargement exécutable complet",
             "◌ Mémoire invitée PS4 : mappage natif disponible par diagnostic de fichier ; dispatch CPU bloqué",
-            "✗ Appels système et bibliothèques PS4 : non implémentés",
+            "◌ Services libkernel disponibles ; démo ELF dynamique bornée à vérifier sur cet appareil",
             "✗ GPU / rendu PS4 : non connecté",
             "Lancement d’un jeu PS4 : indisponible",
             "Le succès du JIT ne valide pas un jeu PS4."
@@ -89,6 +89,33 @@ struct MaxPS4FEXDiagnostic: Sendable {
             let opened = maxps4_fex_engine_open(&engine)
             guard opened == 0, let engine else { return "Ouverture FEXCore refusée : \(opened)" }
             defer { maxps4_fex_engine_close(engine) }
+            // Orbis demonstration path has its own strict linker and real FEX
+            // trampoline. It never falls through to the static interpreter.
+            if file.count >= 18, file[7] == 9, file[17] == 0xfe {
+                var entry: UInt64 = 0; var imports: UInt32 = 0
+                let linked = file.withUnsafeBytes { bytes in
+                    maxps4_fex_engine_link_ps4(engine, bytes.bindMemory(to: UInt8.self).baseAddress,
+                        bytes.count, 65536, &entry, &imports)
+                }
+                guard linked == 0 else {
+                    return "Démo PS4 : liaison refusée (\(linked)). Format dynamique, imports ou instructions hors du périmètre pris en charge."
+                }
+                let initialized = maxps4_fex_engine_initialize(engine)
+                guard initialized == 0 else {
+                    return "Démo PS4 liée (\(imports) imports) ; exécution FEX indisponible sur cet appareil (\(initialized))."
+                }
+                var value: UInt64 = 0; var backend: UInt32 = 0; var calls: UInt32 = 0
+                let executed = maxps4_fex_engine_run_linked_ps4(engine, &value, &backend, &entry, &calls)
+                let nativeFEX = executed == 0 && backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT)
+                return [
+                    "Démo PS4 : " + url.lastPathComponent,
+                    "Exécution FEX ARM64 : " + (nativeFEX ? "réussie" : "non validée (\(executed))"),
+                    "Imports résolus : \(imports) ; appels libkernel : \(calls)",
+                    "RAX : \(value) ; entrée : 0x" + String(entry, radix: 16),
+                    "La démo scePthreadSelf attend RAX = 2 après reprise de son exécution.",
+                    "TLS, dépendances PRX complètes et lancement de jeu : indisponibles."
+                ].joined(separator: "\n")
+            }
             let jit = maxps4_fex_engine_initialize(engine)
             var value: UInt64 = 0; var entry: UInt64 = 0; var rip: UInt64 = 0
             var backend: UInt32 = 0; var count: UInt32 = 0
@@ -117,6 +144,68 @@ struct MaxPS4FEXDiagnostic: Sendable {
         } catch { return "Exécution ELF impossible : \(error.localizedDescription)" }
 #else
         return "Moteur FEXCore natif absent de cette compilation"
+#endif
+    }
+
+    /// Built-in ELF bytes are shared with the native linked-execution tests.
+    /// This path never invokes the restricted interpreter.
+    static func testPS4Libkernel() -> String {
+#if MAXPS4_FEX_APP
+        var report = maxps4_ps4_elf_test_report()
+        let status = maxps4_fex_test_ps4_libkernel(&report)
+        let error = withUnsafeBytes(of: report.error) {
+            String(decoding: $0.prefix(while: { $0 != 0 }), as: UTF8.self)
+        }
+        let backend: String
+        switch report.backend {
+        case UInt32(MAXPS4_CPU_FEX_ARM64_JIT): backend = "FEXCore JIT ARM64 natif (2)"
+        case UInt32(MAXPS4_CPU_FEX_ARM64_SIMULATOR): backend = "FEXCore ARM64 simulé par VIXL (3)"
+        default: backend = "Aucun — exécution non validée"
+        }
+#if targetEnvironment(simulator)
+        let environment = "simulateur iOS — aucune preuve iPhone"
+#elseif os(iOS)
+        let environment = "appareil iOS physique"
+#else
+        let environment = "hôte macOS — aucune preuve iPhone"
+#endif
+        func step(_ value: Int32) -> String {
+            value == -ECANCELED ? "non tenté" : value == 0 ? "réussi (0)" : "échoué (\(value))"
+        }
+        let observed = report.read_status == 0
+        let revision = Bundle.main.object(forInfoDictionaryKey: "MaxPS4SourceRevision") as? String ?? "non renseignée"
+        return [
+            "Test ELF PS4 / libkernel synthétique v1",
+            "Date UTC : " + ISO8601DateFormatter().string(from: Date()),
+            "Révision source : " + revision,
+            "Environnement : " + environment + " ; " + ProcessInfo.processInfo.operatingSystemVersionString,
+            "Ouverture FEX : " + step(report.open_status),
+            "Chargement ELF : " + step(report.load_status) + " ; segments PT_LOAD : \(report.segments)",
+            "Point d’entrée invité : " + (report.load_status == 0 ? "0x" + String(report.entry, radix: 16) : "indisponible"),
+            "NID recherché : aI+OeCz8xrQ (libkernel, version 1)",
+            "Fonction résolue : " + (report.resolved_service != 0 ? "scePthreadSelf (service \(report.resolved_service))" : "aucune"),
+            "Liaison NID / relocation JUMP_SLOT : " + step(report.link_status) + " ; imports : \(report.imports)",
+            "Initialisation JIT : " + step(report.initialize_status),
+            "Fournisseur RX/RW : état \(maxps4_jit_state()), erreur \(maxps4_jit_error())",
+            "Préparation JIT : étape \(maxps4_jit_failure_stage()), code Mach \(maxps4_jit_failure_mach()), région \(maxps4_jit_failure_region())",
+            "Backend d’exécution réel : " + backend,
+            "Exécution : " + step(report.execute_status) + " ; appels libkernel observés : \(report.calls)",
+            "Lecture mémoire invitée : " + step(report.read_status),
+            "Résultat appel libkernel [0x10108] : " + (observed ? String(report.kernel_return) + " (attendu 1)" : "indisponible"),
+            "Retour au code invité : " + (report.resumed == 1 ? "confirmé par CALL/RET → store du retour → ADD → store final → HLT" : "non confirmé"),
+            "Valeur finale en mémoire invitée [0x10100] : " + (observed ? String(report.final_memory) + " (attendu 2)" : "indisponible"),
+            "RAX final : " + (report.execute_status == 0 ? String(report.rax) : "indisponible"),
+            "Vérification : " + step(report.verification_status),
+            "Erreurs précises : " + (error.isEmpty ? "aucune" : error),
+            "Segments invités après retrait : \(report.guest_segments_after)",
+            "Régions RX/RW utilisées après nettoyage : \(report.jit_regions_after) (avant : \(report.jit_regions_before))",
+            "Validation globale : " + (status == 0 ? "réussie" : "échouée (\(status))"),
+            "RIP final et instructions terminées FEX : non exposés par cette API.",
+            "Les régions StikDebug préparées restent réservées jusqu’à leur libération explicite.",
+            "Démo bornée avec tables DT_* standard ; adressage PS4 général, tables SCE, PRX et TLS restent indisponibles."
+        ].joined(separator: "\n")
+#else
+        return "Test ELF PS4 / libkernel : moteur FEXCore natif absent de cette compilation"
 #endif
     }
 
@@ -170,6 +259,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
         var elfEntry: UInt64 = 0
         var guestRIP: UInt64 = 0
         var instructions: UInt32 = 0
+        var fallbackAttempted = false
         var status: Int32
         if initialized == 0 {
             let file = MaxPS4SyntheticELFFEXBridge.syntheticELF()
@@ -180,6 +270,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
             status = jitStatus
         } else { status = initialized }
         if status != 0 {
+            fallbackAttempted = true
             // Preserve the actual JIT error separately from the interpreter result.
             let file = MaxPS4SyntheticELFFEXBridge.syntheticELF()
             status = file.withUnsafeBytes {
@@ -212,7 +303,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
         Confirmation StikDebug : \(mailboxDescription) (code \(mailboxDiagnostic))
         Exécution FEX JIT : statut \(jitStatus) (0 requis pour un succès JIT)
         Point d’entrée ELF64 invité : 0x\(String(elfEntry, radix: 16))
-        RIP invité après repli : 0x\(String(guestRIP, radix: 16)), instructions terminées : \(instructions)
+        \(selected == UInt32(MAXPS4_CPU_RESTRICTED_INTERPRETER) ? "RIP invité après repli : 0x" + String(guestRIP, radix: 16) + ", instructions terminées : \(instructions)" : fallbackAttempted ? "Repli interpréteur : échec avant mesure. RIP et compteur indisponibles." : "Repli interpréteur : non utilisé. RIP final et instructions terminées FEX : non exposés par cette API.")
         Fournisseur RX/RW : état \(maxps4_jit_state()), erreur \(maxps4_jit_error())
         Échec JIT précis : \(failureName) (étape \(failureStage))
         Code Mach : \(maxps4_jit_failure_mach()), région : \(maxps4_jit_failure_region())

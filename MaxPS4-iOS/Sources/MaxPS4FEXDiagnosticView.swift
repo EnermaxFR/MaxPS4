@@ -8,6 +8,9 @@ struct MaxPS4FEXDiagnosticView: View {
     @State private var activationMessage: String?
     @State private var importingELF = false
     @State private var importedReport: String?
+    @State private var ps4LibkernelReport: String?
+    @State private var analyzingOrbis = false
+    @State private var orbisReport: String?
 
     var body: some View {
         NavigationStack {
@@ -48,7 +51,36 @@ struct MaxPS4FEXDiagnosticView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(running)
-                    Button("Exécuter un ELF de test…") { importingELF = true }
+                    Button("Tester ELF PS4 / libkernel") {
+                        running = true
+                        Task {
+                            ps4LibkernelReport = await withCheckedContinuation { continuation in
+                                MaxPS4FEXMetalExecution.queue.async {
+                                    continuation.resume(returning: MaxPS4FEXDiagnostic.testPS4Libkernel())
+                                }
+                            }
+                            running = false
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(running)
+                    .accessibilityIdentifier("maxps4-ps4-libkernel-test")
+                    if let ps4LibkernelReport {
+                        Text(ps4LibkernelReport).font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                        ShareLink(item: ps4LibkernelReport) { Label("Partager le rapport ELF PS4", systemImage: "square.and.arrow.up") }
+                    }
+                    Button("Analyser un exécutable Orbis") { analyzingOrbis = true; importingELF = true }
+                        .disabled(running)
+                        .accessibilityIdentifier("maxps4-orbis-analysis")
+                    Text("Sélectionnez un ELF ou PRX non chiffré. Analyse seule, sans exécution automatique.")
+                        .font(.footnote)
+                    if let orbisReport {
+                        Text(orbisReport).font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                        ShareLink(item: orbisReport) { Label("Partager l’analyse Orbis", systemImage: "square.and.arrow.up") }
+                    }
+                    Button("Exécuter un ELF de test ou une démo PS4…") { analyzingOrbis = false; importingELF = true }
                         .disabled(running)
                     if let importedReport {
                         Text(importedReport).font(.system(.body, design: .monospaced))
@@ -79,6 +111,7 @@ struct MaxPS4FEXDiagnosticView: View {
             .fileImporter(isPresented: $importingELF, allowedContentTypes: [.data]) { selection in
                 switch selection {
                 case .success(let url):
+                    let analysisOnly = analyzingOrbis
                     let scoped = url.startAccessingSecurityScopedResource()
                     running = true
                     Task {
@@ -86,13 +119,20 @@ struct MaxPS4FEXDiagnosticView: View {
                             if scoped { url.stopAccessingSecurityScopedResource() }
                             running = false
                         }
-                        importedReport = await withCheckedContinuation { continuation in
+                        let result: String = await withCheckedContinuation { continuation in
                             MaxPS4FEXMetalExecution.queue.async {
-                                continuation.resume(returning: MaxPS4FEXDiagnostic.executeTestELF(url: url))
+                                if analysisOnly {
+                                    continuation.resume(returning: MaxPS4OrbisAnalyzer.inspect(url: url))
+                                } else {
+                                    continuation.resume(returning: MaxPS4FEXDiagnostic.executeTestELF(url: url))
+                                }
                             }
                         }
+                        if analysisOnly { orbisReport = result } else { importedReport = result }
                     }
-                case .failure(let error): importedReport = error.localizedDescription
+                case .failure(let error):
+                    if analyzingOrbis { orbisReport = error.localizedDescription }
+                    else { importedReport = error.localizedDescription }
                 }
             }
             .navigationTitle("Diagnostic FEXCore")
