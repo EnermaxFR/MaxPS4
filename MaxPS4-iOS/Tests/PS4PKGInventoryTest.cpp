@@ -166,6 +166,14 @@ int main() {
     assert(text.find("Blocage 2/3 : aucun binaire Orbis ELF autonome validé") != std::string::npos);
     assert(text.find("Blocage 3/3 : imports NID") != std::string::npos);
     assert(text.find("aucun contournement DRM/PFS") != std::string::npos);
+    // iPhone regression: readiness diagnostics must use real line breaks, not literal backslash-n.
+    assert(text.find("Diagnostic démarrage : NON PRÊT (inventaire PKG uniquement).\\nBlocage 1/3") != std::string::npos);
+    assert(text.find("eboot.bin accessible par ce lecteur.\\nBlocage 2/3") != std::string::npos);
+    assert(text.find("exécutables.\\nBlocage 3/3") != std::string::npos);
+    assert(text.find("exécution non autorisée.\\nÉtape sûre") != std::string::npos);
+    assert(text.find("aucun contournement DRM/PFS.\\nObstacles") != std::string::npos);
+    assert(text.find("uniquement).\\\\nBlocage") == std::string::npos);
+
 
     // Reproduce the two descriptor classes observed in the real Kero Blaster
     // report, without including or reading any proprietary game payload.
@@ -299,6 +307,15 @@ int main() {
            *Plan::translateModule(staged, "lib/b.prx", 0x1001, 1, 1) == 0);
     assert(!Plan::translateModule(staged, "lib/b.prx", 0x1000, 4097, 1));
     assert(!Plan::translateModule(staged, "lib/b.prx", 0x1000, 0, 1));
+    // Synthetic segment boundaries and BSS must be enforced independently for each module.
+    assert(Plan::translateModule(staged, "lib/b.prx", 0x1fff, 1, 1) &&
+           *Plan::translateModule(staged, "lib/b.prx", 0x1fff, 1, 1) == 0);
+    assert(!Plan::translateModule(staged, "lib/b.prx", 0x2000, 1, 1));
+    assert(!Plan::translateModule(staged, "lib/b.prx", 0x1fff, 2, 1));
+    assert(!Plan::translateModule(staged, "lib/b.prx", UINT64_MAX, 2, 1));
+    assert(Plan::translateModule(staged, "eboot.bin", 0x2fff, 1, 1));
+    assert(!Plan::translateModule(staged, "eboot.bin", 0x3000, 1, 1));
+
     // A 32 MiB image is individually allowed, but three exceed the batch cap.
     auto largeElf = syntheticElf(0xfe18, 0x3000, 32 * 1024 * 1024);
     batch = {
