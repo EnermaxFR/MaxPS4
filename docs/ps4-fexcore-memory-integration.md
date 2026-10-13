@@ -1,5 +1,9 @@
 # PS4 guest-memory to FEXCore integration contract
 
+For the subsequent bounded dynamic-import execution path and its measured
+FEX/VIXL results, see [PS4 libkernel execution](ps4-libkernel-fex-execution.md).
+The general address-space, SCE/PRX and TLS limitations below still apply.
+
 This branch starts from b49f0c7 and is intentionally separate from PR #166.
 
 ## Current verified interface
