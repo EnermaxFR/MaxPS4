@@ -27,8 +27,8 @@ inline std::vector<uint8_t> app() {
     move(x,1,2,0,15); move(y,4,8,2,7);
     // EDX becomes y*16+x. The sprite covers one 2x2 cell.
     emit({0xc1,0xe2,4}); rip(0x8b,0x05,x); emit({0x01,0xc2});
-    // Action selects a different color in guest code.
-    rip(0x8b,0x05,input); immediate(0x25,16); emit({0xc1,0xe0,16});
+    // Action selects a visibly different blue channel (+128) in guest code.
+    rip(0x8b,0x05,input); immediate(0x25,16); emit({0xc1,0xe0,19});
     immediate(0x0d,0xff2080e0); emit({0x89,0xc3});
     for (uint32_t py=0;py<height;++py) for (uint32_t px=0;px<width;++px) {
         immediate(0xb8,0xff302018); // RGBA little endian: dark background.
