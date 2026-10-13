@@ -48,19 +48,32 @@ jobs:
           brew install ninja xcodegen
       - name: Test fixed Stik script and real Mach memory ownership
         shell: bash
+        timeout-minutes: 8
         run: |
           set -euo pipefail
           mkdir -p build/diagnostics
+          echo "::group::Compile guest ELF memory test"
           xcrun clang++ -std=c++23 -Wall -Wextra -Werror -I MaxPS4-iOS/Native \
             MaxPS4-iOS/Native/maxps4_guest_elf.cpp \
             MaxPS4-iOS/Tests/GuestELFMemoryTest.cpp -o build/guest-elf-memory-test
+          echo "::endgroup::"
+          echo "::group::Run guest ELF memory test"
           build/guest-elf-memory-test | tee build/diagnostics/guest-elf-memory-tests.txt
+          echo "::endgroup::"
+          echo "::group::Run Stik script test"
           node MaxPS4-iOS/Tests/StikScriptTest.js | tee build/diagnostics/stik-script-tests.txt
+          echo "::endgroup::"
+          echo "::group::Compile JIT memory test"
           xcrun clang++ -std=c++23 -DMAXPS4_TEST_DARWIN_JIT_POOL=1 \
             -I MaxPS4-iOS/Native MaxPS4-iOS/Native/maxps4_jit_memory.cpp \
             MaxPS4-iOS/Tests/FEXJITMemoryTest.cpp -o build/jit-memory-test
+          echo "::endgroup::"
+          echo "::group::Run JIT memory test"
           build/jit-memory-test | tee build/diagnostics/jit-memory-tests.txt
+          echo "::endgroup::"
+          echo "::group::Inspect JIT memory leaks"
           leaks --atExit -- build/jit-memory-test 2>&1 | tee build/diagnostics/jit-memory-leaks.txt
+          echo "::endgroup::"
       - name: Preserve native runtime tests and test the real Swift C bridge on macOS
         shell: bash
         run: |
