@@ -192,6 +192,18 @@ int main() {
     assert(fclose(file) == 0);
     assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
     assert(std::string(report.data()).find("ELF incompatible : machine x86-64") != std::string::npos);
+    // Protected entries must never be inspected as ELF, even if their bytes
+    // happen to start with the ELF magic.
+    wrongElf[0x712] = 0x3e;
+    put(wrongElf, 0x5c8, 0x80000000U, 4);
+    file = std::fopen(path, "wb"); assert(file);
+    assert(fwrite(wrongElf.data(), 1, wrongElf.size(), file) == wrongElf.size());
+    assert(fclose(file) == 0);
+    assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
+    const std::string protectedReport(report.data());
+    assert(protectedReport.find("chiffrés déclarés=1") != std::string::npos);
+    assert(protectedReport.find("en-tête ELF64 x86-64 reconnu") == std::string::npos);
+    assert(protectedReport.find("signature ELF candidate") == std::string::npos);
     // Malformed names cannot consume 1 MiB then restart the payload budget.
     auto large = original;
     large.resize(0x600 + PKG::extractionBudget + 16, 'x');
