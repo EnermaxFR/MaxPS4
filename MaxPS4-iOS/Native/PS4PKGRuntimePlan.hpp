@@ -151,6 +151,18 @@ public:
         diagnostic = "Modules ELF/PRX préparés en ordre de dépendance ; imports non résolus, aucune exécution";
         return true;
     }
+    // Lookup only within an already validated, staged batch. The address is
+    // module-local: no cross-module address-space mapping or NID resolution.
+    static const uint8_t* translateModule(const std::vector<PreparedModule>& modules,
+                                          const std::string& logicalPath,
+                                          uint64_t address, size_t count,
+                                          uint32_t permissions) {
+        if (!safePath(logicalPath)) return nullptr;
+        for (const auto& module : modules)
+            if (module.logicalPath == logicalPath)
+                return module.image.translate(address, count, permissions);
+        return nullptr;
+    }
     static bool prepareStandalone(const std::string& logicalPath, const uint8_t* bytes, size_t size,
                                   const std::vector<std::string>& dependencies, PreparedModule& output,
                                   std::string& diagnostic) {
