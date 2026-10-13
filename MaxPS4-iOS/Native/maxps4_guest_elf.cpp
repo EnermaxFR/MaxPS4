@@ -213,7 +213,7 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
         std::set<uint64_t> active;
         std::map<uint64_t,size_t> instruction_ranges;
         bool initialized = false;
-        bool edx_initialized = false, ebx_initialized = false, compared = false;
+        bool edx_initialized = false, ebx_initialized = false, esi_initialized = false, ecx_initialized = false, compared = false;
         uint32_t remaining = budget;
         uint64_t refusal_pc = entry;
         uint8_t refusal_opcode = 0;
@@ -228,12 +228,12 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                 if (!code) return -EFAULT;
                 const uint8_t op = code[0];
                 refusal_opcode = op;
-                size_t width = op == 0xb8 || op == 0xba || op == 0xbb || op == 0x05 || op == 0x25 || op == 0x0d ? 5 :
+                size_t width = op == 0xb8 || op == 0xb9 || op == 0xba || op == 0xbb || op == 0x05 || op == 0x25 || op == 0x0d ? 5 :
                     op == 0xff || op == 0x8b || op == 0x81 ? 6 :
                     op == 0xc7 ? 10 : op == 0xc1 || op == 0x0f ? 3 :
-                    op == 0x01 || op == 0x29 || op == 0x89 ? 2 : 1;
+                    op == 0x01 || op == 0x29 || op == 0x39 || op == 0x89 ? 2 : 1;
                 if (!fetch(pc,width)) return -EFAULT;
-                if (op == 0x89 && code[1] != 0xc3) {
+                if (op == 0x89 && code[1] != 0xc3 && code[1] != 0xc6) {
                     width = 6;
                     if (!fetch(pc,width)) return -EFAULT;
                 }
@@ -256,8 +256,13 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                     if (!fetch(pc,width) || (op == 0x05 && !initialized)) return -ENOTSUP;
                     initialized = true;
                     if (op == 0x05) compared = false;
+                } else if (op == 0xb9) {
+                    ecx_initialized = true;
                 } else if (op == 0xba || op == 0xbb) {
                     if (op == 0xba) edx_initialized = true; else ebx_initialized = true;
+                } else if (op == 0x89 && code[1] == 0xc6) {
+                    if (!initialized) return -ENOTSUP;
+                    esi_initialized = true;
                 } else if (op == 0x89 && code[1] == 0xc3) {
                     if (!initialized) return -ENOTSUP;
                     ebx_initialized = true; // MOV EBX,EAX
@@ -285,11 +290,18 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                 } else if (op == 0x01 || op == 0x29) {
                     if (code[1] != 0xc2 || !initialized || !edx_initialized) return -ENOTSUP;
                     compared = false; // ADD/SUB EDX,EAX
+                } else if (op == 0x39) {
+                    if (code[1] != 0xd6 || !esi_initialized || !edx_initialized) return -ENOTSUP;
+                    compared = true;
                 } else if (op == 0x81) {
-                    if (!edx_initialized || (code[1] != 0xfa && code[1] != 0xe2)) return -ENOTSUP;
-                    compared = code[1] == 0xfa; // CMP or AND EDX,imm32
+                    if (code[1] == 0xfe) {
+                        if (!esi_initialized) return -ENOTSUP;
+                    } else if (!edx_initialized || (code[1] != 0xfa && code[1] != 0xe2)) return -ENOTSUP;
+                    compared = code[1] == 0xfa || code[1] == 0xfe; // CMP or AND EDX,imm32
                 } else if (op == 0x0f) {
-                    if (code[1] != 0x44 || code[2] != 0xc3 || !compared || !initialized || !ebx_initialized) return -ENOTSUP;
+                    if (code[1] != 0x44 || !compared || !initialized ||
+                        !((code[2] == 0xc3 && ebx_initialized) || (code[2] == 0xc1 && ecx_initialized) ||
+                          (code[2] == 0xcb && ecx_initialized && ebx_initialized))) return -ENOTSUP;
                     // CMOVE EAX,EBX; MOV does not alter the comparison flags.
                 } else if (op == 0xff) {
                     width = 6;

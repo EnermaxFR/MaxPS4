@@ -6,6 +6,7 @@ struct MaxPS4PlayableView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var session = MaxPS4PlayableSession()
     @State private var importing = false
+    @State private var animatedDemo = false
     @State private var touchVisible = true
     @State private var touch: UInt32 = 0
     @State private var selected: URL?
@@ -18,10 +19,12 @@ struct MaxPS4PlayableView: View {
                         .frame(maxHeight: 360).accessibilityLabel("Framebuffer produit par le programme invité")
                 } else { Text("Aucune image invitée").frame(height: 180) }
                 Text(session.report).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                Toggle("Scène animée (deux personnages)", isOn: $animatedDemo)
+                    .disabled(session.running || selected != nil)
                 Button(session.running ? "Arrêter" : "Lancer / relancer") {
                     touch = 0
                     if session.running { session.stop() }
-                    else if let url = selected ?? Bundle.main.url(forResource: "PlayableDemo", withExtension: nil) { session.start(url: url) }
+                    else if let url = selected ?? Bundle.main.url(forResource: animatedDemo ? "PlayableAnimatedDemo" : "PlayableDemo", withExtension: nil) { session.start(url: url) }
                     else { session.missingDemo() }
                 }.buttonStyle(.borderedProminent)
                 Button("Importer une démo Orbis…") { importing = true }.disabled(session.running)
@@ -34,7 +37,7 @@ struct MaxPS4PlayableView: View {
                         control("Bas", bit: 8)
                     }.disabled(!session.running)
                 }
-                Text("Maintenir une direction pour déplacer le carré ; Action change sa couleur. Une manette iOS connectée utilise le pavé directionnel, le stick gauche et A. Le JIT doit être activé avec StikDebug.")
+                Text("En scène animée, le second carré avance automatiquement et change de couleur lors d’une collision. Maintenir une direction pour déplacer le carré ; Action change sa couleur. Une manette iOS connectée utilise le pavé directionnel, le stick gauche et A. Le JIT doit être activé avec StikDebug.")
                     .font(.footnote)
                 ShareLink(item: session.report) { Label("Partager la preuve de l’image courante", systemImage: "square.and.arrow.up") }
             }.padding()
