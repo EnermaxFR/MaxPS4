@@ -179,6 +179,14 @@ int main() {
     assert(fclose(file) == 0);
     assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
     assert(std::string(report.data()).find("PSF valide (1 entrées) ; TITLE=Demo") != std::string::npos);
+    // A malformed key must not be displayed as trusted metadata.
+    sfo[0x724] = '/';
+    file = std::fopen(path, "wb"); assert(file);
+    assert(fwrite(sfo.data(), 1, sfo.size(), file) == sfo.size());
+    assert(fclose(file) == 0);
+    assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
+    assert(std::string(report.data()).find("PSF invalide") != std::string::npos);
+    sfo[0x724] = 'T';
     sfo[0x70c] = 0xff; // invalid data table offset
     file = std::fopen(path, "wb"); assert(file);
     assert(fwrite(sfo.data(), 1, sfo.size(), file) == sfo.size());
