@@ -157,6 +157,8 @@ int main() {
     const std::string text(report.data());
     assert(text.find("MaxPS4") != std::string::npos);
     assert(text.find("eboot.bin") != std::string::npos);
+    assert(text.find("Bilan des descripteurs : lisibles déclarés=2 ; chiffrés déclarés=0") != std::string::npos);
+    assert(text.find("inconnus=0 ; invalides=0") != std::string::npos);
     assert(text.find("Octets copiés en mémoire : 32") != std::string::npos);
     // Malformed names cannot consume 1 MiB then restart the payload budget.
     auto large = original;
