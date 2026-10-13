@@ -1,5 +1,6 @@
 #include "../Native/PS4PKGInventory.hpp"
 #include "../Native/PS4PKGBridge.h"
+#include "../Native/PS4PKGRuntimePlan.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
@@ -157,7 +158,34 @@ int main() {
     const std::string text(report.data());
     assert(text.find("MaxPS4") != std::string::npos);
     assert(text.find("eboot.bin") != std::string::npos);
+    assert(text.find("Bilan des descripteurs : lisibles déclarés=2") != std::string::npos);
+    assert(text.find("chiffrés déclarés=0") != std::string::npos);
     assert(text.find("Octets copiés en mémoire : 32") != std::string::npos);
+    // Reproduce the two descriptor classes observed in the real Kero Blaster
+    // report, without including or reading any proprietary game payload.
+    auto descriptors = original;
+    put(descriptors, 0x5a0, 0x100, 4); // metas
+    put(descriptors, 0x5b0, 0x5a0, 4); // begins inside the descriptor table
+    put(descriptors, 0x5b4, 16, 4);
+    put(descriptors, 0x5c0, 0x200, 4); // entry_names
+    put(descriptors, 0x5c8, 0x40000000U, 4);
+    put(descriptors, 0x5d0, 0x600, 4);
+    put(descriptors, 0x5d4, 16, 4);
+    f = descriptors;
+    assert(parse());
+    assert(pkg.entries[0].access == Access::invalid);
+    assert(pkg.entries[1].access == Access::unsupported);
+    reads = 0;
+    assert(!pkg.resolveNames(read, names, why) && reads == 0);
+    assert(!pkg.extract(1, read, output, why) && output.empty());
+    file = std::fopen(path, "wb"); assert(file);
+    assert(fwrite(f.data(), 1, f.size(), file) == f.size());
+    assert(fclose(file) == 0);
+    assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
+    const std::string descriptorReport(report.data());
+    assert(descriptorReport.find("Diagnostic metas : début à l'offset de la table PKG ; alias possible") != std::string::npos);
+    assert(descriptorReport.find("Diagnostic entry_names : table déclarée") != std::string::npos);
+    f = original;
     // Malformed names cannot consume 1 MiB then restart the payload budget.
     auto large = original;
     large.resize(0x600 + PKG::extractionBudget + 16, 'x');
@@ -173,10 +201,108 @@ int main() {
     assert(capped.find("Octets inspectés (budget partagé) : 1048576") != std::string::npos);
     assert(capped.find("Octets copiés en mémoire : 0") != std::string::npos);
     char tiny[8]; assert(maxps4_pkg_inventory_report(path, tiny, sizeof(tiny)) != 0 && tiny[7] == 0);
-    assert(maxps4_pkg_inventory_report(nullptr, tiny, sizeof(tiny)) != 0 && tiny[0] == 0);
+    assert(maxps4_pkg_inventory_report(nullptr, tiny, sizeof(tiny)) != 0 && tiny[0] != 0 && tiny[7] == 0);
     assert(maxps4_pkg_inventory_report(path, nullptr, 0) != 0);
     assert(unlink(path) == 0);
     assert(maxps4_pkg_inventory_report(path, tiny, sizeof(tiny)) != 0);
+    // Graph-only Orbis staging: no ELF bytes, no execution, no PFS access.
+    using Plan = maxps4::PS4PKGRuntimePlan;
+    std::vector<size_t> order;
+    std::string graphDiagnostic;
+    std::vector<Plan::ModuleRequest> modules{
+        {"eboot.bin", {"lib/a.prx"}},
+        {"lib/a.prx", {"lib/b.prx"}},
+        {"lib/b.prx", {}}
+    };
+    assert(Plan::orderModules(modules, order, graphDiagnostic));
+    assert((order == std::vector<size_t>{2, 1, 0}));
+    modules[2].dependencies = {"eboot.bin"};
+    assert(!Plan::orderModules(modules, order, graphDiagnostic) && order.empty());
+    modules[2].dependencies = {"missing.prx"};
+    assert(!Plan::orderModules(modules, order, graphDiagnostic) && order.empty());
+    modules[2].dependencies = {};
+    modules[0].dependencies = {"lib/a.prx", "lib/a.prx"};
+    assert(!Plan::orderModules(modules, order, graphDiagnostic) && order.empty());
+    modules[0].dependencies = {"lib/a.prx"};
+    modules[1].logicalPath = "../escape.prx";
+    assert(!Plan::orderModules(modules, order, graphDiagnostic) && order.empty());
+    modules[1].logicalPath = "lib/a.prx";
+    modules.push_back({"lib/a.prx", {}});
+    assert(!Plan::orderModules(modules, order, graphDiagnostic) && order.empty());
+    // Atomic staging: an invalid second module must not expose the first.
+    std::vector<Plan::ModuleBytes> batch{
+        {{"lib/b.prx", {}}, nullptr, 0},
+        {{"eboot.bin", {"lib/b.prx"}}, nullptr, 0}
+    };
+    std::vector<Plan::PreparedModule> staged;
+    staged.emplace_back();
+    assert(!Plan::prepareModules(batch, staged, graphDiagnostic));
+    assert(staged.empty());
+    assert(graphDiagnostic.find("lib/b.prx") != std::string::npos);
+    batch[1].request.dependencies = {"missing.prx"};
+    assert(!Plan::prepareModules(batch, staged, graphDiagnostic));
+    assert(staged.empty());
+    assert(graphDiagnostic.find("manquante") != std::string::npos);
+    // Two standalone synthetic Orbis ELF64 images, no proprietary payload.
+    auto syntheticElf = [](uint16_t type, uint64_t address, uint64_t memorySize) {
+        std::vector<uint8_t> elf(0x101, 0);
+        const uint8_t elfMagic[9] = {0x7f, 'E', 'L', 'F', 2, 1, 1, 9, 0};
+        std::memcpy(elf.data(), elfMagic, sizeof(elfMagic));
+        auto le = [&](size_t at, uint64_t value, size_t width) {
+            for (size_t i = 0; i < width; ++i)
+                elf.at(at + i) = static_cast<uint8_t>(value >> (i * 8));
+        };
+        le(16, type, 2); le(18, 62, 2); le(20, 1, 4);
+        le(24, address, 8); le(32, 64, 8);
+        le(52, 64, 2); le(54, 56, 2); le(56, 1, 2);
+        le(64, 1, 4); le(68, 5, 4);
+        le(72, 0x100, 8); le(80, address, 8);
+        le(96, 1, 8); le(104, memorySize, 8);
+        elf[0x100] = 0xc3;
+        return elf;
+    };
+    auto libElf = syntheticElf(0xfe18, 0x1000, 4096);
+    auto mainElf = syntheticElf(0xfe00, 0x2000, 4096);
+    batch = {
+        {{"eboot.bin", {"lib/b.prx"}}, mainElf.data(), mainElf.size()},
+        {{"lib/b.prx", {}}, libElf.data(), libElf.size()}
+    };
+    assert(Plan::prepareModules(batch, staged, graphDiagnostic));
+    assert(staged.size() == 2);
+    assert(staged[0].logicalPath == "lib/b.prx" && staged[1].logicalPath == "eboot.bin");
+    assert(staged[0].image.translate(0x1000, 1, 1) &&
+           *staged[0].image.translate(0x1000, 1, 1) == 0xc3);
+    assert(staged[1].image.translate(0x2000, 1, 1) &&
+           *staged[1].image.translate(0x2000, 1, 1) == 0xc3);
+    assert(Plan::translateModule(staged, "lib/b.prx", 0x1000, 1, 1) &&
+           *Plan::translateModule(staged, "lib/b.prx", 0x1000, 1, 1) == 0xc3);
+    assert(Plan::translateModule(staged, "eboot.bin", 0x2000, 1, 1) &&
+           *Plan::translateModule(staged, "eboot.bin", 0x2000, 1, 1) == 0xc3);
+    assert(!Plan::translateModule(staged, "eboot.bin", 0x1000, 1, 1));
+    assert(!Plan::translateModule(staged, "lib/b.prx", 0x2000, 1, 1));
+    assert(!Plan::translateModule(staged, "missing.prx", 0x1000, 1, 1));
+    assert(!Plan::translateModule(staged, "../lib/b.prx", 0x1000, 1, 1));
+    assert(!Plan::translateModule(staged, "lib/b.prx", 0x1000, 1, 2));
+    // Caller-constructed batches cannot bypass the unique-module contract.
+    auto ambiguous = staged;
+    ambiguous.push_back(staged.front());
+    assert(!Plan::translateModule(ambiguous, "lib/b.prx", 0x1000, 1, 1));
+    assert(Plan::translateModule(ambiguous, "eboot.bin", 0x2000, 1, 1));
+    // BSS bytes are zero-initialized and requests cannot cross a segment.
+    assert(Plan::translateModule(staged, "lib/b.prx", 0x1001, 1, 1) &&
+           *Plan::translateModule(staged, "lib/b.prx", 0x1001, 1, 1) == 0);
+    assert(!Plan::translateModule(staged, "lib/b.prx", 0x1000, 4097, 1));
+    assert(!Plan::translateModule(staged, "lib/b.prx", 0x1000, 0, 1));
+    // A 32 MiB image is individually allowed, but three exceed the batch cap.
+    auto largeElf = syntheticElf(0xfe18, 0x3000, 32 * 1024 * 1024);
+    batch = {
+        {{"lib/a.prx", {}}, largeElf.data(), largeElf.size()},
+        {{"lib/b.prx", {}}, largeElf.data(), largeElf.size()},
+        {{"lib/c.prx", {}}, largeElf.data(), largeElf.size()}
+    };
+    assert(!Plan::prepareModules(batch, staged, graphDiagnostic));
+    assert(staged.empty());
+    assert(graphDiagnostic.find("64 Mio") != std::string::npos);
     std::puts("PASS PKG inventory: public layout, bounds, budgets, protection flags, ambiguity, exact I/O, C/Swift report ABI");
     std::puts("Synthetic fixtures only; no DRM, PFS extraction, PS4 executable admission or iPhone execution tested");
 }
