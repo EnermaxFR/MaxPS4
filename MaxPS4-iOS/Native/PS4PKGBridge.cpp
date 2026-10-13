@@ -81,7 +81,7 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                             copied += bytes.size();
                             report << " ; copie mémoire=" << bytes.size() << " octets";
                             if (e.id == 0x1000 && bytes.size() >= 4 &&
-                                !std::memcmp(bytes.data(), "\\0PSF", 4)) {
+                                bytes[0] == 0 && bytes[1] == 'P' && bytes[2] == 'S' && bytes[3] == 'F') {
                                 // Bounded PSF metadata preview: no path use, extraction or execution.
                                 auto le16 = [&](size_t at) -> uint16_t {
                                     return uint16_t(bytes[at]) | (uint16_t(bytes[at + 1]) << 8);
