@@ -211,6 +211,7 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
         struct Patch { uint8_t* code; uint32_t displacement; };
         std::vector<Patch> patches;
         std::set<uint64_t> active;
+        std::map<uint64_t,size_t> instruction_ranges;
         bool initialized = false;
         uint32_t remaining = budget;
         uint64_t refusal_pc = entry;
@@ -226,7 +227,22 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                 if (!code) return -EFAULT;
                 const uint8_t op = code[0];
                 refusal_opcode = op;
-                size_t width = 1;
+                size_t width = op == 0xb8 || op == 0x05 ? 5 : op == 0xff ? 6 : op == 0xc7 ? 10 : 1;
+                if (!fetch(pc,width)) return -EFAULT;
+                // A CALL target may not enter another instruction's operand.
+                // Otherwise rewriting one decoded stream could invalidate a
+                // different stream that was admitted over overlapping bytes.
+                const auto next = instruction_ranges.lower_bound(pc);
+                if (next != instruction_ranges.end() && next->first == pc) {
+                    if (next->second != width) return -ENOTSUP;
+                } else {
+                    if (next != instruction_ranges.end() && next->first < pc+width) return -ENOTSUP;
+                    if (next != instruction_ranges.begin()) {
+                        const auto previous = std::prev(next);
+                        if (previous->first+previous->second > pc) return -ENOTSUP;
+                    }
+                    instruction_ranges.emplace_hint(next,pc,width);
+                }
                 if (op == 0xb8 || op == 0x05) {
                     width = 5;
                     if (!fetch(pc,width) || (op == 0x05 && !initialized)) return -ENOTSUP;

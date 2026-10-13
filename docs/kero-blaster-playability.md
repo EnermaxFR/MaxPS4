@@ -22,6 +22,7 @@ sur x86. Aucun repli interpréteur n’existe dans ce chemin.
 L’admission accepte MOV EAX immédiat, ADD EAX immédiat, NOP, des stores C7
 RIP-relatifs prouvés RW/non-X, CALL GOT vers une fonction invitée admise, RET
 dans une fonction et HLT dans la racine. Les autres instructions sont refusées.
+Les flux d’instructions qui se chevauchent sont refusés avant réécriture.
 Les appels sont acycliques, la profondeur est limitée à 32, et le budget est
 consommé sur chaque instruction source visitée, même dans les fonctions appelées.
 Les NOP générés après CALL ajoutent une instruction CPU finie par appel ; ce

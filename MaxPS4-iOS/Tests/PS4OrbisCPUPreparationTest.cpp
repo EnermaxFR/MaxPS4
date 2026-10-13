@@ -46,5 +46,12 @@ int main() {
     CHECK(maxps4::OrbisLinker::link({input("app.elf",app,false),input("provider.prx",provider,true)}, {},linked,reason));
     CHECK(image.prepare_orbis(linked,"app.elf",100,reason)==-ELOOP && image.segments().empty());
     CHECK(reason.find("recursive")!=std::string::npos);
+    provider=make(true); app=make(false);
+    // A raw readable pointer targets the operand of the currently admitted CALL.
+    // Reject overlap before rewriting any stream, even if its bytes decode.
+    orbis_fixture::put(app,0x310,entry+1);
+    orbis_fixture::put(app,0x202,0x8010-(0x4000+6),4);
+    CHECK(maxps4::OrbisLinker::link({input("app.elf",app,false),input("provider.prx",provider,true)}, {},linked,reason));
+    CHECK(image.prepare_orbis(linked,"app.elf",100,reason)!=0 && image.segments().empty());
     std::puts("PASS SCE NID/RELA -> owned page mapping -> guest CALL/RET admission; no CPU execution claimed");
 }

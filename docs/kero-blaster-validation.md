@@ -10,7 +10,7 @@ installés uniquement dans le workspace ; aucune modification système.
 - `test-orbis-runtime.sh` : 3362 checks linker et segments ELF/SELF réussis.
 - `test-orbis-analysis.sh` : métadonnées SCE/NID/PRX et erreurs réussies.
 - `PS4OrbisCPUPreparationTest` étendu : BSS relocalisé et cycle CPU refusé,
-  exécuté avec ASan/UBSan après les extensions.
+  et flux d’instructions chevauchants refusés, exécutés avec ASan/UBSan.
 - `test-ps4-fex-linked.sh` : FEX réel lié, puis exécution des instructions ARM64
   générées dans VIXL. Aucun symbole FEX/service remplacé, aucun résultat constant.
 
