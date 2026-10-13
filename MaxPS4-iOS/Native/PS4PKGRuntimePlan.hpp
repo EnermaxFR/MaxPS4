@@ -109,6 +109,39 @@ public:
         diagnostic = "Graphe valide ; ordre de préparation établi, aucune exécution";
         return true;
     }
+    // Caller-owned plaintext buffers only. Transactional: a failed module leaves
+    // no partially staged batch; no PKG/PFS reads, relocations or execution.
+    struct ModuleBytes {
+        ModuleRequest request;
+        const uint8_t* bytes = nullptr;
+        size_t size = 0;
+    };
+    static bool prepareModules(const std::vector<ModuleBytes>& inputs,
+                               std::vector<PreparedModule>& output,
+                               std::string& diagnostic) {
+        output.clear();
+        diagnostic.clear();
+        std::vector<ModuleRequest> requests;
+        requests.reserve(inputs.size());
+        for (const auto& input : inputs) requests.push_back(input.request);
+        std::vector<size_t> order;
+        if (!orderModules(requests, order, diagnostic)) return false;
+        std::vector<PreparedModule> pending;
+        pending.reserve(inputs.size());
+        for (size_t index : order) {
+            PreparedModule module;
+            if (!prepareStandalone(inputs[index].request.logicalPath,
+                                   inputs[index].bytes, inputs[index].size,
+                                   inputs[index].request.dependencies, module, diagnostic)) {
+                diagnostic = "Modules : " + inputs[index].request.logicalPath + " : " + diagnostic;
+                return false;
+            }
+            pending.push_back(std::move(module));
+        }
+        output = std::move(pending);
+        diagnostic = "Modules ELF/PRX préparés en ordre de dépendance ; imports non résolus, aucune exécution";
+        return true;
+    }
     static bool prepareStandalone(const std::string& logicalPath, const uint8_t* bytes, size_t size,
                                   const std::vector<std::string>& dependencies, PreparedModule& output,
                                   std::string& diagnostic) {
