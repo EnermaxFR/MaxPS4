@@ -5,6 +5,8 @@
 #include <fcntl.h>
 #include <new>
 #include <sys/stat.h>
+#include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 #include <vector>
 
@@ -48,8 +50,20 @@ constexpr Binding bindings[] = {
     {"sceKernelClose", "UK2Tl2DWUns", PS4KernelService::close},
     {"sceKernelLseek", "oib76F-12fk", PS4KernelService::lseek},
     {"sceKernelStat", "eV9wAD2riIA", PS4KernelService::stat},
-    {"sceKernelFstat", "kBwCPsYX-m4", PS4KernelService::fstat}
+    {"sceKernelFstat", "kBwCPsYX-m4", PS4KernelService::fstat},
+    {"sceKernelMmap", "PGhQHd-dzv8", PS4KernelService::mmap},
+    {"sceKernelMunmap", "cQke9UuBQOk", PS4KernelService::munmap},
+    {"sceKernelMprotect", "vSMAm3cxYTY", PS4KernelService::mprotect},
+    {"sceKernelClockGettime", "QBi7HCK03hw", PS4KernelService::clock_gettime},
+    {"sceKernelClockGetres", "wRYVA5Zolso", PS4KernelService::clock_getres},
+    {"sceKernelGettimeofday", "ejekcaNQNq0", PS4KernelService::gettimeofday},
+    {"sceKernelGetProcessTime", "4J2sUJmuHZQ", PS4KernelService::process_time}
 };
+uint64_t monotonic_us() {
+    timespec t{};
+    if (::clock_gettime(CLOCK_MONOTONIC, &t) != 0) return 0;
+    return uint64_t(t.tv_sec) * 1000000 + uint64_t(t.tv_nsec) / 1000;
+}
 class HostFD {
 public:
     explicit HostFD(int fd) : fd(fd) {}
@@ -67,7 +81,8 @@ PS4KernelService resolve_libkernel(std::string_view symbol, std::string_view lib
         if (symbol == binding.name || symbol == binding.nid) return binding.service;
     return PS4KernelService::unresolved;
 }
-PS4Libkernel::PS4Libkernel(PS4GuestMemory& memory) : memory_(memory) { files_.fill(-1); }
+PS4Libkernel::PS4Libkernel(PS4GuestMemory& memory, PS4VirtualMemory* dynamic)
+    : memory_(memory), dynamic_(dynamic), started_us_(monotonic_us()) { files_.fill(-1); }
 PS4Libkernel::~PS4Libkernel() { reset(); }
 void PS4Libkernel::close_files() {
     for (int& fd : files_) { if (fd >= 0) ::close(fd); fd = -1; }
@@ -77,6 +92,8 @@ void PS4Libkernel::reset() {
     close_files();
     if (root_ >= 0) ::close(root_);
     root_ = -1;
+    if (dynamic_) dynamic_->reset();
+    started_us_ = monotonic_us();
 }
 int64_t PS4Libkernel::mount_app0(const char* directory) {
     std::lock_guard<std::mutex> guard(lock_);
@@ -224,6 +241,48 @@ int64_t PS4Libkernel::stat(const PS4KernelCall& c, bool by_descriptor) {
     put_le(wire, 88, info.st_blksize, 4);
     return memory_.write(c.rsi, wire, sizeof(wire)) ? 0 : kernel_error(fault);
 }
+int64_t PS4Libkernel::mmap(const PS4KernelCall& c) {
+    if (!dynamic_) return kernel_error(nosys);
+    // The seventh System V argument is at entry RSP+8, after return address.
+    uint8_t pointer[8];
+    if (!c.rsp || c.rsp > UINT64_MAX - 8 || !memory_.read(c.rsp + 8, pointer, 8))
+        return kernel_error(fault);
+    const uint64_t output = get_le(pointer, 8);
+    if (!writable(output, 8)) return kernel_error(fault);
+    uint64_t mapped = 0;
+    const Error e = dynamic_->map(c.rdi, c.rsi, uint32_t(c.rdx), uint32_t(c.rcx),
+                                 signed32(c.r8), signed64(c.r9), mapped);
+    if (e) return kernel_error(e);
+    put_le(pointer, 0, mapped, 8);
+    if (!memory_.write(output, pointer, 8)) {
+        dynamic_->unmap(mapped, c.rsi);
+        return kernel_error(fault);
+    }
+    return 0;
+}
+int64_t PS4Libkernel::clock(const PS4KernelCall& c, bool resolution) {
+    clockid_t id;
+    switch (uint32_t(c.rdi)) {
+    case 0: id = CLOCK_REALTIME; break;
+    case 4: id = CLOCK_MONOTONIC; break;
+    default: return kernel_error(inval);
+    }
+    if (!writable(c.rsi, 16)) return kernel_error(fault);
+    timespec time{};
+    const int result = resolution ? ::clock_getres(id, &time) : ::clock_gettime(id, &time);
+    if (result != 0) return kernel_error(host_error(errno));
+    uint8_t wire[16]{};
+    put_le(wire, 0, time.tv_sec, 8); put_le(wire, 8, time.tv_nsec, 8);
+    return memory_.write(c.rsi, wire, sizeof(wire)) ? 0 : kernel_error(fault);
+}
+int64_t PS4Libkernel::gettimeofday(uint64_t output) {
+    if (!writable(output, 16)) return kernel_error(fault);
+    timeval time{};
+    if (::gettimeofday(&time, nullptr) != 0) return kernel_error(host_error(errno));
+    uint8_t wire[16]{};
+    put_le(wire, 0, time.tv_sec, 8); put_le(wire, 8, time.tv_usec, 8);
+    return memory_.write(output, wire, sizeof(wire)) ? 0 : kernel_error(fault);
+}
 int64_t PS4Libkernel::invoke(PS4KernelService service, const PS4KernelCall& c) {
     std::lock_guard<std::mutex> guard(lock_);
     try {
@@ -234,6 +293,16 @@ int64_t PS4Libkernel::invoke(PS4KernelService service, const PS4KernelCall& c) {
         case PS4KernelService::lseek: return lseek(c);
         case PS4KernelService::stat: return stat(c, false);
         case PS4KernelService::fstat: return stat(c, true);
+        case PS4KernelService::mmap: return mmap(c);
+        case PS4KernelService::munmap: return kernel_error(dynamic_ ? dynamic_->unmap(c.rdi, c.rsi) : nosys);
+        case PS4KernelService::mprotect: return kernel_error(dynamic_ ? dynamic_->protect(c.rdi, c.rsi, uint32_t(c.rdx)) : nosys);
+        case PS4KernelService::clock_gettime: return clock(c, false);
+        case PS4KernelService::clock_getres: return clock(c, true);
+        case PS4KernelService::gettimeofday: return gettimeofday(c.rdi);
+        case PS4KernelService::process_time: {
+            const uint64_t now = monotonic_us();
+            return now >= started_us_ ? int64_t(now - started_us_) : 0;
+        }
         default: return kernel_error(nosys);
         }
     } catch (const std::bad_alloc&) { return kernel_error(nomem); }

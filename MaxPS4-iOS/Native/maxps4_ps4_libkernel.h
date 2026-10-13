@@ -10,7 +10,8 @@ namespace maxps4 {
 // never be installed directly into guest GOT/PLT slots on ARM64.
 struct PS4KernelCall { uint64_t rdi = 0, rsi = 0, rdx = 0, rcx = 0, r8 = 0, r9 = 0, rsp = 0; };
 enum class PS4KernelService : uint32_t {
-    unresolved, open, read, close, lseek, stat, fstat
+    unresolved, open, read, close, lseek, stat, fstat,
+    mmap, munmap, mprotect, clock_gettime, clock_getres, gettimeofday, process_time
 };
 // Library/module/version are decoded by an ELF/PRX loader before resolution.
 // This resolver deliberately does not guess the meaning of encoded # IDs.
@@ -22,7 +23,7 @@ public:
     static constexpr size_t descriptor_limit = 256;
     static constexpr size_t transfer_limit = 1024 * 1024;
     static constexpr size_t stat_size = 120;
-    explicit PS4Libkernel(PS4GuestMemory& memory);
+    explicit PS4Libkernel(PS4GuestMemory& memory, PS4VirtualMemory* dynamic = nullptr);
     ~PS4Libkernel();
     PS4Libkernel(const PS4Libkernel&) = delete;
     PS4Libkernel& operator=(const PS4Libkernel&) = delete;
@@ -33,6 +34,7 @@ public:
     int64_t invoke(PS4KernelService service, const PS4KernelCall& call);
 private:
     PS4GuestMemory& memory_;
+    PS4VirtualMemory* dynamic_;
     std::mutex lock_;
     int root_ = -1;
     std::array<int, descriptor_limit> files_;
@@ -44,6 +46,10 @@ private:
     int64_t close(int32_t descriptor);
     int64_t lseek(const PS4KernelCall& call);
     int64_t stat(const PS4KernelCall& call, bool by_descriptor);
+    int64_t mmap(const PS4KernelCall& call);
+    int64_t clock(const PS4KernelCall& call, bool resolution);
+    int64_t gettimeofday(uint64_t output);
+    uint64_t started_us_ = 0;
     bool writable(uint64_t address, size_t size) const;
 };
 } // namespace maxps4

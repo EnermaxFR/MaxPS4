@@ -44,6 +44,32 @@ remains ENOSYS.
 
 ## Validation
 
+## Anonymous virtual memory and clocks
+
+`PS4VirtualMemory` supplies zero-filled logical anonymous PRIVATE mappings in
+16 KiB PS4 pages with a 32 MiB backing budget and at most 128 allocations.
+`sceKernelMmap` supports only flags `0x1002`, a zero address hint, fd=-1 and
+offset=0. Its seventh output-pointer argument is read at guest entry RSP+8.
+PROT_READ/WRITE/EXEC are translated to ELF permissions; writable/executable
+mappings are rejected. Guest RX is host data, never an iOS JIT allocation.
+`sceKernelMprotect` changes permissions per page; `sceKernelMunmap` removes
+whole or partial page intervals. Both currently require the entire interval
+to lie in one live anonymous allocation; holes and ELF segments return ENOMEM.
+Partially unmapped pages become inaccessible immediately, but the backing
+budget is released only when the allocation's last page is unmapped. File,
+shared and fixed mappings, hints, direct memory and GPU memory are unsupported.
+Allocations avoid staged ELF segments and other anonymous allocations.
+The optional `PS4DynamicMemory` provider preserves existing ELF-only clients.
+The owner must reset dynamic memory on restaging and serialize all accesses.
+
+`sceKernelClockGettime` and `sceKernelClockGetres` support PS4 REALTIME=0 and
+MONOTONIC=4, using the corresponding host clocks. `sceKernelGettimeofday`
+returns Unix seconds/microseconds; `sceKernelGetProcessTime` returns elapsed
+monotonic microseconds since service creation/reset (elapsed time, not CPU time).
+Unsupported clock IDs return EINVAL. No fabricated network/TSC clock is exposed.
+
+## Validation
+
 Run `bash scripts/test-ps4-system-services.sh` with C++17. The Ubuntu/macOS CI
 matrix enables ASan/UBSan and treats compiler warnings as errors. Tests use
 synthetic ELF/data fixtures only. A Linux ptrace environment may need
