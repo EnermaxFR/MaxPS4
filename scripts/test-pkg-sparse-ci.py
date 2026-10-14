@@ -23,7 +23,7 @@ with tempfile.TemporaryDirectory(prefix="maxps4-sparse-") as temp:
         header = bytearray(0x5c0)
         def be(at, value, width):
             header[at:at + width] = value.to_bytes(width, "big")
-        header[:4] = b"\\x7fCNT"
+        header[:4] = b"\x7fCNT"
         be(0x10, 1, 4)
         be(0x16, 1, 2)
         be(0x18, 0x5a0, 4)
@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory(prefix="maxps4-sparse-") as temp:
         be(0x5a0, 0x1200, 4)
         be(0x5b0, offset, 4)
         be(0x5b4, 24, 4)
-        png = b"\\x89PNG\\r\\n\\x1a\\n" + b"\\x00\\x00\\x00\\x0dIHDR" + (1).to_bytes(4, "big") * 2
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\x0dIHDR" + (1).to_bytes(4, "big") * 2
         with path.open("wb") as handle:
             handle.write(header)
             handle.seek(offset)
