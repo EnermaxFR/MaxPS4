@@ -276,7 +276,9 @@ int maxps4_pkg_pfs_read_file(const char* path, const char* selected, unsigned ch
         if (fstat(fd,&st) || !S_ISREG(st.st_mode) || st.st_size<0) return -EINVAL;
         const auto size=uint64_t(st.st_size);
         auto read=[&](uint64_t at,uint8_t* bytes,size_t n) {
-            if (!maxps4::PS4PKGInventory::range(at,n,size) || at>uint64_t(std::numeric_limits<off_t>::max())) return false;
+            if (!maxps4::PS4PKGInventory::range(at,n,size) ||
+                at > uint64_t(std::numeric_limits<off_t>::max()) ||
+                (n && uint64_t(n-1) > uint64_t(std::numeric_limits<off_t>::max())-at)) return false;
             size_t done=0;
             while (done<n) {
                 const auto r=pread(fd,bytes+done,n-done,off_t(at+done));
@@ -338,10 +340,12 @@ int maxps4_pkg_read_artwork(const char* path, unsigned int entry_id,
     const uint64_t fileSize = static_cast<uint64_t>(before.st_size);
     auto read = [&](uint64_t offset, uint8_t* bytes, size_t count) {
         if (!maxps4::PS4PKGInventory::range(offset, count, fileSize) ||
-            offset > static_cast<uint64_t>(std::numeric_limits<off_t>::max())) return false;
+            offset > static_cast<uint64_t>(std::numeric_limits<off_t>::max()) ||
+            (count && uint64_t(count-1) > uint64_t(std::numeric_limits<off_t>::max())-offset)) return false;
         size_t done = 0;
         while (done < count) {
             const ssize_t n = pread(fd, bytes + done, count - done, static_cast<off_t>(offset + done));
+            if (n < 0 && errno == EINTR) continue;
             if (n <= 0) return false;
             done += static_cast<size_t>(n);
         }
