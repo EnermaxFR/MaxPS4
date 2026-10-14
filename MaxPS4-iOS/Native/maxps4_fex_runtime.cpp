@@ -157,6 +157,10 @@ namespace {
 // engine closes. Future independent FEX consumers must share this ownership.
 std::mutex runtime_lock;
 size_t engines = 0;
+#if TARGET_OS_IPHONE
+// The prepared pool contains one dispatcher and one code cache.
+maxps4_fex_engine* jit_owner = nullptr;
+#endif
 void release_config_if_unused() {
     if (engines == 0) FEXCore::Config::Shutdown();
 }
@@ -233,7 +237,6 @@ extern "C" int32_t maxps4_fex_engine_initialize(maxps4_fex_engine *engine) {
     } catch (const std::bad_alloc&) { return -ENOMEM; }
     engine->stage = MAXPS4_FEX_DISPATCHER_INITIALIZED;
     return 0;
-#endif
 }
 extern "C" int32_t maxps4_fex_engine_stage(const maxps4_fex_engine *engine) {
     std::lock_guard lock(runtime_lock);
