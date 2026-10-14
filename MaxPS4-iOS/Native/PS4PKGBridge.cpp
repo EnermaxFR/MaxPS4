@@ -322,3 +322,61 @@ int maxps4_pkg_pfs_read_file(const char* path, const char* selected, unsigned ch
         return 0;
     } catch (const std::bad_alloc&) { *length=0; return -ENOMEM; }
 }
+
+
+int maxps4_pkg_read_artwork(const char* path, unsigned int entry_id,
+                           unsigned char* output, size_t capacity, size_t* length) {
+    if (!length) return -EINVAL;
+    *length = 0;
+    if (!path || (entry_id != 0x1200 && entry_id != 0x1006)) return -EINVAL;
+    const int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) return -errno;
+    struct stat before{};
+    if (fstat(fd, &before) || !S_ISREG(before.st_mode) || before.st_size < 0) {
+        const int error = errno ? errno : EINVAL; close(fd); return -error;
+    }
+    const uint64_t fileSize = static_cast<uint64_t>(before.st_size);
+    auto read = [&](uint64_t offset, uint8_t* bytes, size_t count) {
+        if (!maxps4::PS4PKGInventory::range(offset, count, fileSize) ||
+            offset > static_cast<uint64_t>(std::numeric_limits<off_t>::max())) return false;
+        size_t done = 0;
+        while (done < count) {
+            const ssize_t n = pread(fd, bytes + done, count - done, static_cast<off_t>(offset + done));
+            if (n <= 0) return false;
+            done += static_cast<size_t>(n);
+        }
+        return true;
+    };
+    maxps4::PS4PKGInventory pkg;
+    int result = -EINVAL;
+    if (pkg.parse(fileSize, read)) {
+        for (size_t i = 0; i < pkg.entries.size(); ++i) {
+            const auto& e = pkg.entries[i];
+            if (e.id != entry_id) continue;
+            if (e.access != maxps4::PS4PKGInventory::Access::plaintext ||
+                e.size < 24 || e.size > 1024 * 1024) break;
+            std::vector<uint8_t> bytes;
+            std::string diagnostic;
+            if (!pkg.extract(i, read, bytes, diagnostic)) { result = -EIO; break; }
+            static const uint8_t png[] = {137,80,78,71,13,10,26,10};
+            if (bytes.size() < 24 || std::memcmp(bytes.data(), png, sizeof(png)) ||
+                std::memcmp(bytes.data() + 12, "IHDR", 4)) break;
+            auto be32 = [](const uint8_t* p) -> uint32_t {
+                return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) |
+                       (uint32_t(p[2]) << 8) | uint32_t(p[3]);
+            };
+            const uint32_t width = be32(bytes.data() + 16), height = be32(bytes.data() + 20);
+            if (!width || !height || width > 4096 || height > 4096 ||
+                uint64_t(width) * height > 4 * 1024 * 1024) break;
+            struct stat after{};
+            if (fstat(fd, &after) || !sameSource(before, after)) { result = -EAGAIN; break; }
+            *length = bytes.size();
+            if (!output || capacity < bytes.size()) { result = -ENOSPC; break; }
+            std::memcpy(output, bytes.data(), bytes.size());
+            result = 0;
+            break;
+        }
+    }
+    close(fd);
+    return result;
+}
