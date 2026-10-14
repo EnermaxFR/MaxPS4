@@ -64,20 +64,20 @@ enum MaxPS4OrbisTest {
     // executor. A refusal is reported as BLOCKED, never as a passing CPU test.
     static func m1Autotests() -> String {
         let revision = Bundle.main.object(forInfoDictionaryKey: "MaxPS4SourceRevision") as? String ?? "unknown"
-        var lines = ["autotests=orbis-m1", "source=\\(revision)", "scope=current_host",
+        var lines = ["autotests=orbis-m1", "source=\(revision)", "scope=current_host",
                      "fixture=v3_synthetic_elf", "m1_threads=not_attempted"]
 #if MAXPS4_FEX_APP
         var engine: OpaquePointer?
         let opened = maxps4_fex_engine_open(&engine)
-        lines.append("engine_open=\\(opened)")
+        lines.append("engine_open=\(opened)")
         guard opened == 0, let engine else {
-            lines.append("m1_threads=BLOCKED"); return lines.joined(separator: "\\n")
+            lines.append("m1_threads=BLOCKED"); return lines.joined(separator: "\n")
         }
         defer { maxps4_fex_engine_close(engine) }
         let initialized = maxps4_fex_engine_initialize(engine)
-        lines.append("jit_initialize=\\(initialized)")
+        lines.append("jit_initialize=\(initialized)")
         guard initialized == 0 else {
-            lines.append("m1_threads=BLOCKED"); return lines.joined(separator: "\\n")
+            lines.append("m1_threads=BLOCKED"); return lines.joined(separator: "\n")
         }
         let elf = fixture()
         // A V3 fixture does not contain the M1 multi-module TLS/stack layout.
@@ -91,8 +91,8 @@ enum MaxPS4OrbisTest {
                     65536, 0, nil, 0, 2, reports.baseAddress, reports.count)
             }
         }
-        lines.append("m1_thread_api_status=\\(status)")
-        lines.append("m1_threads=\\(status == 0 ? "API_RETURNED_SUCCESS_UNVERIFIED" : "BLOCKED")")
+        lines.append("m1_thread_api_status=\(status)")
+        lines.append("m1_threads=\(status == 0 ? "API_RETURNED_SUCCESS_UNVERIFIED" : "BLOCKED")")
         lines.append("m1_multi_module_tls=not_tested")
         lines.append("m1_general_memory_translation=not_tested")
         lines.append("note=V3 fixture is not a valid M1 multithread proof; dedicated M1 fixtures required")
@@ -100,7 +100,7 @@ enum MaxPS4OrbisTest {
         lines.append("m1_threads=BLOCKED")
         lines.append("reason=runtime_not_compiled")
 #endif
-        return lines.joined(separator: "\\n")
+        return lines.joined(separator: "\n")
     }
 
     static func run(_ inspection: Inspection) -> String {
