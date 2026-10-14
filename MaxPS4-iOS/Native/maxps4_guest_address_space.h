@@ -7,7 +7,7 @@
 #include <unistd.h>
 #if defined(__APPLE__)
 #include <mach/mach.h>
-#include <mach/mach_vm.h>
+#include <mach/vm_map.h>
 #endif
 
 namespace maxps4 {
@@ -47,11 +47,11 @@ public:
             // Darwin may relocate mmap hints. Mach fixed allocation, WITHOUT
             // VM_FLAGS_OVERWRITE, fails on existing mappings instead of replacing
             // them. Protect guards before publishing ownership or running FEX.
-            mach_vm_address_t requested = low;
-            const kern_return_t status = mach_vm_allocate(mach_task_self(),&requested,bytes,VM_FLAGS_FIXED);
+            vm_address_t requested = static_cast<vm_address_t>(low);
+            const kern_return_t status = vm_allocate(mach_task_self(),&requested,bytes,VM_FLAGS_FIXED);
             if (status != KERN_SUCCESS) return status == KERN_NO_SPACE ? -EADDRINUSE : -ENOMEM;
-            if (mach_vm_protect(mach_task_self(),requested,bytes,FALSE,VM_PROT_NONE) != KERN_SUCCESS) {
-                mach_vm_deallocate(mach_task_self(),requested,bytes); return -EACCES;
+            if (vm_protect(mach_task_self(),requested,bytes,FALSE,VM_PROT_NONE) != KERN_SUCCESS) {
+                vm_deallocate(mach_task_self(),requested,bytes); return -EACCES;
             }
             host = reinterpret_cast<void*>(requested);
         } else
