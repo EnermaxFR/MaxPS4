@@ -210,6 +210,12 @@ struct MaxPS4HomeView: View {
                         ZStack {
                             RoundedRectangle(cornerRadius: 20)
                                 .fill(LinearGradient(colors: [.blue, .purple, .black], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            if game.fileName.lowercased().hasSuffix(".pkg") {
+                                MaxPS4PKGArtworkView(path: game.localPath, entryID: 0x1006)
+                                    .scaledToFill()
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .clipped()
+                            }
                             VStack(spacing: 12) {
                                 Image(systemName: "gamecontroller.fill").font(.system(size: 48))
                                 Text(game.fileName.uppercased().contains("SONICMANIA") ? "SONIC MANIA" : game.name.uppercased())
@@ -968,6 +974,13 @@ struct MaxPS4HomeView: View {
                         endPoint: .bottomTrailing
                     )
 
+                    if isPKG {
+                        MaxPS4PKGArtworkView(path: game.localPath, entryID: 0x1200)
+                            .scaledToFill()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .clipped()
+                    }
+
                     Circle()
                         .fill(.white.opacity(0.10))
                         .frame(width: 120, height: 120)
@@ -1484,6 +1497,30 @@ private struct MaxPS4Background: View {
                 .frame(width: 260, height: 260)
                 .blur(radius: 70)
                 .offset(x: -180, y: 280)
+        }
+    }
+}
+
+private struct MaxPS4PKGArtworkView: View {
+    let path: String
+    let entryID: UInt32
+    @State private var artwork: UIImage?
+
+    var body: some View {
+        Group {
+            if let artwork {
+                Image(uiImage: artwork).resizable()
+            } else {
+                Color.clear
+            }
+        }
+        .task(id: path + ":" + String(entryID)) {
+            guard let data = MaxPS4PKGInspector.artwork(url: URL(fileURLWithPath: path), entryID: entryID),
+                  let image = UIImage(data: data) else {
+                artwork = nil
+                return
+            }
+            artwork = image
         }
     }
 }
