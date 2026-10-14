@@ -118,15 +118,12 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                 report << "Extraction eboot.bin : fichier PFS non chiffré repéré ; taille="
                        << eboot->size << " octets ; extraction sélectionnée "
                        << (eboot->size <= 64ULL*1024*1024 ? "possible via API (non exécuté)" : "refusée (>64 Mio)")
-                       << " ; format exécutable non validé.\
-";
+                       << " ; format exécutable non validé.\n";
             } else if (pfsAccessible) {
-                report << "Extraction eboot.bin : absent du répertoire PFS accessible.\
-";
+                report << "Extraction eboot.bin : absent du répertoire PFS accessible.\n";
             } else {
                 report << "Extraction eboot.bin : impossible depuis ce PKG (PFS opaque ou chiffré) ; "
-                          "fournir un fichier non chiffré autorisé séparément.\
-";
+                          "fournir un fichier non chiffré autorisé séparément.\n";
             }
 
             if (pfsAccessible)
@@ -333,7 +330,7 @@ int maxps4_pkg_pfs_read_file(const char* path, const char* selected, unsigned ch
         if (it==pfs.files.end()) return -ENOENT;
         if (it->size>64*1024*1024) return -E2BIG;
         *length=size_t(it->size);
-        if (capacity<*length) return -ENOSPC;
+        if (capacity<*length || (!output && *length)) return -ENOSPC;
         std::vector<uint8_t> bytes; std::string why;
         if (!pfs.extract(name,slice,bytes,why)) { *length=0; return -EIO; }
         struct stat after{};
