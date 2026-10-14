@@ -78,9 +78,6 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                 if (!read(at,bytes,n)) return false;
                 std::memcpy(headerBytes.data(),bytes,n); return true;
             });
-            report << "Diagnostic en-tête PFS : " << header.message
-                   << " ; mode=0x" << std::hex << header.mode << std::dec
-                   << " ; budget de lecture=" << header.bytesRead << " octets (maximum 72)\n";
             maxps4::PS4PFSReadOnly pfs;
             auto pfsRead = [&](uint64_t offset, uint8_t* bytes, size_t count) {
                 if (offset==0 && count==headerBytes.size() && header.bytesRead==72) {
@@ -99,6 +96,11 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                 pfs.mode = header.mode;
                 pfs.diagnostic = header.message;
             }
+            report << "Diagnostic en-tête PFS : "
+                   << (pfs.status == maxps4::PS4PFSReadOnly::Status::accessible ?
+                       "PFS non chiffré déclaré : en-tête reconnu ; accès D32 détaillé ci-dessous" : header.message)
+                   << " ; mode=0x" << std::hex << header.mode << std::dec
+                   << " ; budget de lecture=" << header.bytesRead << " octets (maximum 72)\n";
             report << "Diagnostic PKG/PFS : " << pfs.diagnostic << " ; mode=0x" << std::hex << pfs.mode
                    << std::dec << " ; bloc=" << pfs.blockSize << '\n';
             report << "Budgets PFS : inspection 8 Mio (en-tête inclus), répertoire 1 Mio, "

@@ -136,6 +136,8 @@ int main(int argc,char** argv) {
     assert(maxps4_pkg_inventory_report(source.c_str(),report.data(),report.size())==0);
     assert(std::string(report.data()).find("PFS non chiffré accessible")!=std::string::npos);
     assert(std::string(report.data()).find("eboot.bin accessible, non validé")!=std::string::npos);
+    assert(std::string(report.data()).find("budget de lecture=72 octets")!=std::string::npos);
+    assert(std::string(report.data()).find("eboot.bin demeure inaccessible")==std::string::npos);
     size_t length=0; uint8_t out[8]={0xaa};
     assert(maxps4_pkg_pfs_read_file(source.c_str(),"eboot.bin",nullptr,0,&length)==-ENOSPC && length==5);
     assert(maxps4_pkg_pfs_read_file(source.c_str(),"eboot.bin",out,4,&length)==-ENOSPC && out[0]==0xaa);
