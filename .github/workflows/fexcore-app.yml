@@ -2,7 +2,7 @@ name: MaxPS4 FEXCore SideStore IPA
 on:
   workflow_dispatch:
   push:
-    branches: ['codex/ps4-memory-translation-contract', 'integration/ps4-fex-orbis-pkg-validation']
+    branches: ['codex/ps4-memory-translation-contract', 'integration/ps4-fex-orbis-pkg-validation', 'codex/jit-191-side-by-side-test']
     paths:
       - 'MaxPS4-iOS/**'
       - 'scripts/*fexcore*'
