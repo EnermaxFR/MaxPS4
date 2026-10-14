@@ -51,7 +51,8 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
         const uint64_t size = static_cast<uint64_t>(info.st_size);
         auto read = [&](uint64_t offset, uint8_t* bytes, size_t count) {
             if (!maxps4::PS4PKGInventory::range(offset, count, size) ||
-                offset > static_cast<uint64_t>(std::numeric_limits<off_t>::max())) return false;
+                offset > static_cast<uint64_t>(std::numeric_limits<off_t>::max()) ||
+                (count && uint64_t(count-1) > uint64_t(std::numeric_limits<off_t>::max())-offset)) return false;
             return !fseeko(file.get(), static_cast<off_t>(offset), SEEK_SET) &&
                 std::fread(bytes, 1, count, file.get()) == count;
         };
