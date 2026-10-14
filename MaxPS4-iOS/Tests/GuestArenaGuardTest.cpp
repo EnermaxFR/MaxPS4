@@ -66,9 +66,18 @@ static void verify(maxps4::GuestELF& image) {
     CHECK(!image.translate(begin ? begin - 1 : UINT64_MAX, 1, 4));
     CHECK(!image.translate(end, 1, 4));
     // Check a hole between segment pages stays inaccessible after guard insertion.
-    if (end - begin > 2 * page) {
-        CHECK(!image.translate(begin + page, 1, 4));
-        faults(arena + page, false);
+    for (uint64_t address = begin; address < end; address += page) {
+        bool occupied = false;
+        for (const auto& segment : image.segments()) {
+            const uint64_t low = segment.address / page * page;
+            const uint64_t high = (segment.address + segment.memory_size + page - 1) / page * page;
+            occupied |= address >= low && address < high;
+        }
+        if (!occupied) {
+            CHECK(!image.translate(address, 1, 4));
+            faults(arena + (address - begin), false);
+            break;
+        }
     }
     image.clear();
     CHECK(image.segments().empty() && !image.entry_pointer());
