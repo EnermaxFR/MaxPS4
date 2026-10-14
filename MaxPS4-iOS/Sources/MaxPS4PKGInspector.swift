@@ -49,8 +49,9 @@ enum MaxPS4PKGInspector {
                 }
             }
         }
-        guard result == 0, length <= data.count else {
-            throw ReportError.failed(result, "Lecture PFS interrompue ; sélectionner une source stable puis réessayer.")
+        guard result == 0, length == data.count else {
+            throw ReportError.failed(result == 0 ? -Int32(POSIXErrorCode.EIO.rawValue) : result,
+                                     "Lecture PFS interrompue ou taille modifiée ; sélectionner une source stable puis réessayer.")
         }
         return data.prefix(length)
     }

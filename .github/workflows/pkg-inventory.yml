@@ -33,6 +33,7 @@ jobs:
             MaxPS4-iOS/Native/PS4PKGBridge.cpp MaxPS4-iOS/Tests/PS4PKGInventoryTest.cpp \
             -o "$RUNNER_TEMP/pkg-test"
           "$RUNNER_TEMP/pkg-test" | tee pkg-tests.txt
+          python3 scripts/test-pkg-sparse-ci.py | tee pkg-sparse-tests.txt
           c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer \
             MaxPS4-iOS/Native/PS4PKGBridge.cpp MaxPS4-iOS/Tests/PS4PFSReadOnlyTest.cpp -o "$RUNNER_TEMP/pfs-test"
           "$RUNNER_TEMP/pfs-test" build/pkg-fixtures | tee pfs-tests.txt
@@ -50,6 +51,7 @@ jobs:
           name: PKG-sanitizer-report
           path: |
             pkg*-tests.txt
+            pkg-sparse-tests.txt
             pfs-tests.txt
             orbis-linux-tests.txt
       - uses: actions/upload-artifact@v4

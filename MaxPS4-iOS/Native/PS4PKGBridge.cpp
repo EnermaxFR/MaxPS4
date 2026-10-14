@@ -51,7 +51,8 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
         const uint64_t size = static_cast<uint64_t>(info.st_size);
         auto read = [&](uint64_t offset, uint8_t* bytes, size_t count) {
             if (!maxps4::PS4PKGInventory::range(offset, count, size) ||
-                offset > static_cast<uint64_t>(std::numeric_limits<off_t>::max())) return false;
+                offset > static_cast<uint64_t>(std::numeric_limits<off_t>::max()) ||
+                (count && uint64_t(count-1) > uint64_t(std::numeric_limits<off_t>::max())-offset)) return false;
             return !fseeko(file.get(), static_cast<off_t>(offset), SEEK_SET) &&
                 std::fread(bytes, 1, count, file.get()) == count;
         };
@@ -109,6 +110,22 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                 report << "Fichier PFS uroot : " << f.path << " ; octets=" << f.size << '\n';
             const bool pfsAccessible = pfs.status == maxps4::PS4PFSReadOnly::Status::accessible;
             const bool pfsEboot = std::any_of(pfs.files.begin(),pfs.files.end(),[](const auto& f) { return f.path=="eboot.bin"; });
+            // Explicit extraction gate: a PKG descriptor or artwork never proves that
+            // the game executable is readable. Keep encrypted PFS inaccessible.
+            if (pfsAccessible && pfsEboot) {
+                const auto eboot = std::find_if(pfs.files.begin(),pfs.files.end(),
+                    [](const auto& f) { return f.path == "eboot.bin"; });
+                report << "Extraction eboot.bin : fichier PFS non chiffré repéré ; taille="
+                       << eboot->size << " octets ; extraction sélectionnée "
+                       << (eboot->size <= 64ULL*1024*1024 ? "possible via API (non exécuté)" : "refusée (>64 Mio)")
+                       << " ; format exécutable non validé.\n";
+            } else if (pfsAccessible) {
+                report << "Extraction eboot.bin : absent du répertoire PFS accessible.\n";
+            } else {
+                report << "Extraction eboot.bin : impossible depuis ce PKG (PFS opaque ou chiffré) ; "
+                          "fournir un fichier non chiffré autorisé séparément.\n";
+            }
+
             if (pfsAccessible)
                 report << "Contenu PFS : fichiers uroot accessibles ; eboot.bin " << (pfsEboot ? "présent" : "absent")
                        << "; présence distincte de validation ELF et de démarrage.\n"
@@ -276,7 +293,9 @@ int maxps4_pkg_pfs_read_file(const char* path, const char* selected, unsigned ch
         if (fstat(fd,&st) || !S_ISREG(st.st_mode) || st.st_size<0) return -EINVAL;
         const auto size=uint64_t(st.st_size);
         auto read=[&](uint64_t at,uint8_t* bytes,size_t n) {
-            if (!maxps4::PS4PKGInventory::range(at,n,size) || at>uint64_t(std::numeric_limits<off_t>::max())) return false;
+            if (!maxps4::PS4PKGInventory::range(at,n,size) ||
+                at > uint64_t(std::numeric_limits<off_t>::max()) ||
+                (n && uint64_t(n-1) > uint64_t(std::numeric_limits<off_t>::max())-at)) return false;
             size_t done=0;
             while (done<n) {
                 const auto r=pread(fd,bytes+done,n-done,off_t(at+done));
@@ -311,7 +330,7 @@ int maxps4_pkg_pfs_read_file(const char* path, const char* selected, unsigned ch
         if (it==pfs.files.end()) return -ENOENT;
         if (it->size>64*1024*1024) return -E2BIG;
         *length=size_t(it->size);
-        if (capacity<*length) return -ENOSPC;
+        if (capacity<*length || (!output && *length)) return -ENOSPC;
         std::vector<uint8_t> bytes; std::string why;
         if (!pfs.extract(name,slice,bytes,why)) { *length=0; return -EIO; }
         struct stat after{};
@@ -338,10 +357,12 @@ int maxps4_pkg_read_artwork(const char* path, unsigned int entry_id,
     const uint64_t fileSize = static_cast<uint64_t>(before.st_size);
     auto read = [&](uint64_t offset, uint8_t* bytes, size_t count) {
         if (!maxps4::PS4PKGInventory::range(offset, count, fileSize) ||
-            offset > static_cast<uint64_t>(std::numeric_limits<off_t>::max())) return false;
+            offset > static_cast<uint64_t>(std::numeric_limits<off_t>::max()) ||
+            (count && uint64_t(count-1) > uint64_t(std::numeric_limits<off_t>::max())-offset)) return false;
         size_t done = 0;
         while (done < count) {
             const ssize_t n = pread(fd, bytes + done, count - done, static_cast<off_t>(offset + done));
+            if (n < 0 && errno == EINTR) continue;
             if (n <= 0) return false;
             done += static_cast<size_t>(n);
         }

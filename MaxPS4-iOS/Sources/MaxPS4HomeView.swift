@@ -281,9 +281,15 @@ struct MaxPS4HomeView: View {
                         }
                         if game.fileName.lowercased().hasSuffix(".pkg"),
                            detailsReport?.contains("Diagnostic PKG/PFS : PFS non chiffré accessible") == true {
-                            NavigationLink("Exporter un fichier PFS accessible…") {
+                            NavigationLink("Extraire eboot.bin / fichier PFS accessible…") {
                                 MaxPS4PFSExportView(source: URL(fileURLWithPath: game.localPath))
                             }
+                        }
+                        if game.fileName.lowercased().hasSuffix(".pkg"),
+                           detailsReport?.contains("Extraction eboot.bin : impossible depuis ce PKG") == true {
+                            Label("eboot.bin inaccessible : PFS chiffré ou opaque. Aucun fichier exécutable ne peut être exporté depuis ce PKG.", systemImage: "lock.fill")
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
                         }
                         if let report = detailsReport {
                             ShareLink(item: report) {
