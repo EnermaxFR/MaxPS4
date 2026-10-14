@@ -173,6 +173,56 @@ static int m1Test() {
                 (unsigned long long)report.tls_word,report.calls,(unsigned long long)report.entry,(unsigned long long)report.fs_base);
         }
     }
+    auto module_a = make(83,false), module_b = make(129,false);
+    // Legal plaintext PRX headers; the harness consumes PT_TLS templates only,
+    // without claiming PRX relocation/DTV/import support.
+    maxps4_ps4_synthetic::put(module_a,0xfe18,16,2);
+    maxps4_ps4_synthetic::put(module_b,0xfe18,16,2);
+    const maxps4_m1_tls_input modules[] = {{module_a.data(),module_a.size()},{module_b.data(),module_b.size()}};
+    file = make(17,true,true);
+    for (int run=0;run<2;++run) {
+        maxps4_m1_thread_report threads[2]{};
+        const int status = maxps4_fex_engine_run_m1_threads(engine,file.data(),file.size(),200,snapshot,
+            modules,2,2,threads,2);
+        if (status) std::fprintf(stderr,"M1 thread queue rejected: %d\n",status);
+        CHECK(status == 0);
+        for (size_t i=0;i<2;++i) {
+            const auto& t = threads[i];
+            CHECK(t.joined == 1 && t.id == i+1 && t.cpu.kernel_return == i+1);
+            CHECK(t.cpu.rax == 131 && t.cpu.memory == 131 && t.cpu.tls_word == 22 && t.cpu.heap_word == 22);
+            CHECK(t.modules[0] == 84 && t.modules[1] == 131 && !t.zeros[0] && !t.zeros[1]);
+            CHECK(!t.cpu.zero_memory && !t.lock_result && !t.unlock_result && t.cpu.calls == 4);
+            CHECK(t.cpu.backend == report.backend && !(t.cpu.rsp & 15));
+            std::printf("PASS M1 FEX thread=%llu joined=%u backend=%u rax=%llu tls=%llu modules=%llu/%llu mutex=%llu/%llu fs=0x%llx\n",
+                (unsigned long long)t.id,t.joined,t.cpu.backend,(unsigned long long)t.cpu.rax,
+                (unsigned long long)t.cpu.tls_word,(unsigned long long)t.modules[0],(unsigned long long)t.modules[1],
+                (unsigned long long)t.lock_result,(unsigned long long)t.unlock_result,(unsigned long long)t.cpu.fs_base);
+        }
+        CHECK(threads[0].cpu.rsp != threads[1].cpu.rsp && threads[0].cpu.fs_base != threads[1].cpu.fs_base);
+    }
+    maxps4_m1_thread_report rejected[2]{};
+    CHECK(maxps4_fex_engine_run_m1_threads(engine,file.data(),file.size(),1,snapshot,modules,2,2,rejected,2) == -E2BIG);
+    CHECK(!rejected[0].joined && !rejected[1].joined && !rejected[0].cpu.backend);
+    CHECK(maxps4_fex_engine_run_m1_threads(engine,file.data(),file.size(),200,snapshot,modules,2,5,rejected,2) == -EINVAL);
+    {
+        maxps4::GuestAddressSpace blocker(maxps4::GuestAddressSpace::Backend::fex_direct);
+        const uint64_t address = maxps4::OrbisM1::thread_base+0x4000000;
+        const uint64_t marker = 0xcafebabe;
+        CHECK(blocker.reserve(address,0x10000) == 0 && blocker.map(address,0x10000,6,&marker,8) == 0);
+        CHECK(maxps4_fex_engine_run_m1_threads(engine,file.data(),file.size(),200,snapshot,modules,2,2,rejected,2) == -EADDRINUSE);
+        CHECK(!rejected[0].joined && !rejected[1].joined);
+        uint64_t preserved=0;
+        CHECK(blocker.read(address,&preserved,8) == 0 && preserved == marker);
+        CHECK(blocker.release(address) == 0);
+        // A first ready CPU was created before the second thread collision.
+        // A clean retry proves its mappings/context were not left live.
+        CHECK(maxps4_fex_engine_run_m1_threads(engine,file.data(),file.size(),200,snapshot,modules,2,2,rejected,2) == 0);
+        CHECK(rejected[0].joined && rejected[1].joined && rejected[1].cpu.kernel_return == 2);
+    }
+    auto unsupported = make(83,true);
+    const maxps4_m1_tls_input relocation_module[] = {{unsupported.data(),unsupported.size()}};
+    CHECK(maxps4_fex_engine_run_m1_threads(engine,file.data(),file.size(),200,snapshot,relocation_module,1,2,rejected,2) == -ENOTSUP);
+    CHECK(!rejected[0].joined && !rejected[1].joined);
     file = make(); file[0x4000] = 0xeb;
     CHECK(maxps4_fex_engine_run_m1(engine,file.data(),file.size(),100,snapshot,&report) == -ENOTSUP);
     CHECK(!report.rax && !report.backend);
@@ -188,6 +238,15 @@ int main(int argc, char** argv) {
             const auto file = orbis_m1_fixture::make(17,calls);
             std::ofstream out(std::filesystem::path(argv[2])/(calls ? "m1-tls-libkernel.elf" : "m1-tls.elf"),std::ios::binary);
             out.write(reinterpret_cast<const char*>(file.data()),file.size()); CHECK(out.good());
+        }
+        const auto dynamic_file = orbis_m1_fixture::make(17,true,true);
+        std::ofstream dynamic_out(std::filesystem::path(argv[2])/"m1-two-threads-three-tls-modules.elf",std::ios::binary);
+        dynamic_out.write(reinterpret_cast<const char*>(dynamic_file.data()),dynamic_file.size()); CHECK(dynamic_out.good());
+        for (uint32_t initial : {83U,129U}) {
+            auto module = orbis_m1_fixture::make(initial,false);
+            maxps4_ps4_synthetic::put(module,0xfe18,16,2);
+            std::ofstream out(std::filesystem::path(argv[2])/("tls-"+std::to_string(initial)+".prx"),std::ios::binary);
+            out.write(reinterpret_cast<const char*>(module.data()),module.size()); CHECK(out.good());
         }
         return 0;
     }
@@ -379,7 +438,7 @@ int main(int argc, char** argv) {
     CHECK(maxps4_fex_engine_run_linked_ps4(engine,&result,&backend,&entry_out,&calls) == 0 && result == 1 && calls == 1);
     uint8_t preserved_bytes[48]{};
     CHECK(maxps4_fex_engine_read_ps4(engine,data+0x100,preserved_bytes,sizeof(preserved_bytes)) == 0);
-    for (size_t i = 0; i < sizeof(saved); ++i) CHECK(value(preserved_bytes+i*8) == 0x12340000+saved[i]);
+    for (size_t i = 0; i < sizeof(saved); ++i) CHECK(value(preserved_bytes+i*8) == uint64_t{0x12340000}+saved[i]);
     std::puts("PASS System V callee-saved RBX/RBP/R12-R15 preserved through actual FEX syscall trampoline");
     file = combined();
     CHECK(maxps4_fex_engine_link_ps4(engine,file.data(),file.size(),1000,&entry_out,&imports) == 0 && imports == 5);
@@ -426,3 +485,4 @@ int main(int argc, char** argv) {
     CHECK(!result && !backend && !entry_out && !calls);
     std::puts("PASS host-pointer isolation, failed restage and cleanup; iPhone execution requires separate device validation");
 }
+

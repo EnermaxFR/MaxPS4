@@ -12,7 +12,7 @@ constexpr uint64_t snapshot = data+0x100;
 inline uint64_t number(const std::vector<uint8_t>& b,size_t at,size_t n = 8) {
     uint64_t v = 0; for (size_t i=0;i<n;++i) v |= uint64_t(b.at(at+i))<<(8*i); return v;
 }
-inline std::vector<uint8_t> make(uint32_t initial = 17, bool calls = true) {
+inline std::vector<uint8_t> make(uint32_t initial = 17, bool calls = true, bool dynamic = false) {
     using namespace maxps4_ps4_synthetic;
     Program p;
     // Local-exec static TLS at FS-16, initialized 8 bytes plus 8 zero bytes.
@@ -30,6 +30,23 @@ inline std::vector<uint8_t> make(uint32_t initial = 17, bool calls = true) {
     }
     p.bytes({0x64,0x48,0x8b,0x04,0x25}); p.immediate(0xfffffff8,4);
     p.bytes({0x48,0xa3}); p.immediate(data+0x110,8);
+    if (dynamic) {
+        // Fixture-only module payload convention. These are x86 FS-relative
+        // accesses, not an implementation of SCE DTV/__tls_get_addr.
+        for (size_t module=0;module<2;++module) {
+            const uint32_t offset = 0x1000000+module*0x200000-0x20010;
+            p.bytes({0x64,0x48,0x8b,0x04,0x25}); p.immediate(offset,4);
+            p.bytes({0x05}); p.immediate(module+1,4);
+            p.bytes({0x64,0x48,0x89,0x04,0x25}); p.immediate(offset,4);
+        }
+        p.bytes({0x48,0xa3}); p.immediate(snapshot,8);
+        p.bytes({0x64,0x48,0x8b,0x04,0x25}); p.immediate(0x1000000-0x20010+8,4);
+        p.bytes({0x48,0xa3}); p.immediate(snapshot+16,8);
+        p.reg(7,snapshot+0x100); p.call("upoVrzMHFeE");
+        p.bytes({0x48,0xa3}); p.immediate(snapshot+0x80,8);
+        p.reg(7,snapshot+0x100); p.call("tn3VlD0hG60");
+        p.bytes({0x48,0xa3}); p.immediate(snapshot+0x88,8);
+    }
     p.bytes({0x48,0xa1}); p.immediate(snapshot,8); p.bytes({0xf4});
     auto b = p.elf();
     put(b,entry,24);
@@ -51,3 +68,4 @@ inline std::vector<uint8_t> make(uint32_t initial = 17, bool calls = true) {
     return b;
 }
 }
+

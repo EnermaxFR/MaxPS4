@@ -1,4 +1,5 @@
 #include "OrbisM1Fixture.h"
+#include "maxps4_guest_dynamic_tls.h"
 #include <cstdio>
 #include <cstdlib>
 #include <sys/wait.h>
@@ -70,6 +71,30 @@ int main() {
         CHECK(process.admit(one,1) == -E2BIG);
     }
     CHECK(process.space.allocated() == baseline);
+    {
+        const auto dynamic_file = orbis_m1_fixture::make(17,true,true);
+        OrbisM1 dynamic_process(GuestAddressSpace::Backend::translated);
+        CHECK(dynamic_process.load(dynamic_file.data(),dynamic_file.size(),200) == 0);
+        GuestTLSModules modules;
+        const auto extra_file = orbis_m1_fixture::make(83,false);
+        PS4ExecutableImage extra; CHECK(extra.load(extra_file.data(),extra_file.size()) == 0);
+        uint64_t a=0,b=0; CHECK(modules.add(extra,a) == 0 && modules.add(extra,b) == 0);
+        GuestThreadMemory one(dynamic_process.space),two(dynamic_process.space);
+        CHECK(one.initialize(dynamic_process.tls,OrbisM1::thread_base,dynamic_process.entry) == 0);
+        CHECK(two.initialize(dynamic_process.tls,OrbisM1::thread_base+0x4000000,dynamic_process.entry) == 0);
+        GuestDynamicTLS tls_one(dynamic_process.space,modules,OrbisM1::thread_base+0x1000000);
+        GuestDynamicTLS tls_two(dynamic_process.space,modules,OrbisM1::thread_base+0x5000000);
+        std::vector<GuestAddressSpace::Region> first,second;
+        for (auto id : {a,b}) {
+            uint64_t address=0;
+            CHECK(tls_one.resolve(id,0,16,address) == 0); first.push_back({address,16,6});
+            CHECK(tls_two.resolve(id,0,16,address) == 0); second.push_back({address,16,6});
+        }
+        CHECK(dynamic_process.admit(one,200,first) == 0 && dynamic_process.admit(two,200,second) == 0);
+        CHECK(dynamic_process.admit(one,200) == -EFAULT);
+        CHECK(dynamic_process.admit(one,200,second) == -EFAULT);
+        CHECK(dynamic_process.admit(two,1,second) == -E2BIG);
+    }
     using maxps4_ps4_synthetic::put;
     auto bad = file;
     put(bad,5,56,2); std::memcpy(bad.data()+288,bad.data()+232,56);
@@ -104,3 +129,4 @@ int main() {
     process.space.clear();
     std::puts("PASS guest/host separation, mappings, guards, collisions, rollback, static TLS isolation, stack and M1 admission");
 }
+

@@ -62,7 +62,8 @@ public:
     // Sound, finite admission envelope: absolute/RIP/register loads and stores,
     // static FS TLS, balanced PUSH/POP and known GOT calls. No branches or raw
     // syscalls, arbitrary RSP writes, unknown address registers or code writes.
-    int admit(const GuestThreadMemory& thread, uint32_t budget) const {
+    int admit(const GuestThreadMemory& thread, uint32_t budget,
+              const std::vector<GuestAddressSpace::Region>& dynamic_tls = {}) const {
         if (!entry || !budget || budget > 65536) return -EINVAL;
         size_t length = 0;
         for (const auto& s : source.segments()) if ((s.permissions & 1) && entry >= s.address &&
@@ -132,10 +133,13 @@ public:
                 if (left < width || (p[k] != 0x8b && p[k] != 0x89) || p[k+1] != 4 || p[k+2] != 0x25 ||
                     !thread.fs_base) return -ENOTSUP;
                 uint64_t address = 0;
-                if (!target(thread.fs_base,number(p+k+3,4),address) ||
-                    address < thread.tls_begin || address >= thread.tls_begin+tls.memory_size ||
-                    (wide ? 8U : 4U) > thread.tls_begin+tls.memory_size-address ||
-                    !access(address,wide ? 8 : 4,p[k] == 0x89)) return -EFAULT;
+                if (!target(thread.fs_base,number(p+k+3,4),address)) return -EFAULT;
+                const size_t bytes = wide ? 8 : 4;
+                bool payload = address >= thread.tls_begin && address-thread.tls_begin < tls.memory_size &&
+                    bytes <= tls.memory_size-(address-thread.tls_begin);
+                for (const auto& r : dynamic_tls) if (address >= r.address && address-r.address < r.size &&
+                    bytes <= r.size-(address-r.address)) payload = true;
+                if (!payload || !access(address,bytes,p[k] == 0x89)) return -EFAULT;
                 if (p[k] == 0x8b) known[0].reset();
             } else if (left >= 7 && p[0] == 0x48 && (p[1] == 0x8b || p[1] == 0x89) && p[2] == 5) {
                 width = 7; uint64_t address = 0;
@@ -149,6 +153,9 @@ public:
                 if (!import) return -ENOENT;
                 switch (import->service) {
                 case PS4KernelService::thread_self: break;
+                case PS4KernelService::mutex_trylock: case PS4KernelService::mutex_unlock:
+                    if (!known[7] || !access(*known[7],8,true)) return -EFAULT;
+                    break;
                 case PS4KernelService::clock_gettime: case PS4KernelService::clock_getres:
                     if (!known[6] || !access(*known[6],16,true)) return -EFAULT;
                     break;
@@ -164,3 +171,4 @@ public:
     }
 };
 }
+

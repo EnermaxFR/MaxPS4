@@ -56,9 +56,34 @@ Pas de NID ajouté. Le chemin CPU existant conserve ses refus de TLS dynamique.
 PT_TLS multiples dans un module, alignements invalides/non pris en charge,
 offsets hors bloc et absence de template sont explicitement rejetés.
 
-**Scheduler :** non livré dans cet incrément. CreateThread de FEX existe, mais
-les deux objets TLS testés ne sont pas deux threads CPU exécutés. Le scheduler
-invité avec création/join/synchronisation et preuve CPU reste à développer.
+**Deuxième incrément :** l'API expérimentale run_m1_threads crée jusqu'à quatre
+contextes CPU FEX avant toute exécution, avec piles et TLS distincts. Une file
+déterministe les exécute jusqu'à HLT puis les joint/détruit dans l'ordre des IDs.
+Les erreurs interrompent la file et détruisent aussi les contextes encore ready ;
+aucun rapport partiel n'est publié. Le libkernel partagé attache les identités
+et conserve les mutex entre threads. Seuls trylock/unlock, déjà vérifiés dans
+la table du dépôt, sont ajoutés à l'admission M1 (aucun nouveau NID).
+
+Le harness consomme des PRX plaintext sans PT_DYNAMIC, uniquement leurs
+templates PT_TLS ; toute table dynamique/relocation est refusée. Les fixtures
+accèdent aux payloads via offsets FS positifs propres au harness, validés contre
+les spans exacts des modules du thread ; un span d'un autre thread est refusé.
+Cela ne revendique pas les conventions DTV/SCE. La racine du harness impose
+16 octets de TLS dont 8 initialisés, et les modules ont 8 octets initialisés
+suivis d'au moins 8 octets zéro. L'API C de fixture reste isolée de l'interface.
+
+Les nouvelles fixtures attendent deux threads ayant chacun TLS racine 17→22
+et modules 83→84 / 129→131, RAX/mémoire 131, zones zéro, IDs 1/2 retournés par
+scePthreadSelf et retours mutex 0/0. Tous les contextes et blocs coexistent avant
+le premier dispatch. Deux répétitions puis une collision de la deuxième pile
+et un retry testent aussi le rollback après création du premier contexte.
+Ce sont des attentes jusqu'à validation des logs FEX, pas une preuve CPU locale.
+
+**Scheduler général encore absent :** pas de préemption, attente bloquante,
+création/join par appels SCE invités ni gestion pthread générale. La file est
+un modèle hôte fini de création/exécution/join, pas un remplacement du scheduler
+nécessaire aux programmes PS4 arbitraires. Aucun thread x86 n'est lancé comme
+fonction pthread hôte.
 
 ## Validation locale et limites
 

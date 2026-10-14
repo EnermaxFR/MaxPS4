@@ -33,6 +33,7 @@
 #include <unistd.h>
 #include <cerrno>
 #include <mutex>
+#include <memory>
 #include <new>
 
 extern "C" int maxps4_native_guest_x86_run(const uint8_t*, size_t, uint32_t,
@@ -49,6 +50,7 @@ public:
     maxps4::PS4Libkernel* kernel = nullptr;
     maxps4::PS4GuestMemory* memory = nullptr;
     uint64_t private_stack = 0;
+    uint64_t guest_id = 1;
     size_t private_stack_size = 0;
     uint32_t calls = 0;
     int callback_error = 0;
@@ -70,7 +72,7 @@ public:
         } else if (m1) {
             const maxps4::PS4KernelCall call{r[x86::REG_RDI],r[x86::REG_RSI],r[x86::REG_RDX],
                 r[x86::REG_R10],r[x86::REG_R8],r[x86::REG_R9],rsp};
-            result = kernel->invoke(service,call,1);
+            result = kernel->invoke(service,call,guest_id);
             ++calls;
         } else {
             // Never expose the rebased CPU RSP or CALL return pointer. Copy only
@@ -317,7 +319,11 @@ struct PM4Request {
 };
 int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     uint64_t* result, uint32_t* backend, const PM4Request* submission, bool linked = false, bool persistent_frame = false,
-    maxps4::OrbisM1* m1 = nullptr, const maxps4::GuestThreadMemory* guest_thread = nullptr) {
+    maxps4::OrbisM1* m1 = nullptr, const maxps4::GuestThreadMemory* guest_thread = nullptr,
+    FEXCore::Core::InternalThreadState* scheduled = nullptr, uint64_t guest_id = 1,
+    maxps4::PS4Libkernel* shared_kernel = nullptr, bool* scheduled_consumed = nullptr) {
+    if (scheduled_consumed) *scheduled_consumed = false;
+    if (scheduled && !scheduled_consumed) return -EINVAL;
     engine->cpu_report = {};
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
     // FEX still uses rebased host addresses for the admitted instruction set.
@@ -356,7 +362,8 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     engine->probe.image = &image;
     engine->probe.m1 = m1;
     engine->probe.linker = m1 ? &m1->linker : linked ? &engine->linker : nullptr;
-    engine->probe.kernel = m1 ? &m1_kernel : linked ? &engine->libkernel : nullptr;
+    engine->probe.kernel = m1 ? (shared_kernel ? shared_kernel : &m1_kernel) : linked ? &engine->libkernel : nullptr;
+    engine->probe.guest_id = guest_id;
     engine->probe.memory = m1 ? &m1_memory : linked ? &engine->system_memory : nullptr;
     engine->probe.private_stack = guest_thread ? guest_thread->stack_begin : reinterpret_cast<uintptr_t>(stack_base);
     engine->probe.private_stack_size = guest_thread ? guest_thread->stack_size : page;
@@ -367,6 +374,7 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
         ~ClearRange() {
             space.m1 = nullptr; space.image = nullptr; space.linker = nullptr; space.kernel = nullptr;
             space.memory = nullptr; space.private_stack = 0; space.private_stack_size = 0;
+            space.guest_id = 1;
         }
     } clear_range {engine->probe};
     uint64_t initial_rsp = 0;
@@ -374,13 +382,14 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     const int stack_status = maxps4::initialize_guest_stack(stack_base, page, initial_rip, page, initial_rsp);
     if (stack_status) return stack_status;
     if (guest_thread) initial_rsp = guest_thread->rsp;
-    auto* thread = engine->context->CreateThread(initial_rip, initial_rsp);
+    auto* thread = scheduled ? scheduled : engine->context->CreateThread(initial_rip, initial_rsp);
     if (!thread) return -ENOMEM;
     struct DestroyThread {
         FEXCore::Context::Context* context;
         FEXCore::Core::InternalThreadState* thread;
-        ~DestroyThread() { context->DestroyThread(thread); }
+        ~DestroyThread() { if (thread) context->DestroyThread(thread); }
     } destroy {engine->context.get(), thread};
+    if (scheduled_consumed) *scheduled_consumed = true;
     auto& state = thread->CurrentFrame->State;
     // Set the complete integer register entry contract explicitly on every run.
     // Preserve FEX-owned flags, segment and dispatcher frame initialization.
@@ -804,6 +813,124 @@ extern "C" int32_t maxps4_fex_engine_interpret_elf(maxps4_fex_engine* engine,
         *backend = MAXPS4_CPU_RESTRICTED_INTERPRETER;
         return status;
     } catch (const std::bad_alloc&) { return -ENOMEM; }
+}
+
+extern "C" int32_t maxps4_fex_engine_run_m1_threads(maxps4_fex_engine* engine,
+    const uint8_t* file, size_t length, uint32_t budget, uint64_t snapshot,
+    const maxps4_m1_tls_input* inputs, size_t module_count, size_t thread_count,
+    maxps4_m1_thread_report* reports, size_t report_count) {
+    if (!reports || !report_count || report_count > 4) return -EINVAL;
+    std::fill(reports,reports+report_count,maxps4_m1_thread_report{});
+    if (!engine || !file || !length || !inputs || !module_count || module_count > 16 ||
+        !thread_count || thread_count > 4 || report_count != thread_count ||
+        snapshot > UINT64_MAX-0x108) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
+    try {
+        maxps4::OrbisM1 process(maxps4::GuestAddressSpace::Backend::fex_direct);
+        int status = process.load(file,length,budget);
+        if (status) return status;
+        if (process.tls.memory_size != 16 || process.tls.block_size != 16 ||
+            process.tls.initial.size() != 8) return -ENOTSUP;
+        if (!process.space.translate(snapshot,0x108,6)) return -EFAULT;
+        maxps4::GuestTLSModules modules;
+        std::vector<uint64_t> ids;
+        for (size_t i=0;i<module_count;++i) {
+            maxps4::PS4ExecutableImage image;
+            status = image.load(inputs[i].bytes,inputs[i].size);
+            if (status) return status;
+            if (image.isSelf) return -ENOTSUP;
+            for (const auto& h : image.headers) if (h.type == 2) return -ENOTSUP;
+            uint64_t id = 0;
+            status = modules.add(image,id);
+            if (status) return status;
+            // This finite fixture ABI snapshots an initialized word and a
+            // zero word; templates with another layout need another harness.
+            const auto* tls = modules.find(id);
+            if (tls->memory_size < 16 || tls->initial.size() != 8) return -ENOTSUP;
+            ids.push_back(id);
+        }
+        maxps4::GuestELF empty;
+        maxps4::PS4GuestMemory memory(empty,&process.space);
+        maxps4::PS4Libkernel kernel(memory);
+        const maxps4::PS4KernelCall mutex_call{snapshot+0x100,0,0,0,0,0,0};
+        if (kernel.invoke(maxps4::PS4KernelService::mutex_init,mutex_call,1)) return -EFAULT;
+        struct Job {
+            std::unique_ptr<maxps4::GuestThreadMemory> memory;
+            std::unique_ptr<maxps4::GuestDynamicTLS> tls;
+            FEXCore::Core::InternalThreadState* cpu = nullptr;
+            std::vector<maxps4::GuestAddressSpace::Region> payloads;
+            uint64_t id = 0;
+        };
+        std::vector<Job> jobs(thread_count);
+        struct Cleanup {
+            FEXCore::Context::Context* context;
+            std::vector<Job>& jobs;
+            ~Cleanup() { for (auto& job : jobs) if (job.cpu) context->DestroyThread(job.cpu); }
+        } cleanup{engine->context.get(),jobs};
+        // Create every ready context and private mapping before any CPU runs.
+        for (size_t i=0;i<thread_count;++i) {
+            auto& job = jobs[i];
+            job.id = i ? kernel.threads().attach() : 1;
+            if (!job.id) return -E2BIG;
+            const uint64_t base = maxps4::OrbisM1::thread_base+i*0x4000000ULL;
+            job.memory = std::make_unique<maxps4::GuestThreadMemory>(process.space);
+            status = job.memory->initialize(process.tls,base,process.entry);
+            if (status) return status;
+            job.tls = std::make_unique<maxps4::GuestDynamicTLS>(process.space,modules,base+0x1000000);
+            for (auto id : ids) {
+                uint64_t address = 0;
+                status = job.tls->resolve(id,0,modules.find(id)->memory_size,address);
+                if (status) return status;
+                job.payloads.push_back({address,modules.find(id)->memory_size,6});
+            }
+            status = process.admit(*job.memory,budget,job.payloads);
+            if (status) return status;
+            job.cpu = engine->context->CreateThread(process.entry,job.memory->rsp);
+            if (!job.cpu) return -ENOMEM;
+        }
+        std::vector<maxps4_m1_thread_report> completed(thread_count);
+        for (size_t i=0;i<thread_count;++i) {
+            auto& job = jobs[i];
+            auto& report = completed[i];
+            const uint64_t sentinel = 0xdeadbeef;
+            if (process.space.write(snapshot+16,&sentinel,8) ||
+                process.space.write(snapshot+0x80,&sentinel,8) ||
+                process.space.write(snapshot+0x88,&sentinel,8)) return -EFAULT;
+            bool consumed = false;
+            try {
+                status = executeImage(engine,process.source,&report.cpu.rax,&report.cpu.backend,
+                    nullptr,false,false,&process,job.memory.get(),job.cpu,job.id,&kernel,&consumed);
+            } catch (...) {
+                if (consumed) job.cpu = nullptr;
+                throw;
+            }
+            // executeImage joins/destroys an owned CPU context while its GDT and
+            // private call/return mapping are still alive. Cleanup owns contexts
+            // rejected before that ownership transfer.
+            if (consumed) job.cpu = nullptr;
+            if (status) return status;
+            auto& cpu = report.cpu;
+            cpu.entry = process.entry; cpu.rsp = job.memory->rsp; cpu.fs_base = job.memory->fs_base;
+            cpu.calls = engine->probe.calls;
+            if (process.space.read(snapshot,&cpu.memory,8) ||
+                process.space.read(snapshot+8,&cpu.kernel_return,8) ||
+                process.space.read(snapshot+16,&cpu.zero_memory,8) ||
+                process.space.read(maxps4::OrbisM1::heap_base,&cpu.heap_word,8) ||
+                process.space.read(job.memory->tls_begin,&cpu.tls_word,8) ||
+                process.space.read(snapshot+0x80,&report.lock_result,8) ||
+                process.space.read(snapshot+0x88,&report.unlock_result,8)) return -EFAULT;
+            for (size_t j=0;j<module_count;++j) {
+                if (process.space.read(job.payloads[j].address,&report.modules[j],8) ||
+                    process.space.read(job.payloads[j].address+8,&report.zeros[j],8)) return -EFAULT;
+            }
+            report.id = job.id; report.joined = 1;
+            if (job.id != 1 && kernel.threads().detach(job.id) != maxps4::ps4::ok) return -EBUSY;
+        }
+        std::copy(completed.begin(),completed.end(),reports);
+        return 0;
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
+      catch (...) { return -EIO; }
 }
 
 extern "C" int32_t maxps4_fex_engine_run_m1(maxps4_fex_engine* engine,
