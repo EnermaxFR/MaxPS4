@@ -894,9 +894,10 @@ extern "C" int32_t maxps4_fex_engine_run_m1_threads(maxps4_fex_engine* engine,
             auto& job = jobs[i];
             auto& report = completed[i];
             const uint64_t sentinel = 0xdeadbeef;
-            if (process.space.write(snapshot+16,&sentinel,8) ||
-                process.space.write(snapshot+0x80,&sentinel,8) ||
-                process.space.write(snapshot+0x88,&sentinel,8)) return -EFAULT;
+            for (uint64_t address : {snapshot+16,snapshot+0x80,snapshot+0x88}) {
+                status = process.space.write(address,&sentinel,8);
+                if (status) return status;
+            }
             bool consumed = false;
             try {
                 status = executeImage(engine,process.source,&report.cpu.rax,&report.cpu.backend,
@@ -913,16 +914,21 @@ extern "C" int32_t maxps4_fex_engine_run_m1_threads(maxps4_fex_engine* engine,
             auto& cpu = report.cpu;
             cpu.entry = process.entry; cpu.rsp = job.memory->rsp; cpu.fs_base = job.memory->fs_base;
             cpu.calls = engine->probe.calls;
-            if (process.space.read(snapshot,&cpu.memory,8) ||
-                process.space.read(snapshot+8,&cpu.kernel_return,8) ||
-                process.space.read(snapshot+16,&cpu.zero_memory,8) ||
-                process.space.read(maxps4::OrbisM1::heap_base,&cpu.heap_word,8) ||
-                process.space.read(job.memory->tls_begin,&cpu.tls_word,8) ||
-                process.space.read(snapshot+0x80,&report.lock_result,8) ||
-                process.space.read(snapshot+0x88,&report.unlock_result,8)) return -EFAULT;
+            const std::pair<uint64_t,uint64_t*> reads[] = {
+                {snapshot,&cpu.memory}, {snapshot+8,&cpu.kernel_return},
+                {snapshot+16,&cpu.zero_memory}, {maxps4::OrbisM1::heap_base,&cpu.heap_word},
+                {job.memory->tls_begin,&cpu.tls_word}, {snapshot+0x80,&report.lock_result},
+                {snapshot+0x88,&report.unlock_result}
+            };
+            for (const auto& read : reads) {
+                status = process.space.read(read.first,read.second,8);
+                if (status) return status;
+            }
             for (size_t j=0;j<module_count;++j) {
-                if (process.space.read(job.payloads[j].address,&report.modules[j],8) ||
-                    process.space.read(job.payloads[j].address+8,&report.zeros[j],8)) return -EFAULT;
+                status = process.space.read(job.payloads[j].address,&report.modules[j],8);
+                if (status) return status;
+                status = process.space.read(job.payloads[j].address+8,&report.zeros[j],8);
+                if (status) return status;
             }
             report.id = job.id; report.joined = 1;
             if (job.id != 1 && kernel.threads().detach(job.id) != maxps4::ps4::ok) return -EBUSY;
