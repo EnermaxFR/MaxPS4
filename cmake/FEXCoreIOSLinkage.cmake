@@ -2,8 +2,12 @@
 # The upstream shared target contains the core objects but omits its base archive.
 function(maxps4_complete_fexcore_linkage)
   set(NATIVE "${MAXPS4_ROOT}/MaxPS4-iOS/Native")
+  # Propagate allocator failures through FEX constructors to the C bridge.
+  target_compile_options(FEXCore_object PRIVATE -fexceptions)
+  target_compile_options(FEXCore_Base PRIVATE -fexceptions)
   target_sources(FEXCore_Base PRIVATE "${NATIVE}/maxps4_jit_memory.cpp")
   target_include_directories(FEXCore_Base PRIVATE "${NATIVE}")
+  target_include_directories(FEXCore_object PRIVATE "${NATIVE}")
   target_include_directories(FEXCore PRIVATE "${NATIVE}")
   target_include_directories(FEXCore_shared PRIVATE "${NATIVE}")
   target_link_libraries(FEXCore_shared PRIVATE FEXCore_Base)

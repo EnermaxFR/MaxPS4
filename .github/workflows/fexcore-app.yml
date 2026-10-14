@@ -29,6 +29,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/diagnostics
+          xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -I MaxPS4-iOS/Native MaxPS4-iOS/Native/maxps4_jit_memory.cpp \
+            MaxPS4-iOS/Tests/FEXJITUnsupportedHostTest.cpp -o "$RUNNER_TEMP/jit-host-test"
+          "$RUNNER_TEMP/jit-host-test" | tee build/diagnostics/jit-host-abi.txt
           bash scripts/test-orbis-analysis.sh build/diagnostics/game-preflight
           xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
             MaxPS4-iOS/Native/OrbisLinkerBridge.cpp MaxPS4-iOS/Tests/OrbisLinkerTest.cpp -o "$RUNNER_TEMP/orbis-test"
@@ -86,6 +90,9 @@ jobs:
           echo "::endgroup::"
           echo "::group::Run Stik script test"
           node MaxPS4-iOS/Tests/StikScriptTest.js | tee build/diagnostics/stik-script-tests.txt
+          swiftc -parse-as-library MaxPS4-iOS/Sources/MaxPS4StikRequest.swift \
+            MaxPS4-iOS/Tests/StikRequestTest.swift -o build/stik-request-test
+          build/stik-request-test | tee build/diagnostics/stik-request-tests.txt
           echo "::endgroup::"
           echo "::group::Compile JIT memory test"
           xcrun clang++ -std=c++23 -DMAXPS4_TEST_DARWIN_JIT_POOL=1 \
