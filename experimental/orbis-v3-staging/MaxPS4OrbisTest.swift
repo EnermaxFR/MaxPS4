@@ -25,13 +25,21 @@ enum MaxPS4OrbisTest {
         return Data(bytes)
     }
     static func inspect(_ bytes: Data) -> Inspection {
-        var analysis = [CChar](repeating: 0, count: 4*1024*1024)
+        var analysis = [CChar](repeating: 0, count: 16384)
         var preparation = [CChar](repeating: 0, count: 16384)
         var image: OpaquePointer?
         let statuses = bytes.withUnsafeBytes { raw -> (Int32, Int32) in
             let data = raw.bindMemory(to: UInt8.self)
-            let inspected = analysis.withUnsafeMutableBufferPointer {
-                maxps4_orbis_bytes_report(data.baseAddress, data.count, $0.baseAddress, $0.count)
+            let inspected = analysis.withUnsafeMutableBufferPointer { buffer in
+                "test.elf".withCString { path in
+                    var module = maxps4_orbis_module(path: path, bytes: data.baseAddress,
+                        size: data.count, load_bias: 0, dependencies: nil, dependency_count: 0)
+                    var inspectionImage: OpaquePointer?
+                    let status = maxps4_orbis_link_with_report(&module, 1, 32*1024*1024,
+                        &inspectionImage, buffer.baseAddress, buffer.count)
+                    maxps4_orbis_close(inspectionImage)
+                    return status
+                }
             }
             let linked = "test.elf".withCString { path in
                 var module = maxps4_orbis_module(path: path, bytes: data.baseAddress,
