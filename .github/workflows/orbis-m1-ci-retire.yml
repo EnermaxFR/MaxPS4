@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Cancel only unfinished runs from the four superseded M1 commits
+      - name: Cancel only unfinished runs from the superseded M1 commits
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -25,6 +25,8 @@ jobs:
               '4a33c9eb3ba6e17bfa951f889446d6ebe5ac1e61',
               '275c79f45a5e70c2739f347d0dd1013047865fb2',
               '93b528b31e75876c221f05b5040eb0f13ae86837',
+              'e95d0d057a8f9d16db0938bc52a574aedd3f29ea',
+              'd4eeca72fdbe3f835292e7e734d04cedce85ee42',
           ]
           base = 'https://api.github.com/repos/' + os.environ['GH_REPO']
           headers = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
