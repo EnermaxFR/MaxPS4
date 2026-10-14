@@ -72,17 +72,9 @@ def verify(path):
         assert load_path in libraries and identifiers == [load_path]
         assert all(n.startswith(('/usr/lib/', '/System/Library/')) for n in dependencies)
         assert not any('FEXCore' in n or 'LogMan' in n or 'maxps4_' in n for n in unresolved)
-        required = {'_maxps4_fex_engine_' + n for n in ('open', 'initialize', 'cpuid', 'run', 'run_elf', 'close', 'stage')}
-        required |= {'_maxps4_jit_' + n for n in ('begin', 'cancel', 'state', 'error', 'leases')}
-        assert required <= exports, (
-            'Missing required runtime ABI exports: ' + ', '.join(sorted(required - exports))
-        )
-        app_required = {'_maxps4_fex_engine_' + n for n in
-                        ('open', 'initialize', 'cpuid', 'run_elf')}
-        app_required.add('_maxps4_jit_begin')
-        assert app_required <= imports, (
-            'Missing required application ABI imports: ' + ', '.join(sorted(app_required - imports))
-        )
+        required = {'_maxps4_fex_engine_' + n for n in ('open', 'initialize', 'cpuid', 'interpret_elf', 'run_elf', 'close', 'stage')}
+        required |= {'_maxps4_jit_' + n for n in ('begin', 'cancel', 'state', 'error', 'leases', 'confirmation', 'launch_failed')}
+        assert required <= exports and required <= imports, 'App must actually import the FEX/session ABI'
         assert any('CreateNewContext' in name for name in exports), 'Real FEX C++ runtime absent'
         fmeta = plistlib.loads(ipa.read(framework + 'Info.plist'))
         assert fmeta['CFBundleExecutable'] == 'MaxPS4FEXRuntime'
