@@ -5,6 +5,10 @@
 #include <cstring>
 #include <sys/mman.h>
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#endif
 
 namespace maxps4 {
 // Guest addresses and host storage are distinct domains. FEX's direct-memory
@@ -37,7 +41,22 @@ public:
         if (backend_ == Backend::fex_direct && low < 0x100000000ULL) return -ENOTSUP;
         const size_t bytes = size + 2 * page_;
         void* hint = backend_ == Backend::fex_direct ? reinterpret_cast<void*>(low) : nullptr;
-        void* host = ::mmap(hint, bytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        void* host = MAP_FAILED;
+#if defined(__APPLE__)
+        if (hint) {
+            // Darwin may relocate mmap hints. Mach fixed allocation, WITHOUT
+            // VM_FLAGS_OVERWRITE, fails on existing mappings instead of replacing
+            // them. Protect guards before publishing ownership or running FEX.
+            mach_vm_address_t requested = low;
+            const kern_return_t status = mach_vm_allocate(mach_task_self(),&requested,bytes,VM_FLAGS_FIXED);
+            if (status != KERN_SUCCESS) return status == KERN_NO_SPACE ? -EADDRINUSE : -ENOMEM;
+            if (mach_vm_protect(mach_task_self(),requested,bytes,FALSE,VM_PROT_NONE) != KERN_SUCCESS) {
+                mach_vm_deallocate(mach_task_self(),requested,bytes); return -EACCES;
+            }
+            host = reinterpret_cast<void*>(requested);
+        } else
+#endif
+        host = ::mmap(hint, bytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (host == MAP_FAILED) return -errno;
         if (hint && host != hint) { ::munmap(host, bytes); return -EADDRINUSE; }
         try { reservations_.push_back({address,size,host}); }

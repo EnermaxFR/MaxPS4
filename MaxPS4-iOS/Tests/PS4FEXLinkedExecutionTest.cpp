@@ -156,7 +156,9 @@ static int m1Test() {
     for (uint32_t initial : {17U,83U,129U}) for (bool calls : {false,true}) {
         file = make(initial,calls);
         for (int run=0;run<2;++run) {
-            CHECK(maxps4_fex_engine_run_m1(engine,file.data(),file.size(),100,snapshot,&report) == 0);
+            const int32_t status = maxps4_fex_engine_run_m1(engine,file.data(),file.size(),100,snapshot,&report);
+            if (status) std::fprintf(stderr,"M1 run rejected: status=%d initial=%u calls=%d\n",status,initial,calls);
+            CHECK(status == 0);
             CHECK(report.rax == initial+12 && report.memory == initial+12 && report.tls_word == initial+5);
             CHECK(report.heap_word == initial+5 && report.zero_memory == 0 && report.kernel_return == (calls ? 1U : 0U));
             CHECK(report.entry == entry && report.calls == (calls ? 2U : 0U));

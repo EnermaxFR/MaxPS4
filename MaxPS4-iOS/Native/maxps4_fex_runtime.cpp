@@ -813,10 +813,10 @@ extern "C" int32_t maxps4_fex_engine_run_m1(maxps4_fex_engine* engine,
     try {
         maxps4::OrbisM1 process(maxps4::GuestAddressSpace::Backend::fex_direct);
         int status = process.load(file,length,budget);
-        if (status) return status;
+        if (status) { std::fprintf(stderr,"M1 image mapping failed: %d\n",status); return status; }
         maxps4::GuestThreadMemory thread(process.space);
         status = thread.initialize(process.tls,maxps4::OrbisM1::thread_base,process.entry);
-        if (status) return status;
+        if (status) { std::fprintf(stderr,"M1 thread/TLS mapping failed: %d\n",status); return status; }
         status = process.admit(thread,budget);
         if (status) return status;
         const auto* output = process.space.translate(snapshot,24,4);
