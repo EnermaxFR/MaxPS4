@@ -54,3 +54,13 @@ cette fixture ou sortie Metal de cette mission observée sur iPhone.
 Le protocole `orbis-v2-iphone-protocol.md` définit les preuves à collecter.
 Kero Blaster mode 0xd reste inaccessible ; seule l’observation utilisateur
 préexistante de son identification est conservée. Aucun jeu PS4 annoncé fonctionnel.
+
+## Régression CI découverte et corrigée
+
+Le workflow smoke iOS utilise `MaxPS4Inspection-Bridging-Header.h`, sans FEX.
+La nouvelle vue y appelait le linker read-only sans déclarations C importées :
+`cannot find maxps4_orbis_module / maxps4_orbis_link_with_report / maxps4_orbis_close`.
+Le header inspection importe désormais `OrbisLinkerBridge.h`, sans importer
+FEX ni supprimer le contrôle. Le packaging complet du commit 04bbade avait
+réussi via le header complet ; cette divergence de configurations reste un
+échec réel du premier smoke, dont la correction doit être revalidée en CI.
