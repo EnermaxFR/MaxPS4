@@ -205,8 +205,10 @@ struct MaxPS4HomeView: View {
             NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        Text(game.fileName.uppercased().contains("SONICMANIA") ? "Sonic Mania" : game.name)
-                            .font(.largeTitle.bold())
+                        Text(game.fileName.uppercased().contains("KEROBLASTER") ? "Kero Blaster" : (game.fileName.uppercased().contains("SONICMANIA") ? "Sonic Mania" : game.name))
+                            .font(.title2.bold())
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.75)
                         ZStack {
                             RoundedRectangle(cornerRadius: 20)
                                 .fill(LinearGradient(colors: [.blue, .purple, .black], startPoint: .topLeading, endPoint: .bottomTrailing))
@@ -215,15 +217,18 @@ struct MaxPS4HomeView: View {
                                     .scaledToFill()
                                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                                     .clipped()
+                            } else {
+                                VStack(spacing: 12) {
+                                    Image(systemName: "gamecontroller.fill").font(.system(size: 48))
+                                    Text(game.name.uppercased())
+                                        .font(.title2.bold())
+                                        .lineLimit(2)
+                                }
+                                .foregroundStyle(.white)
                             }
-                            VStack(spacing: 12) {
-                                Image(systemName: "gamecontroller.fill").font(.system(size: 48))
-                                Text(game.fileName.uppercased().contains("SONICMANIA") ? "SONIC MANIA" : game.name.uppercased())
-                                    .font(.title2.bold())
-                            }
-                            .foregroundStyle(.white)
                         }
                         .frame(height: 180)
+                        .clipShape(RoundedRectangle(cornerRadius: 20))
                         Text(game.fileName)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
