@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <new>
 #include <sys/mman.h>
 #include <unistd.h>
 #if defined(__APPLE__)
@@ -28,7 +29,34 @@ public:
     GuestAddressSpace& operator=(const GuestAddressSpace&) = delete;
     size_t page_size() const { return page_; }
     size_t allocated() const { return allocated_; }
+    bool fex_direct() const { return backend_ == Backend::fex_direct; }
     const std::vector<Region>& regions() const { return regions_; }
+    // Checked copies may span adjacent regions backed by different mappings.
+    // Validate the complete span first; a hole/protection failure copies nothing.
+    // Owner serializes map/protect/release against these operations.
+    int read(uint64_t address, void* output, size_t size, bool instruction = false) const {
+        if (!output) return -EINVAL;
+        const uint32_t permission = instruction ? 5 : 4;
+        const int error = check_span(address,size,permission);
+        if (error) return error;
+        try {
+            std::vector<uint8_t> scratch(size);
+            copy_span(address,scratch.data(),size,permission,false);
+            std::memmove(output,scratch.data(),size);
+        } catch (const std::bad_alloc&) { return -ENOMEM; }
+        return 0;
+    }
+    int write(uint64_t address, const void* input, size_t size) {
+        if (!input) return -EINVAL;
+        const int error = check_span(address,size,2);
+        if (error) return error;
+        try {
+            const auto* bytes = static_cast<const uint8_t*>(input);
+            std::vector<uint8_t> scratch(bytes,bytes+size);
+            copy_span(address,scratch.data(),size,2,true);
+        } catch (const std::bad_alloc&) { return -ENOMEM; }
+        return 0;
+    }
     int reserve(uint64_t address, size_t size) {
         if (!page_) return -ENOTSUP;
         if (!size || address % page_ || size % page_ || address < page_ ||
@@ -148,6 +176,24 @@ private:
     size_t page_ = 0, allocated_ = 0;
     std::vector<Reservation> reservations_;
     std::vector<Region> regions_;
+    int check_span(uint64_t address, size_t size, uint32_t permission) const {
+        if (!size || size > budget || size > UINT64_MAX-address) return -EINVAL;
+        while (size) {
+            const size_t chunk = contiguous(address,size,permission);
+            if (!chunk) return -EFAULT;
+            address += chunk; size -= chunk;
+        }
+        return 0;
+    }
+    void copy_span(uint64_t address, uint8_t* buffer, size_t size, uint32_t permission, bool write) const {
+        while (size) {
+            const size_t chunk = contiguous(address,size,permission);
+            const auto* host = translate(address,chunk,permission);
+            if (write) std::memcpy(const_cast<uint8_t*>(host),buffer,chunk);
+            else std::memcpy(buffer,host,chunk);
+            address += chunk; buffer += chunk; size -= chunk;
+        }
+    }
     Reservation* containing(uint64_t address, size_t size) {
         for (auto& r : reservations_) if (address >= r.address && address-r.address <= r.size &&
             size <= r.size-(address-r.address)) return &r;
@@ -155,3 +201,4 @@ private:
     }
 };
 }
+

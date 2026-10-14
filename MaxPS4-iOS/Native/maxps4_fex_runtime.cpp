@@ -1,5 +1,6 @@
 #include "maxps4_guest_frame.h"
 #include "maxps4_guest_stack.h"
+#include "maxps4_guest_dynamic_tls.h"
 #include "maxps4_orbis_m1.h"
 #include <algorithm>
 #include <iterator>
@@ -320,6 +321,9 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     engine->cpu_report = {};
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
     // FEX still uses rebased host addresses for the admitted instruction set.
+    // Checked loader copies are not a JIT memory translator. Never dispatch
+    // logical VAs from the translated backend through this direct-memory JIT.
+    if (m1 && !m1->space.fex_direct()) return -ENOTSUP;
     // Check the logical PS4 entry via the shared guest-memory contract before
     // giving FEX a host pointer. This is not general address-space translation.
     maxps4::PS4GuestMemory guest_memory(image);
@@ -836,3 +840,4 @@ extern "C" int32_t maxps4_fex_engine_run_m1(maxps4_fex_engine* engine,
         return 0;
     } catch (const std::bad_alloc&) { return -ENOMEM; }
 }
+

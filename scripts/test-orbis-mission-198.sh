@@ -26,3 +26,7 @@ m1_sources=(
 "$CXX" "${flags[@]}" -I MaxPS4-iOS/Native \
   "${m1_sources[@]}" -o "$OUT/OrbisM1MemoryTest"
 "$OUT/OrbisM1MemoryTest" | tee "$OUT/OrbisM1MemoryTest.txt"
+"$CXX" "${flags[@]}" -I MaxPS4-iOS/Native \
+  MaxPS4-iOS/Tests/GuestDynamicTLSTest.cpp -o "$OUT/GuestDynamicTLSTest"
+"$OUT/GuestDynamicTLSTest" | tee "$OUT/GuestDynamicTLSTest.txt"
+
