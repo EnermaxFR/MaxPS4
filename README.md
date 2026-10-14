@@ -83,4 +83,6 @@ Analyse ELF Orbis/SCE et préparation PRX non chiffrée : [périmètre, limites 
 
 Pré-démarrage d'un dossier de jeu accessible : [audit PKG/ELF/PRX/FEX, rapport exportable et procédure Kero Blaster](docs/kero-blaster-preflight.md). Le PFS opaque reste inaccessible ; aucun démarrage du jeu n'est validé.
 
+Audit du lecteur AetherPS4 et diagnostic indépendant d'en-tête PFS : [comparaison, licences et procédure iPhone](docs/aether-pkg-pfs-audit.md). Aucun déchiffrement, montage PFS ou démarrage de Kero Blaster ajouté.
+
 Première scène synthétique interactive : [pixels invités, commandes et import iPhone](docs/first-playable-frame.md). Les preuves FEX natives et l’IPA ne remplacent pas une validation sur iPhone physique.

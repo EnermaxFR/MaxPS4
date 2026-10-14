@@ -1,0 +1,145 @@
+{
+  "repository": "https://github.com/Leviidev/AetherPS4",
+  "revision": "3347fc13f19860855ce91b66356940989ea6b6a6",
+  "scope": "Static source/notice inventory only; keys.h and executable excluded; no upstream code redistributed. Empty SPDX list is not a conclusion that a file is unlicensed.",
+  "files": [
+    {
+      "path": "tools/pkg-extract/pkg_extractor.cpp",
+      "sha256": "cb0403988dc9b71f1f7e9ee3105c3e49fab6df99d5acc1000def56fcae2aa906",
+      "lines": 1004,
+      "spdx_license_identifiers": []
+    },
+    {
+      "path": "tools/pkg-extract/pkg_extractor.h",
+      "sha256": "7ff4fcd31368ea323a233e0bafcb548ffabb27e74e0c666dcfdeece41cd8ae2f",
+      "lines": 29,
+      "spdx_license_identifiers": []
+    },
+    {
+      "path": "tools/pkg-extract/pkg_type.cpp",
+      "sha256": "6956ba4b55caf24bb6a36780bef9fd4ffd93531b025ded890c0d1b646e6dffd0",
+      "lines": 639,
+      "spdx_license_identifiers": [
+        "GPL-2.0-or-later"
+      ]
+    },
+    {
+      "path": "tools/pkg-extract/pkg_type.h",
+      "sha256": "9b48481ebfedfb65741506e288cbcab6d6122581a7228571946cfe8f1def44fa",
+      "lines": 10,
+      "spdx_license_identifiers": [
+        "GPL-2.0-or-later"
+      ]
+    },
+    {
+      "path": "tools/pkg-extract/pfs.h",
+      "sha256": "1f641548ca476fae0ff30d50f419f74228a1bc47922b24a5acf2d72e38defd74",
+      "lines": 123,
+      "spdx_license_identifiers": [
+        "GPL-2.0-or-later"
+      ]
+    },
+    {
+      "path": "tools/pkg-extract/pkg_crypto.cpp",
+      "sha256": "124e672081bd6df8cafee7a4e5e774fb74230fd48f9027d9888cd19e0391c5be",
+      "lines": 613,
+      "spdx_license_identifiers": []
+    },
+    {
+      "path": "tools/pkg-extract/pkg_crypto.h",
+      "sha256": "da49132f79d4d690ce68ed7fba9ae4ff00b0420621f772aade04eca0a409d358",
+      "lines": 60,
+      "spdx_license_identifiers": []
+    },
+    {
+      "path": "tools/pkg-extract/pkg_rsa_native.cpp",
+      "sha256": "594adcab39e9deabe6f806ba1fe4b9fb6e95101101212fb9e1f677103c1e4822",
+      "lines": 99,
+      "spdx_license_identifiers": []
+    },
+    {
+      "path": "tools/pkg-extract/pkg_rsa_native.h",
+      "sha256": "31770354e4a34475605080282a3fdc1579454f6a5e0ecbc2a5b564f1d743134f",
+      "lines": 17,
+      "spdx_license_identifiers": []
+    },
+    {
+      "path": "tools/pkg-extract/types.h",
+      "sha256": "8744a49d86dda98bd20e1a9d2c5ab30abba153cd799465c00bb08034f7c20bc2",
+      "lines": 42,
+      "spdx_license_identifiers": []
+    },
+    {
+      "path": "tools/pkg-extract/aes.c",
+      "sha256": "f7f78b44654efd3542b6886923dd05194286807ebcfeb078ea05d21fe901ee9e",
+      "lines": 572,
+      "spdx_license_identifiers": []
+    },
+    {
+      "path": "tools/pkg-extract/aes.h",
+      "sha256": "9f74a4de3bd11621ff6e8fb9b352b060f699e6c1c67f81a22d104aacad61a23b",
+      "lines": 91,
+      "spdx_license_identifiers": []
+    },
+    {
+      "path": "tools/pkg-extract/aes_neon.h",
+      "sha256": "2f87f674309ed833aaa176900e50b0538ffc4ef41bc9cab129c36154c15bf7a5",
+      "lines": 86,
+      "spdx_license_identifiers": []
+    },
+    {
+      "path": "tools/pkg-extract/main_cli.cpp",
+      "sha256": "357cc70a396273028ae0c4e63a7ad2a5d3b415bc616539f193afafafc31e1d01",
+      "lines": 79,
+      "spdx_license_identifiers": []
+    },
+    {
+      "path": "tools/pkg-extract/build.sh",
+      "sha256": "8d55a7d4534c4e94d8210591e3140d2325c2879536317318e6335da1011c4f64",
+      "lines": 51,
+      "spdx_license_identifiers": []
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+      "lines": 339,
+      "spdx_license_identifiers": []
+    },
+    {
+      "path": "REUSE.toml",
+      "sha256": "69b4e8c379b1d092ac2e1f4b71d1f045b14e07a4a430418e6724bf1fcc78b59f",
+      "lines": 113,
+      "spdx_license_identifiers": []
+    },
+    {
+      "path": "README.md",
+      "sha256": "3e0a9c2b3a8bbc22805b0cb7f8f768a6199324608eafd27072a9993042d1d130",
+      "lines": 67,
+      "spdx_license_identifiers": []
+    },
+    {
+      "path": "LICENSES/libdeflate-NOTICE.txt",
+      "sha256": "b5f6ad8bae408a30e16c8233171fdff44aed8498c276e6f7253216ed46282bf3",
+      "lines": 24,
+      "spdx_license_identifiers": []
+    },
+    {
+      "path": "launcher/AetherPS4/Tests/AetherPS4Tests/PkgExtractCLITests.swift",
+      "sha256": "eaaa9210619fd78bc8e29f86cd8cf4d460f0eed5dd929adcb48b566e11839267",
+      "lines": 45,
+      "spdx_license_identifiers": []
+    },
+    {
+      "path": "launcher/AetherPS4/Sources/AetherPS4/Models/PkgExtractorLocator.swift",
+      "sha256": "09ece895399a0c240e611edf37bb2a839aa50b46818dadcbffb3eecf35e6b422",
+      "lines": 62,
+      "spdx_license_identifiers": []
+    },
+    {
+      "path": "launcher/AetherPS4/Sources/AetherPS4/Models/EmulatorProcess.swift",
+      "sha256": "225718abddf19bd7f97adc8f9b010f3d2190a5c5d6a78bd9614cde7f2148c12a",
+      "lines": 338,
+      "spdx_license_identifiers": []
+    }
+  ]
+}

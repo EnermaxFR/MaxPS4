@@ -1,6 +1,8 @@
 #include "PS4PKGBridge.h"
 #include "PS4PKGInventory.hpp"
 #include "PS4SFO.hpp"
+#include "PS4PFSHeaderDiagnostic.hpp"
+#include <fcntl.h>
 #include "PS4PKGRuntimePlan.hpp"
 #include <algorithm>
 #include <cerrno>
@@ -22,8 +24,11 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
     if (!path) return sourceError(EINVAL, "chemin absent");
     try {
         const auto closeFile = [](FILE* f) { std::fclose(f); };
-        std::unique_ptr<FILE, decltype(closeFile)> file(std::fopen(path, "rb"), closeFile);
-        if (!file) { const int code = errno; return sourceError(code, std::strerror(code)); }
+        const int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0) { const int code = errno; return sourceError(code, std::strerror(code)); }
+        FILE* stream = fdopen(fd, "rb");
+        if (!stream) { const int code = errno; close(fd); return sourceError(code, std::strerror(code)); }
+        std::unique_ptr<FILE, decltype(closeFile)> file(stream, closeFile);
         struct stat info{};
         if (fstat(fileno(file.get()), &info)) { const int code = errno; return sourceError(code, std::strerror(code)); }
         if (!S_ISREG(info.st_mode) || info.st_size < 0) return sourceError(EINVAL, "fichier régulier requis");
@@ -51,6 +56,11 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
             report << "Taille vérifiée : " << size << " octets ; entrées : " << pkg.entries.size()
                    << "\nCorps : " << pkg.bodyOffset << " + " << pkg.bodySize
                    << "\nPFS : " << pkg.pfsOffset << " + " << pkg.pfsSize << " (opaque, non monté)\n";
+            maxps4::PS4PFSHeaderDiagnostic pfs;
+            pfs.inspect(pkg,read);
+            report << "Diagnostic en-tête PFS : " << pfs.message
+                   << " ; mode=0x" << std::hex << pfs.mode << std::dec
+                   << " ; budget de lecture=" << pfs.bytesRead << " octets (maximum 72)\n";
             // Descriptor counts are informational; no access to the opaque PFS is inferred.
             size_t readable = 0, encrypted = 0, unsupported = 0, unknown = 0, invalid = 0;
             for (const auto& entry : pkg.entries) {
@@ -183,7 +193,7 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                    << "Les flags déclarés ne constituent pas une authentification.\n"
                    << "Les noms de descripteurs ne constituent pas un système de fichiers ; aucune admission ELF/SELF ni exécution.\n"
                    << "Absence de signature dans ces ressources ≠ absence d'exécutable dans le PKG.\n"
-                   << "Aucun déchiffrement, aucune recherche dans les clés/licences ou le PFS.\n";
+                   << "Aucun déchiffrement, aucune recherche dans les clés/licences ou le contenu PFS ; en-tête seul diagnostiqué.\n";
         }
         const auto text = report.str();
         const auto count = text.size() < capacity - 1 ? text.size() : capacity - 1;
