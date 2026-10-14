@@ -110,6 +110,25 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                 report << "Fichier PFS uroot : " << f.path << " ; octets=" << f.size << '\n';
             const bool pfsAccessible = pfs.status == maxps4::PS4PFSReadOnly::Status::accessible;
             const bool pfsEboot = std::any_of(pfs.files.begin(),pfs.files.end(),[](const auto& f) { return f.path=="eboot.bin"; });
+            // Explicit extraction gate: a PKG descriptor or artwork never proves that
+            // the game executable is readable. Keep encrypted PFS inaccessible.
+            if (pfsAccessible && pfsEboot) {
+                const auto eboot = std::find_if(pfs.files.begin(),pfs.files.end(),
+                    [](const auto& f) { return f.path == "eboot.bin"; });
+                report << "Extraction eboot.bin : fichier PFS non chiffré repéré ; taille="
+                       << eboot->size << " octets ; extraction sélectionnée "
+                       << (eboot->size <= 64ULL*1024*1024 ? "possible via API (non exécuté)" : "refusée (>64 Mio)")
+                       << " ; format exécutable non validé.\
+";
+            } else if (pfsAccessible) {
+                report << "Extraction eboot.bin : absent du répertoire PFS accessible.\
+";
+            } else {
+                report << "Extraction eboot.bin : impossible depuis ce PKG (PFS opaque ou chiffré) ; "
+                          "fournir un fichier non chiffré autorisé séparément.\
+";
+            }
+
             if (pfsAccessible)
                 report << "Contenu PFS : fichiers uroot accessibles ; eboot.bin " << (pfsEboot ? "présent" : "absent")
                        << "; présence distincte de validation ELF et de démarrage.\n"
