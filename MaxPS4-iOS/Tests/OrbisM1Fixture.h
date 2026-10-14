@@ -45,6 +45,7 @@ inline std::vector<uint8_t> make(uint32_t initial = 17, bool calls = true) {
     put(b,7,at,4); put(b,4,at+4,4); put(b,data_file+0x2000,at+8);
     put(b,data+0x2000,at+16); put(b,8,at+32); put(b,16,at+40); put(b,16,at+48);
     put(b,initial,data_file+0x2000);
+    put(b,0xdeadbeef,data_file+0x110); // CPU must overwrite this using the zero TLS tail.
     return b;
 }
 }

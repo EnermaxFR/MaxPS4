@@ -60,12 +60,36 @@ int main() {
     }
     CHECK(process.space.allocated() == baseline);
     using maxps4_ps4_synthetic::put;
-    auto bad = file; put(bad,3,232+48); CHECK(process.load(bad.data(),bad.size(),100) == -ENOEXEC);
+    auto bad = file;
+    put(bad,5,56,2); std::memcpy(bad.data()+288,bad.data()+232,56);
+    CHECK(process.load(bad.data(),bad.size(),100) == -ENOEXEC && process.space.allocated() == 0);
+    bad = file; put(bad,0xa008,232+8);
+    CHECK(process.load(bad.data(),bad.size(),100) == -ENOEXEC);
+    bad = file; put(bad,3,232+48); CHECK(process.load(bad.data(),bad.size(),100) == -ENOEXEC);
     bad = file; put(bad,4,56,2); put(bad,32*1024*1024,232+40); CHECK(process.load(bad.data(),bad.size(),100) == -ENOEXEC);
     bad = file; put(bad,orbis_m1_fixture::data+0x2008,232+16); CHECK(process.load(bad.data(),bad.size(),100) == -ENOTSUP);
     bad = file; bad[0x4000] = 0xeb;
     CHECK(process.load(bad.data(),bad.size(),100) == 0);
     GuestThreadMemory thread(process.space); CHECK(thread.initialize(process.tls,OrbisM1::thread_base,process.entry) == 0);
     CHECK(process.admit(thread,100) == -ENOTSUP);
+    thread.clear();
+    for (int fault=0;fault<5;++fault) {
+        bad = file;
+        if (fault == 0) put(bad,0xffffffd0,0x4005,4); // FS outside TLS.
+        if (fault == 1) put(bad,orbis_m1_fixture::data,0x401b); // Write GOT capability.
+        if (fault == 2) put(bad,orbis_m1_fixture::entry,0x401b); // Write RX.
+        if (fault == 3) put(bad,UINT64_MAX-3,0x401b); // Absolute overflow.
+        if (fault == 4) bad[0x4000] = 0x58; // POP without PUSH.
+        CHECK(process.load(bad.data(),bad.size(),100) == 0);
+        CHECK(thread.initialize(process.tls,OrbisM1::thread_base,process.entry) == 0);
+        CHECK(process.admit(thread,100) == (fault == 4 ? -ENOTSUP : -EFAULT));
+        thread.clear();
+    }
+    process.space.clear();
+    CHECK(process.space.reserve(base,2*page) == 0);
+    CHECK(process.space.reserve(base+0x100000000ULL,2*page) == 0); // Sparse VA, bounded host storage.
+    CHECK(process.space.allocated() == 4*page);
+    CHECK(process.space.map(base,page,1) == -EINVAL); // X requires R, host pages never executable.
+    process.space.clear();
     std::puts("PASS guest/host separation, mappings, guards, collisions, rollback, static TLS isolation, stack and M1 admission");
 }

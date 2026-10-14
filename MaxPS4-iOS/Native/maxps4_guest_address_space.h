@@ -77,7 +77,8 @@ public:
         return 0;
     }
     int protect(uint64_t address, size_t size, uint32_t permissions) {
-        if ((permissions & ~7U) || (permissions & 3U) == 3U) return -EINVAL;
+        if ((permissions & ~7U) || (permissions & 3U) == 3U ||
+            ((permissions & 1U) && !(permissions & 4U))) return -EINVAL;
         for (auto& region : regions_) if (region.address == address && region.size == size) {
             auto* r = containing(address,size);
             const uint64_t low = address / page_ * page_;
