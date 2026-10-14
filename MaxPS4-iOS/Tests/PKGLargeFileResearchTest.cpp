@@ -15,5 +15,16 @@ int main(int argc, char** argv) {
     std::array<unsigned char, 24> output{};
     assert(maxps4_pkg_read_artwork(argv[1], 0x1200, output.data(), output.size(), &length) == 0);
     assert(output[0] == 137 && output[19] == 1 && output[23] == 1);
-    std::puts("PASS sparse >2GB/4GB PKG inventory and exact artwork read");
+    // A short destination must not receive a partial PNG or change its guard bytes.
+    std::array<unsigned char, 23> shortOutput{};
+    shortOutput.fill(0xA5);
+    length = 0;
+    assert(maxps4_pkg_read_artwork(argv[1], 0x1200, shortOutput.data(), shortOutput.size(), &length) == -ENOSPC);
+    assert(length == 24);
+    for (auto b : shortOutput) assert(b == 0xA5);
+    // Only the two explicitly admitted artwork descriptors are readable.
+    length = 99;
+    assert(maxps4_pkg_read_artwork(argv[1], 0x1000, output.data(), output.size(), &length) == -EINVAL);
+    assert(length == 0);
+    std::puts("PASS sparse >2GB/4GB PKG inventory, exact artwork read, and bounded output");
 }
