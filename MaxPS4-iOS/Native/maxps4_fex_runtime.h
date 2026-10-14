@@ -49,6 +49,16 @@ int32_t maxps4_fex_engine_initialize(maxps4_fex_engine *engine);
 int32_t maxps4_fex_engine_open(maxps4_fex_engine **out);
 void maxps4_fex_engine_close(maxps4_fex_engine *engine);
 int32_t maxps4_fex_engine_stage(const maxps4_fex_engine *engine);
+// Snapshot of the last executeImage attempt; no host pointers are exported.
+// Initial values are read from the actual FEX CPU frame and private stack.
+typedef struct maxps4_fex_cpu_report {
+    uint64_t entry, rax, argc, page_size;
+    uint32_t rsp_alignment, zero_integer_registers, entry_matches,
+             argv_env_null, auxv_valid, completed;
+} maxps4_fex_cpu_report;
+int32_t maxps4_fex_engine_last_cpu_report(const maxps4_fex_engine *engine,
+                                        maxps4_fex_cpu_report *report);
+
 int32_t maxps4_fex_engine_cpuid(maxps4_fex_engine *engine, uint32_t leaf,
                               uint32_t subleaf, uint32_t out[4]);
 // Compatibility synthetic ELF fixture routed through run_elf; no host syscalls.
@@ -162,7 +172,3 @@ int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine, const uint8_t *code,
 #ifdef __cplusplus
 }
 #endif
-
-
-
-

@@ -2,7 +2,7 @@ name: MaxPS4 FEXCore SideStore IPA
 on:
   workflow_dispatch:
   push:
-    branches: ['codex/ps4-memory-translation-contract', 'integration/ps4-fex-orbis-pkg-validation', 'experiment/orbis-runtime-pkg-v2']
+    branches: ['codex/ps4-memory-translation-contract', 'integration/ps4-fex-orbis-pkg-validation', 'experiment/orbis-runtime-pkg-v2', 'experiment/orbis-v3-autotests']
     paths:
       - 'MaxPS4-iOS/**'
       - 'scripts/*fexcore*'
@@ -213,11 +213,11 @@ jobs:
       - name: Verify isolated Orbis Test IPA and preserve named artifact
         run: |
           python3 scripts/verify-orbis-v2-ipa.py build/MaxPS4-FEXCore-SideStore.ipa
-          cp build/MaxPS4-FEXCore-SideStore.ipa build/MaxPS4-Orbis-Test-SideStore.ipa
+          cp build/MaxPS4-FEXCore-SideStore.ipa build/MaxPS4-Orbis-V3-Test-SideStore.ipa
       - uses: actions/upload-artifact@v4
         with:
-          name: MaxPS4-Orbis-Test-SideStore
-          path: build/MaxPS4-Orbis-Test-SideStore.ipa
+          name: MaxPS4-Orbis-V3-Test-SideStore
+          path: build/MaxPS4-Orbis-V3-Test-SideStore.ipa
           if-no-files-found: error
           retention-days: 14
       - name: Record exact pre-resigning signature and entitlements

@@ -181,29 +181,50 @@ int main(int argc, char** argv) {
         }
         return 0;
     }
-    // V2 legal ET_SCE_EXEC fixture. Same bytes as Swift/Python; actual FEX only.
-    for (uint32_t initial : {40U, 7U}) {
-        auto bytes = guest_test::elf(initial, 2, false);
-        bytes[7] = 9; guest_test::put(bytes,0xfe00,16,2);
-        const maxps4_orbis_module module{"test.elf",bytes.data(),bytes.size(),0,nullptr,0};
+    // Alternate code in the same FEX context: stale translations must never
+    // return the previous image's value when mmap reuses its host address.
+    for (int restart=0;restart<3;++restart) {
         maxps4_fex_engine* process = nullptr;
         CHECK(maxps4_fex_engine_open(&process)==0 && process);
-        struct CloseV2 { maxps4_fex_engine* p; ~CloseV2() { maxps4_fex_engine_close(p); } } closeV2{process};
-        char diagnostic[512]{};
-        CHECK(maxps4_fex_engine_prepare_orbis(process,&module,1,"test.elf",64,diagnostic,sizeof(diagnostic))==0);
-        uint64_t result=99, entry=99; uint32_t backend=99;
-        CHECK(maxps4_fex_engine_run_orbis(process,&result,&backend,&entry)==-EAGAIN);
-        CHECK(result==0 && backend==0 && entry==0);
-        CHECK(maxps4_fex_engine_initialize(process)==0);
-        CHECK(maxps4_fex_engine_run_orbis(process,&result,&backend,&entry)==0);
-        CHECK(result==initial+2 && entry==0x1000);
+        struct CloseV3 { maxps4_fex_engine* p; ~CloseV3() { maxps4_fex_engine_close(p); } } closeV3{process};
+        for (int repeat=0;repeat<16;++repeat) {
+            const uint32_t initial = repeat & 1 ? 7 : 40;
+            auto bytes = guest_test::elf(initial, 2, false);
+            bytes[7] = 9; guest_test::put(bytes,0xfe00,16,2);
+            const maxps4_orbis_module module{"test.elf",bytes.data(),bytes.size(),0,nullptr,0};
+            char diagnostic[512]{};
+            CHECK(maxps4_fex_engine_prepare_orbis(process,&module,1,"test.elf",64,diagnostic,sizeof(diagnostic))==0);
+            uint64_t result=99, logical_entry=99; uint32_t backend=99;
+            if (!repeat) {
+                CHECK(maxps4_fex_engine_run_orbis(process,&result,&backend,&logical_entry)==-EAGAIN);
+                CHECK(result==0 && backend==0 && logical_entry==0);
+                CHECK(maxps4_fex_engine_initialize(process)==0);
+            }
+            CHECK(maxps4_fex_engine_run_orbis(process,&result,&backend,&logical_entry)==0);
+            CHECK(result==initial+2 && logical_entry==0x1000);
 #ifdef VIXL_SIMULATOR
-        CHECK(backend==MAXPS4_CPU_FEX_ARM64_SIMULATOR);
+            CHECK(backend==MAXPS4_CPU_FEX_ARM64_SIMULATOR);
 #else
-        CHECK(backend==MAXPS4_CPU_FEX_ARM64_JIT);
+            CHECK(backend==MAXPS4_CPU_FEX_ARM64_JIT);
 #endif
-        std::printf("PASS V2 ET_SCE_EXEC real FEX result=%llu backend=%u entry=0x%llx (host evidence only)\n",
-            (unsigned long long)result,backend,(unsigned long long)entry);
+            maxps4_fex_cpu_report report{};
+            CHECK(maxps4_fex_engine_last_cpu_report(process,&report)==0);
+            CHECK(report.completed && report.rax==result && report.entry==logical_entry);
+            CHECK(!report.rsp_alignment && report.zero_integer_registers && report.entry_matches);
+            CHECK(!report.argc && report.argv_env_null && report.auxv_valid && report.page_size>0);
+            uint8_t code[11]{};
+            CHECK(maxps4_fex_engine_fetch_ps4(process,0x1000,code,sizeof(code))==0 && code[1]==initial);
+            uint32_t permitted=99;
+            CHECK(maxps4_fex_engine_query_ps4(process,0x1000,1,2,&permitted)==0 && !permitted);
+            CHECK(maxps4_fex_engine_write_ps4(process,0x1000,code,1)==-EFAULT);
+            std::printf("PASS V3 ET_SCE_EXEC real FEX restart=%d repeat=%d result=%llu backend=%u entry=0x%llx stack/regs=verified (host evidence only)\n",
+                restart,repeat,(unsigned long long)result,backend,(unsigned long long)logical_entry);
+            // A failed preparation clears admission; the old program cannot run.
+            bytes[120]=0xeb;
+            CHECK(maxps4_fex_engine_prepare_orbis(process,&module,1,"test.elf",64,diagnostic,sizeof(diagnostic))!=0);
+            CHECK(maxps4_fex_engine_run_orbis(process,&result,&backend,&logical_entry)==-EFAULT);
+            CHECK(!result && !backend && !logical_entry);
+        }
     }
     CHECK(playableTest()==0);
     CHECK(animatedGuestTest()==0);

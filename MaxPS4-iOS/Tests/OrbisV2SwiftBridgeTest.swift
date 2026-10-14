@@ -13,6 +13,14 @@ struct OrbisV2SwiftBridgeTest {
         precondition(!MaxPS4OrbisTest.inspect(corrupt).ready)
         precondition(!MaxPS4OrbisTest.inspect(Data()).ready)
         precondition(MaxPS4OrbisTest.run(MaxPS4OrbisTest.inspect(corrupt)) == "execution=refused_validation")
-        print("PASS V2 real Swift/C snapshot validation, legal fixture SHA256, W+X refusal, redacted export; no execution in this test")
+        let second = MaxPS4OrbisTest.inspect(MaxPS4OrbisTest.fixture(initial: 7))
+        precondition(second.ready)
+        let tests = MaxPS4OrbisTest.autotests()
+        precondition(tests.contains("rax=42") && tests.contains("rax=9"))
+        precondition(tests.components(separatedBy: "fixture_verified=true").count == 5)
+        precondition(tests.components(separatedBy: "cpu_state_verified=true").count == 5)
+        precondition(tests.contains("wx_refused=true") && tests.contains("truncated_refused=true"))
+        print(tests)
+        print("PASS V3 real Swift/C snapshot validation, legal fixture SHA256, W+X refusal, redacted export; real host FEX 42/9 and CPU state verified; no iPhone execution")
     }
 }

@@ -6,6 +6,7 @@ struct MaxPS4OrbisTestView: View {
     @State private var busy = false
     @State private var inspection: MaxPS4OrbisTest.Inspection?
     @State private var execution = "execution=not_attempted"
+    @State private var autotests = "autotests=not_attempted"
     @State private var error: String?
     private let queue = DispatchQueue(label: "maxps4.orbis-test", qos: .userInitiated)
 
@@ -28,13 +29,21 @@ struct MaxPS4OrbisTestView: View {
                             DispatchQueue.main.async { execution = result; busy = false }
                         }
                     }.disabled(busy || inspection?.ready != true)
+                    Button("Autotests FEX : 42, 9 et répétitions") {
+                        busy = true
+                        queue.async {
+                            let results = MaxPS4OrbisTest.autotests()
+                            DispatchQueue.main.async { autotests = results; busy = false }
+                        }
+                    }.disabled(busy)
+                    Text(autotests).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                     if busy { ProgressView("Vérification en cours…") }
                     if let error { Text(error).foregroundStyle(.orange) }
                     if let inspection {
                         Text(inspection.report).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                         Text(execution).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                         ShareLink("Exporter le diagnostic sans chemins ni contenu ELF",
-                                  item: inspection.export + "\n" + execution)
+                                  item: inspection.export + "\n" + execution + "\n" + autotests)
                     }
                     Text("Un test FEX synthétique, un chargement ELF et une exécution Orbis sont des preuves distinctes. Aucun jeu PS4 validé.").font(.footnote)
                 }.padding()
