@@ -21,6 +21,8 @@ jobs:
           git -C build/aether-app sparse-checkout set runtime/sources/fexcore-darwin src/core/guest_cpu src/core/ios
           git -C build/aether-app checkout 3347fc13f19860855ce91b66356940989ea6b6a6
           brew install ninja xcodegen
+      - name: Build required host-side fixture for IPA packaging
+        run: bash scripts/build-fexcore-darwin-ios.sh build/aether-app build/fex-app-host --host-runtime
       - name: Build and verify separate Orbis Test IPA
         run: bash scripts/build-orbis-test-ipa.sh build/aether-app
       - uses: actions/upload-artifact@v4
