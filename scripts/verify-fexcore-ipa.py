@@ -51,7 +51,7 @@ def verify(path):
         assert metadata['CFBundleVersion'] == expected_build.group(1), (
             f"IPA build {metadata['CFBundleVersion']} does not match project build {expected_build.group(1)}"
         )
-        expected_bundle = re.search(r"PRODUCT_BUNDLE_IDENTIFIER:\\s*([^\\s#]+)", project)
+        expected_bundle = re.search(r"PRODUCT_BUNDLE_IDENTIFIER:\s*([^\s#]+)", project)
         assert expected_bundle, 'Missing expected bundle identifier in project.yml'
         assert metadata['CFBundleIdentifier'] == expected_bundle.group(1), (
             f"IPA bundle ID {metadata['CFBundleIdentifier']} does not match project {expected_bundle.group(1)}"
