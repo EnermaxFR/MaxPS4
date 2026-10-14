@@ -136,12 +136,16 @@ int main(int argc,char** argv) {
     assert(maxps4_pkg_inventory_report(source.c_str(),report.data(),report.size())==0);
     assert(std::string(report.data()).find("PFS non chiffré accessible")!=std::string::npos);
     assert(std::string(report.data()).find("eboot.bin accessible, non validé")!=std::string::npos);
+    assert(std::string(report.data()).find("Extraction eboot.bin : fichier PFS non chiffré repéré ; taille=5 octets")!=std::string::npos);
     assert(std::string(report.data()).find("budget de lecture=72 octets")!=std::string::npos);
     assert(std::string(report.data()).find("eboot.bin demeure inaccessible")==std::string::npos);
     size_t length=0; uint8_t out[8]={0xaa};
     assert(maxps4_pkg_pfs_read_file(source.c_str(),"eboot.bin",nullptr,0,&length)==-ENOSPC && length==5);
     assert(maxps4_pkg_pfs_read_file(source.c_str(),"eboot.bin",out,4,&length)==-ENOSPC && out[0]==0xaa);
     assert(maxps4_pkg_pfs_read_file(source.c_str(),"eboot.bin",out,8,&length)==0 && length==5 && !std::memcmp(out,"hello",5));
+    length=99;
+    assert(maxps4_pkg_pfs_read_file(source.c_str(),"eboot.bin",nullptr,8,&length)==-EINVAL && length==0);
+    assert(maxps4_pkg_pfs_read_file(source.c_str(),"eboot.bin",nullptr,0,&length)==-ENOSPC && length==5);
     assert(maxps4_pkg_pfs_read_file(source.c_str(),"../eboot.bin",out,8,&length)==-EACCES && length==0);
     assert(maxps4_pkg_pfs_read_file(source.c_str(),"missing",out,8,&length)==-ENOENT && length==0);
     assert(maxps4_pkg_pfs_read_file(source.c_str(),"keystone",out,8,&length)==-EACCES && length==0);
@@ -157,6 +161,7 @@ int main(int argc,char** argv) {
     assert(maxps4_pkg_pfs_read_file(source.c_str(),"eboot.bin",out,8,&length)==-EACCES);
     assert(maxps4_pkg_inventory_report(source.c_str(),report.data(),report.size())==0);
     assert(std::string(report.data()).find("PFS chiffré déclaré : inaccessible")!=std::string::npos);
+    assert(std::string(report.data()).find("Extraction eboot.bin : impossible depuis ce PKG")!=std::string::npos);
     if(argc>1) {
         const std::filesystem::path artifacts(argv[1]); std::filesystem::create_directories(artifacts);
         for(const auto* name:{"pfs-plain.pkg","pfs-encrypted.pkg","pfs-unknown.pkg"}) {
