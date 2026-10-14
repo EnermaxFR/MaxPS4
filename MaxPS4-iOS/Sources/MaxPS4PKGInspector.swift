@@ -55,4 +55,23 @@ enum MaxPS4PKGInspector {
         return data.prefix(length)
     }
 
+
+    static func artwork(url: URL, entryID: UInt32) -> Data? {
+        var length = 0
+        let query = url.path.withCString {
+            maxps4_pkg_read_artwork($0, entryID, nil, 0, &length)
+        }
+        guard query == -Int32(POSIXErrorCode.ENOSPC.rawValue),
+              length >= 24, length <= 1_048_576 else { return nil }
+        var bytes = Data(count: length)
+        let result = bytes.withUnsafeMutableBytes { buffer in
+            url.path.withCString {
+                maxps4_pkg_read_artwork($0, entryID,
+                    buffer.bindMemory(to: UInt8.self).baseAddress, buffer.count, &length)
+            }
+        }
+        guard result == 0, length == bytes.count else { return nil }
+        return bytes
+    }
+
 }
