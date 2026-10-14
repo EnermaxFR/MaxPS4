@@ -3,7 +3,9 @@
 #include "../Native/maxps4_orbis_m1.h"
 
 namespace orbis_m1_fixture {
-constexpr uint64_t bias = 0x1000000000ULL;
+// Keep fixture VAs outside Darwin's normal anonymous/JIT allocation window.
+// The direct backend must reject a collision, never move an ELF behind its pointers.
+constexpr uint64_t bias = 0x3000000000ULL;
 constexpr uint64_t entry = bias+maxps4_ps4_synthetic::entry;
 constexpr uint64_t data = bias+maxps4_ps4_synthetic::data;
 constexpr uint64_t snapshot = data+0x100;

@@ -3,6 +3,7 @@
 #include "maxps4_ps4_linker.h"
 #include <array>
 #include <optional>
+#include <cstdio>
 
 namespace maxps4 {
 // Initial M1 process: plaintext fixed-address ELF, one static TLS module,
@@ -39,7 +40,11 @@ public:
         auto fail = [&](int code) { space.clear(); source.clear(); linker.reset(); return code; };
         if (high-low > GuestAddressSpace::budget) return fail(-E2BIG);
         error = space.reserve(low,high-low);
-        if (error) return fail(error);
+        if (error) {
+            std::fprintf(stderr,"M1 guest image reservation 0x%llx..0x%llx declined: %d\n",
+                (unsigned long long)low,(unsigned long long)high,error);
+            return fail(error);
+        }
         for (const auto& s : source.segments()) {
             const auto* bytes = source.translate(s.address,s.memory_size,4);
             if (!bytes) return fail(-EFAULT);
@@ -47,6 +52,8 @@ public:
             if (error) return fail(error);
         }
         error = space.reserve(heap_base,0x10000);
+        if (error) std::fprintf(stderr,"M1 guest heap reservation 0x%llx declined: %d\n",
+            (unsigned long long)heap_base,error);
         if (!error) error = space.map(heap_base,0x10000,6);
         if (error) return fail(error);
         entry = parsed.entry;
