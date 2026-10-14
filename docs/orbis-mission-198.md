@@ -105,3 +105,46 @@ ne doit masquer l'absence d'isolation, de gestion des fautes ou de TLS.
 Les liens CI et IPA du nouveau commit doivent être ajoutés après lecture des
 résultats. Une compilation ou un test synthétique réussi ne prouve jamais
 qu'un jeu PS4 démarre ou est jouable.
+
+## Preuves du lot 1 corrigé
+
+Code validé : `f5f0c6b82c49eaa6bca1373453ad2f31c839c681`.
+Les workflows PR testent le merge ref `2ec3433` avec la base V3 inchangée.
+
+| Vérification | Preuve |
+|---|---|
+| Gardes et sept suites Linux/macOS ASan/UBSan | [Succès push](https://github.com/EnermaxFR/MaxPS4/actions/runs/38570199330), [succès PR](https://github.com/EnermaxFR/MaxPS4/actions/runs/38570205629) |
+| PKG/PFS plaintext, offsets sparse, linker et bridge | [Succès Linux/macOS](https://github.com/EnermaxFR/MaxPS4/actions/runs/38570199324) |
+| CPU FEX ARM64 Linux, VIXL sur x86, services et compilation iPhone | [Succès](https://github.com/EnermaxFR/MaxPS4/actions/runs/38570205678) |
+| FEX macOS ARM64, bridge Swift/C++, Metal, app iOS et IPA | [Succès](https://github.com/EnermaxFR/MaxPS4/actions/runs/38570199431) |
+| Inventaire PKG, ELF plaintext, Orbis/PRX, ranges, PM4, interpréteur sans JIT | Suites PR réussies au commit de code |
+| Linkage FEX strict iOS et hôte | [Succès](https://github.com/EnermaxFR/MaxPS4/actions/runs/38570205586) |
+| Compilations lourdes FEX/HLE et smoke Swift/iOS | [Heavy réussi](https://github.com/EnermaxFR/MaxPS4/actions/runs/38570205714), [smoke réussi](https://github.com/EnermaxFR/MaxPS4/actions/runs/38570205720) |
+
+Pour chaque backend CPU, les logs contiennent 48 exécutions réelles :
+24 résultats 42 et 24 résultats 9, pile/registres vérifiés. Backend 2 pour
+Linux/macOS ARM64 natifs, backend 3 pour VIXL ARM64 sur x86. Ce sont des
+fixtures synthétiques conservées de V3, pas un nouveau homebrew externe.
+
+Le [premier run macOS](https://github.com/EnermaxFR/MaxPS4/actions/runs/38569982036)
+a échoué sur une hypothèse erronée du test : première page suivant le code
+supposée vide. Avec les pages hôte de 16 Kio, elle peut couvrir un segment
+de données. Le correctif f5f0c6b cherche un vrai trou entre pages de segments.
+Les contrôles de faute sur les deux gardes restent actifs. Aucun échec masqué.
+
+**IPA expérimentale** :
+[MaxPS4-Orbis-Mission-198-Test-SideStore](https://github.com/EnermaxFR/MaxPS4/actions/runs/38570199431/artifacts/11897497311).
+[Diagnostics complets](https://github.com/EnermaxFR/MaxPS4/actions/runs/38570199431/artifacts/11897652044).
+Rétention annoncée jusqu'au 28 octobre 2026.
+
+L'archive a été téléchargée et contrôlée dans cette session. Digest ZIP :
+`0068231823f3289a9dea96025b03a774f4d359a5f93d5f3cdb6719bba42298f9`.
+SHA256 de l'IPA extraite :
+`863ac9de7a1658489a0c3800539fda3112e75c001b668767096cad10f5053de9`.
+SourceRevision f5f0c6b, bundle `com.enermaxfr.maxps4.orbistest`, Mach-O iOS
+ARM64 et ABI app/runtime validés par `verify-orbis-v2-ipa.py`.
+SideStore doit re-signer l'app et le framework. Aucune installation sur
+appareil ni preuve d'exécution iPhone supplémentaire n'est fournie.
+
+[Extraits CPU/mémoire/IPA](orbis-mission-198-ci-excerpts.txt) et
+[résultats locaux](orbis-mission-198-local-tests.txt).

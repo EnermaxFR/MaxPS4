@@ -1,0 +1,43 @@
+Validation excerpts for code f5f0c6b82c49eaa6bca1373453ad2f31c839c681
+PR tests used merge ref 2ec3433ddf1306ec634ce1985b1f3533692a78b0 over unchanged V3 base.
+Full logs remain in the linked GitHub Actions runs. No physical iPhone execution in this session.
+
+Linux ARM64 native: 48 CPU runs; 24 result=42, 24 result=9; stack/regs verified
+2026-10-14T13:16:40.1701028Z PASS V3 ET_SCE_EXEC real FEX restart=0 repeat=0 result=42 backend=2 entry=0x1000 stack/regs=verified (host evidence only)
+2026-10-14T13:16:40.1741217Z PASS V3 ET_SCE_EXEC real FEX restart=2 repeat=15 result=9 backend=2 entry=0x1000 stack/regs=verified (host evidence only)
+
+Linux x86 VIXL ARM64 simulator: 48 CPU runs; 24 result=42, 24 result=9; stack/regs verified
+2026-10-14T13:18:13.6121936Z PASS V3 ET_SCE_EXEC real FEX restart=0 repeat=0 result=42 backend=3 entry=0x1000 stack/regs=verified (host evidence only)
+2026-10-14T13:18:13.6170618Z PASS V3 ET_SCE_EXEC real FEX restart=2 repeat=15 result=9 backend=3 entry=0x1000 stack/regs=verified (host evidence only)
+
+macOS ARM64 native: 48 CPU runs; 24 result=42, 24 result=9; stack/regs verified
+2026-10-14T13:18:37.0825030Z PASS V3 ET_SCE_EXEC real FEX restart=0 repeat=0 result=42 backend=2 entry=0x1000 stack/regs=verified (host evidence only)
+2026-10-14T13:18:37.0864370Z PASS V3 ET_SCE_EXEC real FEX restart=2 repeat=15 result=9 backend=2 entry=0x1000 stack/regs=verified (host evidence only)
+
+Memory memory (ubuntu-latest)
+2026-10-14T13:15:12.3627902Z PASS kernel guard faults and full reservation cleanup: ELF, PS4 ELF/SELF, linked Orbis; no CPU execution claimed
+2026-10-14T13:15:14.1753336Z PASS ELF64 malformed inputs, CPU admission/budget, real guest mappings R/W/X policy and cleanup; no FEX JIT executed
+2026-10-14T13:15:16.0991060Z ELF interpreter: arithmetic, guest RIP, budget, real stores and RX isolation passed
+2026-10-14T13:15:17.8998826Z PASS bounded RIP-relative store admission: exact addressing, RW targets, budget and signed offsets
+2026-10-14T13:15:19.8315019Z PASS PS4 plaintext ELF/SELF -> shared native FEX arena -> entry/data/BSS readback; permissions, budgets, blockers, rejection and lifecycle
+2026-10-14T13:15:21.6646857Z PASS staged CPU admission: permissions, budget, logical addresses and teardown; no CPU executed
+2026-10-14T13:15:25.2827248Z PASS SCE NID/RELA -> owned page mapping -> guest CALL/RET admission; no CPU execution claimed
+
+Memory memory (macos-15)
+2026-10-14T13:16:22.9918470Z PASS kernel guard faults and full reservation cleanup: ELF, PS4 ELF/SELF, linked Orbis; no CPU execution claimed
+2026-10-14T13:16:25.7006370Z PASS ELF64 malformed inputs, CPU admission/budget, real guest mappings R/W/X policy and cleanup; no FEX JIT executed
+2026-10-14T13:16:27.6370480Z ELF interpreter: arithmetic, guest RIP, budget, real stores and RX isolation passed
+2026-10-14T13:16:29.5356230Z PASS bounded RIP-relative store admission: exact addressing, RW targets, budget and signed offsets
+2026-10-14T13:16:31.2730240Z PASS PS4 plaintext ELF/SELF -> shared native FEX arena -> entry/data/BSS readback; permissions, budgets, blockers, rejection and lifecycle
+2026-10-14T13:16:32.9645900Z PASS staged CPU admission: permissions, budget, logical addresses and teardown; no CPU executed
+2026-10-14T13:16:35.4370790Z PASS SCE NID/RELA -> owned page mapping -> guest CALL/RET admission; no CPU execution claimed
+
+Downloaded IPA verification
+PASS actual ARM64 iOS app + embedded coherent FEX Darwin runtime
+PASS opaque ABI imports, SDK-only runtime dependencies, deployment compatible with iOS 27.2
+Runtime SDK imports: 276
+Application SHA256: 6196042fa145a34b8aae4c2d0565aeda1d24fb324824397c7fc2408c4b304c20
+Runtime SHA256: 297df7c5cddfe86fec527d54288e52cef2a927e781f06834b99bde7ddf47976d
+IPA SHA256: 863ac9de7a1658489a0c3800539fda3112e75c001b668767096cad10f5053de9
+Physical iPhone installation/execution NOT validated; SideStore re-signing required
+PASS isolated MaxPS4 Orbis Test identity; SideStore must re-sign app + framework
