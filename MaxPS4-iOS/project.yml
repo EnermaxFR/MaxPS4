@@ -28,11 +28,11 @@ targets:
       - path: Native/OrbisLinkerBridge.cpp
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.enermaxfr.maxps4
+        PRODUCT_BUNDLE_IDENTIFIER: com.enermaxfr.maxps4.pkg194test
         PRODUCT_NAME: MaxPS4
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_CFBundleDisplayName: MaxPS4
+        INFOPLIST_KEY_CFBundleDisplayName: MaxPS4 PKG Test
         INFOPLIST_KEY_LSRequiresIPhoneOS: YES
         INFOPLIST_FILE: Info.plist
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
@@ -40,7 +40,7 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: 'UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight'
         TARGETED_DEVICE_FAMILY: '1,2'
         MARKETING_VERSION: '0.3.0'
-        CURRENT_PROJECT_VERSION: '1000175'
+        CURRENT_PROJECT_VERSION: '1000194'
     dependencies:
       - sdk: GameController.framework
       - sdk: Metal.framework
