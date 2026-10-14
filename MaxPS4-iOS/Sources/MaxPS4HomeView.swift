@@ -205,19 +205,30 @@ struct MaxPS4HomeView: View {
             NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        Text(game.fileName.uppercased().contains("SONICMANIA") ? "Sonic Mania" : game.name)
-                            .font(.largeTitle.bold())
+                        Text(game.fileName.uppercased().contains("KEROBLASTER") ? "Kero Blaster" : (game.fileName.uppercased().contains("SONICMANIA") ? "Sonic Mania" : game.name))
+                            .font(.title2.bold())
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.75)
                         ZStack {
                             RoundedRectangle(cornerRadius: 20)
                                 .fill(LinearGradient(colors: [.blue, .purple, .black], startPoint: .topLeading, endPoint: .bottomTrailing))
-                            VStack(spacing: 12) {
-                                Image(systemName: "gamecontroller.fill").font(.system(size: 48))
-                                Text(game.fileName.uppercased().contains("SONICMANIA") ? "SONIC MANIA" : game.name.uppercased())
-                                    .font(.title2.bold())
+                            if game.fileName.lowercased().hasSuffix(".pkg") {
+                                MaxPS4PKGArtworkView(path: game.localPath, entryID: 0x1006)
+                                    .scaledToFill()
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .clipped()
+                            } else {
+                                VStack(spacing: 12) {
+                                    Image(systemName: "gamecontroller.fill").font(.system(size: 48))
+                                    Text(game.name.uppercased())
+                                        .font(.title2.bold())
+                                        .lineLimit(2)
+                                }
+                                .foregroundStyle(.white)
                             }
-                            .foregroundStyle(.white)
                         }
                         .frame(height: 180)
+                        .clipShape(RoundedRectangle(cornerRadius: 20))
                         Text(game.fileName)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -235,7 +246,7 @@ struct MaxPS4HomeView: View {
                             detailsReport = emulator.status
                         }
                         .buttonStyle(.borderedProminent)
-                        Button(game.fileName.lowercased().hasSuffix(".pkg") ? "Analyser le PKG" : "Analyser l’exécutable") {
+                        Button(game.fileName.lowercased().hasSuffix(".pkg") ? "Analyser PKG/PFS" : "Analyser l’exécutable") {
                             if game.fileName.lowercased().hasSuffix(".pkg") {
                                 detailsReport = "Analyse du PKG en cours…"
                                 Task { detailsReport = await emulator.analyzePKG(game) }
@@ -268,7 +279,16 @@ struct MaxPS4HomeView: View {
                             }
                             .buttonStyle(.bordered)
                         }
+                        if game.fileName.lowercased().hasSuffix(".pkg"),
+                           detailsReport?.contains("Diagnostic PKG/PFS : PFS non chiffré accessible") == true {
+                            NavigationLink("Exporter un fichier PFS accessible…") {
+                                MaxPS4PFSExportView(source: URL(fileURLWithPath: game.localPath))
+                            }
+                        }
                         if let report = detailsReport {
+                            ShareLink(item: report) {
+                                Label("Exporter le rapport texte", systemImage: "square.and.arrow.up")
+                            }
                             Text(report)
                                 .font(.subheadline)
                                 .textSelection(.enabled)
@@ -959,6 +979,13 @@ struct MaxPS4HomeView: View {
                         endPoint: .bottomTrailing
                     )
 
+                    if isPKG {
+                        MaxPS4PKGArtworkView(path: game.localPath, entryID: 0x1200)
+                            .scaledToFill()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .clipped()
+                    }
+
                     Circle()
                         .fill(.white.opacity(0.10))
                         .frame(width: 120, height: 120)
@@ -1028,7 +1055,7 @@ struct MaxPS4HomeView: View {
                             inspectionReport = emulator.status
                         }
                     } label: {
-                        Label(game.fileName.lowercased().hasSuffix(".pkg") ? "Analyser le PKG" : "Analyser l’exécutable", systemImage: "doc.text.magnifyingglass")
+                        Label(game.fileName.lowercased().hasSuffix(".pkg") ? "Analyser PKG/PFS" : "Analyser l’exécutable", systemImage: "doc.text.magnifyingglass")
                     }
                     Button(role: .destructive) {
                         gameToDelete = game
@@ -1475,6 +1502,30 @@ private struct MaxPS4Background: View {
                 .frame(width: 260, height: 260)
                 .blur(radius: 70)
                 .offset(x: -180, y: 280)
+        }
+    }
+}
+
+private struct MaxPS4PKGArtworkView: View {
+    let path: String
+    let entryID: UInt32
+    @State private var artwork: UIImage?
+
+    var body: some View {
+        Group {
+            if let artwork {
+                Image(uiImage: artwork).resizable()
+            } else {
+                Color.clear
+            }
+        }
+        .task(id: path + ":" + String(entryID)) {
+            guard let data = MaxPS4PKGInspector.artwork(url: URL(fileURLWithPath: path), entryID: entryID),
+                  let image = UIImage(data: data) else {
+                artwork = nil
+                return
+            }
+            artwork = image
         }
     }
 }

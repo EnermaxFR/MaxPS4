@@ -52,6 +52,21 @@ struct PKGSwiftDiagnosticTest {
             _ = try MaxPS4PKGInspector.inspect(url: url)
             fatalError("Missing source was accepted")
         } catch MaxPS4PKGInspector.ReportError.failed {}
-        print("PASS Swift/native PKG report, plaintext copy, encryption refusal, PFS header statuses, truncation and missing source")
+        if CommandLine.arguments.count > 1 {
+            let fixtures = URL(fileURLWithPath: CommandLine.arguments[1])
+            let plain = fixtures.appendingPathComponent("pfs-plain.pkg")
+            let file = try MaxPS4PKGInspector.readPFSFile(url: plain, selected: "eboot.bin")
+            precondition(file == Data("hello".utf8))
+            let plainReport = try MaxPS4PKGInspector.inspect(url: plain)
+            precondition(plainReport.contains("PFS non chiffré accessible"))
+            for (pkg, name) in [("pfs-plain.pkg", "../eboot.bin"), ("pfs-plain.pkg", "keystone"),
+                                ("pfs-encrypted.pkg", "eboot.bin"), ("pfs-unknown.pkg", "eboot.bin")] {
+                do {
+                    _ = try MaxPS4PKGInspector.readPFSFile(url: fixtures.appendingPathComponent(pkg), selected: name)
+                    fatalError("Unsafe or unsupported selection accepted")
+                } catch MaxPS4PKGInspector.ReportError.failed {}
+            }
+        }
+        print("PASS Swift/native PKG report, plaintext copy, encryption refusal, PFS header statuses and bounded extraction, truncation and missing source")
     }
 }

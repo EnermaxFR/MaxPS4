@@ -1,6 +1,8 @@
 #include "../Native/OrbisAnalysisBridge.h"
 #include "OrbisLinkerFixture.h"
 #include "OrbisFixture.h"
+#include "PS4PFSFixture.hpp"
+#include "../Native/PS4PKGBridge.h"
 #include <cassert>
 #include <cerrno>
 #include <cstring>
@@ -35,6 +37,21 @@ int main() {
     assert(text.find("maxps4.json absent")!=std::string::npos);
     // These fabricated fixtures are not game data and never enter a CPU.
     const auto app = orbis_fixture::make(false), provider = orbis_fixture::make(true);
+    // End-to-end: readable synthetic PFS -> explicitly selected memory bytes ->
+    // caller-chosen destination -> existing #185 preflight. Never launch.
+    auto pfs = pfsFixture::image();
+    pfsFixture::le(pfs,65536+2*0xa8+8,app.size(),8);
+    pfsFixture::le(pfs,65536+2*0xa8+0x10,app.size(),8);
+    assert(app.size()<=65536);
+    std::copy(app.begin(),app.end(),pfs.begin()+4*65536);
+    write(root/"fixture.pkg",pfsFixture::package(pfs));
+    std::vector<uint8_t> selected(app.size()); size_t selectedSize=0;
+    assert(maxps4_pkg_pfs_read_file((root/"fixture.pkg").c_str(),"eboot.bin",selected.data(),selected.size(),&selectedSize)==0);
+    assert(selectedSize==app.size() && selected==app);
+    fs::remove(root/"fixture.pkg");
+    write(root/"eboot.bin",selected);
+    const auto fromPFS=inspect(root);
+    assert(fromPFS.find("=== eboot.bin ===")!=std::string::npos && fromPFS.find("NID=AAAAAAAAAAA")!=std::string::npos);
     write(root/"eboot.bin",app);
     fs::create_directories(root/"sce_module");
     fs::create_directories(root/"sce_sys");

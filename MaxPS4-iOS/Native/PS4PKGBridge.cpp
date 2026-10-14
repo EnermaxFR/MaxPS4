@@ -1,6 +1,7 @@
 #include "PS4PKGBridge.h"
 #include "PS4PKGInventory.hpp"
 #include "PS4SFO.hpp"
+#include "PS4PFSReadOnly.hpp"
 #include "PS4PFSHeaderDiagnostic.hpp"
 #include <fcntl.h>
 #include "PS4PKGRuntimePlan.hpp"
@@ -12,6 +13,21 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <limits>
+
+namespace {
+bool sameSource(const struct stat& before,const struct stat& after) {
+#if defined(__APPLE__)
+    const auto m0=before.st_mtimespec,m1=after.st_mtimespec;
+    const auto c0=before.st_ctimespec,c1=after.st_ctimespec;
+#else
+    const auto m0=before.st_mtim,m1=after.st_mtim;
+    const auto c0=before.st_ctim,c1=after.st_ctim;
+#endif
+    return before.st_dev==after.st_dev && before.st_ino==after.st_ino &&
+        before.st_size==after.st_size && m0.tv_sec==m1.tv_sec && m0.tv_nsec==m1.tv_nsec &&
+        c0.tv_sec==c1.tv_sec && c0.tv_nsec==c1.tv_nsec;
+}
+}
 
 int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity) {
     if (!output || !capacity) return -EINVAL;
@@ -55,12 +71,49 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
             if (!pkg.metadataDiagnostic.empty()) report << pkg.metadataDiagnostic << '\n';
             report << "Taille vérifiée : " << size << " octets ; entrées : " << pkg.entries.size()
                    << "\nCorps : " << pkg.bodyOffset << " + " << pkg.bodySize
-                   << "\nPFS : " << pkg.pfsOffset << " + " << pkg.pfsSize << " (opaque, non monté)\n";
-            maxps4::PS4PFSHeaderDiagnostic pfs;
-            pfs.inspect(pkg,read);
-            report << "Diagnostic en-tête PFS : " << pfs.message
-                   << " ; mode=0x" << std::hex << pfs.mode << std::dec
-                   << " ; budget de lecture=" << pfs.bytesRead << " octets (maximum 72)\n";
+                   << "\nPFS : " << pkg.pfsOffset << " + " << pkg.pfsSize << " (plage déclarée ; statut ci-dessous)\n";
+            maxps4::PS4PFSHeaderDiagnostic header;
+            std::array<uint8_t,72> headerBytes{};
+            header.inspect(pkg,[&](uint64_t at,uint8_t* bytes,size_t n) {
+                if (!read(at,bytes,n)) return false;
+                std::memcpy(headerBytes.data(),bytes,n); return true;
+            });
+            maxps4::PS4PFSReadOnly pfs;
+            auto pfsRead = [&](uint64_t offset, uint8_t* bytes, size_t count) {
+                if (offset==0 && count==headerBytes.size() && header.bytesRead==72) {
+                    std::memcpy(bytes,headerBytes.data(),count); return true;
+                }
+                return pkg.range(offset,count,pkg.pfsSize) && read(pkg.pfsOffset+offset,bytes,count);
+            };
+            if (header.status == maxps4::PS4PFSHeaderDiagnostic::Status::unsupported) {
+                pfs.inspect(pkg.pfsSize,pfsRead);
+            } else {
+                using H = maxps4::PS4PFSHeaderDiagnostic;
+                using P = maxps4::PS4PFSReadOnly;
+                pfs.status = header.status == H::Status::encrypted ? P::Status::encrypted :
+                    header.status == H::Status::unknown ? P::Status::unknown :
+                    header.status == H::Status::absent ? P::Status::absent : P::Status::malformed;
+                pfs.mode = header.mode;
+                pfs.diagnostic = header.message;
+            }
+            report << "Diagnostic en-tête PFS : "
+                   << (pfs.status == maxps4::PS4PFSReadOnly::Status::accessible ?
+                       "PFS non chiffré déclaré : en-tête reconnu ; accès D32 détaillé ci-dessous" : header.message)
+                   << " ; mode=0x" << std::hex << header.mode << std::dec
+                   << " ; budget de lecture=" << header.bytesRead << " octets (maximum 72)\n";
+            report << "Diagnostic PKG/PFS : " << pfs.diagnostic << " ; mode=0x" << std::hex << pfs.mode
+                   << std::dec << " ; bloc=" << pfs.blockSize << '\n';
+            report << "Budgets PFS : inspection 8 Mio (en-tête inclus), répertoire 1 Mio, "
+                      "4096 inodes/dirents, profondeur 16, chemins 1 Mio ; extraction sélectionnée 64 Mio.\n";
+            for (const auto& f : pfs.files)
+                report << "Fichier PFS uroot : " << f.path << " ; octets=" << f.size << '\n';
+            const bool pfsAccessible = pfs.status == maxps4::PS4PFSReadOnly::Status::accessible;
+            const bool pfsEboot = std::any_of(pfs.files.begin(),pfs.files.end(),[](const auto& f) { return f.path=="eboot.bin"; });
+            if (pfsAccessible)
+                report << "Contenu PFS : fichiers uroot accessibles ; eboot.bin " << (pfsEboot ? "présent" : "absent")
+                       << "; présence distincte de validation ELF et de démarrage.\n"
+                          "Précontrôle #185 : exporter les fichiers sélectionnés accessibles vers un dossier choisi, "
+                          "puis Import → Dossier de jeu accessible ; aucun manifeste/graphe/biais inventé.\n";
             // Descriptor counts are informational; no access to the opaque PFS is inferred.
             size_t readable = 0, encrypted = 0, unsupported = 0, unknown = 0, invalid = 0;
             for (const auto& entry : pkg.entries) {
@@ -76,7 +129,7 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                    << " ; chiffrés déclarés=" << encrypted
                    << " ; non pris en charge=" << unsupported
                    << " ; inconnus=" << unknown << " ; invalides=" << invalid << '\n';
-            if (pkg.pfsSize)
+            if (pkg.pfsSize && !pfsAccessible)
                 report << "PFS présent : contenu opaque ; aucun exécutable déduit de cet inventaire.\n"
                           "Contenu du jeu : non accessible par ce lecteur (PFS opaque, aucun déchiffrement).\n";
             // Kero Blaster field diagnostics: keep the extraction policy unchanged.
@@ -174,9 +227,9 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
             // PKG metadata and plaintext artwork are never executable admission.
             // The standalone ELF path is a distinct, explicit user-supplied workflow.
             report << "Diagnostic démarrage : NON PRÊT (inventaire PKG uniquement).\n";
-            report << "Blocage 1/3 : PFS "
-                   << (pkg.pfsSize ? "présent mais opaque/non monté" : "absent ou non exposé")
-                   << " ; aucun eboot.bin accessible par ce lecteur.\n";
+            report << (pfsAccessible ? "Accès PFS : " : "Blocage 1/3 : PFS ")
+                   << (pfsAccessible ? "lu en lecture seule (D32 contigu)" : (pkg.pfsSize ? "présent mais opaque/non monté" : "absent ou non exposé"))
+                   << (pfsAccessible && pfsEboot ? " ; eboot.bin accessible, non validé comme exécutable.\n" : " ; aucun eboot.bin accessible par ce lecteur.\n");
             report << "Blocage 2/3 : aucun binaire Orbis ELF autonome validé depuis ce PKG ; "
                       "noms, images et param.sfo ne sont pas exécutables.\n";
             report << "Blocage 3/3 : imports NID, modules PRX et relocations non résolus "
@@ -184,21 +237,146 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
             report << "Étape sûre : fournir séparément un ELF Orbis non chiffré et "
                       "autorisé, puis tester son staging et ses dépendances ; "
                       "aucun contournement DRM/PFS.\n";
-            report << "Obstacles : PFS non monté, entrées chiffrées/non interprétées exclues ; "
+            report << "Obstacles : " << (pfsAccessible ? "PFS lisible limité au sous-ensemble D32 ; " : "PFS non monté ; ")
+                   << "entrées chiffrées/non interprétées exclues ; "
                    << "eboot.bin et dépendances PRX accessibles requis.\n"
                    << "Contrat runtime : fichiers ELF Orbis autonomes non chiffrés fournis explicitement ; "
                    << "staging seulement, imports/dépendances et relocations à résoudre, aucun lancement automatique.\n";
-            report << "Octets inspectés (budget partagé) : " << inspected << "\n";
+            report << "Octets inspectés (budget partagé) : " << inspected << "\n"
+                   << "Ce budget concerne les ressources CNT ; PFS : budget distinct de 8 Mio, aucune lecture de payload chiffré.\n";
             report << "Octets copiés en mémoire : " << copied << "; aucun fichier exporté.\n"
                    << "Les flags déclarés ne constituent pas une authentification.\n"
                    << "Les noms de descripteurs ne constituent pas un système de fichiers ; aucune admission ELF/SELF ni exécution.\n"
                    << "Absence de signature dans ces ressources ≠ absence d'exécutable dans le PKG.\n"
-                   << "Aucun déchiffrement, aucune recherche dans les clés/licences ou le contenu PFS ; en-tête seul diagnostiqué.\n";
+                   << "Aucun déchiffrement ni recherche de clés/licences ; inspection PFS non chiffré documenté uniquement.\n";
         }
+        struct stat after{};
+        if (fstat(fileno(file.get()), &after) || !sameSource(info,after))
+            return sourceError(EIO,"source modifiée pendant l’inspection ; rapport refusé");
         const auto text = report.str();
         const auto count = text.size() < capacity - 1 ? text.size() : capacity - 1;
         std::memcpy(output, text.data(), count);
         output[count] = 0;
         return count == text.size() ? 0 : -ENOSPC;
     } catch (const std::bad_alloc&) { return sourceError(ENOMEM, "budget mémoire indisponible"); }
+}
+
+// Host output remains a caller-owned byte buffer; no source-derived disk path.
+int maxps4_pkg_pfs_read_file(const char* path, const char* selected, unsigned char* output,
+                            size_t capacity, size_t* length) {
+    if (!length) return -EINVAL;
+    *length = 0;
+    if (!path || !selected || (!output && capacity)) return -EINVAL;
+    if (strnlen(selected,4097)>4096) return -EACCES;
+    try {
+        const int fd = open(path,O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC);
+        if (fd<0) return -errno;
+        struct Close { int fd; ~Close() { close(fd); } } closeSource{fd};
+        struct stat st{};
+        if (fstat(fd,&st) || !S_ISREG(st.st_mode) || st.st_size<0) return -EINVAL;
+        const auto size=uint64_t(st.st_size);
+        auto read=[&](uint64_t at,uint8_t* bytes,size_t n) {
+            if (!maxps4::PS4PKGInventory::range(at,n,size) || at>uint64_t(std::numeric_limits<off_t>::max())) return false;
+            size_t done=0;
+            while (done<n) {
+                const auto r=pread(fd,bytes+done,n-done,off_t(at+done));
+                if (r<0 && errno==EINTR) continue;
+                if (r<=0) return false;
+                done+=size_t(r);
+            }
+            return true;
+        };
+        maxps4::PS4PKGInventory pkg;
+        if (!pkg.parse(size,read)) return -EINVAL;
+        maxps4::PS4PFSHeaderDiagnostic header;
+        std::array<uint8_t,72> headerBytes{};
+        header.inspect(pkg,[&](uint64_t at,uint8_t* bytes,size_t n) {
+            if (!read(at,bytes,n)) return false;
+            std::memcpy(headerBytes.data(),bytes,n); return true;
+        });
+        using H = maxps4::PS4PFSHeaderDiagnostic;
+        if (header.status==H::Status::malformed) return -EINVAL;
+        if (header.status!=H::Status::unsupported) return -EACCES;
+        auto slice=[&](uint64_t at,uint8_t* bytes,size_t n) {
+            if (at==0 && n==headerBytes.size()) {
+                std::memcpy(bytes,headerBytes.data(),n); return true;
+            }
+            return pkg.range(at,n,pkg.pfsSize) && read(pkg.pfsOffset+at,bytes,n);
+        };
+        maxps4::PS4PFSReadOnly pfs;
+        if (!pfs.inspect(pkg.pfsSize,slice)) return -EACCES;
+        const std::string name(selected);
+        if (!pfs.allowedSelection(name)) return -EACCES;
+        const auto it=std::find_if(pfs.files.begin(),pfs.files.end(),[&](const auto& f){return f.path==name;});
+        if (it==pfs.files.end()) return -ENOENT;
+        if (it->size>64*1024*1024) return -E2BIG;
+        *length=size_t(it->size);
+        if (capacity<*length) return -ENOSPC;
+        std::vector<uint8_t> bytes; std::string why;
+        if (!pfs.extract(name,slice,bytes,why)) { *length=0; return -EIO; }
+        struct stat after{};
+        if (fstat(fd,&after) || !sameSource(st,after)) {
+            *length=0; return -EIO;
+        }
+        if (!bytes.empty()) std::memcpy(output,bytes.data(),bytes.size());
+        return 0;
+    } catch (const std::bad_alloc&) { *length=0; return -ENOMEM; }
+}
+
+
+int maxps4_pkg_read_artwork(const char* path, unsigned int entry_id,
+                           unsigned char* output, size_t capacity, size_t* length) {
+    if (!length) return -EINVAL;
+    *length = 0;
+    if (!path || (entry_id != 0x1200 && entry_id != 0x1006)) return -EINVAL;
+    const int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) return -errno;
+    struct stat before{};
+    if (fstat(fd, &before) || !S_ISREG(before.st_mode) || before.st_size < 0) {
+        const int error = errno ? errno : EINVAL; close(fd); return -error;
+    }
+    const uint64_t fileSize = static_cast<uint64_t>(before.st_size);
+    auto read = [&](uint64_t offset, uint8_t* bytes, size_t count) {
+        if (!maxps4::PS4PKGInventory::range(offset, count, fileSize) ||
+            offset > static_cast<uint64_t>(std::numeric_limits<off_t>::max())) return false;
+        size_t done = 0;
+        while (done < count) {
+            const ssize_t n = pread(fd, bytes + done, count - done, static_cast<off_t>(offset + done));
+            if (n <= 0) return false;
+            done += static_cast<size_t>(n);
+        }
+        return true;
+    };
+    maxps4::PS4PKGInventory pkg;
+    int result = -EINVAL;
+    if (pkg.parse(fileSize, read)) {
+        for (size_t i = 0; i < pkg.entries.size(); ++i) {
+            const auto& e = pkg.entries[i];
+            if (e.id != entry_id) continue;
+            if (e.access != maxps4::PS4PKGInventory::Access::plaintext ||
+                e.size < 24 || e.size > 1024 * 1024) break;
+            std::vector<uint8_t> bytes;
+            std::string diagnostic;
+            if (!pkg.extract(i, read, bytes, diagnostic)) { result = -EIO; break; }
+            static const uint8_t png[] = {137,80,78,71,13,10,26,10};
+            if (bytes.size() < 24 || std::memcmp(bytes.data(), png, sizeof(png)) ||
+                std::memcmp(bytes.data() + 12, "IHDR", 4)) break;
+            auto be32 = [](const uint8_t* p) -> uint32_t {
+                return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) |
+                       (uint32_t(p[2]) << 8) | uint32_t(p[3]);
+            };
+            const uint32_t width = be32(bytes.data() + 16), height = be32(bytes.data() + 20);
+            if (!width || !height || width > 4096 || height > 4096 ||
+                uint64_t(width) * height > 4 * 1024 * 1024) break;
+            struct stat after{};
+            if (fstat(fd, &after) || !sameSource(before, after)) { result = -EAGAIN; break; }
+            *length = bytes.size();
+            if (!output || capacity < bytes.size()) { result = -ENOSPC; break; }
+            std::memcpy(output, bytes.data(), bytes.size());
+            result = 0;
+            break;
+        }
+    }
+    close(fd);
+    return result;
 }
