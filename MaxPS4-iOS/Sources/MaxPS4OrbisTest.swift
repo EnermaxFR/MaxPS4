@@ -60,6 +60,49 @@ enum MaxPS4OrbisTest {
         results.append("truncated_refused=\(!inspect(Data(fixture().prefix(63))).ready)")
         return results.joined(separator: "\n")
     }
+    // On-device M1 admission probe: uses the real M1 thread API, not the V3
+    // executor. A refusal is reported as BLOCKED, never as a passing CPU test.
+    static func m1Autotests() -> String {
+        let revision = Bundle.main.object(forInfoDictionaryKey: "MaxPS4SourceRevision") as? String ?? "unknown"
+        var lines = ["autotests=orbis-m1", "source=\\(revision)", "scope=current_host",
+                     "fixture=v3_synthetic_elf", "m1_threads=not_attempted"]
+#if MAXPS4_FEX_APP
+        var engine: OpaquePointer?
+        let opened = maxps4_fex_engine_open(&engine)
+        lines.append("engine_open=\\(opened)")
+        guard opened == 0, let engine else {
+            lines.append("m1_threads=BLOCKED"); return lines.joined(separator: "\\n")
+        }
+        defer { maxps4_fex_engine_close(engine) }
+        let initialized = maxps4_fex_engine_initialize(engine)
+        lines.append("jit_initialize=\\(initialized)")
+        guard initialized == 0 else {
+            lines.append("m1_threads=BLOCKED"); return lines.joined(separator: "\\n")
+        }
+        let elf = fixture()
+        // A V3 fixture does not contain the M1 multi-module TLS/stack layout.
+        // Probe the real M1 API and surface its refusal rather than synthesizing
+        // an execution result or claiming multi-thread success.
+        var threadReports = [maxps4_m1_thread_report](repeating: maxps4_m1_thread_report(), count: 2)
+        let status = elf.withUnsafeBytes { raw in
+            threadReports.withUnsafeMutableBufferPointer { reports in
+                maxps4_fex_engine_run_m1_threads(engine,
+                    raw.bindMemory(to: UInt8.self).baseAddress, raw.count,
+                    65536, 0, nil, 0, 2, reports.baseAddress, reports.count)
+            }
+        }
+        lines.append("m1_thread_api_status=\\(status)")
+        lines.append("m1_threads=\\(status == 0 ? "API_RETURNED_SUCCESS_UNVERIFIED" : "BLOCKED")")
+        lines.append("m1_multi_module_tls=not_tested")
+        lines.append("m1_general_memory_translation=not_tested")
+        lines.append("note=V3 fixture is not a valid M1 multithread proof; dedicated M1 fixtures required")
+#else
+        lines.append("m1_threads=BLOCKED")
+        lines.append("reason=runtime_not_compiled")
+#endif
+        return lines.joined(separator: "\\n")
+    }
+
     static func run(_ inspection: Inspection) -> String {
 #if MAXPS4_FEX_APP
         guard inspection.ready else { return "execution=refused_validation" }
