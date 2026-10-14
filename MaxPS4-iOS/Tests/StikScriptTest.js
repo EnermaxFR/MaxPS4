@@ -15,6 +15,8 @@ function run(failAt = '', badAllocation = '') {
             commands.push(command);
             if (command.startsWith(failAt) && failAt) return 'E01';
             if (command.startsWith('vAttach')) return 'T05thread:1;';
+            if (command.startsWith('m')) return failAt === 'replay' ? '00'.repeat(40) :
+                '00'.repeat(8) + 'f0debc9a78563412' + '00'.repeat(24);
             if (command.startsWith('_M')) return badAllocation || (0x10000000 + allocation++ * 0x2000000).toString(16);
             return 'OK';
         },
@@ -38,7 +40,7 @@ const writes = test.commands.filter(x => x.startsWith('M'));
 assert.equal(writes[0], 'M100008,20:0100000000000000000000100000000000000012000000000000001400000000');
 assert.equal(writes[1], 'M100000,8:f0debc9a78563412');
 assert(!test.commands.some(x => /^P|^c$/.test(x)), 'No application breakpoint or register overwrite');
-for (const stage of ['vAttach', '_M', 'prepare', 'M100008', 'M100000', 'D']) {
+for (const stage of ['vAttach', 'm100000', 'replay', '_M', 'prepare', 'M100008', 'M100000', 'D']) {
     test = run(stage);
     if (stage === 'D') assert(test.error);
     else assert.equal(test.error, undefined);
@@ -46,6 +48,10 @@ for (const stage of ['vAttach', '_M', 'prepare', 'M100008', 'M100000', 'D']) {
     else assert.equal(test.commands.at(-1), 'D');
     if (stage === 'prepare') assert(test.commands.includes('_m10000000'));
     if (stage === '_M') assert.equal(test.prepared.length, 0);
+    if (stage === 'm100000' || stage === 'replay') {
+        assert.equal(test.prepared.length, 0);
+        assert(!test.commands.some(x => x.startsWith('M')), 'A stale/unreadable challenge must never be overwritten');
+    }
     if (stage === 'prepare' || stage === '_M') {
         assert(test.commands.includes('M100008,20:0200000000000000' + '00'.repeat(24)));
         assert(!test.commands.includes(writes[0]), 'Failure must never publish successful RX metadata');

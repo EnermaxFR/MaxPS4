@@ -151,8 +151,10 @@ extern "C" int32_t maxps4_jit_begin(uint64_t* address, uint64_t* nonce, uint64_t
     const long host_page = sysconf(_SC_PAGESIZE);
     if (host_page <= 0 || host_page > 16384 || 16384 % host_page != 0) return -ENOTSUP;
     page_size = static_cast<size_t>(host_page);
-    do { arc4random_buf(&expected_nonce, sizeof(expected_nonce)); } while (!expected_nonce);
-    mailbox.nonce = mailbox.status = 0;
+    do { arc4random_buf(&expected_nonce, sizeof(expected_nonce)); } while (expected_nonce <= 2);
+    mailbox.nonce = 0;
+    // Challenge before publication; 1/2 are reserved for final script status.
+    mailbox.status = expected_nonce;
     for (auto& address : mailbox.rx) address = 0;
     state = 1; failure = 0;
     failure_stage = 0; failure_mach = 0; failure_region = -1; active_region = -1;
@@ -197,8 +199,9 @@ extern "C" int32_t maxps4_jit_prepare() {
         if (!protection(rw, region.size, VM_PROT_READ | VM_PROT_WRITE) ||
             !protection(region.rx, region.size, VM_PROT_READ | VM_PROT_EXECUTE)) return reject_stage(EACCES, "alias-protection-check");
     }
-    if (vm_protect(mach_task_self(), regions[1].rw + regions[1].size - page_size,
-        page_size, FALSE, VM_PROT_NONE) != KERN_SUCCESS) return reject_stage(EACCES, "code-cache-guard-page");
+    const auto guard_result = vm_protect(mach_task_self(), regions[1].rw + regions[1].size - page_size,
+        page_size, FALSE, VM_PROT_NONE);
+    if (guard_result != KERN_SUCCESS) return reject_stage(EACCES, "code-cache-guard-page", guard_result);
     // A native-memory test, NOT the guest/FEX test or evidence of FEX success.
     const uint32_t code[] = {0x52800540U, 0xD65F03C0U}; // mov w0,#42; ret
     auto& canary = regions[2];
@@ -215,6 +218,21 @@ extern "C" int32_t maxps4_jit_prepare() {
     state = 2; failure = 0;
     return 0;
 }
+extern "C" int32_t maxps4_jit_confirmation() {
+    std::lock_guard guard(lock);
+    if (!expected_nonce || mailbox.nonce != expected_nonce) return 0;
+    std::atomic_thread_fence(std::memory_order_acquire);
+    return mailbox.status == 1 ? 1 : 2;
+}
+extern "C" int32_t maxps4_jit_launch_failed(uint64_t nonce) {
+    std::lock_guard guard(lock);
+    // Never cancel a request another script has already started to publish.
+    if (state != 1 || !nonce || nonce != expected_nonce || mailbox.nonce || mailbox.status != expected_nonce)
+        return -EBUSY;
+    for (const auto address : mailbox.rx) if (address) return -EBUSY;
+    state = 3; failure = ENOENT;
+    return 0;
+}
 extern "C" uint32_t maxps4_jit_leases() {
     std::lock_guard guard(lock);
     uint32_t count = 0;
@@ -227,6 +245,9 @@ extern "C" int32_t maxps4_jit_cancel() {
     if (state == 1) return -EBUSY;
     for (const auto& region : regions) if (region.leased) return -EBUSY;
     destroy_regions(); expected_nonce = 0; state = failure = 0;
+    mailbox.nonce = 0;
+    mailbox.status = 0;
+    for (auto& address : mailbox.rx) address = 0;
     failure_stage = 0; failure_mach = 0; failure_region = -1; active_region = -1;
     return 0;
 }
@@ -264,6 +285,12 @@ extern "C" int32_t maxps4_jit_free(void* write, size_t size) {
     }
     return 0;
 }
+extern "C" size_t maxps4_jit_usable_size(void* write, size_t size) {
+    std::lock_guard guard(lock);
+    const auto& cache = regions[1];
+    return cache.leased && cache.rw == reinterpret_cast<uintptr_t>(write) &&
+        cache.size == size && size > page_size ? size - page_size : 0;
+}
 extern "C" void* maxps4_jit_executable(void* pointer) { std::lock_guard guard(lock); return translate(pointer, false); }
 extern "C" void* maxps4_jit_writable(void* pointer) { std::lock_guard guard(lock); return translate(pointer, true); }
 extern "C" int32_t maxps4_jit_describe(void* pointer, uintptr_t* base, size_t* offset, size_t* size) {
@@ -286,6 +313,8 @@ extern "C" int32_t maxps4_jit_begin(uint64_t* address, uint64_t* nonce, uint64_t
     *address = *nonce = *page = 0; return -ENOTSUP;
 }
 extern "C" int32_t maxps4_jit_prepare() { return -ENOTSUP; }
+extern "C" int32_t maxps4_jit_confirmation() { return 0; }
+extern "C" int32_t maxps4_jit_launch_failed(uint64_t) { return -ENOTSUP; }
 extern "C" int32_t maxps4_jit_cancel() { return 0; }
 extern "C" int32_t maxps4_jit_state() { return 0; }
 extern "C" int32_t maxps4_jit_error() { return 0; }
@@ -294,4 +323,5 @@ extern "C" int32_t maxps4_jit_failure_stage() { return 0; }
 extern "C" int32_t maxps4_jit_failure_mach() { return 0; }
 extern "C" int32_t maxps4_jit_failure_region() { return -1; }
 extern "C" uint32_t maxps4_jit_leases() { return 0; }
+extern "C" size_t maxps4_jit_usable_size(void*, size_t) { return 0; }
 #endif

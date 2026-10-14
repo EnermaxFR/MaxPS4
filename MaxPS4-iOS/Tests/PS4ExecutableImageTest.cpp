@@ -50,6 +50,7 @@ int main() {
     reject(elf, 24, 0x10000, 8); reject(elf, 96, 33, 8);
     reject(elf, 104, maxps4::PS4ExecutableImage::memoryBudget + 1, 8);
     reject(elf, 136, 0x1001, 8); reject(elf, 80, UINT64_MAX - 2, 8);
+    reject(elf, 68, 7, 4); reject(elf, 124, 7, 4); // W+X never admitted.
     reject(elf, 72, UINT64_MAX, 8); reject(elf, 112, 3, 8);
     for (size_t length = 0; length < 272; ++length)
         assert(image.load(self.data(), length) != 0 && image.segments.empty());

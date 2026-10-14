@@ -85,7 +85,7 @@ xcrun nm -gU "$FRAMEWORK/MaxPS4FEXRuntime" > build/diagnostics/fex-app-runtime-e
 # Every public ABI entry must be exported by the embedded runtime. Only
 # entries actually called by the Swift app are required in its undefined imports;
 # the compiler may legitimately omit unused public functions.
-for symbol in maxps4_fex_test_ps4_libkernel maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_run maxps4_fex_engine_run_elf maxps4_jit_begin maxps4_jit_cancel; do
+for symbol in maxps4_fex_test_ps4_libkernel maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_interpret_elf maxps4_fex_engine_run_elf maxps4_jit_begin maxps4_jit_cancel maxps4_jit_confirmation maxps4_jit_launch_failed; do
   if ! grep -q "_${symbol}$" build/diagnostics/fex-app-runtime-exports.txt; then
     echo "Missing FEXCore runtime export: ${symbol}" >&2
     exit 1

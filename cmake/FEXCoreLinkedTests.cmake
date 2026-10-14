@@ -3,6 +3,10 @@
 # No replacement FEX or system-service symbols are supplied.
 function(maxps4_linked_execution_tests)
   set(NATIVE "${MAXPS4_ROOT}/MaxPS4-iOS/Native")
+  # The shared dispatcher patch unwinds failed construction on every host.
+  # Match the Darwin build: do not compile its try/throw with -fno-exceptions.
+  target_compile_options(FEXCore_object PRIVATE -fexceptions)
+  target_compile_options(FEXCore_Base PRIVATE -fexceptions)
   add_library(MaxPS4LinkedRuntime STATIC
     "${NATIVE}/maxps4_fex_runtime.cpp"
     "${NATIVE}/maxps4_jit_memory.cpp"

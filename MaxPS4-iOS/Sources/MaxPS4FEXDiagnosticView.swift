@@ -3,9 +3,11 @@ import UniformTypeIdentifiers
 
 struct MaxPS4FEXDiagnosticView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @State private var running = false
     @State private var report: MaxPS4FEXDiagnostic?
     @State private var activationMessage: String?
+    @State private var activationRequested = false
     @State private var importingELF = false
     @State private var importingOrbisDirectory = false
     @State private var importedReport: String?
@@ -34,7 +36,7 @@ struct MaxPS4FEXDiagnosticView: View {
                         Label("JIT non testé sur cet appareil", systemImage: "questionmark.shield")
                             .foregroundStyle(.secondary)
                     }
-                    Text("Le JIT nécessite une autorisation effective d’exécution de code sur cet iPhone. SideStore ou un débogueur détecté ne suffisent pas à la prouver. Si l’initialisation renvoie -45 (ENOTSUP), consultez le diagnostic et utilisez l’interpréteur de repli.")
+                    Text("Activer avec StikDebug, attendre la fin de son script et son détachement, puis tester FEXCore. Le test vérifie les permissions RX/RW et l’exécution x86-64. Une confirmation de script seule ne valide pas le JIT.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     Text("Test x86-64 : 40 + 2").font(.headline)
@@ -93,11 +95,17 @@ struct MaxPS4FEXDiagnosticView: View {
                             .textSelection(.enabled)
                     }
                     Button("Activer avec StikDebug") {
-                        activationMessage = MaxPS4StikActivation.begin()
+                        report = nil
+                        activationRequested = true
+                        activationMessage = MaxPS4StikActivation.begin { message in
+                            activationMessage = message
+                        }
                     }
                     .disabled(running)
                     Button("Libérer la mémoire JIT") {
                         activationMessage = MaxPS4StikActivation.release()
+                        report = nil
+                        activationRequested = false
                     }
                     .disabled(running)
                     if let activationMessage { Text(activationMessage).font(.footnote) }
@@ -161,8 +169,12 @@ struct MaxPS4FEXDiagnosticView: View {
                 }
             }
             .navigationTitle("Diagnostic FEXCore")
+            .onChange(of: scenePhase) { phase in
+                if phase == .active && activationRequested {
+                    activationMessage = MaxPS4StikActivation.confirmation()
+                }
+            }
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } } }
         }
     }
 }
-

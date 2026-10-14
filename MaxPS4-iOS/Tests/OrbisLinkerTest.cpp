@@ -51,7 +51,7 @@ int main(int argc, char** argv) {
     put(consumer,0x908,(uint64_t{99}<<32)|7); reject(batch(),"invalid relocation symbol"); consumer=original;
     reject(batch(),"memory budget",1023); reject(batch(),"budget exceeds",65*1024*1024);
     put(consumer,64+56+4,4,4); reject(batch(),"relocation target"); consumer=original;
-    put(consumer,64+4,7,4); reject(batch(),"writable executable"); consumer=original;
+    put(consumer,64+4,7,4); reject(batch(),"rejet du chargeur"); consumer=original;
     put(consumer,0x900,0x1000); reject(batch(),"relocation target"); consumer=original;
     reject({},"invalid module count");
     auto tooMany=std::vector<Linker::Input>(129,batch()[0]); reject(tooMany,"invalid module count");

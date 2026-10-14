@@ -157,6 +157,10 @@ namespace {
 // engine closes. Future independent FEX consumers must share this ownership.
 std::mutex runtime_lock;
 size_t engines = 0;
+#if TARGET_OS_IPHONE
+// The prepared pool contains one dispatcher and one code cache.
+maxps4_fex_engine* jit_owner = nullptr;
+#endif
 void release_config_if_unused() {
     if (engines == 0) FEXCore::Config::Shutdown();
 }
@@ -195,34 +199,32 @@ extern "C" int32_t maxps4_fex_engine_open(maxps4_fex_engine **out) {
 extern "C" void maxps4_fex_engine_close(maxps4_fex_engine *engine) {
     if (!engine) return;
     std::lock_guard lock(runtime_lock);
-    delete engine; // Context must die before global configuration shutdown.
+#if TARGET_OS_IPHONE
+    const bool owned_pool = jit_owner == engine;
+#endif
+    delete engine; // Context dies under runtime_lock before another owner opens.
+#if TARGET_OS_IPHONE
+    if (owned_pool) jit_owner = nullptr;
+#endif
     --engines;
     release_config_if_unused();
 }
 extern "C" int32_t maxps4_fex_engine_initialize(maxps4_fex_engine *engine) {
     if (!engine) return -EINVAL;
     std::lock_guard lock(runtime_lock);
-#if TARGET_OS_IPHONE
-    // FEXCore is built with patch-fexcore-jit-provider.py: its iOS JIT
-    // allocations use the prepared MaxPS4 RX/RW pool, never MAP_JIT fallback.
-    // Fail closed until StikDebug regions pass alias/protection/canary checks.
     if (engine->stage == MAXPS4_FEX_DISPATCHER_INITIALIZED) return 0;
+#if TARGET_OS_IPHONE
+    if (jit_owner && jit_owner != engine) return -EBUSY;
+    // Verify the current nonce, Mach W^X aliases and native canary before FEX
+    // emits code into the prepared dispatcher/cache pool.
     const int32_t prepared = maxps4_jit_prepare();
     if (prepared != 0) {
         std::fprintf(stderr, "MaxPS4 FEX JIT: RX/RW preparation failed (%d).\n", prepared);
         return prepared;
     }
-    engine->context->SetSignalDelegator(&engine->signals);
-    engine->context->SetSyscallHandler(&engine->probe);
-    engine->context->EnableExitOnHLT();
-    errno = 0;
-    try {
-        if (!engine->context->InitCore()) return -(errno ? errno : ENOMEM);
-    } catch (const std::bad_alloc&) { return -ENOMEM; }
-    engine->stage = MAXPS4_FEX_DISPATCHER_INITIALIZED;
-    return 0;
-#else
-    if (engine->stage == MAXPS4_FEX_DISPATCHER_INITIALIZED) return 0;
+    // Retain ownership even after a partial InitCore failure until close.
+    jit_owner = engine;
+#endif
     engine->context->SetSignalDelegator(&engine->signals);
     // Only admitted HLT-terminated straight-line programs are exposed.
     engine->context->SetSyscallHandler(&engine->probe);
@@ -233,7 +235,6 @@ extern "C" int32_t maxps4_fex_engine_initialize(maxps4_fex_engine *engine) {
     } catch (const std::bad_alloc&) { return -ENOMEM; }
     engine->stage = MAXPS4_FEX_DISPATCHER_INITIALIZED;
     return 0;
-#endif
 }
 extern "C" int32_t maxps4_fex_engine_stage(const maxps4_fex_engine *engine) {
     std::lock_guard lock(runtime_lock);
@@ -747,5 +748,3 @@ extern "C" int32_t maxps4_fex_engine_interpret_elf(maxps4_fex_engine* engine,
         return status;
     } catch (const std::bad_alloc&) { return -ENOMEM; }
 }
-
-

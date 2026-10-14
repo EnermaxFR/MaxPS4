@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <fstream>
 #include <unistd.h>
+#include <sys/stat.h>
 
 int main(int argc, char** argv) {
     using namespace orbis_test;
@@ -122,6 +123,17 @@ int main(int argc, char** argv) {
            std::strstr(report.data(),"Préparation : refusée") &&
            std::strstr(report.data(),"Exécution : impossible"));
     char small[8]; assert(maxps4_orbis_analysis_report(path,small,sizeof(small))<0 && small[7]==0);
+    // V2 immutable-snapshot ABI and filesystem boundary regressions.
+    assert(maxps4_orbis_bytes_report(kernel.data(),kernel.size(),report.data(),report.size())==0);
+    assert(std::strstr(report.data(),"NID=aI+OeCz8xrQ"));
+    assert(maxps4_orbis_bytes_report(kernel.data(),kernel.size(),small,sizeof(small))==-ENOSPC && small[7]==0);
+    assert(maxps4_orbis_bytes_report(nullptr,64,report.data(),report.size())==-EINVAL && !report[0]);
+    const std::string link=std::string(path)+"-link", fifo=std::string(path)+"-fifo";
+    assert(symlink(path,link.c_str())==0);
+    assert(maxps4_orbis_analysis_report(link.c_str(),report.data(),report.size())<0);
+    assert(mkfifo(fifo.c_str(),0600)==0);
+    assert(maxps4_orbis_analysis_report(fifo.c_str(),report.data(),report.size())==-EINVAL);
+    assert(unlink(link.c_str())==0 && unlink(fifo.c_str())==0);
     unlink(path);
     assert(maxps4_orbis_analysis_report(path,report.data(),report.size())<0);
     if (argc>1) { std::ofstream out(argv[1],std::ios::binary); out.write(reinterpret_cast<const char*>(kernel.data()),kernel.size()); }

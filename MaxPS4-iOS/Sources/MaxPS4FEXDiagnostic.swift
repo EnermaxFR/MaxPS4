@@ -64,7 +64,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
                 "Liaison/imports : " + (blockers & 1 != 0 ? "requis, non résolus" : "aucun indicateur dynamique détecté"),
                 "TLS : " + (blockers & 2 != 0 ? "requis, non initialisé" : "aucun segment TLS détecté"),
                 "Blocage CPU : adressage absolu PS4, admission des instructions et ABI non raccordés",
-                "JIT iPhone : garde-fou ENOTSUP conservé ; aucune instruction PS4 exécutée",
+                "JIT iPhone : préparation RX/RW vérifiée requise ; aucune instruction PS4 exécutée par ce mappage",
                 "Services PS4 et rendu Metal du jeu : non validés ; aucune jouabilité revendiquée"
             ].joined(separator: "\n")
         } catch { return "MaxPS4 : chargement impossible — \(error.localizedDescription)" }
@@ -119,12 +119,15 @@ struct MaxPS4FEXDiagnostic: Sendable {
             let jit = maxps4_fex_engine_initialize(engine)
             var value: UInt64 = 0; var entry: UInt64 = 0; var rip: UInt64 = 0
             var backend: UInt32 = 0; var count: UInt32 = 0
+            var jitExecution = jit
             let status = file.withUnsafeBytes { bytes in
                 let pointer = bytes.bindMemory(to: UInt8.self).baseAddress
                 if jit == 0 {
-                    return maxps4_fex_engine_run_elf(engine, pointer, bytes.count, 65536,
+                    jitExecution = maxps4_fex_engine_run_elf(engine, pointer, bytes.count, 65536,
                         &value, &backend, &entry)
+                    if jitExecution == 0 { return jitExecution }
                 }
+                // Keep the FEX error if execution itself runs out of JIT memory.
                 return maxps4_fex_engine_interpret_elf(engine, pointer, bytes.count, 65536,
                     &value, &backend, &entry, &rip, &count)
             }
@@ -132,7 +135,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
                 backend == UInt32(MAXPS4_CPU_RESTRICTED_INTERPRETER) ? "Interpréteur ELF sans JIT" : "Aucun"
             return [
                 "ELF importé : " + url.lastPathComponent,
-                "Statut : \(status) ; initialisation JIT : \(jit) ; backend : \(name)",
+                "Statut : \(status) ; initialisation JIT : \(jit) ; exécution JIT : \(jitExecution) ; backend : \(name)",
                 "Entrée invitée : 0x" + String(entry, radix: 16),
                 "RAX : \(value)",
                 backend == UInt32(MAXPS4_CPU_RESTRICTED_INTERPRETER) ?
@@ -338,16 +341,16 @@ struct MaxPS4FEXDiagnostic: Sendable {
         let mailboxDescriptions = ["session inactive", "nonce absent", "nonce incorrect", "statut non publié", "confirmation rejetée", "confirmation reçue"]
         let mailboxDescription = mailboxDescriptions.indices.contains(mailboxDiagnostic) ? mailboxDescriptions[mailboxDiagnostic] : "inconnu"
         let jitGuidance: String
-        if initialized == -45 && providerAfter == 1 {
+        if initialized == -Int32(EAGAIN) && providerAfter == 1 {
             jitGuidance = "Activation StikDebug en attente : MaxPS4 n’a pas reçu la confirmation des régions RX. Terminer l’activation dans StikDebug, revenir dans MaxPS4, puis relancer le test. Ne pas libérer la mémoire avant ce test."
-        } else if initialized == -45 && providerAfter == 0 {
+        } else if initialized == -Int32(EACCES) && providerAfter == 0 {
             jitGuidance = "JIT non préparé : utiliser « Activer avec StikDebug » avant le test FEXCore."
         } else if providerAfter == 3 {
-            jitGuidance = "Préparation mémoire JIT refusée (erreur \\(providerError)). Consulter l’étape et le code Mach ci-dessous."
+            jitGuidance = "Préparation mémoire JIT refusée (erreur \(providerError)). Consulter l’étape et le code Mach ci-dessous."
         } else if initialized == 0 {
             jitGuidance = "FEXCore JIT initialisé ; vérifier le backend réel du test ci-dessous."
         } else {
-            jitGuidance = "Initialisation JIT non disponible (statut \\(initialized))."
+            jitGuidance = "Initialisation JIT non disponible (statut \(initialized))."
         }
         var value: UInt64 = 0
         var selected: UInt32 = 0
@@ -424,4 +427,3 @@ struct MaxPS4FEXDiagnostic: Sendable {
 #endif
     }
 }
-

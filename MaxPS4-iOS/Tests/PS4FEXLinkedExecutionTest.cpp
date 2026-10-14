@@ -1,3 +1,4 @@
+#include "GuestELFFixture.h"
 #include "../Native/maxps4_fex_runtime.h"
 #include "PS4LinkedELFFixture.h"
 #include "PS4OrbisExecutionFixture.h"
@@ -179,6 +180,30 @@ int main(int argc, char** argv) {
             CHECK(std::fclose(out) == 0);
         }
         return 0;
+    }
+    // V2 legal ET_SCE_EXEC fixture. Same bytes as Swift/Python; actual FEX only.
+    for (uint32_t initial : {40U, 7U}) {
+        auto bytes = guest_test::elf(initial, 2, false);
+        bytes[7] = 9; guest_test::put(bytes,0xfe00,16,2);
+        const maxps4_orbis_module module{"test.elf",bytes.data(),bytes.size(),0,nullptr,0};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0 && process);
+        struct CloseV2 { maxps4_fex_engine* p; ~CloseV2() { maxps4_fex_engine_close(p); } } closeV2{process};
+        char diagnostic[512]{};
+        CHECK(maxps4_fex_engine_prepare_orbis(process,&module,1,"test.elf",64,diagnostic,sizeof(diagnostic))==0);
+        uint64_t result=99, entry=99; uint32_t backend=99;
+        CHECK(maxps4_fex_engine_run_orbis(process,&result,&backend,&entry)==-EAGAIN);
+        CHECK(result==0 && backend==0 && entry==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        CHECK(maxps4_fex_engine_run_orbis(process,&result,&backend,&entry)==0);
+        CHECK(result==initial+2 && entry==0x1000);
+#ifdef VIXL_SIMULATOR
+        CHECK(backend==MAXPS4_CPU_FEX_ARM64_SIMULATOR);
+#else
+        CHECK(backend==MAXPS4_CPU_FEX_ARM64_JIT);
+#endif
+        std::printf("PASS V2 ET_SCE_EXEC real FEX result=%llu backend=%u entry=0x%llx (host evidence only)\n",
+            (unsigned long long)result,backend,(unsigned long long)entry);
     }
     CHECK(playableTest()==0);
     CHECK(animatedGuestTest()==0);

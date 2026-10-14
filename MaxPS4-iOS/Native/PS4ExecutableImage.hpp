@@ -114,7 +114,7 @@ private:
             if (!isSelf && h.fileSize && !range(h.offset, h.fileSize, size)) return -ENOEXEC;
             if (h.type != 1 && h.type != 0x61000010) continue; // Metadata retained, not executed.
             if (!h.memorySize || h.fileSize > h.memorySize || h.memorySize > memoryBudget - allocated ||
-                h.address > UINT64_MAX - h.memorySize || (h.flags & ~7U) || !(h.flags & 4U) ||
+                h.address > UINT64_MAX - h.memorySize || (h.flags & ~7U) || !(h.flags & 4U) || (h.flags & 3U) == 3U ||
                 (h.alignment > 1 && ((h.alignment & (h.alignment - 1)) ||
                     h.address % h.alignment != h.offset % h.alignment))) return -ENOEXEC;
             for (const auto& old : segments)
