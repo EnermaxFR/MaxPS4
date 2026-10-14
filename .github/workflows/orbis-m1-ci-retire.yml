@@ -1,0 +1,51 @@
+name: Retire superseded Orbis M1 CI
+on:
+  push:
+    branches: ['experiment/orbis-mission-198']
+    paths: ['.github/workflows/orbis-m1-ci-retire.yml']
+permissions:
+  actions: write
+  contents: read
+jobs:
+  retire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Cancel only unfinished runs from the four superseded M1 commits
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          # Exact allowlist: no earlier PR, other branch or completed evidence.
+          superseded = [
+              'a61874b39bcc75dc0a72df13d62f134026d9f2b4',
+              '4a33c9eb3ba6e17bfa951f889446d6ebe5ac1e61',
+              '275c79f45a5e70c2739f347d0dd1013047865fb2',
+              '93b528b31e75876c221f05b5040eb0f13ae86837',
+          ]
+          base = 'https://api.github.com/repos/' + os.environ['GH_REPO']
+          headers = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                     'Accept': 'application/vnd.github+json',
+                     'X-GitHub-Api-Version': '2022-11-28'}
+          for sha in superseded:
+              request = urllib.request.Request(base + '/actions/runs?head_sha=' + sha + '&per_page=100', headers=headers)
+              with urllib.request.urlopen(request) as response:
+                  runs = json.load(response)['workflow_runs']
+              for run in runs:
+                  if run['head_sha'] != sha or run['head_branch'] != 'experiment/orbis-mission-198':
+                      continue
+                  if run['status'] not in ('queued', 'in_progress', 'waiting', 'requested', 'pending'):
+                      continue
+                  request = urllib.request.Request(base + '/actions/runs/' + str(run['id']) + '/cancel',
+                                                   data=b'', headers=headers, method='POST')
+                  try:
+                      with urllib.request.urlopen(request):
+                          print('Cancelled superseded run', run['id'], sha[:7], run['name'])
+                  except urllib.error.HTTPError as error:
+                      if error.code != 409:
+                          raise
+                      print('Run already finished', run['id'])
+          PY
