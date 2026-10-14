@@ -1,4 +1,5 @@
 #include "GuestELFFixture.h"
+#include "OrbisM1Fixture.h"
 #include "../Native/maxps4_fex_runtime.h"
 #include "PS4LinkedELFFixture.h"
 #include "PS4OrbisExecutionFixture.h"
@@ -143,7 +144,51 @@ static int animatedGuestTest() {
     std::puts("PASS guest x86-64 autonomous sprite animation and collision across 20 real FEX frames");
     return 0;
 }
+static int m1Test() {
+    using namespace orbis_m1_fixture;
+    maxps4_fex_engine* engine = nullptr;
+    CHECK(maxps4_fex_engine_open(&engine) == 0);
+    struct CloseM1 { maxps4_fex_engine* engine; ~CloseM1() { maxps4_fex_engine_close(engine); } } close{engine};
+    maxps4_m1_report report{};
+    auto file = make();
+    CHECK(maxps4_fex_engine_run_m1(engine,file.data(),file.size(),100,snapshot,&report) == -EAGAIN);
+    CHECK(maxps4_fex_engine_initialize(engine) == 0);
+    for (uint32_t initial : {17U,83U,129U}) for (bool calls : {false,true}) {
+        file = make(initial,calls);
+        for (int run=0;run<2;++run) {
+            CHECK(maxps4_fex_engine_run_m1(engine,file.data(),file.size(),100,snapshot,&report) == 0);
+            CHECK(report.rax == initial+12 && report.memory == initial+12 && report.tls_word == initial+5);
+            CHECK(report.heap_word == initial+5 && report.zero_memory == 0 && report.kernel_return == (calls ? 1U : 0U));
+            CHECK(report.entry == entry && report.calls == (calls ? 2U : 0U));
+            CHECK(!(report.rsp & 15) && report.fs_base == maxps4::OrbisM1::thread_base+0x20010);
+#ifdef VIXL_SIMULATOR
+            CHECK(report.backend == MAXPS4_CPU_FEX_ARM64_SIMULATOR);
+#else
+            CHECK(report.backend == MAXPS4_CPU_FEX_ARM64_JIT);
+#endif
+            std::printf("PASS M1 FEX backend=%u initial=%u rax=%llu memory=%llu tls=%llu calls=%u entry=0x%llx fs=0x%llx\n",
+                report.backend,initial,(unsigned long long)report.rax,(unsigned long long)report.memory,
+                (unsigned long long)report.tls_word,report.calls,(unsigned long long)report.entry,(unsigned long long)report.fs_base);
+        }
+    }
+    file = make(); file[0x4000] = 0xeb;
+    CHECK(maxps4_fex_engine_run_m1(engine,file.data(),file.size(),100,snapshot,&report) == -ENOTSUP);
+    CHECK(!report.rax && !report.backend);
+    file = make();
+    CHECK(maxps4_fex_engine_run_m1(engine,file.data(),file.size(),1,snapshot,&report) == -E2BIG);
+    return 0;
+}
 int main(int argc, char** argv) {
+    if (argc == 2 && !std::strcmp(argv[1],"--m1")) return m1Test();
+    if (argc == 3 && !std::strcmp(argv[1],"--m1-bundle")) {
+        std::filesystem::create_directories(argv[2]);
+        for (bool calls : {false,true}) {
+            const auto file = orbis_m1_fixture::make(17,calls);
+            std::ofstream out(std::filesystem::path(argv[2])/(calls ? "m1-tls-libkernel.elf" : "m1-tls.elf"),std::ios::binary);
+            out.write(reinterpret_cast<const char*>(file.data()),file.size()); CHECK(out.good());
+        }
+        return 0;
+    }
     using namespace ps4_linked_test;
     if (argc==3 && !std::strcmp(argv[1],"--playable-evidence")) return playableTest(argv[2]);
     if (argc==3 && (!std::strcmp(argv[1],"--playable-bundle") || !std::strcmp(argv[1],"--animated-playable-bundle"))) {

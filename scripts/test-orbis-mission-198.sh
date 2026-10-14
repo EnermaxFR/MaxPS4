@@ -10,3 +10,12 @@ for suite in GuestArenaGuardTest GuestELFMemoryTest GuestELFInterpreterTest Gues
   "$CXX" "${flags[@]}" -I MaxPS4-iOS/Native MaxPS4-iOS/Native/maxps4_guest_elf.cpp "MaxPS4-iOS/Tests/$suite.cpp" -o "$OUT/$suite"
   "$OUT/$suite" | tee "$OUT/$suite.txt"
 done
+
+"$CXX" "${flags[@]}" -I MaxPS4-iOS/Native \
+  MaxPS4-iOS/Native/maxps4_guest_elf.cpp \
+  MaxPS4-iOS/Native/maxps4_ps4_linker.cpp \
+  MaxPS4-iOS/Native/maxps4_ps4_libkernel.cpp \
+  MaxPS4-iOS/Native/maxps4_ps4_virtual_memory.cpp \
+  MaxPS4-iOS/Native/maxps4_ps4_threads.cpp \
+  MaxPS4-iOS/Tests/OrbisM1MemoryTest.cpp -o "$OUT/OrbisM1MemoryTest"
+"$OUT/OrbisM1MemoryTest" | tee "$OUT/OrbisM1MemoryTest.txt"

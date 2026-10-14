@@ -122,6 +122,8 @@ jobs:
             -L build/fex-app-host -lMaxPS4FEXRuntime \
             -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" \
             -o build/fex-app-host/swift-fex-test
+          python3 scripts/run-bounded.py 60 build/fex-app-host/m1-execution.txt build/fex-app-host/Bin/maxps4-ps4-linked-test --m1
+          build/fex-app-host/Bin/maxps4-ps4-linked-test --m1-bundle build/fex-app-host/m1-bundle
           build/fex-app-host/Bin/maxps4-ps4-linked-test --orbis-bundle build/fex-app-host/orbis-bundle
           python3 scripts/run-bounded.py 60 build/fex-app-host/swift-diagnostic-tests.txt build/fex-app-host/swift-fex-test build/fex-app-host/ps4-libkernel-demo.elf build/fex-app-host/orbis-bundle
       - name: Verify V2 Swift C snapshot bridge and redacted export
@@ -242,4 +244,3 @@ jobs:
             build/fex-app-ios/*.txt
             build/fex-app-ios/*.log
           retention-days: 14
-

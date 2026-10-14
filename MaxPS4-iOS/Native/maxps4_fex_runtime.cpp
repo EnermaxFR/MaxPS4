@@ -1,5 +1,6 @@
 #include "maxps4_guest_frame.h"
 #include "maxps4_guest_stack.h"
+#include "maxps4_orbis_m1.h"
 #include <algorithm>
 #include <iterator>
 #include "maxps4_fex_runtime.h"
@@ -42,6 +43,7 @@ class ProbeAddressSpace final : public FEXCore::HLE::SyscallHandler {
 public:
     ProbeAddressSpace() { OSABI = FEXCore::HLE::SyscallOSABI::OS_GENERIC; }
     maxps4::GuestELF* image = nullptr;
+    maxps4::OrbisM1* m1 = nullptr;
     maxps4::PS4DynamicLinker* linker = nullptr;
     maxps4::PS4Libkernel* kernel = nullptr;
     maxps4::PS4GuestMemory* memory = nullptr;
@@ -57,12 +59,18 @@ public:
         const uint64_t rsp = r[x86::REG_RSP];
         int64_t result = maxps4::ps4::kernel_error(maxps4::ps4::nosys);
         if (!image || !linker || !kernel || !memory || r[x86::REG_RAX] > UINT32_MAX ||
-            !linker->gate(*image,state.rip,static_cast<uint32_t>(r[x86::REG_RAX]),service)) {
+            !linker->gate(*image,m1 ? reinterpret_cast<uintptr_t>(image->translate(state.rip,2,5)) : state.rip,
+                static_cast<uint32_t>(r[x86::REG_RAX]),service)) {
             callback_error = -EPERM;
         } else if (rsp < private_stack || private_stack_size < 16 ||
                    rsp - private_stack > private_stack_size - 16 || (rsp & 7)) {
             callback_error = -EFAULT;
             result = maxps4::ps4::kernel_error(maxps4::ps4::fault);
+        } else if (m1) {
+            const maxps4::PS4KernelCall call{r[x86::REG_RDI],r[x86::REG_RSI],r[x86::REG_RDX],
+                r[x86::REG_R10],r[x86::REG_R8],r[x86::REG_R9],rsp};
+            result = kernel->invoke(service,call,1);
+            ++calls;
         } else {
             // Never expose the rebased CPU RSP or CALL return pointer. Copy only
             // the seventh argument from the proven private CPU stack into a
@@ -104,7 +112,7 @@ public:
             if (executable_bytes != segment.file_size) continue;
             const auto* pointer = image->translate(segment.address, executable_bytes, 5);
             if (!pointer) continue;
-            const auto begin = reinterpret_cast<uintptr_t>(pointer);
+            const auto begin = m1 ? segment.address : reinterpret_cast<uintptr_t>(pointer);
             if (address >= begin && address - begin < executable_bytes) {
                 // Verify the exact requested instruction address in the PS4
                 // logical address domain, not only the segment's first byte.
@@ -307,7 +315,8 @@ struct PM4Request {
     size_t* written;
 };
 int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
-    uint64_t* result, uint32_t* backend, const PM4Request* submission, bool linked = false, bool persistent_frame = false) {
+    uint64_t* result, uint32_t* backend, const PM4Request* submission, bool linked = false, bool persistent_frame = false,
+    maxps4::OrbisM1* m1 = nullptr, const maxps4::GuestThreadMemory* guest_thread = nullptr) {
     engine->cpu_report = {};
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
     // FEX still uses rebased host addresses for the admitted instruction set.
@@ -322,7 +331,7 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     const size_t fetch_length = guest_memory.contiguous(image.entry(), entry_bytes.size(), 5);
     if (!fetch_length || !guest_memory.fetch(image.entry(), entry_bytes.data(), fetch_length))
         return -EFAULT;
-    const auto* entry_pointer = image.entry_pointer();
+    const auto* entry_pointer = m1 ? m1->space.translate(image.entry(),1,5) : image.entry_pointer();
     if (!entry_pointer) return -EFAULT;
     const long host_page = ::sysconf(_SC_PAGESIZE);
     if (host_page <= 0) return -EIO;
@@ -337,18 +346,22 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     if (::mprotect(stack_base, page, PROT_READ | PROT_WRITE) != 0 ||
         ::mprotect(callret_base, callret_size, PROT_READ | PROT_WRITE) != 0) return -errno;
     std::array<FEXCore::Core::CPUState::gdt_segment, 32> gdt {};
+    maxps4::GuestELF empty_image;
+    maxps4::PS4GuestMemory m1_memory(empty_image,m1 ? &m1->space : nullptr);
+    maxps4::PS4Libkernel m1_kernel(m1_memory);
     engine->probe.image = &image;
-    engine->probe.linker = linked ? &engine->linker : nullptr;
-    engine->probe.kernel = linked ? &engine->libkernel : nullptr;
-    engine->probe.memory = linked ? &engine->system_memory : nullptr;
-    engine->probe.private_stack = reinterpret_cast<uintptr_t>(stack_base);
-    engine->probe.private_stack_size = page;
+    engine->probe.m1 = m1;
+    engine->probe.linker = m1 ? &m1->linker : linked ? &engine->linker : nullptr;
+    engine->probe.kernel = m1 ? &m1_kernel : linked ? &engine->libkernel : nullptr;
+    engine->probe.memory = m1 ? &m1_memory : linked ? &engine->system_memory : nullptr;
+    engine->probe.private_stack = guest_thread ? guest_thread->stack_begin : reinterpret_cast<uintptr_t>(stack_base);
+    engine->probe.private_stack_size = guest_thread ? guest_thread->stack_size : page;
     engine->probe.calls = 0;
     engine->probe.callback_error = 0;
     struct ClearRange {
         ProbeAddressSpace& space;
         ~ClearRange() {
-            space.image = nullptr; space.linker = nullptr; space.kernel = nullptr;
+            space.m1 = nullptr; space.image = nullptr; space.linker = nullptr; space.kernel = nullptr;
             space.memory = nullptr; space.private_stack = 0; space.private_stack_size = 0;
         }
     } clear_range {engine->probe};
@@ -356,6 +369,7 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     const uint64_t initial_rip = reinterpret_cast<uintptr_t>(entry_pointer);
     const int stack_status = maxps4::initialize_guest_stack(stack_base, page, initial_rip, page, initial_rsp);
     if (stack_status) return stack_status;
+    if (guest_thread) initial_rsp = guest_thread->rsp;
     auto* thread = engine->context->CreateThread(initial_rip, initial_rsp);
     if (!thread) return -ENOMEM;
     struct DestroyThread {
@@ -369,6 +383,7 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     std::fill(std::begin(state.gregs), std::end(state.gregs), uint64_t{});
     state.gregs[FEXCore::X86State::REG_RSP] = initial_rsp;
     state.rip = initial_rip;
+    if (guest_thread) state.fs_cached = guest_thread->fs_base;
     auto& observed = engine->cpu_report;
     observed.entry = image.entry();
     observed.rsp_alignment = state.gregs[FEXCore::X86State::REG_RSP] & 15;
@@ -784,5 +799,40 @@ extern "C" int32_t maxps4_fex_engine_interpret_elf(maxps4_fex_engine* engine,
         *instructions = execution.instructions;
         *backend = MAXPS4_CPU_RESTRICTED_INTERPRETER;
         return status;
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
+}
+
+extern "C" int32_t maxps4_fex_engine_run_m1(maxps4_fex_engine* engine,
+    const uint8_t* file, size_t length, uint32_t budget, uint64_t snapshot,
+    maxps4_m1_report* report) {
+    if (!report) return -EINVAL;
+    *report = {};
+    if (!engine || !file || !length) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
+    try {
+        maxps4::OrbisM1 process(maxps4::GuestAddressSpace::Backend::fex_direct);
+        int status = process.load(file,length,budget);
+        if (status) return status;
+        maxps4::GuestThreadMemory thread(process.space);
+        status = thread.initialize(process.tls,maxps4::OrbisM1::thread_base,process.entry);
+        if (status) return status;
+        status = process.admit(thread,budget);
+        if (status) return status;
+        const auto* output = process.space.translate(snapshot,24,4);
+        if (!output) return -EFAULT;
+        uint64_t rax = 0; uint32_t backend = 0;
+        status = executeImage(engine,process.source,&rax,&backend,nullptr,false,false,&process,&thread);
+        if (status) return status;
+        report->rax = rax; report->backend = backend; report->entry = process.entry;
+        report->rsp = thread.rsp; report->fs_base = thread.fs_base;
+        report->calls = engine->probe.calls;
+        std::memcpy(&report->memory,output,8);
+        std::memcpy(&report->kernel_return,output+8,8);
+        std::memcpy(&report->zero_memory,output+16,8);
+        std::memcpy(&report->heap_word,process.space.translate(maxps4::OrbisM1::heap_base,8,4),8);
+        if (thread.tls_begin && process.tls.memory_size >= 8)
+            std::memcpy(&report->tls_word,process.space.translate(thread.tls_begin,8,4),8);
+        return 0;
     } catch (const std::bad_alloc&) { return -ENOMEM; }
 }

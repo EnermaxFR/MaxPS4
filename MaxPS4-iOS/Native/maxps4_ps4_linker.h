@@ -12,6 +12,9 @@ class PS4DynamicLinker final {
 public:
     struct Import { uint64_t slot, thunk; PS4KernelService service; };
     int load(GuestELF& image, const uint8_t* file, size_t length, uint32_t budget);
+    // Stages logical GOT calls for the separate M1 admission pass. This does
+    // not authorize CPU dispatch; callers must prove code and map the image.
+    int load_m1(GuestELF& image, const uint8_t* file, size_t length, uint32_t budget);
     void reset() { imports_.clear(); stack_ = 0; diagnostic_.clear(); }
     const std::vector<Import>& imports() const { return imports_; }
     const std::string& diagnostic() const { return diagnostic_; }
@@ -21,6 +24,7 @@ public:
     bool gate(const GuestELF& image, uint64_t cpu_rip, uint32_t token,
               PS4KernelService& service) const;
 private:
+    int load_impl(GuestELF&, const uint8_t*, size_t, uint32_t, bool m1);
     std::vector<Import> imports_;
     uint64_t stack_ = 0;
     std::string diagnostic_;

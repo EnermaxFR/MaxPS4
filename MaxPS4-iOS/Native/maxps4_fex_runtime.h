@@ -169,6 +169,15 @@ int32_t maxps4_fex_engine_contiguous_ps4(maxps4_fex_engine *engine,
 int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine, const uint8_t *code,
                             size_t length, uint32_t budget, uint64_t *result,
                             uint32_t *backend);
+// Experimental M1 direct-address backend. No UI integration. Refuses host
+// collisions, unadmitted instructions and unsupported TLS/ABI models.
+typedef struct maxps4_m1_report {
+    uint64_t rax, entry, rsp, fs_base, memory, tls_word, kernel_return, zero_memory, heap_word;
+    uint32_t backend, calls;
+} maxps4_m1_report;
+int32_t maxps4_fex_engine_run_m1(maxps4_fex_engine*, const uint8_t*, size_t,
+    uint32_t budget, uint64_t snapshot_address, maxps4_m1_report*);
+
 #ifdef __cplusplus
 }
 #endif
