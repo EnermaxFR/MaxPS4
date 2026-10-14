@@ -23,6 +23,27 @@ struct PKGSwiftDiagnosticTest {
         let protected = try MaxPS4PKGInspector.inspect(url: url)
         precondition(protected.contains("chiffré (flag déclaré)"))
         precondition(protected.contains("Octets copiés en mémoire : 0"))
+        // Independent synthetic PFS header: classification through the real ABI.
+        data = Data(repeating: 0, count: 0x700)
+        data.replaceSubrange(0..<4, with: [0x7f, 0x43, 0x4e, 0x54])
+        put(0x10, 1, 4); put(0x16, 1, 2); put(0x18, 0x5a0, 4)
+        put(0x430, UInt64(data.count), 8); put(0x410, 0x600, 8); put(0x418, 0x100, 8)
+        put(0x5a0, 0x409, 4)
+        func little(_ at: Int, _ value: UInt64, _ width: Int) {
+            for i in 0..<width { data[at + i] = UInt8(truncatingIfNeeded: value >> (i * 8)) }
+        }
+        little(0x600, 1, 8); little(0x608, 20130315, 8); little(0x61c, 12, 2)
+        try data.write(to: url)
+        let encryptedPFS = try MaxPS4PKGInspector.inspect(url: url)
+        precondition(encryptedPFS.contains("PFS chiffré déclaré : inaccessible"))
+        precondition(encryptedPFS.contains("budget de lecture=72 octets"))
+        little(0x61c, 8, 2); try data.write(to: url)
+        let plainPFS = try MaxPS4PKGInspector.inspect(url: url)
+        precondition(plainPFS.contains("PFS non chiffré déclaré : contenu non pris en charge"))
+        precondition(plainPFS.contains("eboot.bin demeure inaccessible"))
+        little(0x608, 20130305, 8); try data.write(to: url)
+        let unknownPFS = try MaxPS4PKGInspector.inspect(url: url)
+        precondition(unknownPFS.contains("chiffrement indéterminé"))
         try Data([0x7f, 0x43, 0x4e, 0x54]).write(to: url)
         let rejected = try MaxPS4PKGInspector.inspect(url: url)
         precondition(rejected.contains("Rejet"))
@@ -46,6 +67,6 @@ struct PKGSwiftDiagnosticTest {
                 } catch MaxPS4PKGInspector.ReportError.failed {}
             }
         }
-        print("PASS Swift/native PKG report, plaintext copy, encryption refusal, truncation and missing source")
+        print("PASS Swift/native PKG report, plaintext copy, encryption refusal, PFS header statuses and bounded extraction, truncation and missing source")
     }
 }

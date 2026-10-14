@@ -1,6 +1,6 @@
 import Foundation
 
-/// Bounded native inventory report. Does not export, decrypt or launch a game.
+/// Bounded PKG/PFS inspection and selected plaintext reads; no decryption or launch.
 enum MaxPS4PKGInspector {
     enum ReportError: LocalizedError {
         case failed(Int32, String)
@@ -29,7 +29,7 @@ enum MaxPS4PKGInspector {
         return report
     }
     static func readPFSFile(url: URL, selected: String) throws -> Data {
-        guard !selected.utf8.contains(0) else {
+        guard !selected.utf8.contains(0), !selected.isEmpty, selected.utf8.count <= 4096 else {
             throw ReportError.failed(-Int32(POSIXErrorCode.EINVAL.rawValue), "Sélection invalide")
         }
         var length = 0

@@ -268,7 +268,8 @@ struct MaxPS4HomeView: View {
                             }
                             .buttonStyle(.bordered)
                         }
-                        if game.fileName.lowercased().hasSuffix(".pkg") {
+                        if game.fileName.lowercased().hasSuffix(".pkg"),
+                           detailsReport?.contains("Diagnostic PKG/PFS : PFS non chiffré accessible") == true {
                             NavigationLink("Exporter un fichier PFS accessible…") {
                                 MaxPS4PFSExportView(source: URL(fileURLWithPath: game.localPath))
                             }

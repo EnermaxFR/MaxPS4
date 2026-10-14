@@ -10,8 +10,7 @@ inline void le(std::vector<uint8_t>& b,size_t at,uint64_t n,size_t w) {
 inline void be(std::vector<uint8_t>& b,size_t at,uint64_t n,size_t w) {
     for(size_t i=0;i<w;++i) b[at+w-1-i]=uint8_t(n>>(8*i));
 }
-inline std::vector<uint8_t> image() {
-    constexpr size_t bs=65536;
+inline std::vector<uint8_t> image(size_t bs=65536) {
     std::vector<uint8_t> b(5*bs);
     le(b,0,1,8); le(b,8,20130315,8); le(b,0x1c,8,2); le(b,0x20,bs,4);
     le(b,0x28,1,8); le(b,0x30,3,8); le(b,0x38,5,8); le(b,0x40,1,8);

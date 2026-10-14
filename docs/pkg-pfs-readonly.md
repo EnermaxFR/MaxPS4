@@ -1,6 +1,6 @@
-# PKG/PFS en lecture seule — issue #186
+# PKG/PFS en lecture seule — issues #186 / #190
 
-Base : main `4ceedf4` ; la PR #185 est déjà fusionnée. Cette mission ajoute une
+Base réconciliée : main `13a8a2a` après fusion de #189 ; #185 est déjà fusionnée. Cette mission ajoute une
 PR brouillon séparée sans fusion. Aucun jeu, clé, licence ou PKG commercial
 n'est fourni. Les fixtures originales générées par les tests sont librement
 redistribuables sous la licence du dépôt et contiennent du texte/ELF synthétique.
@@ -43,7 +43,7 @@ timestamps/uid/gid inode sont ignorés comme métadonnées : ils n'autorisent ri
   vérifié depuis inode 0, avec répertoire `uroot`. Seuls ses fichiers sont
   exposés sous des chemins relatifs triés. Aucune admission ELF ou exécution.
 
-La lecture des inodes et répertoires cumule au maximum 8 Mio ; chaque répertoire
+La lecture des inodes et répertoires cumule au maximum 8 Mio (en-tête de 72 octets inclus) ; chaque répertoire
 ≤1 Mio, profondeur ≤16, total ≤4096 dirents, chemins cumulés ≤1 Mio, bloc puissance de deux 4–64 Kio.
 Le nombre de blocs doit correspondre exactement à la taille de la tranche.
 Les pointeurs inutilisés D32 acceptent zéro ou -1 ; les pointeurs indirects
@@ -57,14 +57,15 @@ bornée. Swift alloue cette taille, lit en tâche de fond et ouvre le sélecteur
 iOS **Fichiers** pour une destination explicitement choisie. Pas de dossiers
 créés depuis les noms PFS. La source doit rester stable pendant l'opération ;
 ne pas la modifier avec un autre outil. open O_NOFOLLOW/O_NONBLOCK refuse les
-liens source et évite le blocage sur FIFO. Les métadonnées de la source sont
-revérifiées après lecture ; ce n'est pas une capture immuable contre un écrivain
+liens source et évite le blocage sur FIFO. Les métadonnées de la source (identité, taille, mtime/ctime à la nanoseconde) sont
+revérifiées après inspection et lecture ; ce n'est pas une capture immuable contre un écrivain
 concurrent malveillant.
 
 Les PFS signés (dont certains PFS externes avec pfs_image.dat), l'imbrication de
 PFS, PFSC et les variantes 64 bits restent bloqués. Ils ne sont pas présentés
-comme corrompus ou montés. Aucun accès au PKG utilisateur n'est disponible ici ;
-on ne prétend donc pas avoir constaté son bit de chiffrement. Le rapport #184
+comme corrompus ou montés. Le PKG utilisateur n’est pas disponible dans cet environnement. L’issue #190
+rapporte pour CUSA06015 un PFS chiffré déclaré en mode `0xd` ; ce constat
+externe n’est pas un nouveau test ici et implique le refus d’extraction. Le rapport #184
 prouvait seulement un PFS opaque pour l'ancien lecteur, pas son mode effectif.
 
 ## Recette iPhone / SideStore
@@ -113,3 +114,31 @@ fichiers accessibles par des moyens autorisés sont nécessaires. Sinon, vérifi
 la variante réelle (signed/nested/PFSC encore bloqués), puis ELF/SELF, PRX/NID,
 relocations, TLS, services/ABI, admission CPU, JIT iPhone et rendu réel. Cette PR
 ne résout pas ces besoins et ne ferme pas la mission de jouabilité #184.
+
+## Réconciliation #190 après #189
+
+Le diagnostic indépendant de #189 reste limité à une lecture de 72 octets.
+Le bridge utilise cet en-tête en cache pour le lecteur D32 : pas de seconde
+lecture physique d’en-tête dans le rapport, aucune lecture inode/payload pour
+un mode chiffré reconnu (dont 0xd), inconnu ou une tranche CNT ambiguë.
+Les deux suites de tests restent obligatoires avant packaging SideStore.
+Les fixtures header-only de #189 ne sont pas des PFS montables : leur
+classification d’en-tête reste visible même si la géométrie D32 est invalide.
+
+Le budget partagé est vérifié avant allocation des répertoires et compte aussi
+les noms de répertoires. Les sélections sont limitées à 4096 octets ; les NUL,
+contrôles et noms non ASCII sont refusés. L’interface propose l’export de fichier
+après un diagnostic complet accessible ; l’API refait les validations à chaque
+lecture. Le rapport exporté conserve mode, statut, budget d’en-tête et limites.
+Une extraction de 64 Mio peut faire coexister le buffer natif et les 64 Mio du
+buffer Swift : ces plafonds ne sont pas une mesure RSS ni une promesse de débit.
+
+Tests supplémentaires : géométries 4/8/16/32/64 Kio, fichier vide et payload
+contigu multibloc, inode symlink et dirent spécial, NUL/encodage malformé,
+FIFO d’extraction, modes chiffrés 4/12/13, répertoires imbriqués, dépassement du
+budget cumulé et profondeur 17. Les fixtures restent entièrement synthétiques.
+
+Résultats locaux et CI, commit exact et nouvelle IPA sont consignés dans #187.
+Swift/Xcode et FEX liés ne sont pas disponibles localement ; leur validation
+vient des jobs CI, sans preuve iPhone physique. PR maintenue en brouillon :
+aucune fusion avant validation complète et autorisation explicite.

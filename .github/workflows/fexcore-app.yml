@@ -33,10 +33,10 @@ jobs:
           xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
             MaxPS4-iOS/Native/OrbisLinkerBridge.cpp MaxPS4-iOS/Tests/OrbisLinkerTest.cpp -o "$RUNNER_TEMP/orbis-test"
           "$RUNNER_TEMP/orbis-test" | tee build/diagnostics/orbis-tests.txt
-          for suite in PS4PKGInventoryTest PS4PKGMetadataTest PS4PFSReadOnlyTest; do
+          for suite in PS4PKGInventoryTest PS4PKGMetadataTest PS4PFSHeaderDiagnosticTest PS4PFSReadOnlyTest; do
             xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
               MaxPS4-iOS/Native/PS4PKGBridge.cpp "MaxPS4-iOS/Tests/$suite.cpp" -o "$RUNNER_TEMP/$suite"
-            "$RUNNER_TEMP/$suite" | tee "build/diagnostics/$suite.txt"
+            python3 scripts/run-bounded.py 30 "build/diagnostics/$suite.txt" "$RUNNER_TEMP/$suite"
           done
           swiftc -parse-as-library \
             MaxPS4-iOS/Sources/MaxPS4GuestMemory.swift \

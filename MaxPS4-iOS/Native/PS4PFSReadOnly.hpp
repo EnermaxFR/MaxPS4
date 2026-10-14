@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #pragma once
 // Independently implemented subset of LibOrbisPkg PfsStructs/PfsReader/PFSBuilder
 // at 643477263b2644e0803e0f58b8726ea4e3f3b7d4. No cryptography or upstream code.
@@ -26,6 +27,7 @@ public:
             std::array<uint8_t,0x48> h{};
             if (size < h.size() || !read(0,h.data(),h.size()))
                 return reject(Status::malformed,"PFS : en-tête tronqué / lecture incomplète");
+            inspected = h.size();
             if (le(h.data(),8)!=1 || le(h.data()+8,8)!=20130315)
                 return reject(Status::unknown,"PFS : format inconnu (version/magic non reconnus), chiffrement non déterminé");
             mode = uint16_t(le(h.data()+0x1c,2));
@@ -79,6 +81,9 @@ public:
                 const auto& n=inodes[index];
                 std::vector<uint8_t> bytes;
                 if (n.size>1024*1024) throw Failure(Status::unsupported,"PFS : répertoire supérieur à 1 Mio refusé");
+                // Check the cumulative budget before allocating, including ancestor buffers.
+                if (n.size>8*1024*1024-inspected)
+                    throw Failure(Status::unsupported,"PFS : budget total de lecture 8 Mio dépassé");
                 bytes.resize(size_t(n.size)); exact(read,n.start*blockSize,bytes.data(),bytes.size());
                 std::set<std::string> names;
                 for (size_t at=0;at<bytes.size();) {
@@ -101,6 +106,9 @@ public:
                             throw Failure(Status::malformed,"PFS : lien dot/dotdot invalide");
                     } else {
                         if (!component(name)) throw Failure(Status::malformed,"PFS : chemin malveillant refusé");
+                        if (prefix.size()+name.size()>1024*1024-pathBytes)
+                            throw Failure(Status::unsupported,"PFS : budget de chemins 1 Mio dépassé");
+                        pathBytes+=prefix.size()+name.size();
                         const auto path=prefix+name;
                         if (path.size()>4096) throw Failure(Status::malformed,"PFS : chemin trop long");
                         if (type==3) {
@@ -109,9 +117,6 @@ public:
                         }
                         else if (type==2 && (inodes[ino].mode&0xf000)==0x8000 && visited.insert(uint32_t(ino)).second)
                             {
-                            if (path.size()>1024*1024-pathBytes)
-                                throw Failure(Status::unsupported,"PFS : budget de chemins 1 Mio dépassé");
-                            pathBytes+=path.size();
                             pending.push_back({path,inodes[ino].start*blockSize,inodes[ino].size});
                         }
                         else throw Failure(Status::unsupported,"PFS : type dirent/lien non pris en charge");
@@ -140,7 +145,8 @@ public:
         out.clear(); why.clear();
         if (status!=Status::accessible || !allowedSelection(path)) { why="PFS non accessible"; return false; }
         const auto it=std::find_if(files.begin(),files.end(),[&](const auto& f){return f.path==path;});
-        if (it==files.end() || it->size>64*1024*1024) { why="Fichier absent ou supérieur à 64 Mio"; return false; }
+        if (it==files.end() || it->size>64*1024*1024 ||
+            !PS4PKGInventory::range(it->offset,it->size,imageSize)) { why="Fichier absent ou supérieur à 64 Mio"; return false; }
         try {
             std::vector<uint8_t> pending(size_t(it->size));
             if (it->size && !read(it->offset,pending.data(),pending.size())) { why="Lecture incomplète"; return false; }
@@ -148,6 +154,7 @@ public:
         } catch (const std::bad_alloc&) { why="Budget mémoire indisponible"; return false; }
     }
     static bool allowedSelection(const std::string& path) {
+        if (path.empty() || path.size()>4096) return false;
         size_t start=0;
         do {
             const auto end=path.find('/',start);
