@@ -7,6 +7,7 @@ struct MaxPS4OrbisTestView: View {
     @State private var inspection: MaxPS4OrbisTest.Inspection?
     @State private var execution = "execution=not_attempted"
     @State private var autotests = "autotests=not_attempted"
+    @State private var m1Autotests = "autotests=orbis-m1\nstatus=not_attempted"
     @State private var error: String?
     private let queue = DispatchQueue(label: "maxps4.orbis-test", qos: .userInitiated)
 
@@ -37,13 +38,22 @@ struct MaxPS4OrbisTestView: View {
                         }
                     }.disabled(busy)
                     Text(autotests).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                    Button("Diagnostic M1 sur cet iPhone (expérimental)") {
+                        busy = true
+                        queue.async {
+                            let result = MaxPS4OrbisTest.m1Autotests()
+                            DispatchQueue.main.async { m1Autotests = result; busy = false }
+                        }
+                    }.disabled(busy)
+                    Text(m1Autotests).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+
                     if busy { ProgressView("Vérification en cours…") }
                     if let error { Text(error).foregroundStyle(.orange) }
                     if let inspection {
                         Text(inspection.report).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                         Text(execution).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                         ShareLink("Exporter le diagnostic sans chemins ni contenu ELF",
-                                  item: inspection.export + "\n" + execution + "\n" + autotests)
+                                  item: inspection.export + "\n" + execution + "\n" + autotests + "\n" + m1Autotests)
                     }
                     Text("Un test FEX synthétique, un chargement ELF et une exécution Orbis sont des preuves distinctes. Aucun jeu PS4 validé.").font(.footnote)
                 }.padding()
