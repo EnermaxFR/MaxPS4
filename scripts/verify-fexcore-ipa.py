@@ -51,7 +51,11 @@ def verify(path):
         assert metadata['CFBundleVersion'] == expected_build.group(1), (
             f"IPA build {metadata['CFBundleVersion']} does not match project build {expected_build.group(1)}"
         )
-        assert metadata['CFBundleIdentifier'] == 'com.enermaxfr.maxps4'
+        expected_identifier = re.search(r'PRODUCT_BUNDLE_IDENTIFIER:\s*([^\s#]+)', project)
+        assert expected_identifier, 'Missing expected bundle identifier in project.yml'
+        assert metadata['CFBundleIdentifier'] == expected_identifier.group(1), (
+            f"IPA bundle {metadata['CFBundleIdentifier']} does not match project bundle {expected_identifier.group(1)}"
+        )
         assert metadata['CFBundlePackageType'] == 'APPL'
         assert tuple(map(int, metadata['MinimumOSVersion'].split('.'))) <= (27, 2)
         for name in (prefix + 'MaxPS4', framework + 'MaxPS4FEXRuntime'):
