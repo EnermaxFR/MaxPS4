@@ -3,9 +3,11 @@ import UniformTypeIdentifiers
 
 struct MaxPS4FEXDiagnosticView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @State private var running = false
     @State private var report: MaxPS4FEXDiagnostic?
     @State private var activationMessage: String?
+    @State private var activationRequested = false
     @State private var importingELF = false
     @State private var importingOrbisDirectory = false
     @State private var importedReport: String?
