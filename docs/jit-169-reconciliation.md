@@ -27,6 +27,9 @@ guest-memory and staged CPU admission pass with ASan/UBSan. LeakSanitizer cannot
 run under this traced Linux sandbox; local runs use detect_leaks=0. Real FEX
 local configuration requires Clang, absent here; GCC is rejected by upstream.
 Swift, Mach VM, iOS linkage, Metal, leaks and IPA packaging require macOS CI.
+The first CI run exposed Linux dispatcher compilation with exceptions disabled.
+The linked-test CMake configuration now enables exceptions for the same FEX
+object/base targets as the Darwin configuration; both use the unwind patch.
 
 Keep the PR draft. Attach CI results for the exact final commit, including the
 SideStore IPA and diagnostics. No physical iPhone execution or game launch is
