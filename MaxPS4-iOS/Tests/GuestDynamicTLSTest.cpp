@@ -2,8 +2,11 @@
 #include "OrbisM1Fixture.h"
 #include <cstdio>
 #include <cstdlib>
+#include <type_traits>
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); std::abort(); } } while (0)
 using namespace maxps4;
+static_assert(!std::is_copy_constructible_v<GuestTLSModules>);
+static_assert(!std::is_move_constructible_v<GuestTLSModules>);
 static PS4ExecutableImage image(uint32_t value) {
     const auto bytes = orbis_m1_fixture::make(value,false);
     PS4ExecutableImage parsed;

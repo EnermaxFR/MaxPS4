@@ -8,6 +8,9 @@ namespace maxps4 {
 // Process owner serializes registry and thread access and outlives each thread.
 class GuestTLSModules final {
 public:
+    GuestTLSModules() = default;
+    GuestTLSModules(const GuestTLSModules&) = delete;
+    GuestTLSModules& operator=(const GuestTLSModules&) = delete;
     int add(const PS4ExecutableImage& image, uint64_t& id) {
         id = 0;
         GuestTLSTemplate candidate;
