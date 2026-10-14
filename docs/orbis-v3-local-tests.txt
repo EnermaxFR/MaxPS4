@@ -1,0 +1,26 @@
+ET_SCE_EXEC, x86-64, FreeBSD ABI, RAX expected=42, SHA256=a80acf5c6b919cae109c01ec135516807bfc2c358c940f6f0d8c0abe3e5f57f0
+Generated only: no execution demonstrated.
+ET_SCE_EXEC, x86-64, FreeBSD ABI, RAX expected=42, SHA256=a80acf5c6b919cae109c01ec135516807bfc2c358c940f6f0d8c0abe3e5f57f0
+Generated only: no execution demonstrated.
+PASS V3 fixture structural autotests; CPU execution NOT tested
+PASS PKG inventory: public layout, bounds, budgets, protection flags, ambiguity, exact I/O, C/Swift report ABI
+Synthetic fixtures only; no DRM, PFS extraction, PS4 executable admission or iPhone execution tested
+PASS PKG metadata, SFO bounds/UTF-8, protected refusal, runtime preparation and synthetic iPhone fixtures
+PASS PFS header diagnostic: 72-byte maximum, encrypted/plain/unknown/absent, bounds/overlaps/I/O, C report, symlink/FIFO refusal; no payload or execution
+PASS PFS read-only D32: real synthetic uroot read, selected extraction, encrypted header-only refusal, unknown/unsupported/malformed, paths/cycles/overlaps/budgets/mutations, CNT/C ABI; no execution
+PASS plaintext extraction CNT base=2147549184 PFS payload=262144 logical=2147876864 allocated=331776; encrypted 0xd refused
+PASS plaintext extraction CNT base=4295032832 PFS payload=262144 logical=4295360512 allocated=331776; encrypted 0xd refused
+PASS plaintext extraction CNT base=65536 PFS payload=4295098368 logical=4295229440 allocated=331776; encrypted 0xd refused
+PASS unsupported-host session ABI; no JIT publication or leases
+PASS shipped Stik controller: exact mailbox/GDB contract, failure cleanup, no false readiness
+PASS sparse >2GB/4GB PKG inventory, exact artwork read, and bounded output
+PASS sparse offset=0x80001000, logical size=2147487768, allocated=8192
+PASS sparse >2GB/4GB PKG inventory, exact artwork read, and bounded output
+PASS sparse offset=0xfffffff0, logical size=4294967304, allocated=12288
+Orbis linker: 3368 checks passed
+PASS real PS4 ELF identity and plaintext SELF block-ID mapping, BSS, PM4 read, bounds/rejections
+Segment staging only: no PS4 imports, relocations, TLS initialization, HLE or execution
+PASS Orbis SCE metadata, qualified NID imports/exports, PRX dependencies/RELA, TLS inventory, malformed files and transactional cleanup; no execution
+PASS read-only game directory: deterministic inventory, NID/PRX, SELF/PKG refusal, TLS, symlinks/FIFO, budgets, truncation; no execution
+PASS legal plaintext CNT/PFS extraction -> original ET_SCE_EXEC validation, linking, BSS, native guest mapping, 64 cleanup cycles, corruption and CPU admission refusal. NO CPU execution or FEX in this test.
+PASS minimal x86-64 process stack: alignment, argc/argv/envp, auxv, bounds and invalid inputs

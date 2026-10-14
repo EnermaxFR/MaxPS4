@@ -1,5 +1,8 @@
 #include "maxps4_guest_frame.h"
 #include "maxps4_fex_runtime.h"
+#include "maxps4_guest_stack.h"
+#include <algorithm>
+#include <iterator>
 #include "maxps4_jit_memory.h"
 #include "maxps4_guest_elf.h"
 #include "maxps4_ps4_guest_memory.h"
@@ -142,6 +145,7 @@ struct maxps4_fex_engine {
     ProbeAddressSpace probe;
     maxps4::GuestELF staged_ps4;
     bool orbis_admitted = false;
+    maxps4_fex_cpu_report cpu_report{};
     maxps4::GuestFrame frame;
     uint64_t frame_sequence = 0;
     bool frame_code_cached = false;
@@ -239,6 +243,15 @@ extern "C" int32_t maxps4_fex_engine_initialize(maxps4_fex_engine *engine) {
 extern "C" int32_t maxps4_fex_engine_stage(const maxps4_fex_engine *engine) {
     std::lock_guard lock(runtime_lock);
     return engine ? engine->stage : 0;
+}
+extern "C" int32_t maxps4_fex_engine_last_cpu_report(const maxps4_fex_engine* engine,
+    maxps4_fex_cpu_report* report) {
+    if (!report) return -EINVAL;
+    *report = {};
+    if (!engine) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    *report = engine->cpu_report;
+    return report->completed ? 0 : -EAGAIN;
 }
 extern "C" int32_t maxps4_fex_engine_cpuid(maxps4_fex_engine *engine,
                                           uint32_t leaf, uint32_t subleaf,
@@ -338,8 +351,12 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
             space.memory = nullptr; space.private_stack = 0; space.private_stack_size = 0;
         }
     } clear_range {engine->probe};
-    auto* thread = engine->context->CreateThread(reinterpret_cast<uintptr_t>(entry_pointer),
-        reinterpret_cast<uintptr_t>(stack_base) + page - 16);
+    engine->cpu_report = {};
+    uint64_t initial_rsp = 0;
+    const uint64_t initial_rip = reinterpret_cast<uintptr_t>(entry_pointer);
+    const int stack_status = maxps4::initialize_guest_stack(stack_base, page, initial_rip, page, initial_rsp);
+    if (stack_status) return stack_status;
+    auto* thread = engine->context->CreateThread(initial_rip, initial_rsp);
     if (!thread) return -ENOMEM;
     struct DestroyThread {
         FEXCore::Context::Context* context;
@@ -347,6 +364,23 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
         ~DestroyThread() { context->DestroyThread(thread); }
     } destroy {engine->context.get(), thread};
     auto& state = thread->CurrentFrame->State;
+    std::fill(std::begin(state.gregs), std::end(state.gregs), uint64_t{});
+    state.gregs[FEXCore::X86State::REG_RSP] = initial_rsp;
+    state.rip = initial_rip;
+    auto& observed = engine->cpu_report;
+    observed.entry = image.entry();
+    observed.rsp_alignment = state.gregs[FEXCore::X86State::REG_RSP] & 15;
+    observed.entry_matches = state.rip == initial_rip;
+    observed.zero_integer_registers = 1;
+    for (size_t i = 0; i < std::size(state.gregs); ++i)
+        if (i != FEXCore::X86State::REG_RSP && state.gregs[i]) observed.zero_integer_registers = 0;
+    uint64_t stack_words[9]{};
+    std::memcpy(stack_words, reinterpret_cast<const void*>(initial_rsp), sizeof(stack_words));
+    observed.argc = stack_words[0];
+    observed.argv_env_null = stack_words[1] == 0 && stack_words[2] == 0;
+    observed.page_size = stack_words[4];
+    observed.auxv_valid = stack_words[3] == 6 && stack_words[5] == 9 &&
+        stack_words[6] == state.rip && stack_words[7] == 0 && stack_words[8] == 0;
     thread->CallRetStackBase = callret_base;
     state.callret_sp = reinterpret_cast<uintptr_t>(callret_base) + callret_size / 4;
     state.segment_arrays[FEXCore::Core::CPUState::SEGMENT_ARRAY_INDEX_GDT] = gdt.data();
@@ -372,6 +406,8 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
         *submission->written = snapshot.words.size();
     }
     *result = state.gregs[FEXCore::X86State::REG_RAX];
+    observed.rax = *result;
+    observed.completed = 1;
 #if defined(VIXL_SIMULATOR)
     *backend = MAXPS4_CPU_FEX_ARM64_SIMULATOR;
 #else
