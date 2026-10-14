@@ -17,5 +17,5 @@ node MaxPS4-iOS/Tests/StikScriptTest.js
 python3 scripts/test-pkg-sparse-ci.py
 bash scripts/test-orbis-runtime.sh "$OUT/linker"
 bash scripts/test-orbis-analysis.sh "$OUT/analysis"
-"$CXX" "${flags[@]}" MaxPS4-iOS/Native/maxps4_guest_elf.cpp MaxPS4-iOS/Tests/OrbisRuntimeV2Test.cpp -o "$OUT/OrbisRuntimeV2Test"
+"$CXX" "${flags[@]}" MaxPS4-iOS/Native/PS4PKGBridge.cpp MaxPS4-iOS/Native/maxps4_guest_elf.cpp MaxPS4-iOS/Tests/OrbisRuntimeV2Test.cpp -o "$OUT/OrbisRuntimeV2Test"
 python3 scripts/run-bounded.py 30 "$OUT/OrbisRuntimeV2Test.txt" "$OUT/OrbisRuntimeV2Test" "$OUT/orbis-test.elf"

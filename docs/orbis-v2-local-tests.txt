@@ -20,3 +20,6 @@ Segment staging only: no PS4 imports, relocations, TLS initialization, HLE or ex
 PASS Orbis SCE metadata, qualified NID imports/exports, PRX dependencies/RELA, TLS inventory, malformed files and transactional cleanup; no execution
 PASS read-only game directory: deterministic inventory, NID/PRX, SELF/PKG refusal, TLS, symlinks/FIFO, budgets, truncation; no execution
 PASS original ET_SCE_EXEC validation, linking, BSS, native guest mapping, 64 cleanup cycles, corruption and CPU admission refusal. NO CPU execution or FEX in this test.
+
+Validation complémentaire après ajout de la chaîne PKG→ELF (exit=0) :
+PASS legal plaintext CNT/PFS extraction -> original ET_SCE_EXEC validation, linking, BSS, native guest mapping, 64 cleanup cycles, corruption and CPU admission refusal. NO CPU execution or FEX in this test.

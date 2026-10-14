@@ -25,10 +25,20 @@ Des erreurs découvertes dans les nouveaux tests (header C manquant, appel memcp
 avec source vide, mutation qui produisait un ELF encore valide) ont été corrigées.
 La passe finale est verte, sans diagnostic sanitizer masqué.
 
+## CI observée pour le commit 04bbade
+
+- [Suite V2 Linux/macOS](https://github.com/EnermaxFR/MaxPS4/actions/runs/38560588428) : SUCCESS, les deux jobs sanitizer sont verts.
+- [PKG / Swift-iOS existants](https://github.com/EnermaxFR/MaxPS4/actions/runs/38560588278) : SUCCESS.
+- [Job app/FEX](https://github.com/EnermaxFR/MaxPS4/actions/runs/38560588322) : les étapes FEX host réel, pont Swift/C V2, mémoire Mach/Stik et readback Metal sont déjà vertes ; packaging iOS en cours au moment de ce relevé.
+
+Ajout complémentaire testé localement : la même fixture ELF légale est emballée
+sans chiffrement dans CNT/PFS, extraite via l’API C, comparée octet par octet,
+puis validée/liaisonnée/mappée. Ce test ne lance pas le CPU.
+
 ## Compilation seule / exécution à établir
 
-Aucun nouveau composant Swift/iOS/FEX n’est qualifié de « compilé » avant preuve
-CI. Hôte local sans Swift/Xcode/xcrun/FEX Darwin. Les fonctions C++ testées
+Les étapes host Swift/FEX ci-dessus sont effectivement compilées et testées en CI.
+La compilation complète iOS et son packaging restent à établir. Hôte local sans Swift/Xcode/xcrun/FEX Darwin. Les fonctions C++ testées
 ci-dessus sont réellement compilées et testées ; l’app Swift, les routines Mach
 et les appels FEX sont uniquement inspectés localement.
 

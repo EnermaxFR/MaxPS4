@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "../Native/maxps4_guest_elf.h"
 #include "GuestELFFixture.h"
+#include "PS4PFSFixture.hpp"
+#include "../Native/PS4PKGBridge.h"
 #include <cassert>
 #include <cstdio>
 #include <fstream>
@@ -10,6 +12,23 @@ int main(int argc, char** argv) {
     std::ifstream stream(argv[1], std::ios::binary);
     std::vector<uint8_t> file((std::istreambuf_iterator<char>(stream)), {});
     assert(file.size() == 131);
+    // End-to-end legal fixture: selected plaintext CNT/PFS extraction -> Orbis
+    // validation/linking -> native guest mapping. Still NO CPU execution.
+    auto pfs = pfsFixture::image();
+    const size_t inode = 65536 + 2 * 0xa8;
+    pfsFixture::le(pfs,inode+8,file.size(),8);
+    pfsFixture::le(pfs,inode+0x10,file.size(),8);
+    std::copy(file.begin(),file.end(),pfs.begin()+4*65536);
+    auto pkg = pfsFixture::package(pfs);
+    const std::string path = std::string(argv[1])+".pkg";
+    { std::ofstream output(path,std::ios::binary);
+      output.write(reinterpret_cast<const char*>(pkg.data()),pkg.size()); assert(output.good()); }
+    size_t length=0;
+    assert(maxps4_pkg_pfs_read_file(path.c_str(),"eboot.bin",nullptr,0,&length)==-ENOSPC && length==file.size());
+    std::vector<uint8_t> extracted(length);
+    assert(maxps4_pkg_pfs_read_file(path.c_str(),"eboot.bin",extracted.data(),extracted.size(),&length)==0);
+    assert(length==file.size() && extracted==file);
+    file=std::move(extracted);
     maxps4::OrbisLinker::Image linked;
     std::string why;
     const auto link = [&](const std::vector<uint8_t>& bytes) {
@@ -42,5 +61,5 @@ int main(int argc, char** argv) {
     assert(link(unsupported));
     assert(guest.prepare_orbis(linked,"test.elf",64,why) != 0);
     assert(guest.entry() == 0 && guest.segments().size() == 0);
-    std::puts("PASS original ET_SCE_EXEC validation, linking, BSS, native guest mapping, 64 cleanup cycles, corruption and CPU admission refusal. NO CPU execution or FEX in this test.");
+    std::puts("PASS legal plaintext CNT/PFS extraction -> original ET_SCE_EXEC validation, linking, BSS, native guest mapping, 64 cleanup cycles, corruption and CPU admission refusal. NO CPU execution or FEX in this test.");
 }
