@@ -6,8 +6,12 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #if defined(__APPLE__)
+#include <TargetConditionals.h>
 #include <mach/mach.h>
 #include <mach/vm_map.h>
+#if !TARGET_OS_IPHONE
+#include <mach/mach_vm.h>
+#endif
 #endif
 
 namespace maxps4 {
@@ -48,7 +52,38 @@ public:
             // VM_FLAGS_OVERWRITE, fails on existing mappings instead of replacing
             // them. Protect guards before publishing ownership or running FEX.
             vm_address_t requested = static_cast<vm_address_t>(low);
-            const kern_return_t status = vm_allocate(mach_task_self(),&requested,bytes,VM_FLAGS_FIXED);
+            kern_return_t status = vm_allocate(mach_task_self(),&requested,bytes,VM_FLAGS_FIXED);
+#if !TARGET_OS_IPHONE
+            if (status == KERN_NO_SPACE) {
+                // Modern Darwin places inaccessible placeholders outside its
+                // default/data VA ranges. Its public range API delegates a
+                // fixed-allocation window; it refuses existing ranges/mappings.
+                // Delegate a coarse window once so successive ELF sizes can
+                // reuse it. Delegation persists until process exit, but actual
+                // mappings below remain owned/released by this object.
+                if (__builtin_available(macOS 15.0, *)) {
+                    constexpr uint64_t window = 64 * 1024 * 1024;
+                    mach_vm_range_recipe_v1_t recipe{};
+                    recipe.range_tag = MACH_VM_RANGE_FIXED;
+                    recipe.range.min_address = low / window * window;
+                    recipe.range.max_address = (low + bytes + window - 1) / window * window;
+                    const auto created = mach_vm_range_create(mach_task_self(),MACH_VM_RANGE_FLAVOR_V1,
+                        reinterpret_cast<mach_vm_range_recipes_raw_t>(&recipe),
+                        static_cast<mach_msg_type_number_t>(sizeof(recipe)));
+                    if (created == KERN_SUCCESS) {
+                        // range_create publishes our new PROT_NONE placeholder.
+                        // Remove only that newly created, exclusively owned
+                        // entry before allocating the exact reservation.
+                        const auto removed = vm_deallocate(mach_task_self(),
+                            static_cast<vm_address_t>(recipe.range.min_address),
+                            static_cast<vm_size_t>(recipe.range.max_address-recipe.range.min_address));
+                        if (removed != KERN_SUCCESS) return -EIO;
+                        requested = static_cast<vm_address_t>(low);
+                        status = vm_allocate(mach_task_self(),&requested,bytes,VM_FLAGS_FIXED);
+                    }
+                }
+            }
+#endif
             if (status != KERN_SUCCESS) return status == KERN_NO_SPACE ? -EADDRINUSE : -ENOMEM;
             if (vm_protect(mach_task_self(),requested,bytes,FALSE,VM_PROT_NONE) != KERN_SUCCESS) {
                 vm_deallocate(mach_task_self(),requested,bytes); return -EACCES;
