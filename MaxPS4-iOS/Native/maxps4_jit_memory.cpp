@@ -313,6 +313,8 @@ extern "C" int32_t maxps4_jit_begin(uint64_t* address, uint64_t* nonce, uint64_t
     *address = *nonce = *page = 0; return -ENOTSUP;
 }
 extern "C" int32_t maxps4_jit_prepare() { return -ENOTSUP; }
+extern "C" int32_t maxps4_jit_confirmation() { return 0; }
+extern "C" int32_t maxps4_jit_launch_failed(uint64_t) { return -ENOTSUP; }
 extern "C" int32_t maxps4_jit_cancel() { return 0; }
 extern "C" int32_t maxps4_jit_state() { return 0; }
 extern "C" int32_t maxps4_jit_error() { return 0; }
@@ -321,4 +323,5 @@ extern "C" int32_t maxps4_jit_failure_stage() { return 0; }
 extern "C" int32_t maxps4_jit_failure_mach() { return 0; }
 extern "C" int32_t maxps4_jit_failure_region() { return -1; }
 extern "C" uint32_t maxps4_jit_leases() { return 0; }
+extern "C" size_t maxps4_jit_usable_size(void*, size_t) { return 0; }
 #endif
