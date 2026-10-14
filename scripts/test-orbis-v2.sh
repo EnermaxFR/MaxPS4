@@ -7,6 +7,7 @@ mkdir -p "$OUT"
 CXX=${CXX:-c++}
 flags=(-std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
 python3 scripts/create-orbis-test-v2.py "$OUT/orbis-test.elf"
+python3 scripts/test-orbis-v3-fixture.py
 for suite in PS4PKGInventoryTest PS4PKGMetadataTest PS4PFSHeaderDiagnosticTest PS4PFSReadOnlyTest PFSSparseExtractionV2Test; do
   "$CXX" "${flags[@]}" MaxPS4-iOS/Native/PS4PKGBridge.cpp "MaxPS4-iOS/Tests/$suite.cpp" -o "$OUT/$suite"
   python3 scripts/run-bounded.py 30 "$OUT/$suite.txt" "$OUT/$suite"
