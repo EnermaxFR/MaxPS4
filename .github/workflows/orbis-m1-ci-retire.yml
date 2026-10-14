@@ -27,6 +27,8 @@ jobs:
               '93b528b31e75876c221f05b5040eb0f13ae86837',
               'e95d0d057a8f9d16db0938bc52a574aedd3f29ea',
               'd4eeca72fdbe3f835292e7e734d04cedce85ee42',
+              '6859ba9fb8595264c4cee1f4b3b238bbd835f3c8',
+              'dc2a9da3e638bd5061ac9b35d4420c250297ed29',
           ]
           base = 'https://api.github.com/repos/' + os.environ['GH_REPO']
           headers = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],

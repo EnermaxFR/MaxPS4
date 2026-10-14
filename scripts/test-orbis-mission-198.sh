@@ -11,11 +11,18 @@ for suite in GuestArenaGuardTest GuestELFMemoryTest GuestELFInterpreterTest Gues
   "$OUT/$suite" | tee "$OUT/$suite.txt"
 done
 
+m1_sources=(
+  MaxPS4-iOS/Native/maxps4_guest_elf.cpp
+  MaxPS4-iOS/Native/maxps4_ps4_linker.cpp
+  MaxPS4-iOS/Native/maxps4_ps4_libkernel.cpp
+  MaxPS4-iOS/Native/maxps4_ps4_virtual_memory.cpp
+  MaxPS4-iOS/Native/maxps4_ps4_threads.cpp
+  MaxPS4-iOS/Tests/OrbisM1MemoryTest.cpp
+)
+# Test ordinary VM policy too: sanitizer runtimes can alter process VA layout.
+"$CXX" -std=c++17 -Wall -Wextra -Werror -pedantic -I MaxPS4-iOS/Native \
+  "${m1_sources[@]}" -o "$OUT/OrbisM1NativeMemoryTest"
+"$OUT/OrbisM1NativeMemoryTest" | tee "$OUT/OrbisM1NativeMemoryTest.txt"
 "$CXX" "${flags[@]}" -I MaxPS4-iOS/Native \
-  MaxPS4-iOS/Native/maxps4_guest_elf.cpp \
-  MaxPS4-iOS/Native/maxps4_ps4_linker.cpp \
-  MaxPS4-iOS/Native/maxps4_ps4_libkernel.cpp \
-  MaxPS4-iOS/Native/maxps4_ps4_virtual_memory.cpp \
-  MaxPS4-iOS/Native/maxps4_ps4_threads.cpp \
-  MaxPS4-iOS/Tests/OrbisM1MemoryTest.cpp -o "$OUT/OrbisM1MemoryTest"
+  "${m1_sources[@]}" -o "$OUT/OrbisM1MemoryTest"
 "$OUT/OrbisM1MemoryTest" | tee "$OUT/OrbisM1MemoryTest.txt"

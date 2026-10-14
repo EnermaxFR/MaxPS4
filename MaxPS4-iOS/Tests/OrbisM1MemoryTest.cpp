@@ -40,6 +40,17 @@ int main() {
     CHECK(direct.release(direct_base) == 0);
 
     auto file = orbis_m1_fixture::make();
+    {
+        OrbisM1 direct_process(GuestAddressSpace::Backend::fex_direct);
+        CHECK(direct_process.load(file.data(),file.size(),100) == 0);
+        GuestThreadMemory direct_thread(direct_process.space);
+        CHECK(direct_thread.initialize(direct_process.tls,OrbisM1::thread_base,direct_process.entry) == 0);
+        CHECK(direct_process.admit(direct_thread,100) == 0);
+        CHECK(reinterpret_cast<uintptr_t>(direct_process.space.translate(direct_process.entry,1,5)) == direct_process.entry);
+        CHECK(reinterpret_cast<uintptr_t>(direct_process.space.translate(direct_thread.tls_begin,16,6)) == direct_thread.tls_begin);
+        CHECK(direct_process.space.translate(OrbisM1::heap_base,0x10000,6));
+        direct_thread.clear(); direct_process.space.clear(); CHECK(direct_process.space.allocated() == 0);
+    }
     OrbisM1 process(GuestAddressSpace::Backend::translated);
     CHECK(process.load(file.data(),file.size(),100) == 0);
     const size_t baseline = process.space.allocated();

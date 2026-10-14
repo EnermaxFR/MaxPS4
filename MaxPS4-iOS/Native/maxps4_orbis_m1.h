@@ -11,7 +11,7 @@ namespace maxps4 {
 // General instruction admission/scheduling is separate from address mapping.
 class OrbisM1 final {
 public:
-    static constexpr uint64_t thread_base = 0x2000000000ULL, heap_base = 0x2100000000ULL;
+    static constexpr uint64_t thread_base = 0x300000400000ULL, heap_base = 0x300000800000ULL;
     GuestAddressSpace space;
     GuestELF source;
     PS4DynamicLinker linker;
