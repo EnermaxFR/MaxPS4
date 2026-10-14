@@ -82,4 +82,3 @@ https://github.com/EnermaxFR/MaxPS4/actions/runs/38592871776
 Linkage iOS ARM64, pas d'exécution appareil
 https://github.com/EnermaxFR/MaxPS4/actions/runs/38592871776
 2026-10-14T16:01:10.8254070Z PASS complete strict iOS ARM64 Darwin linkage; device execution NOT tested
-
