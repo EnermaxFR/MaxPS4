@@ -14,11 +14,10 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
 // Other failures leave length=0; output is untouched. Source must remain stable.
 int maxps4_pkg_pfs_read_file(const char* path, const char* selected,
                             unsigned char* output, size_t capacity, size_t* length);
-#ifdef __cplusplus
-}
-#endif
-
 // Read a vetted plaintext PNG artwork descriptor (0x1200 icon0, 0x1006 pic1).
 // Query with output=null to get required length; no PFS/decryption.
 int maxps4_pkg_read_artwork(const char* path, unsigned int entry_id,
                            unsigned char* output, size_t capacity, size_t* length);
+#ifdef __cplusplus
+}
+#endif
