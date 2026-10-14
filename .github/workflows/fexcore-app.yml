@@ -86,6 +86,9 @@ jobs:
           echo "::endgroup::"
           echo "::group::Run Stik script test"
           node MaxPS4-iOS/Tests/StikScriptTest.js | tee build/diagnostics/stik-script-tests.txt
+          swiftc -parse-as-library MaxPS4-iOS/Sources/MaxPS4StikRequest.swift \
+            MaxPS4-iOS/Tests/StikRequestTest.swift -o build/stik-request-test
+          build/stik-request-test | tee build/diagnostics/stik-request-tests.txt
           echo "::endgroup::"
           echo "::group::Compile JIT memory test"
           xcrun clang++ -std=c++23 -DMAXPS4_TEST_DARWIN_JIT_POOL=1 \
