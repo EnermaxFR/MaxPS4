@@ -1,0 +1,29 @@
+name: Orbis mission 198 memory safety
+on:
+  workflow_dispatch:
+  push:
+    branches: ['experiment/orbis-mission-198']
+    paths: ['MaxPS4-iOS/**', 'scripts/test-orbis-mission-198.sh', '.github/workflows/orbis-mission-198.yml']
+  pull_request:
+    paths: ['MaxPS4-iOS/**', 'scripts/test-orbis-mission-198.sh', '.github/workflows/orbis-mission-198.yml']
+permissions:
+  contents: read
+jobs:
+  memory:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Kernel guard faults and loader regressions under ASan and UBSan
+        run: bash scripts/test-orbis-mission-198.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: orbis-mission-198-memory-${{ matrix.os }}
+          path: build/orbis-mission-198/*.txt
+          if-no-files-found: error
+          retention-days: 14
