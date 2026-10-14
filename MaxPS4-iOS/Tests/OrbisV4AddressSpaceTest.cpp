@@ -17,6 +17,11 @@ int main() {
     const uint8_t data[4]={4,2,1,7};
     uint8_t readback[4]={};
     CHECK(space.write(base,data,sizeof(data))==0);
+    // Exercise the same PS4DynamicMemory interface used by the guest runtime.
+    const maxps4::PS4DynamicMemory& runtime_memory=space;
+    CHECK(runtime_memory.translate(base,sizeof(readback),4)!=nullptr);
+    CHECK(runtime_memory.contiguous(base,page,4)==page);
+    CHECK(runtime_memory.translate(base,sizeof(readback),1)==nullptr);
     CHECK(space.read(base,readback,sizeof(readback))==0);
     CHECK(std::memcmp(data,readback,sizeof(data))==0);
     CHECK(space.read(base+page-2,readback,4)==-EFAULT); // No partial copy.
@@ -25,6 +30,8 @@ int main() {
     CHECK(space.map(base+page,page,6)==-EEXIST);
     CHECK(space.protect(base,page,4)==0);
     CHECK(space.write(base,data,sizeof(data))==-EFAULT);
+    CHECK(runtime_memory.translate(base,1,2)==nullptr);
+    CHECK(runtime_memory.translate(base,1,4)!=nullptr);
     CHECK(space.read(base,readback,sizeof(readback))==0);
     CHECK(space.release(base)==0);
     CHECK(space.allocated()==0);
