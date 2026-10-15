@@ -224,6 +224,15 @@ int main() {
     for (const auto byte : fetch_buffer) CHECK(byte==0xaa);
     CHECK(fetch_pages.write(fetch_base+2*page,tail_code,sizeof(tail_code))==0);
     CHECK(fetch_pages.release(fetch_base)==0);
+    // Operand resolution is permission-aware and rejects cross-page access.
+    const uint8_t* operand=reinterpret_cast<const uint8_t*>(1);
+    CHECK(fetch_bridge.resolve_operand(fetch_base,1,4,operand)==0 && operand);
+    CHECK(fetch_bridge.resolve_operand(fetch_base,1,2,operand)==-EFAULT && !operand);
+    CHECK(fetch_bridge.resolve_operand(fetch_base+page-1,2,4,operand)==-EFAULT && !operand);
+    CHECK(fetch_bridge.resolve_operand(fetch_base,0,4,operand)==-EINVAL && !operand);
+    CHECK(fetch_bridge.resolve_operand(fetch_base,1,0,operand)==-EINVAL && !operand);
+    CHECK(fetch_bridge.resolve_operand(fetch_base,1,8,operand)==-EINVAL && !operand);
+    CHECK(fetch_bridge.resolve_operand(fetch_base+3*page,1,4,operand)==-EFAULT && !operand);
     // Atomic translated CAS: success, mismatch, alignment and permission faults.
     GuestAddressSpace atomic_space;
     const uint64_t atomic_base=0x700000000ULL;
