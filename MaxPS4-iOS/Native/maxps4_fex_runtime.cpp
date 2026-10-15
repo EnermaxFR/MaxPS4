@@ -149,8 +149,8 @@ public:
 };
 class Mapping final {
 public:
-    Mapping(size_t bytes, int protection) : size(bytes), address(
-        ::mmap(nullptr, bytes, protection, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)) {}
+    Mapping(size_t bytes, int protection, void* hint = nullptr) : size(bytes), address(
+        ::mmap(hint, bytes, protection, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)) {}
     ~Mapping() {
         if (address != MAP_FAILED && ::munmap(address, size) != 0) {
             std::fprintf(stderr, "FEX probe mapping cleanup failed: errno=%d\n", errno);
@@ -468,8 +468,15 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
         FEXCore::Core::CPUState& state;
         ~ClearFaultRecord() { state.GuestMemoryFaultRecord = nullptr; }
     } clear_fault_record {state};
-    try { engine->context->ExecuteThread(thread); }
-    catch (const std::runtime_error&) { return -ENOTSUP; }
+    try {
+        // Reject unsupported entry-block IR on the C++ stack, before entering
+        // native dispatcher frames that cannot unwind C++ exceptions safely.
+        if (translated) engine->context->CompileRIP(thread,initial_rip);
+        engine->context->ExecuteThread(thread);
+    } catch (const std::runtime_error& error) {
+        std::fprintf(stderr,"FEX translated compilation rejected: %.160s\n",error.what());
+        return -ENOTSUP;
+    }
     if (fault.Bytes) {
         std::fprintf(stderr,"M2 checked operand rejected: guest=0x%llx bytes=%u permissions=%u; dispatch stopped\n",
             static_cast<unsigned long long>(fault.Address),fault.Bytes,fault.Permissions);
@@ -704,7 +711,10 @@ extern "C" int32_t maxps4_fex_test_m2_low_va(maxps4_m2_low_va_report* report) {
                 if (!page) return -ENOTSUP;
                 // A real occupied host mapping is also used as a guest logical
                 // operand. Translation must leave this host marker untouched.
-                Mapping occupied(3*page,PROT_READ|PROT_WRITE);
+                // Linux ARM64 may allocate anonymous storage above 47 bits.
+                // A non-fixed hint keeps the collision operand in the PS4 VA
+                // domain without overwriting any occupied host reservation.
+                Mapping occupied(3*page,PROT_READ|PROT_WRITE,reinterpret_cast<void*>(0x800000000ULL));
                 if (occupied.address == MAP_FAILED) return -errno;
                 auto* marker = static_cast<uint8_t*>(occupied.address)+page;
                 const uint64_t sentinel = 0x13579bdf2468ace0ULL;
