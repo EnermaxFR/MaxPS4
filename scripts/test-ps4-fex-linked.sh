@@ -37,7 +37,7 @@ cmake -S "$FEX" -B "$OUT" -G Ninja \
   -DENABLE_FEX_ALLOCATOR=OFF -DENABLE_VIXL_DISASSEMBLER=OFF -DENABLE_ZYDIS=OFF \
   -DOVERRIDE_VERSION=MaxPS4-Linked -DOVERRIDE_HASH=f2b679f6028ce1c38875233aecfcf5d3f8ebecec \
   "${options[@]}" > "$OUT/configure.log" 2>&1
-cmake --build "$OUT" --target maxps4-ps4-linked-test maxps4-fex-translation-test --parallel "${MAXPS4_BUILD_JOBS:-3}" > "$OUT/build.log" 2>&1
+cmake --build "$OUT" --target maxps4-ps4-linked-test maxps4-fex-translation-test --parallel "${MAXPS4_BUILD_JOBS:-3}" > "$OUT/build.log" 2>&1 || { tail -100 "$OUT/build.log"; exit 1; }
 python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/translation-tests.txt" "$OUT/Bin/maxps4-fex-translation-test"
 python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/ps4-linked-tests.txt" "$OUT/Bin/maxps4-ps4-linked-test"
 python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/m2-low-va-tests.txt" "$OUT/Bin/maxps4-ps4-linked-test" --m2

@@ -55,7 +55,8 @@ function(maxps4_complete_fexcore_linkage)
     add_executable(maxps4-ps4-linked-test
       "${MAXPS4_ROOT}/MaxPS4-iOS/Tests/PS4FEXLinkedExecutionTest.cpp")
     target_compile_features(maxps4-ps4-linked-test PRIVATE cxx_std_23)
-    target_link_libraries(maxps4-ps4-linked-test PRIVATE MaxPS4FEXRuntime)
+    target_link_libraries(maxps4-ps4-linked-test PRIVATE MaxPS4FEXRuntime fmt::fmt)
+  target_include_directories(maxps4-ps4-linked-test PRIVATE "${CMAKE_SOURCE_DIR}/FEXCore/include" "${CMAKE_BINARY_DIR}/include")
     # Host-only profile: macOS rejected a low-profile thread/TLS reservation.
     # iOS retains the default low profile; this does not fix device error -48.
     if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
@@ -65,4 +66,5 @@ function(maxps4_complete_fexcore_linkage)
   endif()
 endfunction()
 cmake_language(DEFER CALL maxps4_complete_fexcore_linkage)
+
 
