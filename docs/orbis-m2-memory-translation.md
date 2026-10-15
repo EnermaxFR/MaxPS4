@@ -13,6 +13,68 @@ L'issue autorise un diagnostic reproductible et une étape fail-closed lorsque
 les contraintes FEX empêchent l'exécution sûre. Cette livraison applique cette
 limite ; elle n'annonce aucune exécution CPU M2.
 
+## Reprise du 15 octobre 2026 : CAS C++17 et validation actuelle
+
+Le head inspecté est `e9d9b9570de5644b3a619d3ffb5d6552a3b8bc43`.
+La commande C++17 du workflow `orbis-v4-memory.yml` échoue sur ce head :
+`std::atomic_ref` exige C++20. Les résultats CI historiques ci-dessous ne
+valident donc pas les derniers ajouts CAS.
+
+Le commit `73f645fed5eea1dc6c28321f69c4774da92442fc` remplace `atomic_ref`
+par le builtin Clang/GCC `__atomic_compare_exchange_n`, fort et séquentiellement
+cohérent. Une assertion de compilation exige une largeur nativement lock-free ;
+l'alignement hôte est vérifié sur la largeur entière avant l'accès. Les contrôles
+V4 de permissions R+W, de durée de vie et de frontière de page sont conservés.
+Ce correctif ne raccorde pas le CAS à `AtomicOps.cpp`.
+
+Validation locale Linux x86_64, GCC 14.2.0 :
+
+- Compilation C++17 stricte et exécution de `OrbisV4AddressSpaceTest` : succès.
+- ASan/UBSan avec `ASAN_OPTIONS=detect_leaks=0` : succès. L'exécution avec
+  LeakSanitizer activé échoue explicitement à cause de ptrace ; aucune validation
+  locale des fuites n'est revendiquée. La CI conserve LeakSanitizer activé.
+- CAS 8/16/32/64 bits au dernier emplacement d'une page : succès, mismatch avec
+  mise à jour de expected, valeur mémoire inchangée au mismatch, refus sur page
+  seulement inscriptible et après release. Les tests existants d'alignement,
+  page RX, copie entre pages et adresses invalides restent exécutés.
+
+Le push sur la branche expérimentale a déclenché notamment :
+
+- [Mémoire V4](https://github.com/EnermaxFR/MaxPS4/actions/runs/38737972087).
+- [Compilation/liaison FEX iOS ARM64 et runtime macOS](https://github.com/EnermaxFR/MaxPS4/actions/runs/38737972135).
+- [IPA SideStore](https://github.com/EnermaxFR/MaxPS4/actions/runs/38737972212).
+- [IPA Orbis Test distincte](https://github.com/EnermaxFR/MaxPS4/actions/runs/38737972308).
+
+À la rédaction, ces exécutions sont en attente (`queued`), sans résultat ni
+nouvel artefact validé. Elles portent sur `73f645f`, pas sur une implémentation
+de traduction générale. L'environnement local est Linux sans Xcode/SDK iOS ;
+il ne peut pas compiler FEX pour iOS. L'utilisateur confirme qu'aucun iPhone
+n'est disponible pour cette validation. Aucun essai matériel n'a été effectué.
+
+Le checkout réel du FEX épinglé confirme les points supplémentaires à traiter
+avant tout dispatch translated :
+
+- `Core.cpp:555` (cacheabilité), `:582` (fetch), `:649` (désassemblage debug),
+  `:680` (copie pour ValidateCode) utilisent des pointeurs directs.
+- `Frontend.cpp:1461` reconstruit le flux par arithmétique de pointeur pour chaque
+  bloc ; traduire seulement l'entrée ne couvre pas les cibles non contiguës.
+- `MemoryOps.cpp` contient aussi les paires, TSO, opérations vectorielles
+  masquées/gather/élément/broadcast, pile, memcpy/memset, caches et non-temporal.
+  Les loads/stores de contexte FEX et spills sont hôtes et ne doivent pas passer
+  dans la table d'adresses PS4. Les adresses effectives incluent les offsets.
+- `AtomicOps.cpp` comprend CASPair, CAS, swap et fetch add/sub/and/clr/or/xor/neg.
+  CASPair réutilise TMP1 à TMP4 : un pointeur traduit placé sans précaution dans
+  un de ces temporaires serait écrasé. Préserver NZCV, registres vivants et ordre
+  mémoire fait partie du raccordement, pas seulement du traducteur C++.
+- `HLE/SyscallHandler.h:62` fournit une implémentation vide par défaut de
+  `InvalidateGuestCodeRange`. L'existence de cette méthode ne prouve pas
+  l'invalidation des blocs Orbis après protect/release/remap.
+
+Les modifications du décodeur, de MemoryOps et d'AtomicOps, la synchronisation
+des mappings et l'invalidation JIT ne sont pas livrées par cette reprise.
+La mission de traduction générale reste incomplète ; `-48` n'est pas déclaré
+corrigé. Aucun dispatch translated supplémentaire n'est activé.
+
 ## Audit du backend épinglé
 
 Sources : `Leviidev/AetherPS4`, commit
