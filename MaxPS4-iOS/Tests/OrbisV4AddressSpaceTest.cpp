@@ -1,4 +1,5 @@
 #include "../Native/maxps4_orbis_v4_execution_gate.h"
+#include "../Native/maxps4_orbis_v4_translation.h"
 #include "../Native/maxps4_orbis_v4_synthetic_stage.h"
 #include <cerrno>
 #include <cstdint>
@@ -294,5 +295,39 @@ int main() {
     CHECK(atomic_bridge.compare_exchange_guest<uint64_t>(atomic_base,expected,99,exchanged)==-EFAULT);
     CHECK(!exchanged);
     CHECK(atomic_space.release(atomic_base)==0);
+    // M2 lease resolution: host pointers are borrowed only while mappings are pinned.
+    size_t lease_invalidations=0;
+    maxps4::OrbisV4Translation translated([&] { ++lease_invalidations; });
+    const uint64_t lease_base=0x720000000ULL;
+    CHECK(translated.reserve(lease_base,2*page)==0);
+    CHECK(translated.map(lease_base,page,6)==0);
+    CHECK(translated.map(lease_base+page,page,4)==0);
+    const uint8_t lease_data[]={9,8,7,6};
+    CHECK(translated.write(lease_base,lease_data,sizeof(lease_data))==0);
+    {
+        auto lease=translated.lease();
+        const uint8_t* host=reinterpret_cast<const uint8_t*>(1);
+        CHECK(lease.resolve_contiguous(lease_base,sizeof(lease_data),4,host)==0);
+        CHECK(host && reinterpret_cast<uintptr_t>(host)!=lease_base);
+        CHECK(std::memcmp(host,lease_data,sizeof(lease_data))==0);
+        CHECK(lease.resolve_contiguous(lease_base,1,2,host)==0 && host);
+        CHECK(lease.resolve_contiguous(lease_base+page,1,2,host)==-EFAULT && !host);
+        CHECK(lease.resolve_contiguous(lease_base+page-1,2,4,host)==-EFAULT && !host);
+        CHECK(lease.resolve_contiguous(lease_base+2*page,1,4,host)==-EFAULT && !host);
+        CHECK(lease.resolve_contiguous(lease_base,0,4,host)==-EINVAL && !host);
+        CHECK(lease.resolve_contiguous(lease_base,1,0,host)==-EINVAL && !host);
+        CHECK(lease.resolve_contiguous(lease_base,1,8,host)==-EINVAL && !host);
+        CHECK(lease.resolve_contiguous(lease_base,1,6,host)==-EINVAL && !host);
+        CHECK(lease.resolve_contiguous(UINT64_MAX,2,4,host)==-EINVAL && !host);
+    }
+    CHECK(translated.protect(lease_base,page,4)==0);
+    {
+        auto lease=translated.lease();
+        const uint8_t* host=nullptr;
+        CHECK(lease.resolve_contiguous(lease_base,1,2,host)==-EFAULT && !host);
+        CHECK(lease.resolve_contiguous(lease_base,1,4,host)==0 && host);
+    }
+    CHECK(translated.release(lease_base)==0);
+    CHECK(lease_invalidations>=5);
     std::puts("PASS Orbis V4 isolated guest address-space checks");
 }
