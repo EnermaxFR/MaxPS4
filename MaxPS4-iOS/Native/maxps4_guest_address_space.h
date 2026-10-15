@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <cstdio>
 #include <new>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -78,7 +79,16 @@ public:
             vm_address_t requested = static_cast<vm_address_t>(low);
             const kern_return_t status = vm_allocate(mach_task_self(),&requested,bytes,VM_FLAGS_FIXED);
 
-            if (status != KERN_SUCCESS) return status == KERN_NO_SPACE ? -EADDRINUSE : -ENOMEM;
+            if (status != KERN_SUCCESS) {
+                // A fixed-address guest reservation may collide with iOS host VM.
+                // Preserve fail-closed semantics; never retry with overwrite or
+                // silently relocate memory while FEX uses direct addressing.
+                std::fprintf(stderr,
+                    "M1 direct VM reservation declined: guest=0x%llx guard_base=0x%llx bytes=0x%zx kern_return=%d\\n",
+                    static_cast<unsigned long long>(address),
+                    static_cast<unsigned long long>(low), bytes, static_cast<int>(status));
+                return status == KERN_NO_SPACE ? -EADDRINUSE : -ENOMEM;
+            }
             if (vm_protect(mach_task_self(),requested,bytes,FALSE,VM_PROT_NONE) != KERN_SUCCESS) {
                 vm_deallocate(mach_task_self(),requested,bytes); return -EACCES;
             }
