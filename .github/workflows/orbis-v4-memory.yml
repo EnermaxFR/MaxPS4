@@ -11,6 +11,10 @@ on:
       - 'MaxPS4-iOS/Native/maxps4_orbis_v4_*.h'
       - 'MaxPS4-iOS/Tests/OrbisV4AddressSpaceTest.cpp'
       - 'MaxPS4-iOS/Tests/OrbisV4TranslationTest.cpp'
+      - 'MaxPS4-iOS/Tests/GuestDynamicTLS*.cpp'
+      - 'MaxPS4-iOS/Tests/OrbisM1*'
+      - 'MaxPS4-iOS/Native/maxps4_orbis_m1.h'
+      - 'scripts/test-orbis-v4-memory.sh'
       - '.github/workflows/orbis-v4-memory.yml'
   pull_request:
     paths:
@@ -21,6 +25,10 @@ on:
       - 'MaxPS4-iOS/Native/maxps4_orbis_v4_*.h'
       - 'MaxPS4-iOS/Tests/OrbisV4AddressSpaceTest.cpp'
       - 'MaxPS4-iOS/Tests/OrbisV4TranslationTest.cpp'
+      - 'MaxPS4-iOS/Tests/GuestDynamicTLS*.cpp'
+      - 'MaxPS4-iOS/Tests/OrbisM1*'
+      - 'MaxPS4-iOS/Native/maxps4_orbis_m1.h'
+      - 'scripts/test-orbis-v4-memory.sh'
       - '.github/workflows/orbis-v4-memory.yml'
 permissions:
   contents: read
@@ -34,18 +42,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Build and run isolated guest address-space regression
-        run: |
-          mkdir -p build/orbis-v4
-          for suite in OrbisV4AddressSpaceTest OrbisV4TranslationTest; do
-            c++ -std=c++17 -pthread -Wall -Wextra -Werror -pedantic -I MaxPS4-iOS/Native \
-              "MaxPS4-iOS/Tests/$suite.cpp" -o "build/orbis-v4/$suite"
-            "build/orbis-v4/$suite"
-          done
-      - name: Run translated memory checks with sanitizers
-        run: |
-          for suite in OrbisV4AddressSpaceTest OrbisV4TranslationTest; do
-            c++ -std=c++17 -pthread -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer \
-              "MaxPS4-iOS/Tests/$suite.cpp" -o "build/orbis-v4/$suite-sanitized"
-            "build/orbis-v4/$suite-sanitized"
-          done
+      - name: Run V4, M1 and TLS regressions with sanitizers
+        run: bash scripts/test-orbis-v4-memory.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: orbis-v4-memory-${{ matrix.os }}
+          path: build/orbis-v4/*.txt
+          if-no-files-found: warn
+          retention-days: 14

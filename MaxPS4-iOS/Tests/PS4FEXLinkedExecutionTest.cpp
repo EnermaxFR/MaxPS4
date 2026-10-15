@@ -1,3 +1,5 @@
+#include "GuestELFFixture.h"
+#include "OrbisM1Fixture.h"
 #include "../Native/maxps4_fex_runtime.h"
 #include "PS4LinkedELFFixture.h"
 #include "PS4OrbisExecutionFixture.h"
@@ -142,7 +144,112 @@ static int animatedGuestTest() {
     std::puts("PASS guest x86-64 autonomous sprite animation and collision across 20 real FEX frames");
     return 0;
 }
+static int m1Test() {
+    using namespace orbis_m1_fixture;
+    maxps4_fex_engine* engine = nullptr;
+    CHECK(maxps4_fex_engine_open(&engine) == 0);
+    struct CloseM1 { maxps4_fex_engine* engine; ~CloseM1() { maxps4_fex_engine_close(engine); } } close{engine};
+    maxps4_m1_report report{};
+    auto file = make();
+    CHECK(maxps4_fex_engine_run_m1(engine,file.data(),file.size(),100,snapshot,&report) == -EAGAIN);
+    CHECK(maxps4_fex_engine_initialize(engine) == 0);
+    for (uint32_t initial : {17U,83U,129U}) for (bool calls : {false,true}) {
+        file = make(initial,calls);
+        for (int run=0;run<2;++run) {
+            const int32_t status = maxps4_fex_engine_run_m1(engine,file.data(),file.size(),100,snapshot,&report);
+            if (status) std::fprintf(stderr,"M1 run rejected: status=%d initial=%u calls=%d\n",status,initial,calls);
+            CHECK(status == 0);
+            CHECK(report.rax == initial+12 && report.memory == initial+12 && report.tls_word == initial+5);
+            CHECK(report.heap_word == initial+5 && report.zero_memory == 0 && report.kernel_return == (calls ? 1U : 0U));
+            CHECK(report.entry == entry && report.calls == (calls ? 2U : 0U));
+            CHECK(!(report.rsp & 15) && report.fs_base == maxps4::OrbisM1::thread_base+0x20010);
+#ifdef VIXL_SIMULATOR
+            CHECK(report.backend == MAXPS4_CPU_FEX_ARM64_SIMULATOR);
+#else
+            CHECK(report.backend == MAXPS4_CPU_FEX_ARM64_JIT);
+#endif
+            std::printf("PASS M1 FEX backend=%u initial=%u rax=%llu memory=%llu tls=%llu calls=%u entry=0x%llx fs=0x%llx\n",
+                report.backend,initial,(unsigned long long)report.rax,(unsigned long long)report.memory,
+                (unsigned long long)report.tls_word,report.calls,(unsigned long long)report.entry,(unsigned long long)report.fs_base);
+        }
+    }
+    auto module_a = make(83,false), module_b = make(129,false);
+    // Legal plaintext PRX headers; the harness consumes PT_TLS templates only,
+    // without claiming PRX relocation/DTV/import support.
+    maxps4_ps4_synthetic::put(module_a,0xfe18,16,2);
+    maxps4_ps4_synthetic::put(module_b,0xfe18,16,2);
+    const maxps4_m1_tls_input modules[] = {{module_a.data(),module_a.size()},{module_b.data(),module_b.size()}};
+    file = make(17,true,true);
+    for (int run=0;run<2;++run) {
+        maxps4_m1_thread_report threads[2]{};
+        const int status = maxps4_fex_engine_run_m1_threads(engine,file.data(),file.size(),200,snapshot,
+            modules,2,2,threads,2);
+        if (status) std::fprintf(stderr,"M1 thread queue rejected: %d\n",status);
+        CHECK(status == 0);
+        for (size_t i=0;i<2;++i) {
+            const auto& t = threads[i];
+            CHECK(t.joined == 1 && t.id == i+1 && t.cpu.kernel_return == i+1);
+            CHECK(t.cpu.rax == 131 && t.cpu.memory == 131 && t.cpu.tls_word == 22 && t.cpu.heap_word == 22);
+            CHECK(t.modules[0] == 84 && t.modules[1] == 131 && !t.zeros[0] && !t.zeros[1]);
+            CHECK(!t.cpu.zero_memory && !t.lock_result && !t.unlock_result && t.cpu.calls == 4);
+            CHECK(t.cpu.backend == report.backend && !(t.cpu.rsp & 15));
+            std::printf("PASS M1 FEX thread=%llu joined=%u backend=%u rax=%llu tls=%llu modules=%llu/%llu mutex=%llu/%llu fs=0x%llx\n",
+                (unsigned long long)t.id,t.joined,t.cpu.backend,(unsigned long long)t.cpu.rax,
+                (unsigned long long)t.cpu.tls_word,(unsigned long long)t.modules[0],(unsigned long long)t.modules[1],
+                (unsigned long long)t.lock_result,(unsigned long long)t.unlock_result,(unsigned long long)t.cpu.fs_base);
+        }
+        CHECK(threads[0].cpu.rsp != threads[1].cpu.rsp && threads[0].cpu.fs_base != threads[1].cpu.fs_base);
+    }
+    maxps4_m1_thread_report rejected[2]{};
+    CHECK(maxps4_fex_engine_run_m1_threads(engine,file.data(),file.size(),1,snapshot,modules,2,2,rejected,2) == -E2BIG);
+    CHECK(!rejected[0].joined && !rejected[1].joined && !rejected[0].cpu.backend);
+    CHECK(maxps4_fex_engine_run_m1_threads(engine,file.data(),file.size(),200,snapshot,modules,2,5,rejected,2) == -EINVAL);
+    {
+        maxps4::GuestAddressSpace blocker(maxps4::GuestAddressSpace::Backend::fex_direct);
+        const uint64_t address = maxps4::OrbisM1::thread_base+0x4000000;
+        const uint64_t marker = 0xcafebabe;
+        CHECK(blocker.reserve(address,0x10000) == 0 && blocker.map(address,0x10000,6,&marker,8) == 0);
+        CHECK(maxps4_fex_engine_run_m1_threads(engine,file.data(),file.size(),200,snapshot,modules,2,2,rejected,2) == -EADDRINUSE);
+        CHECK(!rejected[0].joined && !rejected[1].joined);
+        uint64_t preserved=0;
+        CHECK(blocker.read(address,&preserved,8) == 0 && preserved == marker);
+        CHECK(blocker.release(address) == 0);
+        // A first ready CPU was created before the second thread collision.
+        // A clean retry proves its mappings/context were not left live.
+        CHECK(maxps4_fex_engine_run_m1_threads(engine,file.data(),file.size(),200,snapshot,modules,2,2,rejected,2) == 0);
+        CHECK(rejected[0].joined && rejected[1].joined && rejected[1].cpu.kernel_return == 2);
+    }
+    auto unsupported = make(83,true);
+    const maxps4_m1_tls_input relocation_module[] = {{unsupported.data(),unsupported.size()}};
+    CHECK(maxps4_fex_engine_run_m1_threads(engine,file.data(),file.size(),200,snapshot,relocation_module,1,2,rejected,2) == -ENOTSUP);
+    CHECK(!rejected[0].joined && !rejected[1].joined);
+    file = make(); file[0x4000] = 0xeb;
+    CHECK(maxps4_fex_engine_run_m1(engine,file.data(),file.size(),100,snapshot,&report) == -ENOTSUP);
+    CHECK(!report.rax && !report.backend);
+    file = make();
+    CHECK(maxps4_fex_engine_run_m1(engine,file.data(),file.size(),1,snapshot,&report) == -E2BIG);
+    return 0;
+}
 int main(int argc, char** argv) {
+    if (argc == 2 && !std::strcmp(argv[1],"--m1")) return m1Test();
+    if (argc == 3 && !std::strcmp(argv[1],"--m1-bundle")) {
+        std::filesystem::create_directories(argv[2]);
+        for (bool calls : {false,true}) {
+            const auto file = orbis_m1_fixture::make(17,calls);
+            std::ofstream out(std::filesystem::path(argv[2])/(calls ? "m1-tls-libkernel.elf" : "m1-tls.elf"),std::ios::binary);
+            out.write(reinterpret_cast<const char*>(file.data()),file.size()); CHECK(out.good());
+        }
+        const auto dynamic_file = orbis_m1_fixture::make(17,true,true);
+        std::ofstream dynamic_out(std::filesystem::path(argv[2])/"m1-two-threads-three-tls-modules.elf",std::ios::binary);
+        dynamic_out.write(reinterpret_cast<const char*>(dynamic_file.data()),dynamic_file.size()); CHECK(dynamic_out.good());
+        for (uint32_t initial : {83U,129U}) {
+            auto module = orbis_m1_fixture::make(initial,false);
+            maxps4_ps4_synthetic::put(module,0xfe18,16,2);
+            std::ofstream out(std::filesystem::path(argv[2])/("tls-"+std::to_string(initial)+".prx"),std::ios::binary);
+            out.write(reinterpret_cast<const char*>(module.data()),module.size()); CHECK(out.good());
+        }
+        return 0;
+    }
     using namespace ps4_linked_test;
     if (argc==3 && !std::strcmp(argv[1],"--playable-evidence")) return playableTest(argv[2]);
     if (argc==3 && (!std::strcmp(argv[1],"--playable-bundle") || !std::strcmp(argv[1],"--animated-playable-bundle"))) {
@@ -179,6 +286,51 @@ int main(int argc, char** argv) {
             CHECK(std::fclose(out) == 0);
         }
         return 0;
+    }
+    // Alternate code in the same FEX context: stale translations must never
+    // return the previous image's value when mmap reuses its host address.
+    for (int restart=0;restart<3;++restart) {
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0 && process);
+        struct CloseV3 { maxps4_fex_engine* p; ~CloseV3() { maxps4_fex_engine_close(p); } } closeV3{process};
+        for (int repeat=0;repeat<16;++repeat) {
+            const uint32_t initial = repeat & 1 ? 7 : 40;
+            auto bytes = guest_test::elf(initial, 2, false);
+            bytes[7] = 9; guest_test::put(bytes,0xfe00,16,2);
+            const maxps4_orbis_module module{"test.elf",bytes.data(),bytes.size(),0,nullptr,0};
+            char diagnostic[512]{};
+            CHECK(maxps4_fex_engine_prepare_orbis(process,&module,1,"test.elf",64,diagnostic,sizeof(diagnostic))==0);
+            uint64_t result=99, logical_entry=99; uint32_t backend=99;
+            if (!repeat) {
+                CHECK(maxps4_fex_engine_run_orbis(process,&result,&backend,&logical_entry)==-EAGAIN);
+                CHECK(result==0 && backend==0 && logical_entry==0);
+                CHECK(maxps4_fex_engine_initialize(process)==0);
+            }
+            CHECK(maxps4_fex_engine_run_orbis(process,&result,&backend,&logical_entry)==0);
+            CHECK(result==initial+2 && logical_entry==0x1000);
+#ifdef VIXL_SIMULATOR
+            CHECK(backend==MAXPS4_CPU_FEX_ARM64_SIMULATOR);
+#else
+            CHECK(backend==MAXPS4_CPU_FEX_ARM64_JIT);
+#endif
+            maxps4_fex_cpu_report report{};
+            CHECK(maxps4_fex_engine_last_cpu_report(process,&report)==0);
+            CHECK(report.completed && report.rax==result && report.entry==logical_entry);
+            CHECK(!report.rsp_alignment && report.zero_integer_registers && report.entry_matches);
+            CHECK(!report.argc && report.argv_env_null && report.auxv_valid && report.page_size>0);
+            uint8_t code[11]{};
+            CHECK(maxps4_fex_engine_fetch_ps4(process,0x1000,code,sizeof(code))==0 && code[1]==initial);
+            uint32_t permitted=99;
+            CHECK(maxps4_fex_engine_query_ps4(process,0x1000,1,2,&permitted)==0 && !permitted);
+            CHECK(maxps4_fex_engine_write_ps4(process,0x1000,code,1)==-EFAULT);
+            std::printf("PASS V3 ET_SCE_EXEC real FEX restart=%d repeat=%d result=%llu backend=%u entry=0x%llx stack/regs=verified (host evidence only)\n",
+                restart,repeat,(unsigned long long)result,backend,(unsigned long long)logical_entry);
+            // A failed preparation clears admission; the old program cannot run.
+            bytes[120]=0xeb;
+            CHECK(maxps4_fex_engine_prepare_orbis(process,&module,1,"test.elf",64,diagnostic,sizeof(diagnostic))!=0);
+            CHECK(maxps4_fex_engine_run_orbis(process,&result,&backend,&logical_entry)==-EFAULT);
+            CHECK(!result && !backend && !logical_entry);
+        }
     }
     CHECK(playableTest()==0);
     CHECK(animatedGuestTest()==0);
@@ -295,7 +447,7 @@ int main(int argc, char** argv) {
     CHECK(maxps4_fex_engine_run_linked_ps4(engine,&result,&backend,&entry_out,&calls) == 0 && result == 1 && calls == 1);
     uint8_t preserved_bytes[48]{};
     CHECK(maxps4_fex_engine_read_ps4(engine,data+0x100,preserved_bytes,sizeof(preserved_bytes)) == 0);
-    for (size_t i = 0; i < sizeof(saved); ++i) CHECK(value(preserved_bytes+i*8) == 0x12340000+saved[i]);
+    for (size_t i = 0; i < sizeof(saved); ++i) CHECK(value(preserved_bytes+i*8) == uint64_t{0x12340000}+saved[i]);
     std::puts("PASS System V callee-saved RBX/RBP/R12-R15 preserved through actual FEX syscall trampoline");
     file = combined();
     CHECK(maxps4_fex_engine_link_ps4(engine,file.data(),file.size(),1000,&entry_out,&imports) == 0 && imports == 5);
@@ -342,3 +494,5 @@ int main(int argc, char** argv) {
     CHECK(!result && !backend && !entry_out && !calls);
     std::puts("PASS host-pointer isolation, failed restage and cleanup; iPhone execution requires separate device validation");
 }
+
+

@@ -43,6 +43,12 @@ uint64_t signed32(uint64_t v) { return v & 0x80000000U ? v | 0xffffffff00000000U
 constexpr size_t thunk_size = 11;
 }
 int PS4DynamicLinker::load(GuestELF& image, const uint8_t* file, size_t length, uint32_t budget) {
+    return load_impl(image,file,length,budget,false);
+}
+int PS4DynamicLinker::load_m1(GuestELF& image, const uint8_t* file, size_t length, uint32_t budget) {
+    return load_impl(image,file,length,budget,true);
+}
+int PS4DynamicLinker::load_impl(GuestELF& image, const uint8_t* file, size_t length, uint32_t budget, bool m1) {
     image.clear(); reset();
     auto fail = [&](int error, const char* message) {
         image.clear(); imports_.clear(); stack_ = 0;
@@ -54,13 +60,13 @@ int PS4DynamicLinker::load(GuestELF& image, const uint8_t* file, size_t length, 
         PS4ExecutableImage parsed;
         int error = parsed.load(file, length);
         if (error) return fail(error, "invalid plaintext PS4 ELF");
-        if (parsed.isSelf || parsed.requiresTLS) return fail(-ENOTSUP, "SELF/TLS execution is not implemented");
+        if (parsed.isSelf || (parsed.requiresTLS && !m1)) return fail(-ENOTSUP, "SELF/TLS execution is not implemented");
         const PS4ExecutableImage::Header* dynamic = nullptr;
         for (const auto& h : parsed.headers) {
             if (h.type == 2) {
                 if (dynamic) return fail(-ENOEXEC, "duplicate PT_DYNAMIC");
                 dynamic = &h;
-            } else if (h.type != 1) return fail(-ENOTSUP, "unsupported program header (including SCE tables)");
+            } else if (h.type != 1 && !(m1 && h.type == 7)) return fail(-ENOTSUP, "unsupported program header (including SCE tables)");
         }
         if (!dynamic || !dynamic->fileSize || dynamic->fileSize % 16 ||
             dynamic->fileSize > 65536 || dynamic->fileSize > dynamic->memorySize ||
@@ -236,8 +242,8 @@ int PS4DynamicLinker::load(GuestELF& image, const uint8_t* file, size_t length, 
         const size_t code_size = code_segment->header.fileSize - (parsed.entry - code_segment->header.address);
         if (code_size > 65536) return fail(-E2BIG, "entry program too large");
         size_t offset = 0; uint32_t instructions = 0, initialized = 0;
-        bool halted = false, stack_arg = false;
-        while (offset < code_size) {
+        bool halted = m1, stack_arg = false;
+        while (!m1 && offset < code_size) {
             const size_t left = code_size - offset;
             auto* p = code + offset; size_t width = 0;
             if (++instructions > budget) return fail(-E2BIG, "instruction budget exhausted");
@@ -322,3 +328,4 @@ bool PS4DynamicLinker::gate(const GuestELF& image, uint64_t cpu_rip, uint32_t to
     return false;
 }
 }
+
