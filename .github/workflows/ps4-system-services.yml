@@ -40,6 +40,9 @@ on:
       - 'cmake/FEXCoreLinkedTests.cmake'
       - '.github/workflows/ps4-system-services.yml'
   workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -55,6 +58,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Fetch pinned FEX runtime and upstream ARM64 instruction simulator
         timeout-minutes: 5
         run: |
@@ -87,12 +92,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - run: bash scripts/test-ps4-system-services.sh
   iphone-arm64-compile:
     timeout-minutes: 10
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Compile system services for the real iPhone ARM64 SDK
         run: |
           set -euo pipefail

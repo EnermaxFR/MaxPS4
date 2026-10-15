@@ -78,6 +78,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Run V4, M1 and TLS regressions with sanitizers
         run: bash scripts/test-orbis-v4-memory.sh
       - uses: actions/upload-artifact@v4

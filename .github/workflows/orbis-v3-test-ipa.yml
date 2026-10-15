@@ -9,6 +9,9 @@ on:
       - 'experimental/orbis-v3-staging/**'
       - 'scripts/build-orbis-test-ipa.sh'
       - '.github/workflows/orbis-v3-test-ipa.yml'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -17,6 +20,8 @@ jobs:
     timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Checkout pinned FEX runtime and build tools
         run: |
           git clone --filter=blob:none --no-checkout https://github.com/Leviidev/AetherPS4.git build/aether-app

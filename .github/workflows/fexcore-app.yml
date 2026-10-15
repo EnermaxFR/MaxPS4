@@ -20,6 +20,9 @@ on:
       - 'scripts/run-bounded.py'
       - 'cmake/FEXCoreIOSLinkage.cmake'
       - '.github/workflows/fexcore-app.yml'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -28,6 +31,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Validate PKG metadata and runtime preparation before packaging
         shell: bash
         run: |
