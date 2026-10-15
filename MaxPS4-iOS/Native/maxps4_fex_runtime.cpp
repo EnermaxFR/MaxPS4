@@ -578,7 +578,17 @@ extern "C" int32_t maxps4_fex_engine_step_frame(maxps4_fex_engine* engine,
         engine->orbis_admitted = false; engine->frame = {}; return -ENOMEM;
     }
 }
-extern "C" int32_t maxps4_fex_engine_v4_preflight(maxps4_fex_engine* engine,\n    uint64_t entry, uint64_t stack, size_t stack_bytes) {\n    if (!engine) return -EINVAL;\n    std::lock_guard lock(runtime_lock);\n    if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;\n    const uint8_t* executable = nullptr;\n    const uint8_t* writable_stack = nullptr;\n    return engine->v4_execution_gate.preflight(entry,stack,stack_bytes,\n                                               executable,writable_stack);\n}\nextern "C" int32_t maxps4_fex_engine_run_orbis(maxps4_fex_engine* engine,
+extern "C" int32_t maxps4_fex_engine_v4_preflight(maxps4_fex_engine* engine,
+    uint64_t entry, uint64_t stack, size_t stack_bytes) {
+    if (!engine) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
+    const uint8_t* executable = nullptr;
+    const uint8_t* writable_stack = nullptr;
+    return engine->v4_execution_gate.preflight(entry,stack,stack_bytes,
+                                               executable,writable_stack);
+}
+extern "C" int32_t maxps4_fex_engine_run_orbis(maxps4_fex_engine* engine,
     uint64_t* result, uint32_t* backend, uint64_t* entry) {
     if (result) *result = 0;
     if (backend) *backend = 0;
