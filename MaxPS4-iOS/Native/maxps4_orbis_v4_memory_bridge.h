@@ -38,6 +38,20 @@ public:
     int write_guest(uint64_t guest, const void* src, size_t bytes) {
         return memory_.write(guest,src,bytes);
     }
+    // Resolve a single guest memory operand for a future FEX JIT slow path.
+    // The caller must hold the guest mapping stable until the access completes.
+    // Refuse cross-page operands: they require an explicit split-access path,
+    // not a raw native load/store that could overrun a mapped host region.
+    int resolve_operand(uint64_t guest, size_t bytes, uint32_t permissions,
+                        const uint8_t*& host) const {
+        host = nullptr;
+        if (!bytes || !permissions || (permissions & ~7U) ||
+            (permissions & 3U) == 3U) return -EINVAL;
+        const size_t page = memory_.page_size();
+        if (!page || bytes > page || (guest % page) > page - bytes) return -EFAULT;
+        host = memory_.translate(guest,bytes,permissions);
+        return host ? 0 : -EFAULT;
+    }
     // Single-mapping atomic primitive for a future translated JIT slow path.
     // The caller must serialize map/protect/release against this operation.
     // Never emulate a split-page atomic with separate reads and writes.
