@@ -11,9 +11,10 @@ namespace maxps4 {
 // General instruction admission/scheduling is separate from address mapping.
 class OrbisM1 final {
 public:
-    // ASan reserves the low profile as shadow memory on Linux. Only the
-    // sanitizer memory suite opts into the legacy high profile; CPU/IPA use 16 GiB.
-#if defined(MAXPS4_M1_HIGH_VA_SANITIZER)
+    // Host-only suites may need the high profile: Linux ASan owns the low
+    // shadow range, and macOS VM reservations can collide with thread 2.
+    // Device builds retain the low profile and must report collisions honestly.
+#if defined(MAXPS4_M1_HIGH_VA_SANITIZER) || defined(MAXPS4_M1_HIGH_VA_HOST_TEST)
     static constexpr uint64_t thread_base = 0x300000400000ULL, heap_base = 0x300000800000ULL;
 #else
     static constexpr uint64_t thread_base = 0x400400000ULL, heap_base = 0x400800000ULL;

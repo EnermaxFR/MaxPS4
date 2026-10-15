@@ -3,7 +3,7 @@
 #include "../Native/maxps4_orbis_m1.h"
 
 namespace orbis_m1_fixture {
-// Finite direct fixture at 16 GiB, below the macOS GPU carve-out and 48 TiB.
+// Default finite direct fixture at 16 GiB; host tests can select the high profile.
 // Device VM/JIT admission is still required; this is not general VA translation.
 // The direct backend must reject a collision, never move an ELF behind its pointers.
 constexpr uint64_t bias = maxps4::OrbisM1::heap_base-0x800000;

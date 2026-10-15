@@ -28,3 +28,10 @@ backend before any execution test.
 
 No physical iPhone was available in this development session. Error -48 remains
 unverified. Do not close #202 or advertise a working PS4 game from this build.
+
+Observed integration failure: macOS ARM64 run 38767323866 on 0feef0b completed
+all single-thread M1 cases but rejected the two-thread queue with -48 before
+packaging. Linux native ARM64 and simulator passed the low-profile thread cases.
+Darwin host-linked tests now select MAXPS4_M1_HIGH_VA_HOST_TEST, a separate high
+fixture profile. iOS builds keep the default low profile. This host test selection
+does not resolve the low-profile collision or establish iPhone compatibility.

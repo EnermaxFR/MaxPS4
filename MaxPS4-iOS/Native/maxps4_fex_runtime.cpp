@@ -881,6 +881,15 @@ extern "C" int32_t maxps4_fex_engine_run_m1_threads(maxps4_fex_engine* engine,
         maxps4::OrbisM1 process(maxps4::GuestAddressSpace::Backend::fex_direct);
         int status = process.load(file,length,budget);
         if (status) return status;
+        auto mapping_error = [&](const char* phase, uint64_t id, int error) {
+            const auto failure = process.space.reservation_failure();
+            std::fprintf(stderr,
+                "M1 %s thread=%llu error=%d guest=0x%llx guard_bytes=%zu host_status=%d reservation_error=%d\n",
+                phase, static_cast<unsigned long long>(id), error,
+                static_cast<unsigned long long>(failure.guest), failure.bytes,
+                failure.host_status, failure.error);
+            return error;
+        };
         if (process.tls.memory_size != 16 || process.tls.block_size != 16 ||
             process.tls.initial.size() != 8) return -ENOTSUP;
         if (!process.space.translate(snapshot,0x108,6)) return -EFAULT;
@@ -927,12 +936,12 @@ extern "C" int32_t maxps4_fex_engine_run_m1_threads(maxps4_fex_engine* engine,
             const uint64_t base = maxps4::OrbisM1::thread_base+i*0x4000000ULL;
             job.memory = std::make_unique<maxps4::GuestThreadMemory>(process.space);
             status = job.memory->initialize(process.tls,base,process.entry);
-            if (status) return status;
+            if (status) return mapping_error("stack/static-TLS",job.id,status);
             job.tls = std::make_unique<maxps4::GuestDynamicTLS>(process.space,modules,base+0x1000000);
             for (auto id : ids) {
                 uint64_t address = 0;
                 status = job.tls->resolve(id,0,modules.find(id)->memory_size,address);
-                if (status) return status;
+                if (status) return mapping_error("dynamic-TLS",job.id,status);
                 job.payloads.push_back({address,modules.find(id)->memory_size,6});
             }
             status = process.admit(*job.memory,budget,job.payloads);
