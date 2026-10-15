@@ -214,11 +214,13 @@ int main() {
     CHECK(fetch_pages.map(fetch_base+page,page,5)==0);
     CHECK(fetch_pages.map(fetch_base+2*page,page,6)==0);
     uint8_t fetch_buffer[4]={0xaa,0xaa,0xaa,0xaa};
-    CHECK(fetch_pages.read(fetch_base+page-2,fetch_buffer,sizeof(fetch_buffer),true)==0);
+    maxps4::OrbisV4MemoryBridge fetch_bridge(fetch_pages);
+    CHECK(fetch_bridge.fetch_instruction(fetch_base+page-2,fetch_buffer,sizeof(fetch_buffer))==0);
+    CHECK(fetch_bridge.fetch_instruction(fetch_base+page-2,fetch_buffer,16)==-EINVAL);
     CHECK(fetch_buffer[0]==0 && fetch_buffer[1]==0 &&
           fetch_buffer[2]==0 && fetch_buffer[3]==0);
     std::memset(fetch_buffer,0xaa,sizeof(fetch_buffer));
-    CHECK(fetch_pages.read(fetch_base+2*page-2,fetch_buffer,sizeof(fetch_buffer),true)==-EFAULT);
+    CHECK(fetch_bridge.fetch_instruction(fetch_base+2*page-2,fetch_buffer,sizeof(fetch_buffer))==-EFAULT);
     for (const auto byte : fetch_buffer) CHECK(byte==0xaa);
     CHECK(fetch_pages.write(fetch_base+2*page,tail_code,sizeof(tail_code))==0);
     CHECK(fetch_pages.release(fetch_base)==0);
