@@ -67,10 +67,15 @@ public:
             return -EINVAL;
         if (size > budget - allocated_) return -E2BIG;
         const uint64_t low = address - page_, high = address + size + page_;
-        for (const auto& r : reservations_)
-            if (low < r.address + r.size + page_ && r.address - page_ < high) return -EEXIST;
-        if (backend_ == Backend::fex_direct && low < 0x100000000ULL) return -ENOTSUP;
         const size_t bytes = size + 2 * page_;
+        for (const auto& r : reservations_)
+            if (low < r.address + r.size + page_ && r.address - page_ < high) {
+                // An overlap in our own reservation table is not a Mach
+                // failure. Keep it distinguishable from a host VM collision.
+                failure_ = {address,bytes,0,-EEXIST};
+                return -EEXIST;
+            }
+        if (backend_ == Backend::fex_direct && low < 0x100000000ULL) return -ENOTSUP;
         void* hint = backend_ == Backend::fex_direct ? reinterpret_cast<void*>(low) : nullptr;
         void* host = MAP_FAILED;
 #if defined(__APPLE__)
