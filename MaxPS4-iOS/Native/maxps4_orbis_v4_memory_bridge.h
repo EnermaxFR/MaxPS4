@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <atomic>
-#include <cstring>
 #include <type_traits>
 
 namespace maxps4 {
@@ -51,6 +50,10 @@ public:
                       "Only native 8/16/32/64-bit integer atomics supported");
         exchanged = false;
         if (guest % alignof(T)) return -EINVAL;
+        // A translated native atomic must not straddle guest pages, even if
+        // two adjacent guest regions happen to share one host reservation.
+        const size_t page = memory_.page_size();
+        if (!page || (guest % page) > page - sizeof(T)) return -EFAULT;
         // Both permissions are mandatory; no read-only or execute-only CAS.
         const auto* ptr = memory_.translate(guest,sizeof(T),6);
         if (!ptr) return -EFAULT; // Includes unmapped and split-region access.
