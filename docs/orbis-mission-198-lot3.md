@@ -136,3 +136,24 @@ Les preuves du lot 2 ne constituaient pas une preuve de TLS multi-modules.
 Le lot 3 exécute réellement les payloads du harness décrits ci-dessus ; cela
 ne prouve pas l'ABI TLS SCE ni un backend traduit. M1 général reste incomplet.
 Aucune exécution iPhone, aucun jeu PS4 jouable, aucun déchiffrement revendiqué.
+
+## Suivi du 15 octobre — rollback TLS après échec d'allocation
+
+L'inspection locale au SHA AetherPS4 épinglé ci-dessus confirme les accès directs
+`GetReg(Op->Addr)`/`GenerateMemOperand` dans MemoryOps.cpp et le fetch
+`AdjustedInstStream` dans Frontend.cpp. Le blocage de traduction FEX générale
+reste applicable ; ce correctif ne change pas le backend CPU.
+
+`GuestDynamicTLS::resolve` nettoie désormais l'entrée de module et toute
+réservation acquise quand les allocations de bookkeeping C++ échouent.
+`std::bad_alloc` devient `-ENOMEM`, avec adresse de sortie zéro ; les autres
+exceptions sont propagées après rollback. Auparavant une exception pendant
+reserve/map pouvait laisser une entrée de bloc zéro, une réservation persistante
+ou une exception non gérée à la place du code d'erreur attendu.
+
+`GuestDynamicTLSAllocationTest` injecte un échec sur chaque allocation de resolve,
+vérifie l'absence de région/réservation résiduelle et retente la résolution dans
+le même thread, puis contrôle .tdata/.tbss et la destruction. Le test est intégré
+à la suite mission 198 ASan/UBSan Linux/macOS. Le code précédent termine sur une
+exception non gérée avec ce test. Ce test de stockage ne prouve aucune nouvelle
+exécution FEX, convention TLS SCE, compilation iOS ou exécution iPhone.

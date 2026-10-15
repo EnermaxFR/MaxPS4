@@ -30,3 +30,7 @@ m1_sources=(
   MaxPS4-iOS/Tests/GuestDynamicTLSTest.cpp -o "$OUT/GuestDynamicTLSTest"
 "$OUT/GuestDynamicTLSTest" | tee "$OUT/GuestDynamicTLSTest.txt"
 
+
+"$CXX" "${flags[@]}" -I MaxPS4-iOS/Native \
+  MaxPS4-iOS/Tests/GuestDynamicTLSAllocationTest.cpp -o "$OUT/GuestDynamicTLSAllocationTest"
+"$OUT/GuestDynamicTLSAllocationTest" | tee "$OUT/GuestDynamicTLSAllocationTest.txt"

@@ -62,13 +62,23 @@ public:
             const uint64_t block = base_+blocks_.size()*stride;
             const size_t size = (tls->block_size+page-1)/page*page;
             // Allocate bookkeeping before acquiring VM; publish only success.
-            it = blocks_.emplace(module, 0).first;
-            int error = space_.reserve(block,size);
-            const bool reserved = error == 0;
-            if (!error) error = space_.map(block,size,6,tls->initial.data(),tls->initial.size());
+            bool reserved = false;
+            int error = 0;
+            try {
+                it = blocks_.emplace(module, 0).first;
+                error = space_.reserve(block,size);
+                reserved = error == 0;
+                if (!error) error = space_.map(block,size,6,tls->initial.data(),tls->initial.size());
+            } catch (const std::bad_alloc&) {
+                error = -ENOMEM;
+            } catch (...) {
+                if (reserved) space_.release(block);
+                blocks_.erase(module);
+                throw;
+            }
             if (error) {
                 if (reserved) space_.release(block);
-                blocks_.erase(it);
+                blocks_.erase(module);
                 return error;
             }
             it->second = block;
