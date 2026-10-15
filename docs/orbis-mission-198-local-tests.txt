@@ -1,0 +1,27 @@
+Source: V3 8b7e0fc + lot 1 guard changes (published as 52724729480594b5e89d16d9126c9ddb029cd715)
+Command: ASAN_OPTIONS=detect_leaks=0 bash scripts/test-orbis-mission-198.sh
+GCC Linux x86-64; ASan/UBSan enabled; local LeakSanitizer disabled in traced executor.
+No FEX CPU execution, iOS compilation or device execution in this local run.
+The corrected 16 KiB-aware guard test was recompiled and rerun locally with ASan/UBSan; passed.
+
+GuestArenaGuardTest.txt
+PASS kernel guard faults and full reservation cleanup: ELF, PS4 ELF/SELF, linked Orbis; no CPU execution claimed
+
+GuestELFInterpreterTest.txt
+ELF interpreter: arithmetic, guest RIP, budget, real stores and RX isolation passed
+
+GuestELFMemoryTest.txt
+PASS ELF64 malformed inputs, CPU admission/budget, real guest mappings R/W/X policy and cleanup; no FEX JIT executed
+
+GuestRIPStoreAdmissionTest.txt
+PASS bounded RIP-relative store admission: exact addressing, RW targets, budget and signed offsets
+
+PS4GuestStagingTest.txt
+PASS PS4 plaintext ELF/SELF -> shared native FEX arena -> entry/data/BSS readback; permissions, budgets, blockers, rejection and lifecycle
+Synthetic fixtures; no PS4 CPU dispatch, iPhone execution or game rendering tested
+
+PS4OrbisCPUPreparationTest.txt
+PASS SCE NID/RELA -> owned page mapping -> guest CALL/RET admission; no CPU execution claimed
+
+PS4StagedCPUAdmissionTest.txt
+PASS staged CPU admission: permissions, budget, logical addresses and teardown; no CPU executed

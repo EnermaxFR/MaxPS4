@@ -55,13 +55,22 @@ mkdir -p "$ANIMATED"
 build/fex-app-host/Bin/maxps4-ps4-linked-test --animated-playable-bundle "$ANIMATED"
 cp MaxPS4-iOS/Resources/PlayableDemo/maxps4.json "$ANIMATED/"
 test -s "$ANIMATED/app.elf" && test -s "$ANIMATED/provider.prx" && test -s "$ANIMATED/maxps4.json"
+# Embed the exact fixture bundle exercised by native and Swift host CI.
+mkdir -p build/Payload/MaxPS4.app/OrbisM1
+cp build/fex-app-host/m1-bundle/* build/Payload/MaxPS4.app/OrbisM1/
 # Record the tested source revision before signing, for shareable device proof.
 python3 - <<'PYREVISION'
-import plistlib, subprocess
+import plistlib, subprocess, os, json, hashlib
 from pathlib import Path
 path = Path('build/Payload/MaxPS4.app/Info.plist')
 info = plistlib.loads(path.read_bytes())
 info['MaxPS4SourceRevision'] = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+event_path = os.environ.get('GITHUB_EVENT_PATH')
+event = json.loads(Path(event_path).read_text()) if event_path else {}
+info['MaxPS4PRHeadRevision'] = event.get('pull_request', {}).get('head', {}).get('sha', info['MaxPS4SourceRevision'])
+info['MaxPS4BuildRun'] = os.environ.get('GITHUB_RUN_ID', 'local')
+info['MaxPS4M1FixtureSHA256'] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+    for p in Path('build/Payload/MaxPS4.app/OrbisM1').glob('*') if p.is_file()}
 path.write_bytes(plistlib.dumps(info))
 PYREVISION
 # Xcode strips development Headers/Modules during embedding. Re-seal the exact

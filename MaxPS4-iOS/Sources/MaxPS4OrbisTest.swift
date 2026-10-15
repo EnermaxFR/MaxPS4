@@ -60,6 +60,107 @@ enum MaxPS4OrbisTest {
         results.append("truncated_refused=\(!inspect(Data(fixture().prefix(63))).ready)")
         return results.joined(separator: "\n")
     }
+    // Exact native-test fixtures; all pointers remain alive until the ABI returns.
+    static func m1Autotests(bundleDirectory: URL? = nil) -> String {
+        let revision = Bundle.main.object(forInfoDictionaryKey: "MaxPS4SourceRevision") as? String ?? "unknown"
+        let buildRun = Bundle.main.object(forInfoDictionaryKey: "MaxPS4BuildRun") as? String ?? "unknown"
+        let head = Bundle.main.object(forInfoDictionaryKey: "MaxPS4PRHeadRevision") as? String ?? "unknown"
+        var lines = ["autotests=orbis-m1", "source=\(revision)", "pr_head=\(head)",
+                     "build_run=\(buildRun)", "scope=current_host", "fixture=m1_two_threads_three_tls_modules_16gib",
+                     "scheduler=deterministic_run_to_completion", "tls_abi=fixture_fs_offsets",
+                     "m1_general_memory_translation=SKIP", "sce_dynamic_tls_abi=SKIP"]
+#if MAXPS4_FEX_APP
+        let directory = bundleDirectory ?? Bundle.main.resourceURL?.appendingPathComponent("OrbisM1")
+        guard let directory,
+              let elf = try? Data(contentsOf: directory.appendingPathComponent("m1-two-threads-three-tls-modules.elf")),
+              let moduleA = try? Data(contentsOf: directory.appendingPathComponent("tls-83.prx")),
+              let moduleB = try? Data(contentsOf: directory.appendingPathComponent("tls-129.prx")) else {
+            return (lines + ["m1_threads=BLOCKED", "reason=dedicated_fixture_missing"]).joined(separator: "\n")
+        }
+        for (name, bytes) in [("elf", elf), ("tls83", moduleA), ("tls129", moduleB)] {
+            let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+            lines.append("\(name)_sha256=\(digest)")
+        }
+        var engine: OpaquePointer?
+        let opened = maxps4_fex_engine_open(&engine)
+        lines.append("engine_open=\(opened)")
+        guard opened == 0, let engine else {
+            return (lines + ["m1_threads=BLOCKED", "reason=engine_open_failed"]).joined(separator: "\n")
+        }
+        defer { maxps4_fex_engine_close(engine) }
+        let initialized = maxps4_fex_engine_initialize(engine)
+        lines.append("jit_initialize=\(initialized)")
+        guard initialized == 0 else {
+            return (lines + ["m1_threads=BLOCKED", "reason=jit_initialization_failed"]).joined(separator: "\n")
+        }
+        let snapshot: UInt64 = 0x400010100
+        func execute(_ bytes: Data, budget: UInt32 = 200) -> (Int32, [maxps4_m1_thread_report]) {
+            var reports = [maxps4_m1_thread_report](repeating: maxps4_m1_thread_report(), count: 2)
+            let status = bytes.withUnsafeBytes { raw in
+                moduleA.withUnsafeBytes { a in
+                    moduleB.withUnsafeBytes { b in
+                        let inputs = [maxps4_m1_tls_input(bytes: a.bindMemory(to: UInt8.self).baseAddress, size: a.count),
+                                      maxps4_m1_tls_input(bytes: b.bindMemory(to: UInt8.self).baseAddress, size: b.count)]
+                        return inputs.withUnsafeBufferPointer { modules in
+                            reports.withUnsafeMutableBufferPointer { output in
+                                maxps4_fex_engine_run_m1_threads(engine,
+                                    raw.bindMemory(to: UInt8.self).baseAddress, raw.count,
+                                    budget, snapshot, modules.baseAddress, modules.count, 2, output.baseAddress, output.count)
+                            }
+                        }
+                    }
+                }
+            }
+            return (status, reports)
+        }
+        var passed = true
+        for run in 1...2 {
+            let (status, reports) = execute(elf)
+            lines.append("run=\(run) m1_thread_api_status=\(status)")
+            guard status == 0 else {
+                let reason: String
+                switch status {
+                case -48, -98: reason = "direct_mapping_collision"
+                case -12: reason = "vm_or_allocation_refused"
+                case -13, -1: reason = "vm_or_execution_permission_denied"
+                case -45, -95: reason = "unsupported_mapping_instruction_or_tls"
+                case -22: reason = "invalid_fixture_or_api_contract"
+                default: reason = "runtime_refused_status_\(status)"
+                }
+                return (lines + ["m1_threads=BLOCKED", "m1_multi_module_tls=SKIP", "reason=\(reason)"]).joined(separator: "\n")
+            }
+            for (i, t) in reports.enumerated() {
+                let c = t.cpu
+                let ok = t.joined == 1 && t.id == UInt64(i+1) && c.kernel_return == t.id &&
+                    c.rax == 131 && c.memory == 131 && c.tls_word == 22 && c.heap_word == 22 &&
+                    c.zero_memory == 0 && t.modules.0 == 84 && t.modules.1 == 131 &&
+                    t.zeros.0 == 0 && t.zeros.1 == 0 && t.lock_result == 0 && t.unlock_result == 0 &&
+                    c.calls == 4 && c.entry == 0x400004000 && (c.rsp & 15) == 0 &&
+                    c.backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT)
+                passed = passed && ok
+                lines.append("thread=\(t.id) result=\(ok ? "PASS" : "FAIL") joined=\(t.joined) backend=\(c.backend) rax=\(c.rax) memory=\(c.memory) tls=\(c.tls_word) modules=\(t.modules.0)/\(t.modules.1) zeros=\(t.zeros.0)/\(t.zeros.1)/\(c.zero_memory) self=\(c.kernel_return) calls=\(c.calls) mutex=\(t.lock_result)/\(t.unlock_result) rsp=\(c.rsp) fs=\(c.fs_base)")
+            }
+            let isolated = reports[0].cpu.rsp != reports[1].cpu.rsp && reports[0].cpu.fs_base != reports[1].cpu.fs_base
+            passed = passed && isolated
+            lines.append("distinct_stacks_tls=\(isolated ? "PASS" : "FAIL")")
+        }
+        let (budgetStatus, rejected) = execute(elf, budget: 1)
+        let refused = budgetStatus == -7 && rejected.allSatisfy { $0.joined == 0 && $0.cpu.backend == 0 }
+        lines.append("budget_refusal=\(refused ? "PASS" : "FAIL") status=\(budgetStatus)")
+        passed = passed && refused
+        var wx = elf; wx[68] = 7
+        let (wxStatus, wxReports) = execute(wx)
+        let wxRefused = wxStatus < 0 && wxReports.allSatisfy { $0.joined == 0 && $0.cpu.backend == 0 }
+        passed = passed && wxRefused
+        lines.append("wx_refusal=\(wxRefused ? "PASS" : "FAIL") status=\(wxStatus)")
+        lines.append("m1_threads=\(passed ? "PASS" : "FAIL")")
+        lines.append("m1_multi_module_tls=\(passed ? "PASS" : "FAIL")")
+#else
+        lines += ["m1_threads=BLOCKED", "reason=runtime_not_compiled"]
+#endif
+        return lines.joined(separator: "\n")
+    }
+
     static func run(_ inspection: Inspection) -> String {
 #if MAXPS4_FEX_APP
         guard inspection.ready else { return "execution=refused_validation" }

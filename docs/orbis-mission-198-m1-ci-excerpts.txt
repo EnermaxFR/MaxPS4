@@ -1,0 +1,67 @@
+Mission #198 lot 2 — code validé 659cafdfc90794eb5a1ed359db2950e8a6d88e6a
+Les commits de rapport ne changent pas le code validé.
+
+FEX macOS ARM64 / iOS / IPA: https://github.com/EnermaxFR/MaxPS4/actions/runs/38582054416
+2026-10-14T14:39:48.3051350Z PASS M1 FEX backend=2 initial=17 rax=29 memory=29 tls=22 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:39:48.3052110Z PASS M1 FEX backend=2 initial=17 rax=29 memory=29 tls=22 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:39:48.3052810Z PASS M1 FEX backend=2 initial=17 rax=29 memory=29 tls=22 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:39:48.3053430Z PASS M1 FEX backend=2 initial=17 rax=29 memory=29 tls=22 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:39:48.3054010Z PASS M1 FEX backend=2 initial=83 rax=95 memory=95 tls=88 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:39:48.3054580Z PASS M1 FEX backend=2 initial=83 rax=95 memory=95 tls=88 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:39:48.3055150Z PASS M1 FEX backend=2 initial=83 rax=95 memory=95 tls=88 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:39:48.3055730Z PASS M1 FEX backend=2 initial=83 rax=95 memory=95 tls=88 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:39:48.3056320Z PASS M1 FEX backend=2 initial=129 rax=141 memory=141 tls=134 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:39:48.3056940Z PASS M1 FEX backend=2 initial=129 rax=141 memory=141 tls=134 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:39:48.3057560Z PASS M1 FEX backend=2 initial=129 rax=141 memory=141 tls=134 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:39:48.3058170Z PASS M1 FEX backend=2 initial=129 rax=141 memory=141 tls=134 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:42:24.0622760Z IPA SHA256: 1f6e5a666061c83ceed12ec05258abceca4efde1a7df54dde528df75e54ddab7
+2026-10-14T14:42:24.5842660Z IPA SHA256: 1f6e5a666061c83ceed12ec05258abceca4efde1a7df54dde528df75e54ddab7
+2026-10-14T14:42:26.2181090Z Artifact download URL: https://github.com/EnermaxFR/MaxPS4/actions/runs/38582054416/artifacts/11903377596
+2026-10-14T14:42:27.4642740Z Artifact download URL: https://github.com/EnermaxFR/MaxPS4/actions/runs/38582054416/artifacts/11903457550
+2026-10-14T14:42:28.5296070Z Artifact download URL: https://github.com/EnermaxFR/MaxPS4/actions/runs/38582054416/artifacts/11903982352
+
+FEX Linux ARM64 natif: https://github.com/EnermaxFR/MaxPS4/actions/runs/38582054410
+2026-10-14T14:38:29.5519355Z PASS M1 FEX backend=2 initial=17 rax=29 memory=29 tls=22 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:38:29.5520173Z PASS M1 FEX backend=2 initial=17 rax=29 memory=29 tls=22 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:38:29.5521187Z PASS M1 FEX backend=2 initial=17 rax=29 memory=29 tls=22 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:38:29.5521997Z PASS M1 FEX backend=2 initial=17 rax=29 memory=29 tls=22 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:38:29.5522860Z PASS M1 FEX backend=2 initial=83 rax=95 memory=95 tls=88 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:38:29.5523507Z PASS M1 FEX backend=2 initial=83 rax=95 memory=95 tls=88 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:38:29.5524189Z PASS M1 FEX backend=2 initial=83 rax=95 memory=95 tls=88 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:38:29.5524837Z PASS M1 FEX backend=2 initial=83 rax=95 memory=95 tls=88 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:38:29.5525514Z PASS M1 FEX backend=2 initial=129 rax=141 memory=141 tls=134 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:38:29.5526202Z PASS M1 FEX backend=2 initial=129 rax=141 memory=141 tls=134 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:38:29.5526861Z PASS M1 FEX backend=2 initial=129 rax=141 memory=141 tls=134 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:38:29.5527561Z PASS M1 FEX backend=2 initial=129 rax=141 memory=141 tls=134 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:38:31.2760571Z Artifact download URL: https://github.com/EnermaxFR/MaxPS4/actions/runs/38582054410/artifacts/11903267686
+
+FEX ARM64 VIXL sur x86, backend=3 explicite: https://github.com/EnermaxFR/MaxPS4/actions/runs/38582054410
+2026-10-14T14:40:05.5302015Z PASS M1 FEX backend=3 initial=17 rax=29 memory=29 tls=22 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:40:05.5304368Z PASS M1 FEX backend=3 initial=17 rax=29 memory=29 tls=22 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:40:05.5305653Z PASS M1 FEX backend=3 initial=17 rax=29 memory=29 tls=22 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:40:05.5307005Z PASS M1 FEX backend=3 initial=17 rax=29 memory=29 tls=22 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:40:05.5309656Z PASS M1 FEX backend=3 initial=83 rax=95 memory=95 tls=88 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:40:05.5310948Z PASS M1 FEX backend=3 initial=83 rax=95 memory=95 tls=88 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:40:05.5312011Z PASS M1 FEX backend=3 initial=83 rax=95 memory=95 tls=88 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:40:05.5313103Z PASS M1 FEX backend=3 initial=83 rax=95 memory=95 tls=88 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:40:05.5314254Z PASS M1 FEX backend=3 initial=129 rax=141 memory=141 tls=134 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:40:05.5315416Z PASS M1 FEX backend=3 initial=129 rax=141 memory=141 tls=134 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:40:05.5316633Z PASS M1 FEX backend=3 initial=129 rax=141 memory=141 tls=134 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:40:05.5317830Z PASS M1 FEX backend=3 initial=129 rax=141 memory=141 tls=134 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T14:40:21.1563957Z Artifact download URL: https://github.com/EnermaxFR/MaxPS4/actions/runs/38582054410/artifacts/11903807072
+
+Mémoire Linux/macOS, préflight direct sans sanitizers et ASan/UBSan :
+https://github.com/EnermaxFR/MaxPS4/actions/runs/38582054391
+Compilation des services iPhone ARM64 : workflow services ci-dessus.
+Linkage strict complet hôte/iPhone ARM64 :
+https://github.com/EnermaxFR/MaxPS4/actions/runs/38582054331
+
+Échecs précédents conservés :
+https://github.com/EnermaxFR/MaxPS4/actions/runs/38575269513 — premier M1 macOS refusé.
+https://github.com/EnermaxFR/MaxPS4/actions/runs/38576232539 — mach_vm.h interdit par SDK iPhone, corrigé par vm_map APIs.
+https://github.com/EnermaxFR/MaxPS4/actions/runs/38578429376 — refus à 192 Gio, zone GPU kernel 64..448 Gio.
+https://github.com/EnermaxFR/MaxPS4/actions/runs/38579877999 — l’API de plages Mach ne rend pas ce carve-out disponible.
+659cafd retire l’essai de range_create et utilise 48 Tio pour image/pile/heap/TLS ; aucune région kernel écrasée.
+
+Aucune exécution iPhone, aucun jeu PS4 jouable ou JIT iPhone prouvés par ces résultats.
+IPA expérimentale vérifiée par les scripts CI ; SideStore doit re-signer app et framework.

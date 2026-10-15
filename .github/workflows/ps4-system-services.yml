@@ -18,7 +18,7 @@ on:
       - 'cmake/FEXCoreLinkedTests.cmake'
       - '.github/workflows/ps4-system-services.yml'
   push:
-    branches: ['codex/ps4-memory-translation-contract']
+    branches: ['codex/ps4-memory-translation-contract', 'experiment/orbis-mission-198']
     paths:
       - 'MaxPS4-iOS/Native/PS4PFS*'
       - 'MaxPS4-iOS/Native/PS4PKG*'
@@ -72,6 +72,7 @@ jobs:
             build/ps4-linked/ps4-libkernel-demo.elf
             build/ps4-linked/ps4-libkernel-combined.elf
             build/ps4-linked/Bin/maxps4-ps4-linked-test
+            build/ps4-linked/m1-bundle/**
             build/ps4-linked/orbis-bundle/**
             build/ps4-linked/playable-bundle/**
             build/ps4-linked/playable-evidence/**

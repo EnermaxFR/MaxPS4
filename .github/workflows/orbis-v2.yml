@@ -1,7 +1,7 @@
 name: Orbis PKG runtime V2 safety
 on:
   push:
-    branches: ['experiment/orbis-runtime-pkg-v2', 'experiment/orbis-v3-autotests']
+    branches: ['experiment/orbis-runtime-pkg-v2', 'experiment/orbis-v3-autotests', 'experiment/orbis-mission-198']
   pull_request:
     paths:
       - 'MaxPS4-iOS/**'
@@ -29,3 +29,4 @@ jobs:
           name: Orbis-V2-${{ matrix.os }}-evidence
           path: build/orbis-v2/
           if-no-files-found: error
+

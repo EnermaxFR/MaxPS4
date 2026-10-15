@@ -169,6 +169,30 @@ int32_t maxps4_fex_engine_contiguous_ps4(maxps4_fex_engine *engine,
 int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine, const uint8_t *code,
                             size_t length, uint32_t budget, uint64_t *result,
                             uint32_t *backend);
+// Experimental M1 direct-address backend. No UI integration. Refuses host
+// collisions, unadmitted instructions and unsupported TLS/ABI models.
+typedef struct maxps4_m1_report {
+    uint64_t rax, entry, rsp, fs_base, memory, tls_word, kernel_return, zero_memory, heap_word;
+    uint32_t backend, calls;
+} maxps4_m1_report;
+int32_t maxps4_fex_engine_run_m1(maxps4_fex_engine*, const uint8_t*, size_t,
+    uint32_t budget, uint64_t snapshot_address, maxps4_m1_report*);
+// Experimental deterministic run-to-completion queue. All CPU contexts, stacks
+// and TLS blocks are created before dispatch; dispatch/join in ID order. Direct
+// backend only, no guest pthread_create/join ABI or preemption. Up to 4 threads,
+// 16 PT_TLS templates. Dynamic resolver/DTV ABI is not installed. This fixture
+// API uses FS-relative payload accesses admitted against the exact module spans.
+typedef struct maxps4_m1_tls_input { const uint8_t* bytes; size_t size; } maxps4_m1_tls_input;
+typedef struct maxps4_m1_thread_report {
+    maxps4_m1_report cpu;
+    uint64_t id, modules[16], zeros[16], lock_result, unlock_result;
+    uint32_t joined;
+} maxps4_m1_thread_report;
+int32_t maxps4_fex_engine_run_m1_threads(maxps4_fex_engine*, const uint8_t*, size_t,
+    uint32_t budget, uint64_t snapshot_address, const maxps4_m1_tls_input*, size_t module_count,
+    size_t thread_count, maxps4_m1_thread_report*, size_t report_count);
+
 #ifdef __cplusplus
 }
 #endif
+

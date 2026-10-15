@@ -1,0 +1,84 @@
+Code validé : 23546d04c9c83a3c20c9a3bc0835ac844e157813
+M1 général incomplet : backend direct, ABI DTV/SCE TLS et scheduler général absents.
+
+FEX Linux ARM64 natif
+https://github.com/EnermaxFR/MaxPS4/actions/runs/38592861055
+2026-10-14T15:52:12.3984511Z PASS M1 FEX backend=2 initial=17 rax=29 memory=29 tls=22 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:52:12.3985295Z PASS M1 FEX backend=2 initial=17 rax=29 memory=29 tls=22 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:52:12.3986392Z PASS M1 FEX backend=2 initial=17 rax=29 memory=29 tls=22 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:52:12.3987729Z PASS M1 FEX backend=2 initial=17 rax=29 memory=29 tls=22 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:52:12.3988415Z PASS M1 FEX backend=2 initial=83 rax=95 memory=95 tls=88 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:52:12.3989266Z PASS M1 FEX backend=2 initial=83 rax=95 memory=95 tls=88 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:52:12.3990638Z PASS M1 FEX backend=2 initial=83 rax=95 memory=95 tls=88 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:52:12.3991950Z PASS M1 FEX backend=2 initial=83 rax=95 memory=95 tls=88 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:52:12.3992699Z PASS M1 FEX backend=2 initial=129 rax=141 memory=141 tls=134 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:52:12.3993396Z PASS M1 FEX backend=2 initial=129 rax=141 memory=141 tls=134 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:52:12.3994077Z PASS M1 FEX backend=2 initial=129 rax=141 memory=141 tls=134 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:52:12.3994794Z PASS M1 FEX backend=2 initial=129 rax=141 memory=141 tls=134 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:52:12.3995470Z PASS M1 FEX thread=1 joined=1 backend=2 rax=131 tls=22 modules=84/131 mutex=0/0 fs=0x300000420010
+2026-10-14T15:52:12.3996089Z PASS M1 FEX thread=2 joined=1 backend=2 rax=131 tls=22 modules=84/131 mutex=0/0 fs=0x300004420010
+2026-10-14T15:52:12.3996733Z PASS M1 FEX thread=1 joined=1 backend=2 rax=131 tls=22 modules=84/131 mutex=0/0 fs=0x300000420010
+2026-10-14T15:52:12.3997339Z PASS M1 FEX thread=2 joined=1 backend=2 rax=131 tls=22 modules=84/131 mutex=0/0 fs=0x300004420010
+
+FEX VIXL ARM64 sur x86
+https://github.com/EnermaxFR/MaxPS4/actions/runs/38592861055
+2026-10-14T15:53:30.1580070Z PASS M1 FEX backend=3 initial=17 rax=29 memory=29 tls=22 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:53:30.1581189Z PASS M1 FEX backend=3 initial=17 rax=29 memory=29 tls=22 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:53:30.1582324Z PASS M1 FEX backend=3 initial=17 rax=29 memory=29 tls=22 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:53:30.1584028Z PASS M1 FEX backend=3 initial=17 rax=29 memory=29 tls=22 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:53:30.1585045Z PASS M1 FEX backend=3 initial=83 rax=95 memory=95 tls=88 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:53:30.1586122Z PASS M1 FEX backend=3 initial=83 rax=95 memory=95 tls=88 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:53:30.1587182Z PASS M1 FEX backend=3 initial=83 rax=95 memory=95 tls=88 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:53:30.1588586Z PASS M1 FEX backend=3 initial=83 rax=95 memory=95 tls=88 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:53:30.1590098Z PASS M1 FEX backend=3 initial=129 rax=141 memory=141 tls=134 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:53:30.1591769Z PASS M1 FEX backend=3 initial=129 rax=141 memory=141 tls=134 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:53:30.1593425Z PASS M1 FEX backend=3 initial=129 rax=141 memory=141 tls=134 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:53:30.1594773Z PASS M1 FEX backend=3 initial=129 rax=141 memory=141 tls=134 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:53:30.1595729Z PASS M1 FEX thread=1 joined=1 backend=3 rax=131 tls=22 modules=84/131 mutex=0/0 fs=0x300000420010
+2026-10-14T15:53:30.1596759Z PASS M1 FEX thread=2 joined=1 backend=3 rax=131 tls=22 modules=84/131 mutex=0/0 fs=0x300004420010
+2026-10-14T15:53:30.1600214Z PASS M1 FEX thread=1 joined=1 backend=3 rax=131 tls=22 modules=84/131 mutex=0/0 fs=0x300000420010
+2026-10-14T15:53:30.1601290Z PASS M1 FEX thread=2 joined=1 backend=3 rax=131 tls=22 modules=84/131 mutex=0/0 fs=0x300004420010
+
+FEX macOS ARM64 et compilation/packaging iOS
+https://github.com/EnermaxFR/MaxPS4/actions/runs/38592860868
+2026-10-14T15:59:19.5784190Z PASS complete strict Darwin ARM64 Darwin linkage; device execution NOT tested
+2026-10-14T15:59:24.3920560Z PASS M1 FEX backend=2 initial=17 rax=29 memory=29 tls=22 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:59:24.3921230Z PASS M1 FEX backend=2 initial=17 rax=29 memory=29 tls=22 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:59:24.3922110Z PASS M1 FEX backend=2 initial=17 rax=29 memory=29 tls=22 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:59:24.3922950Z PASS M1 FEX backend=2 initial=17 rax=29 memory=29 tls=22 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:59:24.3923660Z PASS M1 FEX backend=2 initial=83 rax=95 memory=95 tls=88 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:59:24.3924410Z PASS M1 FEX backend=2 initial=83 rax=95 memory=95 tls=88 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:59:24.3925100Z PASS M1 FEX backend=2 initial=83 rax=95 memory=95 tls=88 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:59:24.3925780Z PASS M1 FEX backend=2 initial=83 rax=95 memory=95 tls=88 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:59:24.3926500Z PASS M1 FEX backend=2 initial=129 rax=141 memory=141 tls=134 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:59:24.3927230Z PASS M1 FEX backend=2 initial=129 rax=141 memory=141 tls=134 calls=0 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:59:24.3927930Z PASS M1 FEX backend=2 initial=129 rax=141 memory=141 tls=134 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:59:24.3928630Z PASS M1 FEX backend=2 initial=129 rax=141 memory=141 tls=134 calls=2 entry=0x300000004000 fs=0x300000420010
+2026-10-14T15:59:24.3929400Z PASS M1 FEX thread=1 joined=1 backend=2 rax=131 tls=22 modules=84/131 mutex=0/0 fs=0x300000420010
+2026-10-14T15:59:24.3930050Z PASS M1 FEX thread=2 joined=1 backend=2 rax=131 tls=22 modules=84/131 mutex=0/0 fs=0x300004420010
+2026-10-14T15:59:24.3930730Z PASS M1 FEX thread=1 joined=1 backend=2 rax=131 tls=22 modules=84/131 mutex=0/0 fs=0x300000420010
+2026-10-14T15:59:24.3931390Z PASS M1 FEX thread=2 joined=1 backend=2 rax=131 tls=22 modules=84/131 mutex=0/0 fs=0x300004420010
+2026-10-14T15:59:28.3846580Z PASS V3 real Swift/C snapshot validation, legal fixture SHA256, W+X refusal, redacted export; real host FEX 42/9 and CPU state verified; no iPhone execution
+2026-10-14T16:00:25.7794900Z PASS complete strict iOS ARM64 Darwin linkage; device execution NOT tested
+2026-10-14T16:01:22.1883960Z IPA SHA256: fb8749deeb476d47a4cf5d084406bab5fa0ab7f202bd093523f091a929526c36
+2026-10-14T16:01:22.4881350Z IPA SHA256: fb8749deeb476d47a4cf5d084406bab5fa0ab7f202bd093523f091a929526c36
+
+Mémoire Linux ASan/UBSan
+https://github.com/EnermaxFR/MaxPS4/actions/runs/38592860827
+2026-10-14T15:51:06.1616050Z PASS guest/host separation, mappings, guards, collisions, rollback, static TLS isolation, stack and M1 admission
+2026-10-14T15:51:15.2442528Z PASS guest/host separation, mappings, guards, collisions, rollback, static TLS isolation, stack and M1 admission
+2026-10-14T15:51:17.4197546Z PASS translated multi-region copies, absolute guest pointers, overflow/protection rollback and lazy multi-module TLS isolation; no FEX CPU execution
+
+Mémoire macOS ASan/UBSan
+https://github.com/EnermaxFR/MaxPS4/actions/runs/38592860827
+2026-10-14T15:54:18.8927600Z PASS guest/host separation, mappings, guards, collisions, rollback, static TLS isolation, stack and M1 admission
+2026-10-14T15:54:25.6842640Z PASS guest/host separation, mappings, guards, collisions, rollback, static TLS isolation, stack and M1 admission
+2026-10-14T15:54:27.1410040Z PASS translated multi-region copies, absolute guest pointers, overflow/protection rollback and lazy multi-module TLS isolation; no FEX CPU execution
+
+Linkage macOS ARM64
+https://github.com/EnermaxFR/MaxPS4/actions/runs/38592871776
+2026-10-14T16:00:12.5854670Z PASS complete strict Darwin ARM64 Darwin linkage; device execution NOT tested
+
+Linkage iOS ARM64, pas d'exécution appareil
+https://github.com/EnermaxFR/MaxPS4/actions/runs/38592871776
+2026-10-14T16:01:10.8254070Z PASS complete strict iOS ARM64 Darwin linkage; device execution NOT tested
