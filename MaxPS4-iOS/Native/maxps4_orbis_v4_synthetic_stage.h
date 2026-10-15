@@ -15,11 +15,13 @@ inline int stage_v4_synthetic_image(GuestAddressSpace& space,
     if (!page || !code || !code_size || !stack_size ||
         code_size > page || stack_size != page ||
         code_address % page || stack_address % page ||
-        code_address == stack_address) return -EINVAL;
+        code_address == stack_address ||
+        page > UINT64_MAX / 2 || code_address > UINT64_MAX - 2 * page)
+        return -EINVAL;
     if (space.fex_direct()) return -ENOTSUP;
     // Reserve a single two-page region only when code and stack are adjacent.
-    if (stack_address != code_address + page ||
-        code_address > UINT64_MAX - 2 * page) return -EINVAL;
+    // Check arithmetic bounds before computing any guest address.
+    if (stack_address != code_address + page) return -EINVAL;
     const int reserved = space.reserve(code_address, 2 * page);
     if (reserved) return reserved;
     const int mapped_code = space.map(code_address,page,5,code,code_size);
