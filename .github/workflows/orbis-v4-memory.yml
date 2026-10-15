@@ -2,14 +2,16 @@ name: Orbis V4 isolated memory checks
 on:
   workflow_dispatch:
   push:
-    branches: ['integration/orbis-v4-safe-staging']
+    branches: ['integration/orbis-v4-safe-staging', 'experiment/orbis-m2-memory-translation']
     paths:
       - 'MaxPS4-iOS/Native/maxps4_guest_address_space.h'
+      - 'MaxPS4-iOS/Native/maxps4_orbis_v4_*.h'
       - 'MaxPS4-iOS/Tests/OrbisV4AddressSpaceTest.cpp'
       - '.github/workflows/orbis-v4-memory.yml'
   pull_request:
     paths:
       - 'MaxPS4-iOS/Native/maxps4_guest_address_space.h'
+      - 'MaxPS4-iOS/Native/maxps4_orbis_v4_*.h'
       - 'MaxPS4-iOS/Tests/OrbisV4AddressSpaceTest.cpp'
       - '.github/workflows/orbis-v4-memory.yml'
 permissions:
@@ -31,3 +33,8 @@ jobs:
             MaxPS4-iOS/Tests/OrbisV4AddressSpaceTest.cpp \
             -o build/orbis-v4/address-space-test
           build/orbis-v4/address-space-test
+      - name: Run translated memory checks with sanitizers
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer \
+            MaxPS4-iOS/Tests/OrbisV4AddressSpaceTest.cpp -o build/orbis-v4/address-space-sanitized
+          build/orbis-v4/address-space-sanitized
