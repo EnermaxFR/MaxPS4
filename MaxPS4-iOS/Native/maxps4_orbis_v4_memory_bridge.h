@@ -23,13 +23,6 @@ public:
         host = translated;
         return 0;
     }
-    // Decoder-facing bounded copy: guest RX pages can have discontiguous
-    // host backing. Never expose a raw translated pointer to FEX's JIT.
-    // The destination is unchanged if any part of the fetch is inaccessible.
-    int fetch_instruction(uint64_t guest, void* dst, size_t bytes) const {
-        if (!bytes || bytes > 15) return -EINVAL; // x86 instruction limit
-        return memory_.read(guest,dst,bytes,true);
-    }
     // Decoder-facing fetch copies x86 instruction bytes from translated guest
     // storage. It never exposes a guest VA as a host pointer. This is not a
     // JIT load/store or atomic translation implementation.
