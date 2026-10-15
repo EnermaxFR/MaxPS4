@@ -150,6 +150,14 @@ typedef struct maxps4_v4_synthetic_report {
 // retries direct collisions using overwrite or dispatches through V3.
 int32_t maxps4_fex_engine_v4_synthetic(maxps4_fex_engine *engine,
     uint32_t instruction_budget, maxps4_v4_synthetic_report *report);
+// Isolated constant-code diagnostic. Never accepts an ELF or guest bytecode.
+// Low guest RIP, distinct storage, host-VA collision, TLS, stack and atomic RMW.
+typedef struct maxps4_m2_low_va_report {
+    int32_t status, initialize_status, execute_status;
+    uint32_t backend, collision_preserved, cleanup, code_rx, stack_rw_nx;
+    uint64_t rax, memory, tls, entry, rsp;
+} maxps4_m2_low_va_report;
+int32_t maxps4_fex_test_m2_low_va(maxps4_m2_low_va_report *report);
 // Experimental V4 direct-memory preflight. Requires explicitly mapped V4 pages;
 // does not dispatch guest instructions or alter the V3 execution path.
 // Returns an error until a genuine FEX-direct guest mapping is admitted.
@@ -216,5 +224,6 @@ int32_t maxps4_fex_engine_run_m1_threads(maxps4_fex_engine*, const uint8_t*, siz
 #ifdef __cplusplus
 }
 #endif
+
 
 

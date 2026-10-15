@@ -175,6 +175,8 @@ struct MaxPS4FEXDiagnostic: Sendable {
         func step(_ value: Int32) -> String {
             value == -ECANCELED ? "non tenté" : value == 0 ? "réussi (0)" : "échoué (\(value))"
         }
+        var m2 = maxps4_m2_low_va_report()
+        let m2Status = maxps4_fex_test_m2_low_va(&m2)
         let observed = report.read_status == 0
         let revision = Bundle.main.object(forInfoDictionaryKey: "MaxPS4SourceRevision") as? String ?? "non renseignée"
         return [
@@ -203,6 +205,9 @@ struct MaxPS4FEXDiagnostic: Sendable {
             "Segments invités après retrait : \(report.guest_segments_after)",
             "Régions RX/RW utilisées après nettoyage : \(report.jit_regions_after) (avant : \(report.jit_regions_before))",
             "Validation globale : " + (status == 0 ? "réussie" : "échouée (\(status))"),
+            "M2 low-VA 0x400000 : statut \(m2Status), backend \(m2.backend), RAX \(m2.rax), mémoire \(m2.memory) (attendu 42), TLS \(m2.tls) (attendu 8)",
+            "M2 collision hôte préservée : \(m2.collision_preserved), nettoyage : \(m2.cleanup), code RX : \(m2.code_rx), pile RW/NX : \(m2.stack_rw_nx)",
+            "Ce diagnostic borné doit être exécuté sur iPhone ; aucune correction générale de -48 n’est annoncée.",
             "RIP final et instructions terminées FEX : non exposés par cette API.",
             "Les régions StikDebug préparées restent réservées jusqu’à leur libération explicite.",
             "Démo bornée avec tables DT_* standard ; adressage PS4 général, tables SCE, PRX et TLS restent indisponibles."
@@ -427,4 +432,5 @@ struct MaxPS4FEXDiagnostic: Sendable {
 #endif
     }
 }
+
 

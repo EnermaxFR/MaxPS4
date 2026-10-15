@@ -40,6 +40,7 @@ cmake -S "$FEX" -B "$OUT" -G Ninja \
 cmake --build "$OUT" --target maxps4-ps4-linked-test maxps4-fex-translation-test --parallel "${MAXPS4_BUILD_JOBS:-3}" > "$OUT/build.log" 2>&1
 python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/translation-tests.txt" "$OUT/Bin/maxps4-fex-translation-test"
 python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/ps4-linked-tests.txt" "$OUT/Bin/maxps4-ps4-linked-test"
+python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/m2-low-va-tests.txt" "$OUT/Bin/maxps4-ps4-linked-test" --m2
 python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/m1-linked-tests.txt" "$OUT/Bin/maxps4-ps4-linked-test" --m1
 "$OUT/Bin/maxps4-ps4-linked-test" --m1-bundle "$OUT/orbis-bundle/m1"
 python3 "$ROOT/scripts/run-bounded.py" 10 "$OUT/fixture-export.txt" "$OUT/Bin/maxps4-ps4-linked-test" \
@@ -53,3 +54,4 @@ python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/playable-frames.txt" "$OUT/Bin/m
 cmp "$OUT/playable-bundle/app.elf" "$ROOT/MaxPS4-iOS/Resources/PlayableDemo/app.elf"
 cmp "$OUT/playable-bundle/provider.prx" "$ROOT/MaxPS4-iOS/Resources/PlayableDemo/provider.prx"
 cp "$ROOT/MaxPS4-iOS/Resources/PlayableDemo/maxps4.json" "$OUT/playable-bundle/"
+

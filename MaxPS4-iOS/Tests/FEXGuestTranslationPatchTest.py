@@ -11,7 +11,7 @@ repo = Path(__file__).resolve().parents[2]
 source = Path(sys.argv[1])
 patch = repo / 'patches/fexcore-guest-memory.patch'
 paths = re.findall(r'^\+\+\+ b/(.*)$', patch.read_text(), re.M)
-assert len(paths) == 14, paths
+assert len(paths) == 15, paths
 with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
     for name in paths:
@@ -35,3 +35,4 @@ with tempfile.TemporaryDirectory() as directory:
     assert result.returncode != 0, 'Diverged patch was accepted'
     assert before == {name: (root / name).read_bytes() for name in paths}, 'Partial mutation on rejection'
 print('PASS pinned memory patch: application, idempotence, drift refused without partial edits')
+

@@ -209,13 +209,12 @@ static int m1Test() {
         const uint64_t address = maxps4::OrbisM1::thread_base+0x4000000;
         const uint64_t marker = 0xcafebabe;
         CHECK(blocker.reserve(address,0x10000) == 0 && blocker.map(address,0x10000,6,&marker,8) == 0);
-        CHECK(maxps4_fex_engine_run_m1_threads(engine,file.data(),file.size(),200,snapshot,modules,2,2,rejected,2) == -EADDRINUSE);
-        CHECK(!rejected[0].joined && !rejected[1].joined);
+        CHECK(maxps4_fex_engine_run_m1_threads(engine,file.data(),file.size(),200,snapshot,modules,2,2,rejected,2) == 0);
+        CHECK(rejected[0].joined && rejected[1].joined && rejected[1].cpu.kernel_return == 2);
         uint64_t preserved=0;
         CHECK(blocker.read(address,&preserved,8) == 0 && preserved == marker);
         CHECK(blocker.release(address) == 0);
-        // A first ready CPU was created before the second thread collision.
-        // A clean retry proves its mappings/context were not left live.
+        // Translated storage leaves occupied host VAs intact; repeat after cleanup.
         CHECK(maxps4_fex_engine_run_m1_threads(engine,file.data(),file.size(),200,snapshot,modules,2,2,rejected,2) == 0);
         CHECK(rejected[0].joined && rejected[1].joined && rejected[1].cpu.kernel_return == 2);
     }
@@ -231,6 +230,17 @@ static int m1Test() {
     return 0;
 }
 int main(int argc, char** argv) {
+    if (argc == 2 && !std::strcmp(argv[1],"--m2")) {
+        CHECK(maxps4_fex_test_m2_low_va(nullptr)==-EINVAL);
+        for (unsigned i=0;i<3;++i) {
+            maxps4_m2_low_va_report report{};
+            CHECK(maxps4_fex_test_m2_low_va(&report)==0);
+            CHECK(report.status==0 && report.entry==0x400000 && report.rax==42 && report.memory==42 && report.tls==8);
+            CHECK(report.cleanup && report.collision_preserved && report.code_rx && report.stack_rw_nx);
+            CHECK(report.backend==MAXPS4_CPU_FEX_ARM64_JIT || report.backend==MAXPS4_CPU_FEX_ARM64_SIMULATOR);
+        }
+        return 0;
+    }
     if (argc == 2 && !std::strcmp(argv[1],"--m1")) return m1Test();
     if (argc == 3 && !std::strcmp(argv[1],"--m1-bundle")) {
         std::filesystem::create_directories(argv[2]);
@@ -494,5 +504,6 @@ int main(int argc, char** argv) {
     CHECK(!result && !backend && !entry_out && !calls);
     std::puts("PASS host-pointer isolation, failed restage and cleanup; iPhone execution requires separate device validation");
 }
+
 
 

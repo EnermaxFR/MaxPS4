@@ -322,6 +322,10 @@ int main() {
         CHECK(maxps4_fex_engine_run(nullptr, block, sizeof(block), 32, &result, &backend) == -EINVAL);
         CHECK(maxps4_fex_engine_cpuid(second, 0, 0, nullptr) == -EINVAL);
         maxps4_fex_engine_close(second);
+        maxps4_m2_low_va_report m2{};
+        CHECK(maxps4_fex_test_m2_low_va(&m2)==0);
+        CHECK(m2.entry==0x400000 && m2.rax==42 && m2.memory==42 && m2.tls==8);
+        CHECK(m2.cleanup && m2.collision_preserved && m2.code_rx && m2.stack_rw_nx);
         for (size_t i = 0; i < signal_numbers.size(); ++i) {
             struct sigaction action {};
             CHECK(::sigaction(signal_numbers[i], nullptr, &action) == 0);
@@ -339,6 +343,7 @@ int main() {
     }
     std::puts("PASS real FEX context lifecycle/CPUID and explicit interpreter fallback; device JIT NOT tested");
 }
+
 
 
 

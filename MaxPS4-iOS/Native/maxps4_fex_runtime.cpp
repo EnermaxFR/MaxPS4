@@ -37,6 +37,7 @@
 #include <mutex>
 #include <memory>
 #include <new>
+#include <stdexcept>
 
 extern "C" int maxps4_native_guest_x86_run(const uint8_t*, size_t, uint32_t,
                                            uint64_t*) noexcept;
@@ -54,6 +55,11 @@ public:
     uint64_t private_stack = 0;
     uint64_t guest_id = 1;
     size_t private_stack_size = 0;
+    // Private M1 storage is pinned by runtime_lock and the process lifetime.
+    // No mapping-mutating libkernel VM provider is exposed during dispatch.
+    std::vector<FEXCore::HLE::GuestMemoryRange> ranges;
+    bool UsesGuestMemoryTranslation() const override { return m1 && !m1->space.fex_direct(); }
+    std::span<const FEXCore::HLE::GuestMemoryRange> GuestMemoryRanges() const override { return ranges; }
     uint32_t calls = 0;
     int callback_error = 0;
     uint64_t HandleSyscall(FEXCore::Core::CpuStateFrame* frame, FEXCore::HLE::SyscallArguments*) override {
@@ -102,6 +108,12 @@ public:
     }
     FEXCore::HLE::ExecutableRangeInfo QueryGuestExecutableRange(
         FEXCore::Core::InternalThreadState*, uint64_t address) override {
+        if (UsesGuestMemoryTranslation()) {
+            for (const auto& r : ranges)
+                if ((r.Permissions & 5) == 5 && address >= r.Guest && address-r.Guest < r.Size)
+                    return {r.Guest,r.Size,false};
+            return {0,0,false};
+        }
         if (image) for (const auto& segment : image->segments()) {
             if (!(segment.permissions & 1)) continue;
             // FEX receives rebased host addresses only for the restricted
@@ -331,10 +343,10 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     if (scheduled && !scheduled_consumed) return -EINVAL;
     engine->cpu_report = {};
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
-    // FEX still uses rebased host addresses for the admitted instruction set.
-    // Checked loader copies are not a JIT memory translator. Never dispatch
-    // logical VAs from the translated backend through this direct-memory JIT.
-    if (m1 && !m1->space.fex_direct()) return -ENOTSUP;
+    const bool translated = m1 && !m1->space.fex_direct();
+    // Translated M1 requires a logical stack and the immutable snapshot below.
+    // Arbitrary ELF/PKG dispatch still passes its existing admission gate.
+    if (translated && !guest_thread) return -ENOTSUP;
     // Check the logical PS4 entry via the shared guest-memory contract before
     // giving FEX a host pointer. This is not general address-space translation.
     maxps4::PS4GuestMemory guest_memory(image);
@@ -364,6 +376,13 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     maxps4::GuestELF empty_image;
     maxps4::PS4GuestMemory m1_memory(empty_image,m1 ? &m1->space : nullptr);
     maxps4::PS4Libkernel m1_kernel(m1_memory);
+    engine->probe.ranges.clear();
+    if (translated) for (const auto& r : m1->space.regions()) {
+        if (!r.permissions) continue;
+        const auto* host = m1->space.translate(r.address,r.size,r.permissions);
+        if (!host) return -EFAULT;
+        engine->probe.ranges.push_back({r.address,reinterpret_cast<uintptr_t>(host),r.size,r.permissions});
+    }
     engine->probe.image = &image;
     engine->probe.m1 = m1;
     engine->probe.linker = m1 ? &m1->linker : linked ? &engine->linker : nullptr;
@@ -377,13 +396,14 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     struct ClearRange {
         ProbeAddressSpace& space;
         ~ClearRange() {
+            space.ranges.clear();
             space.m1 = nullptr; space.image = nullptr; space.linker = nullptr; space.kernel = nullptr;
             space.memory = nullptr; space.private_stack = 0; space.private_stack_size = 0;
             space.guest_id = 1;
         }
     } clear_range {engine->probe};
     uint64_t initial_rsp = 0;
-    const uint64_t initial_rip = reinterpret_cast<uintptr_t>(entry_pointer);
+    const uint64_t initial_rip = m1 ? image.entry() : reinterpret_cast<uintptr_t>(entry_pointer);
     const int stack_status = maxps4::initialize_guest_stack(stack_base, page, initial_rip, page, initial_rsp);
     if (stack_status) return stack_status;
     if (guest_thread) initial_rsp = guest_thread->rsp;
@@ -392,8 +412,16 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     struct DestroyThread {
         FEXCore::Context::Context* context;
         FEXCore::Core::InternalThreadState* thread;
-        ~DestroyThread() { if (thread) context->DestroyThread(thread); }
-    } destroy {engine->context.get(), thread};
+        bool translated;
+        ~DestroyThread() {
+            if (!thread) return;
+            // Discard embedded host pointers BEFORE mappings/permissions change.
+            // Other scheduled contexts have not dispatched yet; no stale cache
+            // survives this invocation in the shared L3 or the current thread.
+            if (translated) context->ClearCodeCache(thread,false);
+            context->DestroyThread(thread);
+        }
+    } destroy {engine->context.get(), thread, translated};
     if (scheduled_consumed) *scheduled_consumed = true;
     auto& state = thread->CurrentFrame->State;
     // Set the complete integer register entry contract explicitly on every run.
@@ -410,7 +438,9 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     for (size_t i = 0; i < std::size(state.gregs); ++i)
         if (i != FEXCore::X86State::REG_RSP && state.gregs[i]) observed.zero_integer_registers = 0;
     uint64_t stack_words[9]{};
-    std::memcpy(stack_words, reinterpret_cast<const void*>(initial_rsp), sizeof(stack_words));
+    if (m1) {
+        if (m1->space.read(initial_rsp,stack_words,sizeof(stack_words))) return -EFAULT;
+    } else std::memcpy(stack_words, reinterpret_cast<const void*>(initial_rsp), sizeof(stack_words));
     observed.argc = stack_words[0];
     observed.argv_env_null = stack_words[1] == 0 && stack_words[2] == 0;
     observed.page_size = stack_words[4];
@@ -432,7 +462,15 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     // without allocating another iOS JIT buffer. All engine execution is locked.
     if (!persistent_frame || !engine->frame_code_cached) engine->context->ClearCodeCache(thread, false);
     engine->frame_code_cached = persistent_frame;
-    engine->context->ExecuteThread(thread);
+    thread->CurrentFrame->GuestMemoryFaultData = {};
+    try { engine->context->ExecuteThread(thread); }
+    catch (const std::runtime_error&) { return -ENOTSUP; }
+    const auto& fault = thread->CurrentFrame->GuestMemoryFaultData;
+    if (fault.Bytes) {
+        std::fprintf(stderr,"M2 checked operand rejected: guest=0x%llx bytes=%u permissions=%u; dispatch stopped\n",
+            static_cast<unsigned long long>(fault.Address),fault.Bytes,fault.Permissions);
+        return -EFAULT;
+    }
     if (engine->probe.callback_error) return engine->probe.callback_error;
     if (submission) {
         const auto snapshot = maxps4::gpu::snapshotPM4(image, submission->address, submission->count);
@@ -644,6 +682,88 @@ extern "C" int32_t maxps4_fex_engine_v4_synthetic(maxps4_fex_engine* engine,
     } catch (const std::bad_alloc&) {
         return fail(-ENOMEM,MAXPS4_V4_STAGING_FAILED);
     }
+}
+extern "C" int32_t maxps4_fex_test_m2_low_va(maxps4_m2_low_va_report* report) {
+    if (!report) return -EINVAL;
+    *report = {};
+    maxps4_fex_engine* engine = nullptr;
+    int status = maxps4_fex_engine_open(&engine);
+    if (status) return report->status = status;
+    report->initialize_status = maxps4_fex_engine_initialize(engine);
+    status = report->initialize_status;
+    if (!status) {
+        std::lock_guard lock(runtime_lock);
+        try {
+            status = [&]() -> int {
+                maxps4::OrbisM1 process(maxps4::GuestAddressSpace::Backend::translated);
+                const size_t page = process.space.page_size();
+                if (!page) return -ENOTSUP;
+                // A real occupied host mapping is also used as a guest logical
+                // operand. Translation must leave this host marker untouched.
+                Mapping occupied(3*page,PROT_READ|PROT_WRITE);
+                if (occupied.address == MAP_FAILED) return -errno;
+                auto* marker = static_cast<uint8_t*>(occupied.address)+page;
+                const uint64_t sentinel = 0x13579bdf2468ace0ULL;
+                std::memcpy(marker,&sentinel,8);
+                const uint64_t data = reinterpret_cast<uintptr_t>(marker);
+                constexpr uint64_t entry = 0x400000;
+                maxps4_ps4_synthetic::Program code;
+                code.reg(3,data);
+                code.bytes({0xb8,21,0,0,0,0x48,0x89,0x03});
+                code.bytes({0xf0,0x48,0x0f,0xc1,0x03,0x48,0x8b,0x03,0x50,0x58});
+                // Preserve RAX=42 while loading/updating private static TLS.
+                code.bytes({0x64,0x48,0x8b,0x0c,0x25,0xf0,0xff,0xff,0xff});
+                code.bytes({0x48,0x83,0xc1,1});
+                code.bytes({0x64,0x48,0x89,0x0c,0x25,0xf0,0xff,0xff,0xff,0xf4});
+                std::vector<uint8_t> file(256+code.code.size());
+                std::memcpy(file.data(),"\177ELF\2\1\1\11",8);
+                auto put = [&](uint64_t value,size_t at,size_t width=8) {
+                    maxps4_ps4_synthetic::put(file,value,at,width);
+                };
+                put(0xfe00,16,2); put(62,18,2); put(1,20,4); put(entry,24);
+                put(64,32); put(64,52,2); put(56,54,2); put(1,56,2);
+                put(1,64,4); put(5,68,4); put(256,72); put(entry,80);
+                put(code.code.size(),96); put(page,104); put(1,112);
+                std::memcpy(file.data()+256,code.code.data(),code.code.size());
+                int error = process.source.stage_ps4(file.data(),file.size());
+                if (error) return error;
+                if ((error=process.space.reserve(entry,page)) ||
+                    (error=process.space.map(entry,page,5,code.code.data(),code.code.size())) ||
+                    (error=process.space.reserve(data,page)) ||
+                    (error=process.space.map(data,page,6))) return error;
+                process.entry = entry;
+                process.tls.memory_size = process.tls.block_size = 16;
+                process.tls.initial = {7,0,0,0,0,0,0,0};
+                maxps4::GuestThreadMemory thread(process.space);
+                error = thread.initialize(process.tls,0x800000,entry);
+                if (error) return error;
+                report->entry = entry; report->rsp = thread.rsp;
+                report->code_rx = process.space.translate(entry,1,5) && !process.space.translate(entry,1,2);
+                report->stack_rw_nx = process.space.translate(thread.stack_begin,thread.stack_size,6) &&
+                    !process.space.translate(thread.stack_begin,1,1);
+                // Only the constant fixture above bypasses general ELF admission.
+                report->execute_status = executeImage(engine,process.source,&report->rax,&report->backend,
+                    nullptr,false,false,&process,&thread);
+                if (report->execute_status) return report->execute_status;
+                if ((error=process.space.read(data,&report->memory,8)) ||
+                    (error=process.space.read(thread.tls_begin,&report->tls,8))) return error;
+                uint64_t observed = 0; std::memcpy(&observed,marker,8);
+                report->collision_preserved = observed == sentinel;
+                return report->rax == 42 && report->memory == 42 && report->tls == 8 &&
+                    report->collision_preserved && report->code_rx && report->stack_rw_nx ? 0 : -EIO;
+            }();
+            // All fixture mappings and CPU caches have been retired before this.
+            report->cleanup = engine->probe.m1 == nullptr && engine->probe.ranges.empty();
+        } catch (const std::bad_alloc&) { status = -ENOMEM; }
+          catch (...) { status = -EIO; }
+    }
+    maxps4_fex_engine_close(engine);
+    report->status = status;
+    std::fprintf(stderr,"M2 low-VA diagnostic: status=%d backend=%u entry=0x%llx rax=%llu memory=%llu tls=%llu collision=%u cleanup=%u\n",
+        status,report->backend,static_cast<unsigned long long>(report->entry),
+        static_cast<unsigned long long>(report->rax),static_cast<unsigned long long>(report->memory),
+        static_cast<unsigned long long>(report->tls),report->collision_preserved,report->cleanup);
+    return status;
 }
 extern "C" int32_t maxps4_fex_engine_v4_preflight(maxps4_fex_engine* engine,
     uint64_t entry, uint64_t stack, size_t stack_bytes) {
@@ -878,7 +998,7 @@ extern "C" int32_t maxps4_fex_engine_run_m1_threads(maxps4_fex_engine* engine,
     std::lock_guard lock(runtime_lock);
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
     try {
-        maxps4::OrbisM1 process(maxps4::GuestAddressSpace::Backend::fex_direct);
+        maxps4::OrbisM1 process(maxps4::GuestAddressSpace::Backend::translated);
         int status = process.load(file,length,budget);
         if (status) return status;
         auto mapping_error = [&](const char* phase, uint64_t id, int error) {
@@ -1008,7 +1128,7 @@ extern "C" int32_t maxps4_fex_engine_run_m1(maxps4_fex_engine* engine,
     std::lock_guard lock(runtime_lock);
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
     try {
-        maxps4::OrbisM1 process(maxps4::GuestAddressSpace::Backend::fex_direct);
+        maxps4::OrbisM1 process(maxps4::GuestAddressSpace::Backend::translated);
         int status = process.load(file,length,budget);
         if (status) { std::fprintf(stderr,"M1 image mapping failed: %d\n",status); return status; }
         maxps4::GuestThreadMemory thread(process.space);
@@ -1033,5 +1153,6 @@ extern "C" int32_t maxps4_fex_engine_run_m1(maxps4_fex_engine* engine,
         return 0;
     } catch (const std::bad_alloc&) { return -ENOMEM; }
 }
+
 
 

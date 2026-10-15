@@ -60,7 +60,7 @@ int main() {
         Space space;
         auto ctx=FEXCore::Context::Context::CreateNewContext(features); CHECK(ctx);
         ctx->SetSignalDelegator(&signals); ctx->SetSyscallHandler(&space); ctx->EnableExitOnHLT(); CHECK(ctx->InitCore());
-        constexpr uint64_t code=0x300000000ULL, data=0x400000000ULL;
+        constexpr uint64_t code=0x400000ULL, data=0x400000000ULL;
         auto* thread=ctx->CreateThread(code, data+2048); CHECK(thread);
         std::array<FEXCore::Core::CPUState::gdt_segment,32> gdt{};
         CallRetMemory callret;
@@ -91,6 +91,7 @@ int main() {
             observed.fs_cached=data; observed.gs_cached=data;
             observed.rip=entry; observed.gregs[FEXCore::X86State::REG_RSP]=data+2048;
             observed.callret_sp=reinterpret_cast<uintptr_t>(callret.data())+callret.size()/4;
+            current->CurrentFrame->GuestMemoryFaultData = {};
             ctx->ExecuteThread(current);
             return observed.gregs[FEXCore::X86State::REG_RAX];
         };
@@ -115,6 +116,26 @@ int main() {
             uint64_t observed=0; auto lease=memory.lease();
             CHECK(lease.memory().read(data,&observed,8)==0); CHECK(observed==expected);
         };
+        // Rejected native operands stop without a signal or a partial store.
+        auto rejected = [&](uint64_t pointer, const std::vector<uint8_t>& operation, uint32_t permissions) {
+            std::vector<uint8_t> bytes={0x48,0xbf};
+            for (unsigned i=0;i<8;++i) bytes.push_back(static_cast<uint8_t>(pointer>>(8*i)));
+            bytes.insert(bytes.end(),operation.begin(),operation.end()); bytes.push_back(0xf4);
+            replace(bytes); run(code);
+            const auto& fault=thread->CurrentFrame->GuestMemoryFaultData;
+            CHECK(fault.Bytes==8 && fault.Address==pointer && fault.Permissions==permissions);
+        };
+        rejected(data+page-4,{0x48,0x8b,0x07},4); // split operand
+        rejected(data+page,{0x48,0x89,0x07},2);   // unmapped
+        rejected(data+1,{0xf0,0x48,0x0f,0xc1,0x07},6); // misaligned atomic
+        CHECK(memory.protect(data,page,4)==0);
+        rejected(data,{0x48,0x89,0x07},2);
+        CHECK(memory.protect(data,page,0)==0);
+        rejected(data,{0x48,0x8b,0x07},4);
+        CHECK(memory.protect(data,page,6)==0);
+        replace({0xb8,42,0,0,0,0xf4}); CHECK(run(code)==42);
+        CHECK(!thread->CurrentFrame->GuestMemoryFaultData.Bytes);
+        std::puts("PASS low RIP 0x400000; checked split/hole/permissions/atomic rejection and retry");
         // Native-width CAS and XADD: both mismatch and success, all widths.
         for (size_t width : {1U,2U,4U,8U}) {
             uint64_t initial=21; CHECK(memory.write(data,&initial,8)==0);
@@ -240,3 +261,4 @@ int main() {
     std::puts("PASS translated FEX decoder/scalar/vector/TSO/atomic/TLS/stack/remap/lease; backend=native ARM64 (not iPhone)");
 #endif
 }
+
