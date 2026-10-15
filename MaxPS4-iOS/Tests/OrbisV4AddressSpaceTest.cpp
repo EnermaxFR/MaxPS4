@@ -14,6 +14,10 @@ int main() {
     const uint64_t base=0x200000000ULL;
     CHECK(space.reserve(base,2*page)==0);
     CHECK(space.reserve(base,2*page)==-EEXIST);
+    CHECK(space.reservation_failure().guest==base);
+    CHECK(space.reservation_failure().bytes==4*page);
+    CHECK(space.reservation_failure().host_status==0);
+    CHECK(space.reservation_failure().error==-EEXIST);
     CHECK(space.map(base,page,6)==0);
     maxps4::OrbisV4MemoryBridge bridge(space);
     maxps4::OrbisV4ExecutionGate gate(space);
