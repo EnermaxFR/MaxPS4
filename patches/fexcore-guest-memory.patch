@@ -1,0 +1,546 @@
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+index 9a6b9489..ccfc8679 100644
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -27,6 +28,7 @@ $end_info$
+ #include "Interface/IR/Passes/RegisterAllocationPass.h"
+ #include "Interface/IR/Passes.h"
+ #include "Interface/IR/PassManager.h"
++#include <stdexcept>
+ #include "Interface/IR/RegisterAllocationData.h"
+ #include "Utils/Allocator.h"
+ #include "Utils/Allocator/HostAllocator.h"
+@@ -543,6 +546,182 @@ void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, boo
+   Allocator::VirtualDontNeed(Thread->CallRetStackBase, FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE);
+ }
+ 
++static void TranslateGuestOperands(IR::IREmitter* Emit) {
++  auto View = Emit->ViewIR();
++  for (auto [Block, Header] : View.GetBlocks()) {
++    for (auto [Node, ReadOnlyOp] : View.GetCode(Block)) {
++      auto* Op = const_cast<IR::IROp_Header*>(ReadOnlyOp);
++      uint8_t AddrIndex = 255, OffsetIndex = 255;
++      IR::OrderedNodeWrapper Offset {};
++      auto Type = IR::MemOffsetType::SXTX;
++      uint8_t Scale = 1;
++      uint32_t Bytes = IR::OpSizeToSize(Op->Size), Permissions = 4, Alignment = 1;
++      switch (Op->Op) {
++      case IR::OP_LOADMEM: {
++        auto* M = Op->CW<IR::IROp_LoadMem>();
++        AddrIndex = M->Addr_Index; OffsetIndex = M->Offset_Index; Offset = M->Offset; Type = M->OffsetType; Scale = M->OffsetScale;
++        M->OffsetScale = 1; M->OffsetType = IR::MemOffsetType::SXTX;
++        Permissions = 4;
++        break;
++      }
++      case IR::OP_LOADMEMTSO: {
++        auto* M = Op->CW<IR::IROp_LoadMemTSO>();
++        AddrIndex = M->Addr_Index; OffsetIndex = M->Offset_Index; Offset = M->Offset; Type = M->OffsetType; Scale = M->OffsetScale;
++        M->OffsetScale = 1; M->OffsetType = IR::MemOffsetType::SXTX;
++        Permissions = 4;
++        break;
++      }
++      case IR::OP_STOREMEM: {
++        auto* M = Op->CW<IR::IROp_StoreMem>();
++        AddrIndex = M->Addr_Index; OffsetIndex = M->Offset_Index; Offset = M->Offset; Type = M->OffsetType; Scale = M->OffsetScale;
++        M->OffsetScale = 1; M->OffsetType = IR::MemOffsetType::SXTX;
++        Permissions = 2;
++        break;
++      }
++      case IR::OP_STOREMEMTSO: {
++        auto* M = Op->CW<IR::IROp_StoreMemTSO>();
++        AddrIndex = M->Addr_Index; OffsetIndex = M->Offset_Index; Offset = M->Offset; Type = M->OffsetType; Scale = M->OffsetScale;
++        M->OffsetScale = 1; M->OffsetType = IR::MemOffsetType::SXTX;
++        Permissions = 2;
++        break;
++      }
++      case IR::OP_CAS: {
++        AddrIndex = IR::IROp_CAS::Addr_Index;
++
++        Permissions = 6; Alignment = Bytes;
++        break;
++      }
++      case IR::OP_CASPAIR: {
++        AddrIndex = IR::IROp_CASPair::Addr_Index;
++        Bytes = 2 * IR::OpSizeToSize(Op->ElementSize);
++        Permissions = 6; Alignment = Bytes;
++        break;
++      }
++      case IR::OP_ATOMICSWAP: {
++        AddrIndex = IR::IROp_AtomicSwap::Addr_Index;
++
++        Permissions = 6; Alignment = Bytes;
++        break;
++      }
++      case IR::OP_ATOMICFETCHADD: {
++        AddrIndex = IR::IROp_AtomicFetchAdd::Addr_Index;
++
++        Permissions = 6; Alignment = Bytes;
++        break;
++      }
++      case IR::OP_ATOMICFETCHSUB: {
++        AddrIndex = IR::IROp_AtomicFetchSub::Addr_Index;
++
++        Permissions = 6; Alignment = Bytes;
++        break;
++      }
++      case IR::OP_ATOMICFETCHAND: {
++        AddrIndex = IR::IROp_AtomicFetchAnd::Addr_Index;
++
++        Permissions = 6; Alignment = Bytes;
++        break;
++      }
++      case IR::OP_ATOMICFETCHCLR: {
++        AddrIndex = IR::IROp_AtomicFetchCLR::Addr_Index;
++
++        Permissions = 6; Alignment = Bytes;
++        break;
++      }
++      case IR::OP_ATOMICFETCHOR: {
++        AddrIndex = IR::IROp_AtomicFetchOr::Addr_Index;
++
++        Permissions = 6; Alignment = Bytes;
++        break;
++      }
++      case IR::OP_ATOMICFETCHXOR: {
++        AddrIndex = IR::IROp_AtomicFetchXor::Addr_Index;
++
++        Permissions = 6; Alignment = Bytes;
++        break;
++      }
++      case IR::OP_ATOMICFETCHNEG: {
++        AddrIndex = IR::IROp_AtomicFetchNeg::Addr_Index;
++
++        Permissions = 6; Alignment = Bytes;
++        break;
++      }
++      case IR::OP_LOADMEMPAIR: {
++        auto* M = Op->CW<IR::IROp_LoadMemPair>(); AddrIndex = M->Addr_Index;
++        Emit->SetWriteCursorBefore(Node);
++        Offset = Emit->WrapNode(Emit->_Constant(M->Offset)); M->Offset = 0;
++        Bytes *= 2; Permissions = 4; break;
++      }
++      case IR::OP_STOREMEMPAIR: {
++        auto* M = Op->CW<IR::IROp_StoreMemPair>(); AddrIndex = M->Addr_Index;
++        Emit->SetWriteCursorBefore(Node);
++        Offset = Emit->WrapNode(Emit->_Constant(M->Offset)); M->Offset = 0;
++        Bytes *= 2; Permissions = 2; break;
++      }
++      case IR::OP_VLOADVECTORELEMENT: {
++        AddrIndex = IR::IROp_VLoadVectorElement::Addr_Index;
++        Bytes = IR::OpSizeToSize(Op->ElementSize); Permissions = 4; break;
++      }
++      case IR::OP_VSTOREVECTORELEMENT: {
++        AddrIndex = IR::IROp_VStoreVectorElement::Addr_Index;
++        Bytes = IR::OpSizeToSize(Op->ElementSize); Permissions = 2; break;
++      }
++      case IR::OP_VBROADCASTFROMMEM: {
++        AddrIndex = IR::IROp_VBroadcastFromMem::Address_Index;
++        Bytes = IR::OpSizeToSize(Op->ElementSize); Permissions = 4; break;
++      }
++      case IR::OP_VSTORENONTEMPORAL: {
++        auto* M = Op->CW<IR::IROp_VStoreNonTemporal>(); AddrIndex = M->Addr_Index;
++        Emit->SetWriteCursorBefore(Node);
++        Offset = Emit->WrapNode(Emit->_Constant(static_cast<uint64_t>(static_cast<int64_t>(M->Offset)))); M->Offset = 0;
++         Permissions = 2; break;
++      }
++      case IR::OP_VSTORENONTEMPORALPAIR: {
++        auto* M = Op->CW<IR::IROp_VStoreNonTemporalPair>(); AddrIndex = M->Addr_Index;
++        Emit->SetWriteCursorBefore(Node);
++        Offset = Emit->WrapNode(Emit->_Constant(static_cast<uint64_t>(static_cast<int64_t>(M->Offset)))); M->Offset = 0;
++        Bytes *= 2; Permissions = 2; break;
++      }
++      case IR::OP_VLOADNONTEMPORAL: {
++        auto* M = Op->CW<IR::IROp_VLoadNonTemporal>(); AddrIndex = M->Addr_Index;
++        Emit->SetWriteCursorBefore(Node);
++        Offset = Emit->WrapNode(Emit->_Constant(static_cast<uint64_t>(static_cast<int64_t>(M->Offset)))); M->Offset = 0;
++         Permissions = 4; break;
++      }
++      case IR::OP_PUSH:
++      case IR::OP_PUSHTWO:
++      case IR::OP_POP:
++      case IR::OP_POPTWO:
++      case IR::OP_MEMSET:
++      case IR::OP_MEMCPY:
++      case IR::OP_VLOADVECTORMASKED:
++      case IR::OP_VSTOREVECTORMASKED:
++      case IR::OP_VLOADVECTORGATHERMASKED:
++      case IR::OP_VLOADVECTORGATHERMASKEDQPS:
++      case IR::OP_STOREMEMX87SVEOPTPREDICATE:
++      case IR::OP_LOADMEMX87SVEOPTPREDICATE:
++      case IR::OP_CACHELINECLEAR:
++      case IR::OP_CACHELINECLEAN:
++      case IR::OP_CACHELINEZERO:
++      case IR::OP_PREFETCH:
++      case IR::OP_VALIDATECODE:
++        throw std::runtime_error("Unsupported translated guest memory operation");
++      default: break;
++      }
++      if (AddrIndex != 255) {
++        Emit->SetWriteCursorBefore(Node);
++        IR::Ref Translated;
++        if (Permissions == 6) {
++          Translated = Emit->_TranslateGuestAtomicAddress(Emit->UnwrapNode(Op->Args[AddrIndex]), Bytes);
++        } else {
++          Translated = Emit->_TranslateGuestAddress(Emit->UnwrapNode(Op->Args[AddrIndex]), Emit->UnwrapNode(Offset), Type, Scale, Bytes, Permissions, Alignment);
++        }
++        Emit->ReplaceNodeArgument(Node, AddrIndex, Translated);
++        if (OffsetIndex != 255) Emit->ReplaceNodeArgument(Node, OffsetIndex, Emit->Invalid());
++      }
++    }
++  }
++}
++
+ static void IRDumper(FEXCore::Core::InternalThreadState* Thread, IR::IREmitter* IREmitter, uint64_t GuestRIP) {
+   FEXCore::File::File FD = FEXCore::File::File::GetStdERR();
+   fextl::stringstream out;
+@@ -646,7 +825,13 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
+ 
+ #ifdef ZYDIS_DISASSEMBLER
+         if (FEXCore::Config::Get_X86DISASSEMBLE()) {
++          std::array<uint8_t, 16> TranslatedBytes {};
+           const uint8_t* InstBytes = reinterpret_cast<const uint8_t*>(InstAddress);
++          if (SyscallHandler && SyscallHandler->UsesGuestMemoryTranslation()) {
++            if (!SyscallHandler->ReadGuestInstruction(InstAddress, TranslatedBytes.data(), DecodedInfo->InstSize))
++              throw std::runtime_error("Non executable guest disassembly");
++            InstBytes = TranslatedBytes.data();
++          }
+           ZydisDisassembledInstruction ZydisInst;
+           if (ZYAN_SUCCESS(ZydisDisassembleIntel(ZydisMachineMode, InstAddress, InstBytes, DecodedInfo->InstSize, &ZydisInst))) {
+             LogMan::Msg::IFmt("    {:#x}: {}", InstAddress, ZydisInst.text);
+@@ -680,7 +865,10 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
+           auto ExistingCodePtr = reinterpret_cast<uint8_t*>(Block.Entry + BlockInstructionsLength);
+           auto InstAddressReg = Thread->OpDispatcher->_EntrypointOffset(GPRSize, InstAddress - GuestRIP);
+           std::array<uint8_t, 0x10> CodeOriginal;
+-          memcpy(CodeOriginal.data(), ExistingCodePtr, DecodedInfo->InstSize);
++          if (SyscallHandler && SyscallHandler->UsesGuestMemoryTranslation()) {
++            if (!SyscallHandler->ReadGuestInstruction(InstAddress, CodeOriginal.data(), DecodedInfo->InstSize))
++              throw std::runtime_error("Non executable guest code");
++          } else memcpy(CodeOriginal.data(), ExistingCodePtr, DecodedInfo->InstSize);
+           auto CodeChanged = Thread->OpDispatcher->_ValidateCode(CodeOriginal, InstAddressReg, DecodedInfo->InstSize);
+ 
+           auto InvalidateCodeCond = Thread->OpDispatcher->CondJump(CodeChanged);
+@@ -799,6 +987,9 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
+     IRDumper(Thread, IREmitter, GuestRIP);
+   }
+ 
++  if (SyscallHandler && SyscallHandler->UsesGuestMemoryTranslation()) {
++    TranslateGuestOperands(IREmitter);
++  }
+   // Run the passmanager over the IR from the dispatcher
+   Thread->PassManager->Run(IREmitter);
+ 
+diff --git a/FEXCore/Source/Interface/Core/Frontend.cpp b/FEXCore/Source/Interface/Core/Frontend.cpp
+index 02cfdb10..80b7f107 100644
+--- a/FEXCore/Source/Interface/Core/Frontend.cpp
++++ b/FEXCore/Source/Interface/Core/Frontend.cpp
+@@ -124,7 +124,11 @@ uint8_t Decoder::ReadByte() {
+ }
+ 
+ std::optional<uint8_t> Decoder::PeekByte(uint8_t Offset) {
+-  uint64_t ByteAddress = reinterpret_cast<uint64_t>(InstStream.InstStream + InstructionSize + Offset);
++  uint64_t ByteAddress = reinterpret_cast<uint64_t>(InstStream.InstStream) + InstructionSize + Offset;
++  if (CTX->SyscallHandler && CTX->SyscallHandler->UsesGuestMemoryTranslation()) {
++    uint8_t Byte {};
++    return CTX->SyscallHandler->ReadGuestInstruction(ByteAddress, &Byte, 1) ? std::optional<uint8_t>(Byte) : std::nullopt;
++  }
+   if (CheckRangeExecutable(ByteAddress, 1)) {
+     return InstStream.AdjustedInstStream[InstructionSize + Offset];
+   } else {
+@@ -136,8 +140,10 @@ std::pair<uint64_t, bool> Decoder::ReadData(uint8_t Size) {
+   LOGMAN_THROW_A_FMT(Size != 0 && Size <= sizeof(uint64_t), "Unknown data size to read");
+ 
+   uint64_t Res = 0;
+-  uint64_t Address = reinterpret_cast<uint64_t>(InstStream.InstStream + InstructionSize);
+-  if (CheckRangeExecutable(Address, Size)) {
++  uint64_t Address = reinterpret_cast<uint64_t>(InstStream.InstStream) + InstructionSize;
++  if (CTX->SyscallHandler && CTX->SyscallHandler->UsesGuestMemoryTranslation()) {
++    if (!CTX->SyscallHandler->ReadGuestInstruction(Address, &Res, Size)) HitNonExecutableRange = true;
++  } else if (CheckRangeExecutable(Address, Size)) {
+     std::memcpy(&Res, &InstStream.AdjustedInstStream[InstructionSize], Size);
+   } else {
+     HitNonExecutableRange = true;
+@@ -1342,6 +1348,10 @@ void Decoder::AddBranchTarget(uint64_t Target) {
+ }
+ 
+ const Decoder::DecodeStream Decoder::AdjustAddrForSpecialRegion(const uint8_t* _InstStream, uint64_t EntryPoint, uint64_t RIP) {
++  if (CTX->SyscallHandler && CTX->SyscallHandler->UsesGuestMemoryTranslation()) {
++    const auto* Guest = reinterpret_cast<const uint8_t*>(RIP);
++    return {.InstStream = Guest, .AdjustedInstStream = Guest};
++  }
+   constexpr uint64_t VSyscall_Base = 0xFFFF'FFFF'FF60'0000ULL;
+   constexpr uint64_t VSyscall_End = VSyscall_Base + 0x1000;
+ 
+diff --git a/FEXCore/Source/Interface/Core/Frontend.h b/FEXCore/Source/Interface/Core/Frontend.h
+index f668d2b9..5442cde3 100644
+--- a/FEXCore/Source/Interface/Core/Frontend.h
++++ b/FEXCore/Source/Interface/Core/Frontend.h
+@@ -136,14 +136,14 @@ private:
+     const uint8_t* AdjustedInstStream;
+ 
+     DecodeStream& operator-=(size_t offset) noexcept {
+-      InstStream -= offset;
+-      AdjustedInstStream -= offset;
++      InstStream = reinterpret_cast<const uint8_t*>(reinterpret_cast<uint64_t>(InstStream) - offset);
++      AdjustedInstStream = reinterpret_cast<const uint8_t*>(reinterpret_cast<uint64_t>(AdjustedInstStream) - offset);
+       return *this;
+     }
+ 
+     DecodeStream& operator+=(size_t offset) noexcept {
+-      InstStream += offset;
+-      AdjustedInstStream += offset;
++      InstStream = reinterpret_cast<const uint8_t*>(reinterpret_cast<uint64_t>(InstStream) + offset);
++      AdjustedInstStream = reinterpret_cast<const uint8_t*>(reinterpret_cast<uint64_t>(AdjustedInstStream) + offset);
+       return *this;
+     }
+   };
+diff --git a/FEXCore/Source/Interface/Core/JIT/AtomicOps.cpp b/FEXCore/Source/Interface/Core/JIT/AtomicOps.cpp
+index d451a7e8..9eabbd76 100644
+--- a/FEXCore/Source/Interface/Core/JIT/AtomicOps.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/AtomicOps.cpp
+@@ -10,6 +10,14 @@ $end_info$
+ #include "Interface/Core/JIT/JITClass.h"
+ 
+ namespace FEXCore::CPU {
++DEF_OP(TranslateGuestAtomicAddress) {
++  const auto* Op = IROp->C<IR::IROp_TranslateGuestAtomicAddress>();
++  // Resolve the entire R+W operand once, before the exclusive monitor starts.
++  // Natural alignment rejects split-page atomics, including 16-byte CASPair.
++  EmitGuestAddressTranslation(Op->Addr, IR::OrderedNodeWrapper{}, IR::MemOffsetType::SXTX, 1,
++                              Op->Bytes, 6, Op->Bytes, Node);
++}
++
+ DEF_OP(CASPair) {
+   auto Op = IROp->C<IR::IROp_CASPair>();
+   LOGMAN_THROW_A_FMT(IROp->ElementSize == IR::OpSize::i32Bit || IROp->ElementSize == IR::OpSize::i64Bit, "Wrong element size");
+@@ -20,6 +28,8 @@ DEF_OP(CASPair) {
+   auto Expected1 = GetReg(Op->ExpectedHi);
+   auto Desired0 = GetReg(Op->DesiredLo);
+   auto Desired1 = GetReg(Op->DesiredHi);
++  // Translated mode supplies an RA-owned TranslateGuestAddress result here.
++  // No translator temporary may survive into CAS/LSE/exclusive sequences.
+   auto MemSrc = GetReg(Op->Addr);
+ 
+   const auto EmitSize = IROp->ElementSize == IR::OpSize::i64Bit ? ARMEmitter::Size::i64Bit : ARMEmitter::Size::i32Bit;
+@@ -99,6 +109,8 @@ DEF_OP(CAS) {
+ 
+   auto Expected = GetReg(Op->Expected);
+   auto Desired = GetReg(Op->Desired);
++  // Translated mode supplies an RA-owned TranslateGuestAddress result here.
++  // No translator temporary may survive into CAS/LSE/exclusive sequences.
+   auto MemSrc = GetReg(Op->Addr);
+   auto Dst = GetReg(Node);
+ 
+@@ -146,6 +158,8 @@ DEF_OP(AtomicSwap) {
+                                                                                                                                  "d CAS "
+                                                                                                                                  "size");
+ 
++  // Translated mode supplies an RA-owned TranslateGuestAddress result here.
++  // No translator temporary may survive into CAS/LSE/exclusive sequences.
+   auto MemSrc = GetReg(Op->Addr);
+   auto Src = GetReg(Op->Value);
+ 
+@@ -172,6 +186,8 @@ DEF_OP(AtomicFetchAdd) {
+   const auto EmitSize = ConvertSize(IROp);
+   const auto SubEmitSize = ConvertSubRegSize8(IROp->Size);
+ 
++  // Translated mode supplies an RA-owned TranslateGuestAddress result here.
++  // No translator temporary may survive into CAS/LSE/exclusive sequences.
+   auto MemSrc = GetReg(Op->Addr);
+   auto Src = GetReg(Op->Value);
+ 
+@@ -193,6 +209,8 @@ DEF_OP(AtomicFetchSub) {
+   const auto EmitSize = ConvertSize(IROp);
+   const auto SubEmitSize = ConvertSubRegSize8(IROp->Size);
+ 
++  // Translated mode supplies an RA-owned TranslateGuestAddress result here.
++  // No translator temporary may survive into CAS/LSE/exclusive sequences.
+   auto MemSrc = GetReg(Op->Addr);
+   auto Src = GetReg(Op->Value);
+ 
+@@ -215,6 +233,8 @@ DEF_OP(AtomicFetchAnd) {
+   const auto EmitSize = ConvertSize(IROp);
+   const auto SubEmitSize = ConvertSubRegSize8(IROp->Size);
+ 
++  // Translated mode supplies an RA-owned TranslateGuestAddress result here.
++  // No translator temporary may survive into CAS/LSE/exclusive sequences.
+   auto MemSrc = GetReg(Op->Addr);
+   auto Src = GetReg(Op->Value);
+ 
+@@ -237,6 +257,8 @@ DEF_OP(AtomicFetchCLR) {
+   const auto EmitSize = ConvertSize(IROp);
+   const auto SubEmitSize = ConvertSubRegSize8(IROp->Size);
+ 
++  // Translated mode supplies an RA-owned TranslateGuestAddress result here.
++  // No translator temporary may survive into CAS/LSE/exclusive sequences.
+   auto MemSrc = GetReg(Op->Addr);
+   auto Src = GetReg(Op->Value);
+ 
+@@ -258,6 +280,8 @@ DEF_OP(AtomicFetchOr) {
+   const auto EmitSize = ConvertSize(IROp);
+   const auto SubEmitSize = ConvertSubRegSize8(IROp->Size);
+ 
++  // Translated mode supplies an RA-owned TranslateGuestAddress result here.
++  // No translator temporary may survive into CAS/LSE/exclusive sequences.
+   auto MemSrc = GetReg(Op->Addr);
+   auto Src = GetReg(Op->Value);
+ 
+@@ -279,6 +303,8 @@ DEF_OP(AtomicFetchXor) {
+   const auto EmitSize = ConvertSize(IROp);
+   const auto SubEmitSize = ConvertSubRegSize8(IROp->Size);
+ 
++  // Translated mode supplies an RA-owned TranslateGuestAddress result here.
++  // No translator temporary may survive into CAS/LSE/exclusive sequences.
+   auto MemSrc = GetReg(Op->Addr);
+   auto Src = GetReg(Op->Value);
+ 
+@@ -300,6 +326,8 @@ DEF_OP(AtomicFetchNeg) {
+   const auto EmitSize = ConvertSize(IROp);
+   const auto SubEmitSize = ConvertSubRegSize8(IROp->Size);
+ 
++  // Translated mode supplies an RA-owned TranslateGuestAddress result here.
++  // No translator temporary may survive into CAS/LSE/exclusive sequences.
+   auto MemSrc = GetReg(Op->Addr);
+ 
+   if (CTX->HostFeatures.SupportsAtomics) {
+diff --git a/FEXCore/Source/Interface/Core/JIT/JITClass.h b/FEXCore/Source/Interface/Core/JIT/JITClass.h
+index 3e01eeb7..d1ae3e3a 100644
+--- a/FEXCore/Source/Interface/Core/JIT/JITClass.h
++++ b/FEXCore/Source/Interface/Core/JIT/JITClass.h
+@@ -315,6 +315,10 @@ private:
+     return IsFPR(IR::PhysicalRegister(Wrap).AsRegClass());
+   }
+ 
++  void EmitGuestAddressTranslation(IR::OrderedNodeWrapper Addr, IR::OrderedNodeWrapper Offset,
++      IR::MemOffsetType OffsetType, uint8_t Scale, uint32_t Bytes, uint32_t Permissions,
++      uint32_t Alignment, IR::Ref Node);
++
+   [[nodiscard]]
+   ARMEmitter::ExtendedMemOperand GenerateMemOperand(IR::OpSize AccessSize, ARMEmitter::Register Base, IR::OrderedNodeWrapper Offset,
+                                                     IR::MemOffsetType OffsetType, uint8_t OffsetScale);
+diff --git a/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp b/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
+index 849df0f2..f2a5a845 100644
+--- a/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
+@@ -15,7 +15,51 @@ $end_info$
+ #include <FEXCore/Utils/CompilerDefs.h>
+ #include <FEXCore/Utils/MathUtils.h>
+ 
++#include <FEXCore/HLE/SyscallHandler.h>
++
+ namespace FEXCore::CPU {
++DEF_OP(TranslateGuestAddress) {
++  const auto* Op = IROp->C<IR::IROp_TranslateGuestAddress>();
++  EmitGuestAddressTranslation(Op->Addr, Op->Offset, Op->OffsetType, Op->Scale,
++                              Op->Bytes, Op->Permissions, Op->Alignment, Node);
++}
++
++void Arm64JITCore::EmitGuestAddressTranslation(IR::OrderedNodeWrapper Addr, IR::OrderedNodeWrapper Offset,
++    IR::MemOffsetType OffsetType, uint8_t Scale, uint32_t Bytes, uint32_t Permissions,
++    uint32_t Alignment, IR::Ref Node) {
++  const auto Dst = GetReg(Node);
++  // Compute the complete effective address BEFORE translating; offsets and TLS
++  // bases remain in the guest domain. Dst is a normal RA-owned SSA value.
++  const auto EA = ApplyMemOperand(IR::OpSize::i64Bit, GetReg(Addr), TMP1,
++                                 Offset, OffsetType, Scale);
++  mov(ARMEmitter::Size::i64Bit, TMP2, EA);
++  mrs(TMP4, ARMEmitter::SystemRegister::NZCV);
++  ARMEmitter::ForwardLabel Done;
++  if (Alignment > 1) {
++    ARMEmitter::ForwardLabel Aligned;
++    and_(ARMEmitter::Size::i64Bit, TMP1, TMP2, Alignment - 1);
++    (void)cbz(ARMEmitter::Size::i64Bit, TMP1, &Aligned);
++    brk(0x4d32);
++    (void)Bind(&Aligned);
++  }
++  for (const auto& R : CTX->SyscallHandler->GuestMemoryRanges()) {
++    if ((R.Permissions & Permissions) != Permissions || R.Size < Bytes) continue;
++    ARMEmitter::ForwardLabel Next;
++    LoadConstant(ARMEmitter::Size::i64Bit, TMP1, R.Guest);
++    sub(ARMEmitter::Size::i64Bit, TMP3, TMP2, TMP1);
++    LoadConstant(ARMEmitter::Size::i64Bit, TMP1, R.Size - Bytes);
++    cmp(ARMEmitter::Size::i64Bit, TMP3, TMP1);
++    (void)b(ARMEmitter::Condition::CC_HI, &Next);
++    LoadConstant(ARMEmitter::Size::i64Bit, TMP1, R.Host);
++    add(ARMEmitter::Size::i64Bit, Dst, TMP1, TMP3);
++    (void)b(&Done);
++    (void)Bind(&Next);
++  }
++  brk(0x4d32); // No unchecked guest VA reaches a native memory instruction.
++  (void)Bind(&Done);
++  msr(ARMEmitter::SystemRegister::NZCV, TMP4);
++}
++
+ 
+ DEF_OP(LoadContext) {
+   const auto Op = IROp->C<IR::IROp_LoadContext>();
+diff --git a/FEXCore/Source/Interface/IR/IR.json b/FEXCore/Source/Interface/IR/IR.json
+index 14b6df9d..3565ee13 100644
+--- a/FEXCore/Source/Interface/IR/IR.json
++++ b/FEXCore/Source/Interface/IR/IR.json
+@@ -529,6 +529,16 @@
+         "DestSize": "OpSize::i64Bit"
+       },
+ 
++      "GPR = TranslateGuestAtomicAddress GPR:$Addr, u32:$Bytes": {
++        "DestSize": "OpSize::i64Bit",
++        "HasSideEffects": true
++      },
++
++      "GPR = TranslateGuestAddress GPR:$Addr, GPR:$Offset, MemOffsetType:$OffsetType, u8:$Scale, u32:$Bytes, u32:$Permissions, u32:$Alignment": {
++        "DestSize": "OpSize::i64Bit",
++        "HasSideEffects": true
++      },
++
+       "SSA = LoadMem RegisterClass:$Class, OpSize:#Size, GPR:$Addr, GPR:$Offset, OpSize:$Align, MemOffsetType:$OffsetType, u8:$OffsetScale": {
+         "Inline": ["", "Mem"],
+         "DestSize": "Size"
+diff --git a/FEXCore/include/FEXCore/HLE/SyscallHandler.h b/FEXCore/include/FEXCore/HLE/SyscallHandler.h
+index d1f4decd..7eaf54e7 100644
+--- a/FEXCore/include/FEXCore/HLE/SyscallHandler.h
++++ b/FEXCore/include/FEXCore/HLE/SyscallHandler.h
+@@ -2,6 +2,7 @@
+ #pragma once
+ #include <cstdint>
+ #include <optional>
++#include <span>
+ 
+ #include <FEXCore/Core/CodeCache.h>
+ #include <FEXCore/IR/IR.h>
+@@ -49,9 +50,37 @@ struct ExecutableRangeInfo {
+ class SyscallHandler;
+ class SourcecodeResolver;
+ 
++// Mapping snapshots are immutable for the whole compile/dispatch lease. The
++// owner must stop dispatch and clear ALL thread code caches before replacement.
++struct GuestMemoryRange {
++  uint64_t Guest;
++  uint64_t Host;
++  uint64_t Size;
++  uint32_t Permissions; // ELF R=4, W=2, X=1
++};
++
+ class SyscallHandler {
+ public:
+   virtual ~SyscallHandler() = default;
++  virtual bool UsesGuestMemoryTranslation() const { return false; }
++  virtual std::span<const GuestMemoryRange> GuestMemoryRanges() const { return {}; }
++  // Fetch can cross noncontiguous host mappings, unlike a native operand.
++  virtual bool ReadGuestInstruction(uint64_t Address, void* Output, size_t Size) const {
++    if (!Output || Size > UINT64_MAX - Address) return false;
++    auto* Bytes = static_cast<uint8_t*>(Output);
++    for (size_t i = 0; i < Size; ++i) {
++      bool Found = false;
++      for (const auto& R : GuestMemoryRanges()) {
++        if ((R.Permissions & 5) == 5 && Address + i >= R.Guest && Address + i - R.Guest < R.Size) {
++          Bytes[i] = *reinterpret_cast<const uint8_t*>(R.Host + Address + i - R.Guest);
++          Found = true;
++          break;
++        }
++      }
++      if (!Found) return false;
++    }
++    return true;
++  }
+ 
+   virtual uint64_t HandleSyscall(FEXCore::Core::CpuStateFrame* Frame, FEXCore::HLE::SyscallArguments* Args) = 0;
+ 

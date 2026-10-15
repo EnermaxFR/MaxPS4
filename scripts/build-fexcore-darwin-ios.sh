@@ -16,7 +16,7 @@ TARGETS=(FEXCore_shared)
 RUNTIME=OFF
 if [[ "${3:-}" == --runtime || "${3:-}" == --host-runtime ]]; then
   RUNTIME=ON
-  TARGETS+=(MaxPS4FEXRuntime maxps4-fex-runtime-test maxps4-ps4-linked-test)
+  TARGETS+=(MaxPS4FEXRuntime maxps4-fex-runtime-test maxps4-ps4-linked-test maxps4-fex-translation-test)
 fi
 if [[ "${3:-}" == --host-runtime ]]; then
   SDK=$(xcrun --sdk macosx --show-sdk-path)
@@ -25,6 +25,8 @@ if [[ "${3:-}" == --host-runtime ]]; then
 fi
 python3 -B "$ROOT/MaxPS4-iOS/Tests/FEXDispatcherInitPatchTest.py" "$FEX"
 python3 -B "$ROOT/scripts/patch-fexcore-dispatcher-init.py" "$FEX"
+python3 -B "$ROOT/MaxPS4-iOS/Tests/FEXGuestTranslationPatchTest.py" "$FEX"
+python3 -B "$ROOT/scripts/patch-fexcore-memory-translation.py" "$FEX"
 python3 -B "$ROOT/MaxPS4-iOS/Tests/FEXJITProviderPatchTest.py" "$FEX"
 python3 -B "$ROOT/scripts/patch-fexcore-jit-provider.py" "$FEX"
 # Patch only the disposable dependency checkout. No replacement symbols are defined.
@@ -118,6 +120,7 @@ if [[ "$RUNTIME" == ON ]]; then
     python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/ps4-linked-tests.txt" "$OUT/Bin/maxps4-ps4-linked-test"
     python3 "$ROOT/scripts/run-bounded.py" 10 "$OUT/fixture-export.txt" "$OUT/Bin/maxps4-ps4-linked-test" \
       "$OUT/ps4-libkernel-demo.elf" "$OUT/ps4-libkernel-combined.elf"
+    python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/translation-tests.txt" "$OUT/Bin/maxps4-fex-translation-test"
     python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/runtime-tests.txt" "$OUT/Bin/maxps4-fex-runtime-test"
   fi
 fi

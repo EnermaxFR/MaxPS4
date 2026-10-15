@@ -1,5 +1,58 @@
 # Orbis M2 — traduction mémoire FEX : blocage structurel
 
+## Implémentation guest→host du 15 octobre 2026 (suite)
+
+Le patch versionné `patches/fexcore-guest-memory.patch` modifie réellement le
+FEX Darwin épinglé à `3347fc13`, dans son checkout de compilation. Le script
+`patch-fexcore-memory-translation.py` vérifie le patch entier avant application,
+accepte sa réapplication exacte et refuse les sources divergentes sans écriture
+partielle. Les builds Linux, Darwin, iOS et SideStore appliquent le même patch.
+
+Le fetch lit chaque octet dans le domaine guest, y compris les immédiats qui
+traversent deux mappings hôtes et les cibles de multiblock non contiguës. Les
+copies debug/SMC sont traduites aussi ; le dispatch SMC `ValidateCode` reste
+refusé tant que sa vérification runtime n'est pas traduite.
+
+Avant RA, `Core.cpp` insère des opérateurs IR dédiés aux adresses de données et
+aux adresses atomiques. Le résultat host est une valeur SSA allouée par FEX,
+séparée des registres guest : pas d'écrasement du registre d'adresse ni de
+pointeur laissé dans TMP1–TMP4 pendant CASPair. `MemoryOps.cpp` émet le calcul
+complet de l'adresse effective, puis une sélection de plage avec contrôle de
+largeur et permissions. NZCV est sauvegardé/restauré. `AtomicOps.cpp` exige R+W
+et l'alignement naturel de l'opérande entier avant les séquences LSE/exclusives.
+La mémoire du contexte FEX, les spills et les registres ne sont pas traduits.
+
+Couverture implémentée : loads/stores scalaires et vecteurs contigus, TSO,
+paires, éléments/broadcast et non-temporal ; CAS 8/16/32/64, CASPair 64/128,
+swap et fetch add/sub/and/clr/or/xor/neg. Les chemins spécialisés pile,
+memcpy/memset, masked/gather et cache ne sont pas encore raccordés : la
+compilation translated les refuse explicitement. Les accès natifs ne sont
+admis que si l'opérande entier appartient à une même plage host contiguë.
+Un accès de données invalide produit actuellement un trap ARM64 dédié ; la
+conversion en faute guest récupérable reste à implémenter. Aucun programme
+arbitraire n'est autorisé par cette étape.
+
+`OrbisV4Translation` possède les mappings derrière un verrou. Une lease garde
+le verrou du snapshot jusqu'à la fin du décodage/dispatch ; reserve/map/protect/
+write/release/clear prennent le même verrou et appellent l'invalidateur AVANT
+la mutation. L'invalidateur doit vider les caches de chaque thread FEX associé.
+Le test lié exerce les caches de deux threads, le remplacement du code au même
+RIP guest et l'attente d'un release concurrent pendant une lease.
+
+La nouvelle suite `FEXGuestTranslationTest.cpp` exécute le vrai frontend, IR,
+RA et JIT du FEX épinglé. Elle est compilée pour iOS et exécutée sur les runners
+hôtes Linux/macOS, sous timeout externe. Sur x86, le simulateur ARM64 VIXL est
+explicitement identifié, avec sa limitation connue des moniteurs exclusifs.
+Il ne démontre pas les propriétés de concurrence du matériel ARM64.
+
+**Limites :** le raccordement au runtime M2 public reste désactivé, car ses
+chemins mémoire généraux et ses fautes ne sont pas encore tous couverts. L'API
+synthétique existante conserve son refus `TRANSLATION_REQUIRED`. Cette étape
+livre une traduction réellement exécutée dans FEX pour le sous-ensemble testé,
+pas la résolution complète de M2 ou de l'erreur iPhone `-48`. Aucun iPhone n'est
+disponible ; une IPA construite et des tests CI ne prouvent pas une exécution
+sur appareil. Les paragraphes suivants décrivent l'état historique précédent.
+
 ## Résultat et provenance
 
 Travail issu de `integration/orbis-v4-safe-staging` à `f7a4806`, pour #202.

@@ -3,6 +3,8 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      - 'patches/fexcore-guest-memory.patch'
+      - 'MaxPS4-iOS/Tests/FEXGuestTranslationTest.cpp'
       - 'MaxPS4-iOS/**'
       - 'experimental/orbis-v3-staging/**'
       - 'scripts/build-orbis-test-ipa.sh'
