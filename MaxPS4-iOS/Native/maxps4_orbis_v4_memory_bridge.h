@@ -69,8 +69,9 @@ public:
         const size_t page = memory_.page_size();
         if (!page || (guest % page) > page - sizeof(T)) return -EFAULT;
         // Both permissions are mandatory; no read-only or execute-only CAS.
-        const auto* ptr = memory_.translate(guest,sizeof(T),6);
-        if (!ptr) return -EFAULT; // Includes unmapped and split-region access.
+        const uint8_t* ptr = nullptr;
+        const int status = resolve_operand(guest,sizeof(T),6,ptr);
+        if (status) return status;
         auto* typed = reinterpret_cast<T*>(const_cast<uint8_t*>(ptr));
         // No software load/store fallback: preserve hardware atomicity.
         std::atomic_ref<T> atom(*typed);
