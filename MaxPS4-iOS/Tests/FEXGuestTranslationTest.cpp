@@ -14,6 +14,15 @@
 #include <chrono>
 
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); std::abort(); } } while (0)
+class CallRetMemory {
+public:
+    CallRetMemory() : ptr_(::mmap(nullptr,size(),PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0)) { CHECK(ptr_!=MAP_FAILED); }
+    ~CallRetMemory() { ::munmap(ptr_,size()); }
+    uint8_t* data() const { return static_cast<uint8_t*>(ptr_); }
+    size_t size() const { return FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE; }
+private:
+    void* ptr_;
+};
 class Space final : public FEXCore::HLE::SyscallHandler {
 public:
     Space() { OSABI = FEXCore::HLE::SyscallOSABI::OS_GENERIC; }
@@ -42,6 +51,11 @@ int main() {
         if (lse && !features.SupportsAtomics) continue;
 #endif
         features.SupportsAtomics=lse;
+#if defined(VIXL_SIMULATOR)
+        if (std::getenv("MAXPS4_TEST_NO_SVE")) {
+            features.SupportsAVX=false; features.SupportsSVE128=false; features.SupportsSVE256=false;
+        }
+#endif
         FEXCore::SignalDelegator signals;
         Space space;
         auto ctx=FEXCore::Context::Context::CreateNewContext(features); CHECK(ctx);
@@ -49,7 +63,7 @@ int main() {
         constexpr uint64_t code=0x300000000ULL, data=0x400000000ULL;
         auto* thread=ctx->CreateThread(code, data+2048); CHECK(thread);
         std::array<FEXCore::Core::CPUState::gdt_segment,32> gdt{};
-        std::vector<uint8_t> callret(FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE);
+        CallRetMemory callret;
         thread->CallRetStackBase=callret.data();
         auto& state=thread->CurrentFrame->State;
         state.segment_arrays[FEXCore::Core::CPUState::SEGMENT_ARRAY_INDEX_GDT]=gdt.data();
@@ -80,7 +94,9 @@ int main() {
             ctx->ExecuteThread(current);
             return observed.gregs[FEXCore::X86State::REG_RAX];
         };
+        callret.data()[callret.size()-1]=0xa5;
         CHECK(memory.reserve(data,page)==0); CHECK(memory.map(data,page,6)==0);
+        CHECK(callret.data()[callret.size()-1]==0);
         // mov rdi,guest-data; mov qword [rdi+8],21; mov rax,[rdi+8];
         // lock xadd [rdi+8],rax; movdqu xmm0,[rdi+8]; movdqu [rdi+32],xmm0;
         // mov eax,[rdi+32]; hlt. Both offsets are translated, not added to host base.
@@ -91,6 +107,9 @@ int main() {
         CHECK(run(code,false,true)==42);
         CHECK(run(code)==42); // cached code, same immutable mapping snapshot
         auto replace=[&](const std::vector<uint8_t>& bytes) { CHECK(memory.release(code)==0); stage(bytes); };
+        replace({0xb8,99,0,0,0,0xf4}); CHECK(run(code)==99); CHECK(run(code,false,true)==99);
+        replace({0xb8,21,0,0,0,0xf4}); CHECK(run(code)==21); CHECK(run(code,false,true)==21);
+        std::puts("PASS two-thread instruction cache remap before atomics"); std::fflush(stdout);
         const std::vector<uint8_t> address={0x48,0xbf,0,0,0,0,4,0,0,0};
         auto verify=[&](uint64_t expected) {
             uint64_t observed=0; auto lease=memory.lease();

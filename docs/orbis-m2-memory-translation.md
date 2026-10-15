@@ -33,6 +33,22 @@ Un accès de données invalide produit actuellement un trap ARM64 dédié ; la
 conversion en faute guest récupérable reste à implémenter. Aucun programme
 arbitraire n'est autorisé par cette étape.
 
+La première CI native Darwin a révélé un défaut réel d'invalidation du FEX
+épinglé : `MADV_DONTNEED` ne garantit pas de remise à zéro sous Darwin. Le test
+CAS recevait 42 au lieu de 21 après remplacement du code ; le simulateur Linux
+ne révélait pas ce comportement. Les tentatives SideStore
+[cc43243](https://github.com/EnermaxFR/MaxPS4/actions/runs/38741379809) et
+[2d26cf5](https://github.com/EnermaxFR/MaxPS4/actions/runs/38741958089) ont donc
+échoué avant l'empaquetage : aucune IPA valide n'en est issue.
+
+Le correctif vide explicitement les entrées L1, les indices L2 alloués et leur
+backing utilisé sur Darwin, sans matérialiser toute la table virtuelle ni
+remplacer de mapping. Le suivi conserve aussi les indices dont les blocs ont
+été invalidés individuellement. La réduction du L1 dynamique et les cibles
+host du cache CALL/RET sont également remises à zéro explicitement. Ces
+opérations restent soumises à l'exclusion de dispatch par la lease. La preuve
+native du correctif doit provenir d'un nouveau run, pas des succès Linux.
+
 `OrbisV4Translation` possède les mappings derrière un verrou. Une lease garde
 le verrou du snapshot jusqu'à la fin du décodage/dispatch ; reserve/map/protect/
 write/release/clear prennent le même verrou et appellent l'invalidateur AVANT

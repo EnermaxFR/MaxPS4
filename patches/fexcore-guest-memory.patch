@@ -1,5 +1,5 @@
 diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
-index 9a6b9489..ccfc8679 100644
+index 9a6b9489..c3e1dd2c 100644
 --- a/FEXCore/Source/Interface/Core/Core.cpp
 +++ b/FEXCore/Source/Interface/Core/Core.cpp
 @@ -27,6 +28,7 @@ $end_info$
@@ -10,10 +10,14 @@ index 9a6b9489..ccfc8679 100644
  #include "Interface/IR/RegisterAllocationData.h"
  #include "Utils/Allocator.h"
  #include "Utils/Allocator/HostAllocator.h"
-@@ -543,6 +546,182 @@ void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, boo
-   Allocator::VirtualDontNeed(Thread->CallRetStackBase, FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE);
- }
- 
+@@ -540,7 +543,183 @@ void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, boo
+     }
+     LogMan::Msg::IFmt("BACHATA_BUFFER_REUSE: end, releasing CodeInvalidationMutex");
+   }
+-  Allocator::VirtualDontNeed(Thread->CallRetStackBase, FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE);
++  Thread->ClearCallRetStack();
++}
++
 +static void TranslateGuestOperands(IR::IREmitter* Emit) {
 +  auto View = Emit->ViewIR();
 +  for (auto [Block, Header] : View.GetBlocks()) {
@@ -188,11 +192,9 @@ index 9a6b9489..ccfc8679 100644
 +      }
 +    }
 +  }
-+}
-+
+ }
+ 
  static void IRDumper(FEXCore::Core::InternalThreadState* Thread, IR::IREmitter* IREmitter, uint64_t GuestRIP) {
-   FEXCore::File::File FD = FEXCore::File::File::GetStdERR();
-   fextl::stringstream out;
 @@ -646,7 +825,13 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
  
  #ifdef ZYDIS_DISASSEMBLER
@@ -228,6 +230,15 @@ index 9a6b9489..ccfc8679 100644
 +  }
    // Run the passmanager over the IR from the dispatcher
    Thread->PassManager->Run(IREmitter);
+ 
+@@ -1032,7 +1223,7 @@ void ContextImpl::InvalidateThreadCachedCodeRange(FEXCore::Core::InternalThreadS
+     FEXCORE_PROFILE_SCOPED("InvalidateCallRet");
+ 
+     // This may cause access violations in the thread on Windows as zeroing is not atomic, this is handled by the frontend
+-    Allocator::VirtualDontNeed(Thread->CallRetStackBase, FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE);
++    Thread->ClearCallRetStack();
+   }
+ }
  
 diff --git a/FEXCore/Source/Interface/Core/Frontend.cpp b/FEXCore/Source/Interface/Core/Frontend.cpp
 index 02cfdb10..80b7f107 100644
@@ -402,6 +413,19 @@ index d451a7e8..9eabbd76 100644
    auto MemSrc = GetReg(Op->Addr);
  
    if (CTX->HostFeatures.SupportsAtomics) {
+diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+index cf2f6af9..c474cd10 100644
+--- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+@@ -1164,7 +1164,7 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
+       LOGMAN_THROW_A_FMT(CurrentCodeBuffer->LookupCache.get() == ThreadState->LookupCache->Shared, "INVARIANT VIOLATED: SharedLookupCache "
+                                                                                                    "doesn't match up!\n");
+       if (auto Prev = CheckCodeBufferUpdate()) {
+-        Allocator::VirtualDontNeed(ThreadState->CallRetStackBase, FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE);
++        ThreadState->ClearCallRetStack();
+         auto lk = ThreadState->LookupCache->AcquireWriteLock();
+         ThreadState->LookupCache->ChangeGuestToHostMapping(*Prev, *CurrentCodeBuffer->LookupCache, lk);
+       }
 diff --git a/FEXCore/Source/Interface/Core/JIT/JITClass.h b/FEXCore/Source/Interface/Core/JIT/JITClass.h
 index 3e01eeb7..d1ae3e3a 100644
 --- a/FEXCore/Source/Interface/Core/JIT/JITClass.h
@@ -473,6 +497,88 @@ index 849df0f2..7c0ab642 100644
  
  DEF_OP(LoadContext) {
    const auto Op = IROp->C<IR::IROp_LoadContext>();
+diff --git a/FEXCore/Source/Interface/Core/LookupCache.cpp b/FEXCore/Source/Interface/Core/LookupCache.cpp
+index 06c2ff51..e7efa7d5 100644
+--- a/FEXCore/Source/Interface/Core/LookupCache.cpp
++++ b/FEXCore/Source/Interface/Core/LookupCache.cpp
+@@ -81,15 +81,31 @@ LookupCache::~LookupCache() {
+ void LookupCache::ClearL2Cache(const FEXCore::LookupCacheBaseLockToken& lk) {
+   // Clear out the page memory
+   // PagePointer and PageMemory are sequential with each other. Clear both at once.
++#if defined(__APPLE__)
++  // MADV_DONTNEED on Darwin does not promise zero-fill on the next read.
++  // Explicitly discard lookup tags while dispatch is excluded by the owner.
++  // Do not memset the entire sparsely reserved guest page-pointer table.
++  auto* Pointers = reinterpret_cast<uintptr_t*>(PagePointer);
++  for (const auto Index : AllocatedPageIndices) Pointers[Index] = 0;
++  std::memset(reinterpret_cast<void*>(PageMemory), 0, AllocateOffset);
++#else
+   FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(PagePointer),
+                                       ctx->Config.VirtualMemSize / FEXCore::Utils::FEX_PAGE_SIZE * 8 + CODE_SIZE, false);
++#endif
++  AllocatedPageIndices.clear();
+   AllocateOffset = 0;
+ }
+ 
+-void LookupCache::ClearThreadLocalCaches(const LookupCacheWriteLockToken&) {
+-  // TODO: Preserve code cache entries?
+-  // Clear L1 and L2 by clearing the full cache.
++void LookupCache::ClearThreadLocalCaches(const LookupCacheWriteLockToken& lk) {
++#if defined(__APPLE__)
++  ClearL2Cache(lk);
++  std::memset(reinterpret_cast<void*>(L1Pointer), 0, MAX_L1_SIZE);
++#else
++  // Linux anonymous MADV_DONTNEED guarantees subsequent zero-fill.
+   FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(PagePointer), TotalCacheSize, false);
++  AllocatedPageIndices.clear();
++  AllocateOffset = 0;
++#endif
+ 
+   // TODO: Rename this member to avoid confusion with code caching
+   CachedCodePages.clear();
+diff --git a/FEXCore/Source/Interface/Core/LookupCache.h b/FEXCore/Source/Interface/Core/LookupCache.h
+index 68cef7d1..59ca2df8 100644
+--- a/FEXCore/Source/Interface/Core/LookupCache.h
++++ b/FEXCore/Source/Interface/Core/LookupCache.h
+@@ -13,6 +13,7 @@
+ #include <FEXCore/fextl/memory_resource.h>
+ 
+ #include <cstdint>
++#include <cstring>
+ #include <stddef.h>
+ #include <utility>
+ #include <mutex>
+@@ -282,7 +283,12 @@ public:
+           // Madvise the entries that we are dropping. Gives the memory back to the OS.
+           LookupCacheEntry* FirstZeroL1Entry = &reinterpret_cast<LookupCacheEntry*>(L1Pointer)[CurrentL1Entries];
+           size_t ZeroMemorySize = (MAX_L1_ENTRIES - CurrentL1Entries) * sizeof(LookupCacheEntry);
++#if defined(__APPLE__)
++          // Darwin MADV_DONTNEED is advisory and can retain stale block tags.
++          std::memset(FirstZeroL1Entry, 0, ZeroMemorySize);
++#else
+           FEXCore::Allocator::VirtualDontNeed(FirstZeroL1Entry, ZeroMemorySize, false);
++#endif
+ 
+           // Update the thread's L1 pointer mask to increase how much cache it uses.
+           // Since we're in C-code, this is safe to update here.
+@@ -441,6 +447,9 @@ private:
+           CacheBlockMapping(FullAddress, Entry, false, lk);
+           return;
+         }
++        // Remember every allocated L2 index, including subsequently invalidated
++        // blocks, so a Darwin clear can zero only committed table pages.
++        AllocatedPageIndices.push_back(Address);
+         Pointers[Address] = NewPageBacking;
+         LocalPagePointer = NewPageBacking;
+       }
+@@ -488,6 +497,7 @@ private:
+   constexpr static size_t MAX_L1_SIZE = MAX_L1_ENTRIES * sizeof(LookupCacheEntry);
+ 
+   size_t AllocateOffset {};
++  fextl::vector<uint64_t> AllocatedPageIndices;
+ 
+   FEXCore::Context::ContextImpl* ctx;
+   uint64_t VirtualMemSize {};
 diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
 index 31f9eddc..c1e12182 100644
 --- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
@@ -553,6 +659,34 @@ index 14b6df9d..3565ee13 100644
        "SSA = LoadMem RegisterClass:$Class, OpSize:#Size, GPR:$Addr, GPR:$Offset, OpSize:$Align, MemOffsetType:$OffsetType, u8:$OffsetScale": {
          "Inline": ["", "Mem"],
          "DestSize": "Size"
+diff --git a/FEXCore/include/FEXCore/Debug/InternalThreadState.h b/FEXCore/include/FEXCore/Debug/InternalThreadState.h
+index 42feabb1..36a9cf86 100644
+--- a/FEXCore/include/FEXCore/Debug/InternalThreadState.h
++++ b/FEXCore/include/FEXCore/Debug/InternalThreadState.h
+@@ -9,6 +9,7 @@
+ #include <FEXCore/fextl/vector.h>
+ 
+ #include <cstddef>
++#include <cstring>
+ #include <cstdint>
+ #include <shared_mutex>
+ #include <type_traits>
+@@ -110,6 +111,15 @@ struct alignas(FEXCore::Utils::FEX_PAGE_SIZE) InternalThreadState : public FEXCo
+   void* FrontendPtr;
+ 
+   static constexpr size_t CALLRET_STACK_SIZE {0x400000};
++  void ClearCallRetStack() {
++    if (!CallRetStackBase) return;
++#if defined(__APPLE__)
++    // These are cached host return targets. Advisory discard is insufficient.
++    std::memset(CallRetStackBase, 0, CALLRET_STACK_SIZE);
++#else
++    FEXCore::Allocator::VirtualDontNeed(CallRetStackBase, CALLRET_STACK_SIZE);
++#endif
++  }
+ 
+   // The low address of the call-ret stack allocation (not including guard pages)
+   void* CallRetStackBase {};
 diff --git a/FEXCore/include/FEXCore/HLE/SyscallHandler.h b/FEXCore/include/FEXCore/HLE/SyscallHandler.h
 index d1f4decd..7eaf54e7 100644
 --- a/FEXCore/include/FEXCore/HLE/SyscallHandler.h
