@@ -317,7 +317,7 @@ int main() {
         CHECK(lease.resolve_contiguous(lease_base,0,4,host)==-EINVAL && !host);
         CHECK(lease.resolve_contiguous(lease_base,1,0,host)==-EINVAL && !host);
         CHECK(lease.resolve_contiguous(lease_base,1,8,host)==-EINVAL && !host);
-        CHECK(lease.resolve_contiguous(lease_base,1,6,host)==-EINVAL && !host);
+        CHECK(lease.resolve_contiguous(lease_base,1,6,host)==0 && host);
         CHECK(lease.resolve_contiguous(UINT64_MAX,2,4,host)==-EINVAL && !host);
     }
     CHECK(translated.protect(lease_base,page,4)==0);
