@@ -80,6 +80,19 @@ int main() {
                                            staged_base+staged_page,staged_page)==-EEXIST);
     CHECK(staged.release(staged_base)==0);
     CHECK(staged.allocated()==0);
+    // A pre-existing stack page must not be overwritten by staging.
+    GuestAddressSpace collision;
+    CHECK(collision.reserve(staged_base,2*staged_page)==0);
+    CHECK(collision.map(staged_base+staged_page,staged_page,6)==0);
+    CHECK(maxps4::stage_v4_synthetic_image(collision,staged_base,code,sizeof(code),
+                                           staged_base+staged_page,staged_page)==-EEXIST);
+    CHECK(collision.regions().size()==1);
+    CHECK(collision.release(staged_base)==0);
+    GuestAddressSpace direct_space(GuestAddressSpace::Backend::fex_direct);
+    CHECK(maxps4::stage_v4_synthetic_image(direct_space,staged_base,code,sizeof(code),
+                                           staged_base+staged_page,staged_page)==-ENOTSUP);
+    CHECK(direct_space.allocated()==0);
+
     CHECK(maxps4::stage_v4_synthetic_image(staged,staged_base,nullptr,sizeof(code),
                                            staged_base+staged_page,staged_page)==-EINVAL);
     CHECK(maxps4::stage_v4_synthetic_image(staged,staged_base,code,sizeof(code),
