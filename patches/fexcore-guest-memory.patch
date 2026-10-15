@@ -242,7 +242,7 @@ diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/C
 diff --git a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
 --- a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
 +++ b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
-@@ -290,8 +290,12 @@
+@@ -290,8 +290,13 @@
      str(TMP2, STATE, offsetof(FEXCore::Core::CPUState, DeferredSignalRefCount));
  
      // Trigger segfault if any deferred signals are pending
@@ -252,8 +252,9 @@ diff --git a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp b/FEXCore/S
 +    // limited to 4095 even though the interrupt-page contract allows 65520.
 +    constexpr size_t InterruptOffset = offsetof(FEXCore::Core::InternalThreadState, InterruptFaultPage) -
 +                                       offsetof(FEXCore::Core::InternalThreadState, BaseFrameState);
-+    LoadConstant(ARMEmitter::Size::i64Bit, TMP1, InterruptOffset);
-+    strb(ARMEmitter::XReg::zr, STATE, TMP1.R(), ARMEmitter::ExtendedType::LSL_64, 0);
++    // TMP1 is the compiled block returned by Body; preserve the branch target.
++    LoadConstant(ARMEmitter::Size::i64Bit, TMP2, InterruptOffset);
++    strb(ARMEmitter::XReg::zr, STATE, TMP2.R(), ARMEmitter::ExtendedType::LSL_64, 0);
  #endif
    };
  
