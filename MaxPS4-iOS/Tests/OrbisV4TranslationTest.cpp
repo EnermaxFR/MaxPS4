@@ -63,7 +63,23 @@ int main() {
         const uint8_t* host=nullptr;
         CHECK(lease.resolve_contiguous(base,1,4,host)==0 && host && *host==42);
     }
-    CHECK(memory.write(base,&value,1)==0); memory.clear();
+    // Checked split-region accesses remain atomic with respect to mapping
+    // changes, and a failed write must leave the first region unchanged.
+    CHECK(memory.release(base)==0);
+    CHECK(memory.reserve(base,2*page)==0);
+    CHECK(memory.map(base,page,6)==0);
+    CHECK(memory.map(base+page,page,6)==0);
+    const uint8_t across[4]={7,8,9,10};
+    uint8_t result_bytes[4]={};
+    CHECK(memory.write_span(base+page-2,across,sizeof(across))==0);
+    CHECK(memory.read(base+page-2,result_bytes,sizeof(result_bytes))==0);
+    for (size_t i=0;i<sizeof(across);++i) CHECK(result_bytes[i]==across[i]);
+    CHECK(memory.protect(base+page,page,4)==0);
+    const uint8_t replacement[4]={1,1,1,1};
+    CHECK(memory.write_span(base+page-2,replacement,sizeof(replacement))==-EFAULT);
+    CHECK(memory.read(base+page-2,result_bytes,sizeof(result_bytes))==0);
+    for (size_t i=0;i<sizeof(across);++i) CHECK(result_bytes[i]==across[i]);
+    memory.clear();
     { auto lease=memory.lease(); CHECK(lease.ranges().empty()); }
     std::puts("PASS translation leases, invalidation-before-mutation, failed invalidation rollback, protection, release and reuse");
 }
