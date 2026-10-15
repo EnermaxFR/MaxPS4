@@ -14,6 +14,40 @@
 #include <fstream>
 #include <unistd.h>
 
+#if defined(__linux__)
+#include <signal.h>
+#include <ucontext.h>
+#include <execinfo.h>
+// CI-only fatal diagnostics. The application runtime installs no signal handler.
+static void fault_diagnostic(int signal, siginfo_t* info, void* raw) {
+    char line[160];
+    auto emit = [&](const char* name, uint64_t value) {
+        size_t n=0; while (*name) line[n++]=*name++;
+        line[n++]='='; line[n++]='0'; line[n++]='x';
+        for (int shift=60;shift>=0;shift-=4) line[n++]="0123456789abcdef"[(value>>shift)&15];
+        line[n++]='\n'; (void)::write(STDERR_FILENO,line,n);
+    };
+    emit("FATAL signal",signal); emit("fault address",reinterpret_cast<uintptr_t>(info->si_addr));
+    const auto* context=static_cast<const ucontext_t*>(raw);
+#if defined(__aarch64__)
+    emit("native PC",context->uc_mcontext.pc); emit("native SP",context->uc_mcontext.sp);
+    for (unsigned i=0;i<31;++i) {
+        char name[]="x00"; name[1]='0'+i/10; name[2]='0'+i%10;
+        emit(name,context->uc_mcontext.regs[i]);
+    }
+    if (context->uc_mcontext.pc>=4096 && context->uc_mcontext.pc!=reinterpret_cast<uintptr_t>(info->si_addr)) {
+        const auto* instruction=reinterpret_cast<const uint32_t*>(context->uc_mcontext.pc);
+        emit("fault instruction",instruction[0]);
+    }
+#elif defined(__x86_64__) && defined(REG_RIP)
+    emit("native PC",context->uc_mcontext.gregs[REG_RIP]);
+#endif
+    void* frames[24]; const int count=::backtrace(frames,24);
+    ::backtrace_symbols_fd(frames,count,STDERR_FILENO);
+    _Exit(128+signal);
+}
+#endif
+
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); return 1; } } while (0)
 static uint64_t value(const uint8_t* bytes) {
     uint64_t result = 0;
@@ -231,6 +265,15 @@ static int m1Test() {
     return 0;
 }
 int main(int argc, char** argv) {
+    std::setvbuf(stdout,nullptr,_IONBF,0);
+#if defined(__linux__)
+    struct sigaction diagnostic {};
+    diagnostic.sa_sigaction=fault_diagnostic;
+    diagnostic.sa_flags=SA_SIGINFO|SA_RESETHAND;
+    sigemptyset(&diagnostic.sa_mask);
+    for (int signal : {SIGSEGV,SIGBUS,SIGILL,SIGABRT}) sigaction(signal,&diagnostic,nullptr);
+#endif
+
     // Keep assertion text visible when the pinned emitter terminates a check.
     LogMan::Throw::InstallHandler([](const char* text) { std::fprintf(stderr,"FEX assertion: %s\n",text); });
     LogMan::Msg::InstallHandler([](LogMan::DebugLevels level,const char* text) {
