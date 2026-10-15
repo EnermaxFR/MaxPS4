@@ -5,7 +5,7 @@ requires at least one TLS module. Its -EINVAL result did not attempt M1 threads.
 
 The experimental app now embeds the exact native test bundle: a dedicated ELF
 and two plaintext PRX PT_TLS templates (83 and 129). The default finite direct
-layout starts at 8 GiB instead of 48 TiB, outside the macOS GPU carve-out. It
+layout starts at 16 GiB instead of 48 TiB, outside the macOS GPU carve-out. It
 still requires iOS to admit those exact mappings and JIT execution. Collisions
 are refused without overwriting mappings. No general FEX memory translation is
 implemented, and device admissibility is not established by host CI.
@@ -35,3 +35,7 @@ address CPU execution. No iPhone execution or working PS4 game is claimed.
 The existing isolated Mission 198 IPA workflow and draft PR target are retained.
 SideStore must re-sign the app and framework. A new hardware test should only be
 requested after the new SHA's packaging and verification jobs succeed.
+
+Initial CI at 8 GiB was refused on macOS with EADDRINUSE before CPU dispatch.
+The revised candidate starts at 16 GiB, beyond the shared-cache range as well
+as below the GPU carve-out. This remains subject to actual device admission.

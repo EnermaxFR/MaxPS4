@@ -66,7 +66,7 @@ enum MaxPS4OrbisTest {
         let buildRun = Bundle.main.object(forInfoDictionaryKey: "MaxPS4BuildRun") as? String ?? "unknown"
         let head = Bundle.main.object(forInfoDictionaryKey: "MaxPS4PRHeadRevision") as? String ?? "unknown"
         var lines = ["autotests=orbis-m1", "source=\(revision)", "pr_head=\(head)",
-                     "build_run=\(buildRun)", "scope=current_host", "fixture=m1_two_threads_three_tls_modules_8gib",
+                     "build_run=\(buildRun)", "scope=current_host", "fixture=m1_two_threads_three_tls_modules_16gib",
                      "scheduler=deterministic_run_to_completion", "tls_abi=fixture_fs_offsets",
                      "m1_general_memory_translation=SKIP", "sce_dynamic_tls_abi=SKIP"]
 #if MAXPS4_FEX_APP
@@ -93,7 +93,7 @@ enum MaxPS4OrbisTest {
         guard initialized == 0 else {
             return (lines + ["m1_threads=BLOCKED", "reason=jit_initialization_failed"]).joined(separator: "\n")
         }
-        let snapshot: UInt64 = 0x200010100
+        let snapshot: UInt64 = 0x400010100
         func execute(_ bytes: Data, budget: UInt32 = 200) -> (Int32, [maxps4_m1_thread_report]) {
             var reports = [maxps4_m1_thread_report](repeating: maxps4_m1_thread_report(), count: 2)
             let status = bytes.withUnsafeBytes { raw in
@@ -135,7 +135,7 @@ enum MaxPS4OrbisTest {
                     c.rax == 131 && c.memory == 131 && c.tls_word == 22 && c.heap_word == 22 &&
                     c.zero_memory == 0 && t.modules.0 == 84 && t.modules.1 == 131 &&
                     t.zeros.0 == 0 && t.zeros.1 == 0 && t.lock_result == 0 && t.unlock_result == 0 &&
-                    c.calls == 4 && c.entry == 0x200004000 && (c.rsp & 15) == 0 &&
+                    c.calls == 4 && c.entry == 0x400004000 && (c.rsp & 15) == 0 &&
                     c.backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT)
                 passed = passed && ok
                 lines.append("thread=\(t.id) result=\(ok ? "PASS" : "FAIL") joined=\(t.joined) backend=\(c.backend) rax=\(c.rax) memory=\(c.memory) tls=\(c.tls_word) modules=\(t.modules.0)/\(t.modules.1) zeros=\(t.zeros.0)/\(t.zeros.1)/\(c.zero_memory) self=\(c.kernel_return) calls=\(c.calls) mutex=\(t.lock_result)/\(t.unlock_result) rsp=\(c.rsp) fs=\(c.fs_base)")
