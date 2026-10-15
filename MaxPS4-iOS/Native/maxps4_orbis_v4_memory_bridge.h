@@ -72,6 +72,10 @@ public:
         const uint8_t* ptr = nullptr;
         const int status = resolve_operand(guest,sizeof(T),6,ptr);
         if (status) return status;
+        // atomic_ref may require stronger alignment than the C++ value type.
+        // Never construct it on an insufficiently aligned host address.
+        if (reinterpret_cast<uintptr_t>(ptr) % std::atomic_ref<T>::required_alignment)
+            return -EINVAL;
         auto* typed = reinterpret_cast<T*>(const_cast<uint8_t*>(ptr));
         // No software load/store fallback: preserve hardware atomicity.
         std::atomic_ref<T> atom(*typed);
