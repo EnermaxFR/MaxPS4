@@ -65,7 +65,7 @@ enum MaxPS4OrbisTest {
         let revision = Bundle.main.object(forInfoDictionaryKey: "MaxPS4SourceRevision") as? String ?? "unknown"
         let buildRun = Bundle.main.object(forInfoDictionaryKey: "MaxPS4BuildRun") as? String ?? "unknown"
         let head = Bundle.main.object(forInfoDictionaryKey: "MaxPS4PRHeadRevision") as? String ?? "unknown"
-        var lines = ["autotests=orbis-m1", "source=\(revision)", "pr_head=\(head)",
+        var lines = ["autotests=orbis-m1", "diagnostic_revision=m1-ios-collision-203-v1", "source=\(revision)", "pr_head=\(head)",
                      "build_run=\(buildRun)", "scope=current_host", "fixture=m1_two_threads_three_tls_modules_16gib",
                      "scheduler=deterministic_run_to_completion", "tls_abi=fixture_fs_offsets",
                      "m1_general_memory_translation=SKIP", "sce_dynamic_tls_abi=SKIP"]
