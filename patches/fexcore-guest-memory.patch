@@ -456,7 +456,7 @@ diff --git a/FEXCore/Source/Interface/Core/JIT/JITClass.h b/FEXCore/Source/Inter
 diff --git a/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp b/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
 --- a/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
 +++ b/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
-@@ -15,7 +15,62 @@
+@@ -15,7 +15,66 @@
  #include <FEXCore/Utils/CompilerDefs.h>
  #include <FEXCore/Utils/MathUtils.h>
  
@@ -503,11 +503,15 @@ diff --git a/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp b/FEXCore/Source/In
 +  (void)Bind(&Fault);
 +  // Stop this invocation before the native operand. Restore NZCV before the
 +  // dispatcher spills SRA, and unwind dynamic spill slots as ExitFunction does.
-+  str(TMP2, STATE, offsetof(FEXCore::Core::CpuStateFrame, GuestMemoryFaultData.Address));
++  ARMEmitter::ForwardLabel Stop;
++  ldr(TMP3, STATE, offsetof(FEXCore::Core::CpuStateFrame, State.GuestMemoryFaultRecord));
++  (void)cbz(ARMEmitter::Size::i64Bit, TMP3, &Stop);
++  str(TMP2, TMP3, offsetof(FEXCore::Core::GuestMemoryFaultData, Address));
 +  LoadConstant(ARMEmitter::Size::i64Bit, TMP1, Bytes);
-+  str(TMP1.W(), STATE, offsetof(FEXCore::Core::CpuStateFrame, GuestMemoryFaultData.Bytes));
++  str(TMP1.W(), TMP3, offsetof(FEXCore::Core::GuestMemoryFaultData, Bytes));
 +  LoadConstant(ARMEmitter::Size::i64Bit, TMP1, Permissions);
-+  str(TMP1.W(), STATE, offsetof(FEXCore::Core::CpuStateFrame, GuestMemoryFaultData.Permissions));
++  str(TMP1.W(), TMP3, offsetof(FEXCore::Core::GuestMemoryFaultData, Permissions));
++  (void)Bind(&Stop);
 +  msr(ARMEmitter::SystemRegister::NZCV, TMP4);
 +  ResetStack();
 +  ldr(TMP1, STATE, offsetof(FEXCore::Core::CpuStateFrame, Pointers.ThreadStopHandlerSpillSRA));
@@ -679,21 +683,32 @@ diff --git a/FEXCore/Source/Interface/IR/IR.json b/FEXCore/Source/Interface/IR/I
 diff --git a/FEXCore/include/FEXCore/Core/CoreState.h b/FEXCore/include/FEXCore/Core/CoreState.h
 --- a/FEXCore/include/FEXCore/Core/CoreState.h
 +++ b/FEXCore/include/FEXCore/Core/CoreState.h
-@@ -425,6 +425,14 @@
-     uint16_t _pad : 16;
-   } SynchronousFaultData;
+@@ -71,6 +71,13 @@
+ static_assert(std::is_trivially_copyable_v<NonAtomicRefCounter<uint64_t>>, "needs to be trivially copyable");
+ static_assert(sizeof(NonAtomicRefCounter<uint64_t>) == sizeof(uint64_t), "Needs to be correct size");
  
-+  // Checked translated operand rejection; no native signal is raised.
-+  // The owner resets this before dispatch and returns EFAULT on Bytes != 0.
-+  struct GuestMemoryFaultDataStruct {
-+    uint64_t Address {};
-+    uint32_t Bytes {};
-+    uint32_t Permissions {};
-+  } GuestMemoryFaultData;
++// Frontend-owned for one dispatch. Keep CpuStateFrame's pinned ABI unchanged.
++struct GuestMemoryFaultData {
++  uint64_t Address {};
++  uint32_t Bytes {};
++  uint32_t Permissions {};
++};
 +
-   InternalThreadState* Thread;
+ struct alignas(64) CPUState {
+   // Allows more efficient handling of the register
+   // file in the event AVX is not supported.
+@@ -107,7 +114,10 @@
+   uint64_t L1Pointer {};
+   uint64_t L1Mask {};
+   uint64_t callret_sp {};
+-  uint64_t _pad1 {};
++  union {
++    uint64_t _pad1 {};
++    GuestMemoryFaultData* GuestMemoryFaultRecord;
++  };
  
- #ifdef ARCHITECTURE_arm64ec
+   // Cacheline: 1,2,3,4
+   // The high 128-bits of AVX registers when not being emulated by SVE256.
 diff --git a/FEXCore/include/FEXCore/Debug/InternalThreadState.h b/FEXCore/include/FEXCore/Debug/InternalThreadState.h
 --- a/FEXCore/include/FEXCore/Debug/InternalThreadState.h
 +++ b/FEXCore/include/FEXCore/Debug/InternalThreadState.h
@@ -732,7 +747,7 @@ diff --git a/FEXCore/include/FEXCore/HLE/SyscallHandler.h b/FEXCore/include/FEXC
  
  #include <FEXCore/Core/CodeCache.h>
  #include <FEXCore/IR/IR.h>
-@@ -49,9 +50,37 @@
+@@ -49,9 +50,39 @@
  class SyscallHandler;
  class SourcecodeResolver;
  
@@ -748,6 +763,8 @@ diff --git a/FEXCore/include/FEXCore/HLE/SyscallHandler.h b/FEXCore/include/FEXC
  class SyscallHandler {
  public:
    virtual ~SyscallHandler() = default;
++  // Frontends pin ranges and set CPUState::GuestMemoryFaultRecord for the
++  // complete dispatch, then inspect the record before publishing CPU success.
 +  virtual bool UsesGuestMemoryTranslation() const { return false; }
 +  virtual std::span<const GuestMemoryRange> GuestMemoryRanges() const { return {}; }
 +  // Fetch can cross noncontiguous host mappings, unlike a native operand.

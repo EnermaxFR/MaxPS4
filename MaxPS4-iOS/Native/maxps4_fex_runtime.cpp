@@ -462,10 +462,14 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     // without allocating another iOS JIT buffer. All engine execution is locked.
     if (!persistent_frame || !engine->frame_code_cached) engine->context->ClearCodeCache(thread, false);
     engine->frame_code_cached = persistent_frame;
-    thread->CurrentFrame->GuestMemoryFaultData = {};
+    FEXCore::Core::GuestMemoryFaultData fault {};
+    state.GuestMemoryFaultRecord = &fault;
+    struct ClearFaultRecord {
+        FEXCore::Core::CPUState& state;
+        ~ClearFaultRecord() { state.GuestMemoryFaultRecord = nullptr; }
+    } clear_fault_record {state};
     try { engine->context->ExecuteThread(thread); }
     catch (const std::runtime_error&) { return -ENOTSUP; }
-    const auto& fault = thread->CurrentFrame->GuestMemoryFaultData;
     if (fault.Bytes) {
         std::fprintf(stderr,"M2 checked operand rejected: guest=0x%llx bytes=%u permissions=%u; dispatch stopped\n",
             static_cast<unsigned long long>(fault.Address),fault.Bytes,fault.Permissions);

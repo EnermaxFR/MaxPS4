@@ -88,6 +88,7 @@ int main() {
         auto stage=[&](const std::vector<uint8_t>& bytes) {
             CHECK(memory.reserve(code,page)==0); CHECK(memory.map(code,page,5,bytes.data(),bytes.size())==0);
         };
+        FEXCore::Core::GuestMemoryFaultData operand_fault {};
         auto run=[&](uint64_t entry, bool alias=false, bool alternate=false) {
             auto* current=alternate?second:thread;
             auto& observed=current->CurrentFrame->State;
@@ -99,8 +100,10 @@ int main() {
             observed.fs_cached=data; observed.gs_cached=data;
             observed.rip=entry; observed.gregs[FEXCore::X86State::REG_RSP]=data+2048;
             observed.callret_sp=reinterpret_cast<uintptr_t>(callret.data())+callret.size()/4;
-            current->CurrentFrame->GuestMemoryFaultData = {};
+            operand_fault = {};
+            observed.GuestMemoryFaultRecord = &operand_fault;
             ctx->ExecuteThread(current);
+            observed.GuestMemoryFaultRecord = nullptr;
             return observed.gregs[FEXCore::X86State::REG_RAX];
         };
         callret.data()[callret.size()-1]=0xa5;
@@ -131,7 +134,7 @@ int main() {
             for (unsigned i=0;i<8;++i) bytes.push_back(static_cast<uint8_t>(pointer>>(8*i)));
             bytes.insert(bytes.end(),operation.begin(),operation.end()); bytes.push_back(0xf4);
             replace(bytes); run(code);
-            const auto& fault=thread->CurrentFrame->GuestMemoryFaultData;
+            const auto& fault=operand_fault;
             CHECK(fault.Bytes==8 && fault.Address==pointer && fault.Permissions==permissions);
         };
         rejected(data+page-4,{0x48,0x8b,0x07},4); // split operand
@@ -143,7 +146,7 @@ int main() {
         rejected(data,{0x48,0x8b,0x07},4);
         CHECK(memory.protect(data,page,6)==0);
         replace({0xb8,42,0,0,0,0xf4}); CHECK(run(code)==42);
-        CHECK(!thread->CurrentFrame->GuestMemoryFaultData.Bytes);
+        CHECK(!operand_fault.Bytes);
         std::puts("PASS low RIP 0x400000; checked split/hole/permissions/atomic rejection and retry");
         // Native-width CAS and XADD: both mismatch and success, all widths.
         for (size_t width : {1U,2U,4U,8U}) {
