@@ -16,6 +16,14 @@ arbitrary native SIGSEGV/SIGBUS faults. Mapping lifetime and host protection mus
 therefore remain stable. Unsupported memcpy/memset, masked/gather, cache and
 ValidateCode IR still fail compilation; arbitrary translated programs remain closed.
 
+The checked fault record belongs to the dispatch invocation. Its pointer uses an
+existing reserved CPU-state slot, preserving the pinned frame layout. The
+interrupt-page store uses TMP2 and preserves TMP1's compiled branch target.
+Temporary emission capacity includes each translation node's range ladder;
+oversized translated blocks are rejected before emission at the existing iPhone
+code-pool ceiling of 16 MiB. This avoids relying on a native guard-page fault to
+grow the temporary buffer, which this frontend cannot recover.
+
 All translated invocation caches are cleared before destroying CPU threads or
 releasing their snapshots and mappings. The existing translation owner tests also
 cover invalidation-before-mutation and leases blocking concurrent release.

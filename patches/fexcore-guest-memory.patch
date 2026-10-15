@@ -431,7 +431,45 @@ diff --git a/FEXCore/Source/Interface/Core/JIT/AtomicOps.cpp b/FEXCore/Source/In
 diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
 --- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
 +++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
-@@ -1164,7 +1164,7 @@
+@@ -37,6 +37,7 @@
+ 
+ #include <cstdio>
+ #include <cstring>
++#include <stdexcept>
+ #include <unistd.h>
+ 
+ namespace {
+@@ -935,7 +936,28 @@
+ 
+   // Fairly excessive buffer range to make sure we don't overflow
+   // One page baseline, plus SSANodeMultipler bytes, plus another page for guard page.
+-  const uint32_t DesiredBufferRange = AlignUp(FEXCore::Utils::FEX_PAGE_SIZE * 2 + SSACount * SSANodeMultiplier, FEXCore::Utils::FEX_PAGE_SIZE);
++  uint64_t RequiredBufferRange = FEXCore::Utils::FEX_PAGE_SIZE * 2 + uint64_t{SSACount} * SSANodeMultiplier;
++  if (CTX->SyscallHandler && CTX->SyscallHandler->UsesGuestMemoryTranslation()) {
++    // A translation node emits a checked range ladder, not six instructions.
++    // Size it before emission: these frontends install no native fault handler
++    // to recover an underestimated temporary-buffer guard-page write.
++    constexpr uint64_t MaxTranslatedTemporaryBytes = 16 * 1024 * 1024;
++    const uint64_t RangeCount = CTX->SyscallHandler->GuestMemoryRanges().size();
++    if (RangeCount > (MaxTranslatedTemporaryBytes - 256) / 96)
++      throw std::runtime_error("Too many translated guest mappings");
++    const uint64_t TranslationBytes = 256 + 96 * RangeCount;
++    for (auto [Block, Header] : IR->GetBlocks()) {
++      for (auto [Node, Op] : IR->GetCode(Block)) {
++        if (Op->Op == IR::OP_TRANSLATEGUESTADDRESS || Op->Op == IR::OP_TRANSLATEGUESTATOMICADDRESS)
++          RequiredBufferRange += TranslationBytes;
++      }
++    }
++    // Match the existing iPhone code-pool ceiling; never allocate an unbounded
++    // temporary block or rely on a native trap to grow one.
++    if (RequiredBufferRange > MaxTranslatedTemporaryBytes)
++      throw std::runtime_error("Translated JIT block exceeds bounded temporary space");
++  }
++  const uint32_t DesiredBufferRange = AlignUp(static_cast<uint32_t>(RequiredBufferRange), FEXCore::Utils::FEX_PAGE_SIZE);
+ 
+   // JIT output is first written to a temporary buffer and later relocated to the CodeBuffer.
+   // This minimizes lock contention of CodeBufferWriteMutex.
+@@ -1164,7 +1186,7 @@
        LOGMAN_THROW_A_FMT(CurrentCodeBuffer->LookupCache.get() == ThreadState->LookupCache->Shared, "INVARIANT VIOLATED: SharedLookupCache "
                                                                                                     "doesn't match up!\n");
        if (auto Prev = CheckCodeBufferUpdate()) {
