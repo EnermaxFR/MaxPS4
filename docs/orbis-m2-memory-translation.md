@@ -23,9 +23,10 @@ et l'alignement naturel de l'opérande entier avant les séquences LSE/exclusive
 La mémoire du contexte FEX, les spills et les registres ne sont pas traduits.
 
 Couverture implémentée : loads/stores scalaires et vecteurs contigus, TSO,
-paires, éléments/broadcast et non-temporal ; CAS 8/16/32/64, CASPair 64/128,
-swap et fetch add/sub/and/clr/or/xor/neg. Les chemins spécialisés pile,
-memcpy/memset, masked/gather et cache ne sont pas encore raccordés : la
+paires, éléments/broadcast et non-temporal, PUSH/POP abaissés en accès
+traduits avec RSP guest conservé, CALL/RET ; CAS 8/16/32/64, CASPair 64/128,
+swap et fetch add/sub/and/clr/or/xor/neg. Les chemins memcpy/memset,
+masked/gather et cache ne sont pas encore raccordés : la
 compilation translated les refuse explicitement. Les accès natifs ne sont
 admis que si l'opérande entier appartient à une même plage host contiguë.
 Un accès de données invalide produit actuellement un trap ARM64 dédié ; la

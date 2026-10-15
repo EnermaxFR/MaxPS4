@@ -473,6 +473,65 @@ index 849df0f2..7c0ab642 100644
  
  DEF_OP(LoadContext) {
    const auto Op = IROp->C<IR::IROp_LoadContext>();
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+index 31f9eddc..c1e12182 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -498,7 +498,7 @@ void OpDispatchBuilder::LEAVEOp(OpcodeArgs) {
+   const auto OperandSize = (Op->Flags & FEXCore::X86Tables::DecodeFlags::FLAG_OPERAND_SIZE) ? OpSize::i16Bit : GPRSize;
+ 
+   // First we move RBP in to RSP and then behave effectively like a pop
+-  auto SP = _RMWHandle(LoadGPRRegister(X86State::REG_RBP));
++  Ref SP = _RMWHandle(LoadGPRRegister(X86State::REG_RBP));
+   auto NewGPR = Pop(OperandSize, SP);
+ 
+   // Store the new stack pointer
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+index e2239ae0..46cae780 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+@@ -13,6 +13,7 @@
+ #include <FEXCore/Core/Context.h>
+ #include <FEXCore/Core/X86Enums.h>
+ #include <FEXCore/IR/IR.h>
++#include <FEXCore/HLE/SyscallHandler.h>
+ 
+ #include <FEXCore/Utils/LogManager.h>
+ #include <FEXCore/Utils/MathUtils.h>
+@@ -2566,7 +2567,21 @@ private:
+     return _StoreMemPairAutoTSO(RegClass::FPR, Size, A, Value1, Value2, Align);
+   }
+ 
+-  Ref Pop(IR::OpSize Size, Ref SP_RMW) {
++  Ref _Push(IR::OpSize GPRSize, IR::OpSize Size, Ref Value, Ref OldSP) {
++    if (CTX->SyscallHandler && CTX->SyscallHandler->UsesGuestMemoryTranslation()) {
++      Ref NewSP = Sub(GPRSize, OldSP, IR::OpSizeToSize(Size));
++      _StoreMemGPRAutoTSO(Size, NewSP, Value);
++      return NewSP; // Guest RSP, never the translated storage pointer.
++    }
++    return IREmitter::_Push(GPRSize, Size, Value, OldSP);
++  }
++
++  Ref Pop(IR::OpSize Size, Ref& SP_RMW) {
++    if (CTX->SyscallHandler && CTX->SyscallHandler->UsesGuestMemoryTranslation()) {
++      Ref Value = _LoadMemGPRAutoTSO(Size, SP_RMW);
++      SP_RMW = Add(GetGPROpSize(), SP_RMW, IR::OpSizeToSize(Size));
++      return Value;
++    }
+     Ref Value = _AllocateGPR(false);
+     _Pop(Size, SP_RMW, Value);
+     return Value;
+@@ -2574,9 +2589,7 @@ private:
+ 
+   Ref Pop(IR::OpSize Size) {
+     Ref SP = _RMWHandle(LoadGPRRegister(X86State::REG_RSP));
+-    Ref Value = _AllocateGPR(false);
+-
+-    _Pop(Size, SP, Value);
++    Ref Value = Pop(Size, SP);
+ 
+     // Store the new stack pointer
+     StoreGPRRegister(X86State::REG_RSP, SP);
 diff --git a/FEXCore/Source/Interface/IR/IR.json b/FEXCore/Source/Interface/IR/IR.json
 index 14b6df9d..3565ee13 100644
 --- a/FEXCore/Source/Interface/IR/IR.json

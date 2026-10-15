@@ -11,7 +11,7 @@ repo = Path(__file__).resolve().parents[2]
 source = Path(sys.argv[1])
 patch = repo / 'patches/fexcore-guest-memory.patch'
 paths = re.findall(r'^\+\+\+ b/(.*)$', patch.read_text(), re.M)
-assert len(paths) == 8, paths
+assert len(paths) == 10, paths
 with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
     for name in paths:
