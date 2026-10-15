@@ -242,6 +242,11 @@ int main(int argc, char** argv) {
     std::puts("BEGIN real FEX context and linked Orbis execution");
     CHECK(maxps4_fex_engine_open(&engine) == 0 && engine);
     struct Close { maxps4_fex_engine* engine; ~Close() { maxps4_fex_engine_close(engine); } } close{engine};
+    // Exercise the actual C ABI against a live FEX engine, without V4 mappings.
+    // Fail closed: translated/unmapped addresses cannot enter direct FEX execution.
+    CHECK(maxps4_fex_engine_v4_preflight(nullptr,0x1000,0x2000,4096)==-EINVAL);
+    CHECK(maxps4_fex_engine_v4_preflight(engine,0x1000,0x2000,4096)==-EAGAIN);
+
     uint64_t entry_out = 99, result = 99;
     uint32_t imports = 99, backend = 99, calls = 99;
     auto file = minimal();
@@ -251,6 +256,10 @@ int main(int argc, char** argv) {
     CHECK(!result && !backend && !entry_out && !calls);
     std::puts("PASS linking and pre-initialization refusal; initialize real FEX dispatcher");
     CHECK(maxps4_fex_engine_initialize(engine) == 0);
+    CHECK(maxps4_fex_engine_v4_preflight(engine,0x1000,0x2000,4096)==-ENOTSUP);
+    CHECK(maxps4_fex_engine_v4_preflight(engine,0,0x2000,4096)==-EINVAL);
+    CHECK(maxps4_fex_engine_v4_preflight(engine,0x1000,UINT64_MAX,4096)==-EOVERFLOW);
+
     CHECK(maxps4_fex_engine_probe(engine,&result,&backend) == 0 && result == 42);
     std::puts("PASS existing real FEX JIT 40+2 diagnostic regression (42)");
     std::puts("PASS dispatcher initialization; begin CPU execution");

@@ -132,6 +132,11 @@ int32_t maxps4_fex_engine_configure_frame(maxps4_fex_engine *engine,
 // unchanged on error; metadata zeroed. Caller serializes close against invocation.
 int32_t maxps4_fex_engine_step_frame(maxps4_fex_engine *engine,
     uint32_t buttons, uint8_t *pixels, size_t capacity, uint64_t *sequence, uint32_t *backend);
+// Experimental V4 direct-memory preflight. Requires explicitly mapped V4 pages;
+// does not dispatch guest instructions or alter the V3 execution path.
+// Returns an error until a genuine FEX-direct guest mapping is admitted.
+int32_t maxps4_fex_engine_v4_preflight(maxps4_fex_engine *engine,
+    uint64_t entry, uint64_t stack, size_t stack_bytes);
 // Only an admitted SCE process may run. Real FEX only, with guarded private
 // SysV stack, acyclic guest CALL/RET and terminal HLT. No implicit init/fini,
 // syscall, TLS, arbitrary instructions, absolute pointer dereference or fallback.

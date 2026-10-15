@@ -1,6 +1,7 @@
 #include "maxps4_guest_frame.h"
 #include "maxps4_fex_runtime.h"
 #include "maxps4_guest_stack.h"
+#include "maxps4_orbis_v4_execution_gate.h"
 #include <algorithm>
 #include <iterator>
 #include "maxps4_jit_memory.h"
@@ -144,6 +145,9 @@ struct maxps4_fex_engine {
     FEXCore::SignalDelegator signals;
     ProbeAddressSpace probe;
     maxps4::GuestELF staged_ps4;
+    // V4 is opt-in and isolated from the stable V3 image/virtual memory.
+    maxps4::GuestAddressSpace v4_address_space;
+    maxps4::OrbisV4ExecutionGate v4_execution_gate{v4_address_space};
     bool orbis_admitted = false;
     maxps4_fex_cpu_report cpu_report{};
     maxps4::GuestFrame frame;
@@ -573,6 +577,16 @@ extern "C" int32_t maxps4_fex_engine_step_frame(maxps4_fex_engine* engine,
     } catch (const std::bad_alloc&) {
         engine->orbis_admitted = false; engine->frame = {}; return -ENOMEM;
     }
+}
+extern "C" int32_t maxps4_fex_engine_v4_preflight(maxps4_fex_engine* engine,
+    uint64_t entry, uint64_t stack, size_t stack_bytes) {
+    if (!engine) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
+    const uint8_t* executable = nullptr;
+    const uint8_t* writable_stack = nullptr;
+    return engine->v4_execution_gate.preflight(entry,stack,stack_bytes,
+                                               executable,writable_stack);
 }
 extern "C" int32_t maxps4_fex_engine_run_orbis(maxps4_fex_engine* engine,
     uint64_t* result, uint32_t* backend, uint64_t* entry) {
