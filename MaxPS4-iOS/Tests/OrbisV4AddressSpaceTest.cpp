@@ -1,4 +1,5 @@
 #include "../Native/maxps4_orbis_v4_execution_gate.h"
+#include "../Native/maxps4_orbis_v4_translation.h"
 #include "../Native/maxps4_orbis_v4_synthetic_stage.h"
 #include <cerrno>
 #include <cstdint>
@@ -6,7 +7,35 @@
 #include <cstdlib>
 #include <cstring>
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); std::exit(1); } } while (0)
+template<class T> void check_cas_width() {
+    maxps4::GuestAddressSpace memory;
+    const size_t page=memory.page_size();
+    const uint64_t base=0x710000000ULL;
+    CHECK(memory.reserve(base,page)==0);
+    CHECK(memory.map(base,page,6)==0);
+    maxps4::OrbisV4MemoryBridge bridge(memory);
+    const uint64_t address=base+page-sizeof(T);
+    T expected=0;
+    bool exchanged=false;
+    CHECK(bridge.compare_exchange_guest<T>(address,expected,T{37},exchanged)==0);
+    CHECK(exchanged && expected==0);
+    CHECK(bridge.compare_exchange_guest<T>(address,expected,T{99},exchanged)==0);
+    CHECK(!exchanged && expected==37);
+    T actual=0;
+    CHECK(memory.read(address,&actual,sizeof(actual))==0 && actual==37);
+    CHECK(memory.protect(base,page,2)==0); // Write permission alone is insufficient.
+    expected=37;
+    CHECK(bridge.compare_exchange_guest<T>(address,expected,T{99},exchanged)==-EFAULT);
+    CHECK(!exchanged && expected==37);
+    CHECK(memory.release(base)==0);
+    CHECK(bridge.compare_exchange_guest<T>(address,expected,T{99},exchanged)==-EFAULT);
+    CHECK(!exchanged && expected==37);
+}
 int main() {
+    check_cas_width<uint8_t>();
+    check_cas_width<uint16_t>();
+    check_cas_width<uint32_t>();
+    check_cas_width<uint64_t>();
     using maxps4::GuestAddressSpace;
     GuestAddressSpace space;
     const size_t page=space.page_size();
@@ -14,6 +43,10 @@ int main() {
     const uint64_t base=0x200000000ULL;
     CHECK(space.reserve(base,2*page)==0);
     CHECK(space.reserve(base,2*page)==-EEXIST);
+    CHECK(space.reservation_failure().guest==base);
+    CHECK(space.reservation_failure().bytes==4*page);
+    CHECK(space.reservation_failure().host_status==0);
+    CHECK(space.reservation_failure().error==-EEXIST);
     CHECK(space.map(base,page,6)==0);
     maxps4::OrbisV4MemoryBridge bridge(space);
     maxps4::OrbisV4ExecutionGate gate(space);
@@ -114,5 +147,196 @@ int main() {
                                            staged_base+staged_page,staged_page)==-EINVAL);
     CHECK(maxps4::stage_v4_synthetic_image(staged,staged_base,code,sizeof(code),
                                            staged_base+2*staged_page,staged_page)==-EINVAL);
+    // A real occupied host address, independent of fixed-address availability.
+    // Exercise #203's non-overwrite/rollback/retry contract on the V4 base.
+    const size_t bytes = 3*page;
+    void* occupied = ::mmap(nullptr,bytes,PROT_READ|PROT_WRITE,
+                           MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
+    CHECK(occupied != MAP_FAILED);
+    auto* middle = static_cast<uint8_t*>(occupied)+page;
+    const uint64_t guest = reinterpret_cast<uintptr_t>(middle);
+    CHECK(guest >= 0x100000000ULL && guest < (uint64_t{1}<<47)-2*page);
+    middle[0] = 0x59;
+    CHECK(direct_space.reserve(guest,page)==-EADDRINUSE);
+    const auto failure = direct_space.reservation_failure();
+    CHECK(failure.guest==guest && failure.bytes==bytes && failure.error==-EADDRINUSE);
+#if defined(__APPLE__)
+    CHECK(failure.host_status==KERN_NO_SPACE);
+#else
+    CHECK(failure.host_status==0); // mmap hint relocated rather than failed.
+#endif
+    CHECK(middle[0]==0x59 && direct_space.allocated()==0 && direct_space.regions().empty());
+    CHECK(!direct_space.translate(guest,1,4));
+    // Distinct translated storage can use the same guest number without
+    // touching the occupied host allocation, but MUST fail FEX admission.
+    GuestAddressSpace separate;
+    CHECK(separate.reserve(guest,page)==0 && separate.map(guest,page,6)==0);
+    CHECK(separate.translate(guest,1,4)!=middle);
+    CHECK(separate.write(guest,data,sizeof(data))==0 && middle[0]==0x59);
+    maxps4::OrbisV4MemoryBridge translated_bridge(separate);
+    const uint8_t* rejected=middle;
+    CHECK(translated_bridge.admit_fex_direct(guest,1,4,rejected)==-ENOTSUP && !rejected);
+    CHECK(::munmap(occupied,bytes)==0);
+    CHECK(direct_space.reserve(guest,page)==0);
+    CHECK(direct_space.reservation_failure().error==0);
+    CHECK(direct_space.reservation_failure().guest==0);
+    CHECK(direct_space.reservation_failure().bytes==0);
+    CHECK(direct_space.reservation_failure().host_status==0);
+    CHECK(direct_space.map(guest,page,5,code,sizeof(code))==0);
+    CHECK(direct_space.translate(guest,sizeof(code),5)==middle);
+    CHECK(!direct_space.translate(guest-1,1,4));
+    CHECK(!direct_space.translate(guest+page,1,4));
+    CHECK(direct_space.write(guest,data,sizeof(data))==-EFAULT);
+    maxps4::OrbisV4ExecutionGate direct_gate(direct_space);
+    executable=middle; writable_stack=middle;
+    CHECK(direct_gate.preflight(guest,guest,page,executable,writable_stack)==-EFAULT);
+    CHECK(!executable && !writable_stack); // No partially published code pointer.
+    direct_space.clear();
+    CHECK(direct_space.allocated()==0 && direct_space.regions().empty());
+    CHECK(direct_space.reserve(guest,page)==0 && direct_space.release(guest)==0);
+    CHECK(direct_space.release(guest)==-ENOENT);
+    // Repeated translated lifecycles; invalid writes across RX preserve all bytes.
+    for (int iteration=0; iteration<3; ++iteration) {
+        GuestAddressSpace life;
+        CHECK(life.reserve(base,0)==-EINVAL);
+        CHECK(life.reserve(UINT64_MAX-page+1,page)==-EINVAL);
+        CHECK(life.reserve(base,GuestAddressSpace::budget+page)==-E2BIG);
+        CHECK(life.reserve(base,2*page)==0);
+        CHECK(life.map(base,page,7)==-EINVAL); // W^X
+        CHECK(life.map(base,page,6)==0 && life.map(base+page,page,5)==0);
+        CHECK(life.write(base+page-2,data,4)==-EFAULT);
+        uint8_t unchanged[2]={9,9};
+        CHECK(life.read(base+page-2,unchanged,2)==0 && unchanged[0]==0 && unchanged[1]==0);
+        CHECK(life.read(base,unchanged,0)==-EINVAL);
+        CHECK(life.read(UINT64_MAX-1,unchanged,4)==-EINVAL);
+        CHECK(life.protect(base,page,7)==-EINVAL);
+        CHECK(life.protect(base,page,0)==0);
+        CHECK(life.read(base,unchanged,2)==-EFAULT);
+        CHECK(life.release(base)==0 && life.allocated()==0);
+    }
+    // A translated access spanning two separately mapped RW pages must preserve
+    // guest ordering. A later permission downgrade must reject the whole write.
+    GuestAddressSpace spanning;
+    const uint64_t span_base = 0x500000000ULL;
+    CHECK(spanning.reserve(span_base,2*page)==0);
+    CHECK(spanning.map(span_base,page,6)==0);
+    CHECK(spanning.map(span_base+page,page,6)==0);
+    const uint8_t across[6]={11,22,33,44,55,66};
+    uint8_t across_read[6]={};
+    CHECK(spanning.write(span_base+page-3,across,sizeof(across))==0);
+    CHECK(spanning.read(span_base+page-3,across_read,sizeof(across_read))==0);
+    CHECK(std::memcmp(across,across_read,sizeof(across))==0);
+    CHECK(spanning.protect(span_base+page,page,4)==0);
+    const uint8_t replacement[6]={1,1,1,1,1,1};
+    CHECK(spanning.write(span_base+page-3,replacement,sizeof(replacement))==-EFAULT);
+    std::memset(across_read,0,sizeof(across_read));
+    CHECK(spanning.read(span_base+page-3,across_read,sizeof(across_read))==0);
+    CHECK(std::memcmp(across,across_read,sizeof(across))==0);
+    CHECK(spanning.release(span_base)==0);
+    // Instruction fetch across adjacent RX pages is allowed, but crossing
+    // into an NX stack must fail before any bytes are copied to the caller.
+    GuestAddressSpace fetch_pages;
+    const uint64_t fetch_base=0x600000000ULL;
+    CHECK(fetch_pages.reserve(fetch_base,3*page)==0);
+    const uint8_t tail_code[4]={0x90,0x90,0x90,0xf4};
+    CHECK(fetch_pages.map(fetch_base,page,5)==0);
+    CHECK(fetch_pages.map(fetch_base+page,page,5)==0);
+    CHECK(fetch_pages.map(fetch_base+2*page,page,6)==0);
+    uint8_t fetch_buffer[4]={0xaa,0xaa,0xaa,0xaa};
+    maxps4::OrbisV4MemoryBridge fetch_bridge(fetch_pages);
+    CHECK(fetch_bridge.fetch_instruction(fetch_base+page-2,fetch_buffer,sizeof(fetch_buffer))==0);
+    CHECK(fetch_bridge.fetch_instruction(fetch_base+page-2,fetch_buffer,16)==-EINVAL);
+    CHECK(fetch_buffer[0]==0 && fetch_buffer[1]==0 &&
+          fetch_buffer[2]==0 && fetch_buffer[3]==0);
+    std::memset(fetch_buffer,0xaa,sizeof(fetch_buffer));
+    CHECK(fetch_bridge.fetch_instruction(fetch_base+2*page-2,fetch_buffer,sizeof(fetch_buffer))==-EFAULT);
+    for (const auto byte : fetch_buffer) CHECK(byte==0xaa);
+    CHECK(fetch_pages.write(fetch_base+2*page,tail_code,sizeof(tail_code))==0);
+    // Operand resolution is permission-aware and rejects cross-page access.
+    const uint8_t* operand=reinterpret_cast<const uint8_t*>(1);
+    CHECK(fetch_bridge.resolve_operand(fetch_base,1,4,operand)==0 && operand);
+    CHECK(fetch_bridge.resolve_operand(fetch_base,1,2,operand)==-EFAULT && !operand);
+    CHECK(fetch_bridge.resolve_operand(fetch_base+page-1,2,4,operand)==-EFAULT && !operand);
+    CHECK(fetch_bridge.resolve_operand(fetch_base,0,4,operand)==-EINVAL && !operand);
+    CHECK(fetch_bridge.resolve_operand(fetch_base,1,0,operand)==-EINVAL && !operand);
+    CHECK(fetch_bridge.resolve_operand(fetch_base,1,8,operand)==-EINVAL && !operand);
+    CHECK(fetch_bridge.resolve_operand(fetch_base+3*page,1,4,operand)==-EFAULT && !operand);
+    CHECK(fetch_pages.release(fetch_base)==0);
+    // Atomic translated CAS: success, mismatch, alignment and permission faults.
+    GuestAddressSpace atomic_space;
+    const uint64_t atomic_base=0x700000000ULL;
+    CHECK(atomic_space.reserve(atomic_base,2*page)==0);
+    CHECK(atomic_space.map(atomic_base,page,6)==0);
+    CHECK(atomic_space.map(atomic_base+page,page,5)==0);
+    maxps4::OrbisV4MemoryBridge atomic_bridge(atomic_space);
+    const uint64_t initial=41;
+    CHECK(atomic_space.write(atomic_base,&initial,sizeof(initial))==0);
+    uint64_t expected=41;
+    bool exchanged=false;
+    CHECK(atomic_bridge.compare_exchange_guest<uint64_t>(atomic_base,expected,42,exchanged)==0);
+    CHECK(exchanged && expected==41);
+    expected=41;
+    CHECK(atomic_bridge.compare_exchange_guest<uint64_t>(atomic_base,expected,99,exchanged)==0);
+    CHECK(!exchanged && expected==42);
+    uint64_t actual=0;
+    CHECK(atomic_space.read(atomic_base,&actual,sizeof(actual))==0 && actual==42);
+    CHECK(atomic_bridge.compare_exchange_guest<uint64_t>(atomic_base+1,expected,99,exchanged)==-EINVAL);
+    CHECK(!exchanged);
+    CHECK(atomic_bridge.compare_exchange_guest<uint64_t>(atomic_base+page,expected,99,exchanged)==-EFAULT);
+    CHECK(!exchanged);
+    CHECK(atomic_bridge.compare_exchange_guest<uint64_t>(atomic_base+page-4,expected,99,exchanged)==-EINVAL);
+    CHECK(!exchanged);
+    // Aligned 64-bit CAS at the last valid slot of a guest page.
+    expected=0;
+    CHECK(atomic_bridge.compare_exchange_guest<uint64_t>(atomic_base+page-sizeof(uint64_t),expected,7,exchanged)==0);
+    CHECK(exchanged);
+    CHECK(atomic_space.protect(atomic_base,page,4)==0);
+    expected=42;
+    CHECK(atomic_bridge.compare_exchange_guest<uint64_t>(atomic_base,expected,99,exchanged)==-EFAULT);
+    CHECK(!exchanged);
+    CHECK(atomic_space.release(atomic_base)==0);
+    // M2 lease resolution: host pointers are borrowed only while mappings are pinned.
+    size_t lease_invalidations=0;
+    maxps4::OrbisV4Translation translated([&] { ++lease_invalidations; });
+    const uint64_t lease_base=0x720000000ULL;
+    CHECK(translated.reserve(lease_base,2*page)==0);
+    CHECK(translated.map(lease_base,page,6)==0);
+    CHECK(translated.map(lease_base+page,page,4)==0);
+    const uint8_t lease_data[]={9,8,7,6};
+    CHECK(translated.write(lease_base,lease_data,sizeof(lease_data))==0);
+    {
+        auto lease=translated.lease();
+        const uint8_t* host=reinterpret_cast<const uint8_t*>(1);
+        CHECK(lease.resolve_contiguous(lease_base,sizeof(lease_data),4,host)==0);
+        CHECK(host && reinterpret_cast<uintptr_t>(host)!=lease_base);
+        CHECK(std::memcmp(host,lease_data,sizeof(lease_data))==0);
+        CHECK(lease.resolve_contiguous(lease_base,1,2,host)==0 && host);
+        CHECK(lease.resolve_contiguous(lease_base+page,1,2,host)==-EFAULT && !host);
+        CHECK(lease.resolve_contiguous(lease_base+page-1,2,4,host)==-EFAULT && !host);
+        CHECK(lease.resolve_contiguous(lease_base+2*page,1,4,host)==-EFAULT && !host);
+        CHECK(lease.resolve_contiguous(lease_base,0,4,host)==-EINVAL && !host);
+        CHECK(lease.resolve_contiguous(lease_base,1,0,host)==-EINVAL && !host);
+        CHECK(lease.resolve_contiguous(lease_base,1,8,host)==-EINVAL && !host);
+        CHECK(lease.resolve_contiguous(lease_base,1,6,host)==0 && host);
+        CHECK(lease.resolve_contiguous(UINT64_MAX,2,4,host)==-EINVAL && !host);
+        // Reject invalid combined permissions and overflow without leaking
+        // a pointer from a previous successful translation.
+        CHECK(lease.resolve_contiguous(lease_base,1,3,host)==-EINVAL && !host);
+        CHECK(lease.resolve_contiguous(lease_base,1,7,host)==-EINVAL && !host);
+        CHECK(lease.resolve_contiguous(lease_base,1,0x80,host)==-EINVAL && !host);
+        CHECK(lease.resolve_contiguous(lease_base+page,1,4,host)==0 && host);
+        CHECK(lease.resolve_contiguous(lease_base+page,1,6,host)==-EFAULT && !host);
+        CHECK(lease.resolve_contiguous(lease_base+page-1,2,2,host)==-EFAULT && !host);
+        CHECK(lease.resolve_contiguous(UINT64_MAX-1,2,4,host)==-EINVAL && !host);
+    }
+    CHECK(translated.protect(lease_base,page,4)==0);
+    {
+        auto lease=translated.lease();
+        const uint8_t* host=nullptr;
+        CHECK(lease.resolve_contiguous(lease_base,1,2,host)==-EFAULT && !host);
+        CHECK(lease.resolve_contiguous(lease_base,1,4,host)==0 && host);
+    }
+    CHECK(translated.release(lease_base)==0);
+    CHECK(lease_invalidations>=5);
     std::puts("PASS Orbis V4 isolated guest address-space checks");
 }
