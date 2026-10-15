@@ -1,6 +1,7 @@
 #include "maxps4_guest_frame.h"
 #include "maxps4_fex_runtime.h"
 #include "maxps4_guest_stack.h"
+#include "maxps4_orbis_v4_execution_gate.h"
 #include <algorithm>
 #include <iterator>
 #include "maxps4_jit_memory.h"
@@ -144,6 +145,9 @@ struct maxps4_fex_engine {
     FEXCore::SignalDelegator signals;
     ProbeAddressSpace probe;
     maxps4::GuestELF staged_ps4;
+    // V4 is opt-in and isolated from the stable V3 image/virtual memory.
+    maxps4::GuestAddressSpace v4_address_space;
+    maxps4::OrbisV4ExecutionGate v4_execution_gate{v4_address_space};
     bool orbis_admitted = false;
     maxps4_fex_cpu_report cpu_report{};
     maxps4::GuestFrame frame;
