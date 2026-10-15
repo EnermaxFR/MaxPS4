@@ -76,6 +76,16 @@ int main() {
     CHECK(staged.write(staged_base,code,sizeof(code))==-EFAULT);
     CHECK(staged.read(staged_base+staged_page,fetched,sizeof(fetched),true)==-EFAULT);
     CHECK(staged.write(staged_base+staged_page,code,sizeof(code))==0);
+    // Staged synthetic code is readable as guest RX, but translated host
+    // storage must never be mistaken for an executable FEX-direct mapping.
+    maxps4::OrbisV4ExecutionGate staged_gate(staged);
+    const uint8_t* staged_executable=reinterpret_cast<const uint8_t*>(1);
+    const uint8_t* staged_stack=reinterpret_cast<const uint8_t*>(1);
+    CHECK(staged_gate.preflight(staged_base,staged_base+staged_page,staged_page,
+                                staged_executable,staged_stack)==-ENOTSUP);
+    CHECK(staged_executable==nullptr && staged_stack==nullptr);
+    CHECK(staged.read(staged_base,fetched,sizeof(fetched),true)==0);
+    CHECK(std::memcmp(fetched,code,sizeof(code))==0);
     CHECK(maxps4::stage_v4_synthetic_image(staged,staged_base,code,sizeof(code),
                                            staged_base+staged_page,staged_page)==-EEXIST);
     CHECK(staged.release(staged_base)==0);
