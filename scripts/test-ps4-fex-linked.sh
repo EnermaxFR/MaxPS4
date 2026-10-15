@@ -49,7 +49,14 @@ python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/translation-tests.txt" "$OUT/Bin
 }
 python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/ps4-linked-tests.txt" "$OUT/Bin/maxps4-ps4-linked-test"
 python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/m2-low-va-tests.txt" "$OUT/Bin/maxps4-ps4-linked-test" --m2
-python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/m1-linked-tests.txt" "$OUT/Bin/maxps4-ps4-linked-test" --m1
+python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/m1-linked-tests.txt" "$OUT/Bin/maxps4-ps4-linked-test" --m1 || {
+  if command -v gdb >/dev/null 2>&1; then
+    python3 "$ROOT/scripts/run-bounded.py" 30 "$OUT/m1-backtrace.txt" \
+      gdb --batch -ex run -ex 'bt 25' -ex 'info registers' -ex 'x/12i $pc-16' \
+      --args "$OUT/Bin/maxps4-ps4-linked-test" --m1
+  fi
+  exit 1
+}
 "$OUT/Bin/maxps4-ps4-linked-test" --m1-bundle "$OUT/orbis-bundle/m1"
 python3 "$ROOT/scripts/run-bounded.py" 10 "$OUT/fixture-export.txt" "$OUT/Bin/maxps4-ps4-linked-test" \
   "$OUT/ps4-libkernel-demo.elf" "$OUT/ps4-libkernel-combined.elf"
