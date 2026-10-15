@@ -2,7 +2,7 @@ name: Orbis mission 198 memory safety
 on:
   workflow_dispatch:
   push:
-    branches: ['experiment/orbis-mission-198']
+    branches: ['experiment/orbis-mission-198', 'experiment/orbis-m1-ios-collision-diagnostics']
     paths: ['MaxPS4-iOS/**', 'scripts/test-orbis-mission-198.sh', '.github/workflows/orbis-mission-198.yml']
   pull_request:
     paths: ['MaxPS4-iOS/**', 'scripts/test-orbis-mission-198.sh', '.github/workflows/orbis-mission-198.yml']
