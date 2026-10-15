@@ -1,4 +1,5 @@
 #include "../Native/maxps4_orbis_v4_execution_gate.h"
+#include "../Native/maxps4_orbis_v4_synthetic_stage.h"
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -62,5 +63,26 @@ int main() {
     CHECK(space.release(base)==0);
     CHECK(space.allocated()==0);
     CHECK(space.regions().empty());
+    // Stage synthetic x86 bytes and a distinct writable stack, without FEX dispatch.
+    GuestAddressSpace staged;
+    const size_t staged_page=staged.page_size();
+    const uint64_t staged_base=0x300000000ULL;
+    const uint8_t code[]={0xb8,42,0,0,0,0xf4};
+    CHECK(maxps4::stage_v4_synthetic_image(staged,staged_base,code,sizeof(code),
+                                           staged_base+staged_page,staged_page)==0);
+    uint8_t fetched[sizeof(code)]{};
+    CHECK(staged.read(staged_base,fetched,sizeof(fetched),true)==0);
+    CHECK(std::memcmp(fetched,code,sizeof(code))==0);
+    CHECK(staged.write(staged_base,code,sizeof(code))==-EFAULT);
+    CHECK(staged.read(staged_base+staged_page,fetched,sizeof(fetched),true)==-EFAULT);
+    CHECK(staged.write(staged_base+staged_page,code,sizeof(code))==0);
+    CHECK(maxps4::stage_v4_synthetic_image(staged,staged_base,code,sizeof(code),
+                                           staged_base+staged_page,staged_page)==-EEXIST);
+    CHECK(staged.release(staged_base)==0);
+    CHECK(staged.allocated()==0);
+    CHECK(maxps4::stage_v4_synthetic_image(staged,staged_base,nullptr,sizeof(code),
+                                           staged_base+staged_page,staged_page)==-EINVAL);
+    CHECK(maxps4::stage_v4_synthetic_image(staged,staged_base,code,sizeof(code),
+                                           staged_base+2*staged_page,staged_page)==-EINVAL);
     std::puts("PASS Orbis V4 isolated guest address-space checks");
 }
