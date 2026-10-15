@@ -17,7 +17,12 @@ int main() {
     maxps4::OrbisV4MemoryBridge bridge(space);
     const uint8_t* direct=nullptr;
     CHECK(bridge.admit_fex_direct(base,1,4,direct)==-ENOTSUP);
-    CHECK(direct==nullptr); // Guest RW, never host executable.
+    CHECK(direct==nullptr);
+    CHECK(bridge.admit_fex_direct(base,0,4,direct)==-ENOTSUP);
+    CHECK(direct==nullptr);
+    CHECK(bridge.admit_fex_direct(base,1,8,direct)==-ENOTSUP);
+    CHECK(direct==nullptr);
+    // Translated storage must never be passed to FEX as direct guest VA.
     const uint8_t data[4]={4,2,1,7};
     uint8_t readback[4]={};
     CHECK(bridge.write_guest(base,data,sizeof(data))==0);
@@ -28,15 +33,18 @@ int main() {
     CHECK(runtime_memory.translate(base,sizeof(readback),1)==nullptr);
     CHECK(bridge.read_guest(base,readback,sizeof(readback))==0);
     CHECK(std::memcmp(data,readback,sizeof(data))==0);
-    CHECK(space.read(base+page-2,readback,4)==-EFAULT); // No partial copy.
+    CHECK(bridge.read_guest(base+page-2,readback,4)==-EFAULT); // No partial copy.
+    CHECK(bridge.write_guest(base+page-2,data,4)==-EFAULT);
     CHECK(space.map(base+page,page,5)==0); // Guest RX.
-    CHECK(space.write(base+page,data,sizeof(data))==-EFAULT);
+    CHECK(bridge.write_guest(base+page,data,sizeof(data))==-EFAULT);
+    CHECK(bridge.read_guest(base+page,readback,sizeof(readback),true)==0);
     CHECK(space.map(base+page,page,6)==-EEXIST);
     CHECK(space.protect(base,page,4)==0);
     CHECK(space.write(base,data,sizeof(data))==-EFAULT);
     CHECK(runtime_memory.translate(base,1,2)==nullptr);
     CHECK(runtime_memory.translate(base,1,4)!=nullptr);
-    CHECK(space.read(base,readback,sizeof(readback))==0);
+    CHECK(bridge.read_guest(base,readback,sizeof(readback))==0);
+    CHECK(bridge.read_guest(base,readback,sizeof(readback),true)==-EFAULT);
     CHECK(space.release(base)==0);
     CHECK(space.allocated()==0);
     CHECK(space.regions().empty());
