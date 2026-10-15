@@ -132,6 +132,24 @@ int32_t maxps4_fex_engine_configure_frame(maxps4_fex_engine *engine,
 // unchanged on error; metadata zeroed. Caller serializes close against invocation.
 int32_t maxps4_fex_engine_step_frame(maxps4_fex_engine *engine,
     uint32_t buttons, uint8_t *pixels, size_t capacity, uint64_t *sequence, uint32_t *backend);
+// Experimental M2 diagnostic only. No CPU execution is currently supported.
+// cpu_valid/backend and CPU registers stay zero until actual FEX execution is
+// implemented and verified. A budget never implies an enforced FEX timeout.
+enum maxps4_v4_stop_reason {
+    MAXPS4_V4_INVALID_REQUEST = 1, MAXPS4_V4_NOT_INITIALIZED = 2,
+    MAXPS4_V4_STAGING_FAILED = 3, MAXPS4_V4_TRANSLATION_REQUIRED = 4
+};
+typedef struct maxps4_v4_synthetic_report {
+    int32_t status;
+    uint32_t stop_reason, cpu_valid, backend;
+    uint64_t rax, rip, rsp;
+    uint32_t code_rx, stack_rw_nx;
+} maxps4_v4_synthetic_report;
+// Fixed mov eax,42; hlt fixture, translated storage and mandatory direct
+// preflight. Returns -ENOTSUP after staging on initialized engines. Never
+// retries direct collisions using overwrite or dispatches through V3.
+int32_t maxps4_fex_engine_v4_synthetic(maxps4_fex_engine *engine,
+    uint32_t instruction_budget, maxps4_v4_synthetic_report *report);
 // Experimental V4 direct-memory preflight. Requires explicitly mapped V4 pages;
 // does not dispatch guest instructions or alter the V3 execution path.
 // Returns an error until a genuine FEX-direct guest mapping is admitted.
