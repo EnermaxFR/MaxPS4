@@ -200,5 +200,23 @@ int main() {
     CHECK(spanning.read(span_base+page-3,across_read,sizeof(across_read))==0);
     CHECK(std::memcmp(across,across_read,sizeof(across))==0);
     CHECK(spanning.release(span_base)==0);
+    // Instruction fetch across adjacent RX pages is allowed, but crossing
+    // into an NX stack must fail before any bytes are copied to the caller.
+    GuestAddressSpace fetch_pages;
+    const uint64_t fetch_base=0x600000000ULL;
+    CHECK(fetch_pages.reserve(fetch_base,3*page)==0);
+    const uint8_t tail_code[4]={0x90,0x90,0x90,0xf4};
+    CHECK(fetch_pages.map(fetch_base,page,5)==0);
+    CHECK(fetch_pages.map(fetch_base+page,page,5)==0);
+    CHECK(fetch_pages.map(fetch_base+2*page,page,6)==0);
+    uint8_t fetch_buffer[4]={0xaa,0xaa,0xaa,0xaa};
+    CHECK(fetch_pages.read(fetch_base+page-2,fetch_buffer,sizeof(fetch_buffer),true)==0);
+    CHECK(fetch_buffer[0]==0 && fetch_buffer[1]==0 &&
+          fetch_buffer[2]==0 && fetch_buffer[3]==0);
+    std::memset(fetch_buffer,0xaa,sizeof(fetch_buffer));
+    CHECK(fetch_pages.read(fetch_base+2*page-2,fetch_buffer,sizeof(fetch_buffer),true)==-EFAULT);
+    for (const auto byte : fetch_buffer) CHECK(byte==0xaa);
+    CHECK(fetch_pages.write(fetch_base+2*page,tail_code,sizeof(tail_code))==0);
+    CHECK(fetch_pages.release(fetch_base)==0);
     std::puts("PASS Orbis V4 isolated guest address-space checks");
 }
