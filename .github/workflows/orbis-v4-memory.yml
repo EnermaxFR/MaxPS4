@@ -2,14 +2,16 @@ name: Orbis V4 isolated memory checks
 on:
   workflow_dispatch:
   push:
-    branches: ['integration/orbis-v4-safe-staging']
+    branches: ['integration/orbis-v4-safe-staging', 'integration/orbis-v4-implementation']
     paths:
       - 'MaxPS4-iOS/Native/maxps4_guest_address_space.h'
+      - 'MaxPS4-iOS/Native/maxps4_orbis_v4_translation.h'
       - 'MaxPS4-iOS/Tests/OrbisV4AddressSpaceTest.cpp'
       - '.github/workflows/orbis-v4-memory.yml'
   pull_request:
     paths:
       - 'MaxPS4-iOS/Native/maxps4_guest_address_space.h'
+      - 'MaxPS4-iOS/Native/maxps4_orbis_v4_translation.h'
       - 'MaxPS4-iOS/Tests/OrbisV4AddressSpaceTest.cpp'
       - '.github/workflows/orbis-v4-memory.yml'
 permissions:
@@ -19,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15]
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
