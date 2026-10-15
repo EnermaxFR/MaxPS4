@@ -224,5 +224,30 @@ int main() {
     for (const auto byte : fetch_buffer) CHECK(byte==0xaa);
     CHECK(fetch_pages.write(fetch_base+2*page,tail_code,sizeof(tail_code))==0);
     CHECK(fetch_pages.release(fetch_base)==0);
+    // Atomic translated CAS: success, mismatch, alignment and permission faults.
+    GuestAddressSpace atomic_space;
+    const uint64_t atomic_base=0x700000000ULL;
+    CHECK(atomic_space.reserve(atomic_base,2*page)==0);
+    CHECK(atomic_space.map(atomic_base,page,6)==0);
+    CHECK(atomic_space.map(atomic_base+page,page,5)==0);
+    maxps4::OrbisV4MemoryBridge atomic_bridge(atomic_space);
+    const uint64_t initial=41;
+    CHECK(atomic_space.write(atomic_base,&initial,sizeof(initial))==0);
+    uint64_t expected=41;
+    bool exchanged=false;
+    CHECK(atomic_bridge.compare_exchange_guest<uint64_t>(atomic_base,expected,42,exchanged)==0);
+    CHECK(exchanged && expected==41);
+    expected=41;
+    CHECK(atomic_bridge.compare_exchange_guest<uint64_t>(atomic_base,expected,99,exchanged)==0);
+    CHECK(!exchanged && expected==42);
+    uint64_t actual=0;
+    CHECK(atomic_space.read(atomic_base,&actual,sizeof(actual))==0 && actual==42);
+    CHECK(atomic_bridge.compare_exchange_guest<uint64_t>(atomic_base+1,expected,99,exchanged)==-EINVAL);
+    CHECK(!exchanged);
+    CHECK(atomic_bridge.compare_exchange_guest<uint64_t>(atomic_base+page,expected,99,exchanged)==-EFAULT);
+    CHECK(!exchanged);
+    CHECK(atomic_bridge.compare_exchange_guest<uint64_t>(atomic_base+page-4,expected,99,exchanged)==-EINVAL);
+    CHECK(!exchanged);
+    CHECK(atomic_space.release(atomic_base)==0);
     std::puts("PASS Orbis V4 isolated guest address-space checks");
 }
