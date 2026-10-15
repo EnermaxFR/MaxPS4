@@ -30,6 +30,13 @@ public:
         if (!bytes || bytes > 15) return -EINVAL; // x86 instruction limit
         return memory_.read(guest,dst,bytes,true);
     }
+    // Decoder-facing fetch copies x86 instruction bytes from translated guest
+    // storage. It never exposes a guest VA as a host pointer. This is not a
+    // JIT load/store or atomic translation implementation.
+    int fetch_instruction(uint64_t guest, void* dst, size_t bytes) const {
+        if (!dst || !bytes || bytes > 15) return -EINVAL;
+        return memory_.read(guest,dst,bytes,true);
+    }
     int read_guest(uint64_t guest, void* dst, size_t bytes, bool instruction=false) const {
         return memory_.read(guest,dst,bytes,instruction);
     }
