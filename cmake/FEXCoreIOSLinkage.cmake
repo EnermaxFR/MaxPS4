@@ -47,6 +47,11 @@ function(maxps4_complete_fexcore_linkage)
     target_include_directories(maxps4-fex-runtime-test PRIVATE "${NATIVE}"
       "${CMAKE_SOURCE_DIR}/FEXCore/include" "${CMAKE_BINARY_DIR}/include")
     target_link_libraries(maxps4-fex-runtime-test PRIVATE MaxPS4FEXRuntime fmt::fmt)
+  add_executable(maxps4-fex-translation-test "${MAXPS4_ROOT}/MaxPS4-iOS/Tests/FEXGuestTranslationTest.cpp")
+  target_compile_features(maxps4-fex-translation-test PRIVATE cxx_std_23)
+  target_include_directories(maxps4-fex-translation-test PRIVATE "${NATIVE}" "${CMAKE_SOURCE_DIR}/Source")
+  target_sources(maxps4-fex-translation-test PRIVATE "${CMAKE_SOURCE_DIR}/Source/Common/HostFeatures.cpp" "${CMAKE_SOURCE_DIR}/Source/Common/CPUInfo.cpp")
+  target_link_libraries(maxps4-fex-translation-test PRIVATE FEXCore FEXCore_Base JemallocLibs fmt::fmt range-v3::range-v3)
     add_executable(maxps4-ps4-linked-test
       "${MAXPS4_ROOT}/MaxPS4-iOS/Tests/PS4FEXLinkedExecutionTest.cpp")
     target_compile_features(maxps4-ps4-linked-test PRIVATE cxx_std_23)

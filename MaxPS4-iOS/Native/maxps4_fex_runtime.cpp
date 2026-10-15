@@ -2,6 +2,7 @@
 #include "maxps4_fex_runtime.h"
 #include "maxps4_guest_stack.h"
 #include "maxps4_orbis_v4_execution_gate.h"
+#include "maxps4_orbis_v4_synthetic_stage.h"
 #include <algorithm>
 #include <iterator>
 #include "maxps4_jit_memory.h"
@@ -576,6 +577,42 @@ extern "C" int32_t maxps4_fex_engine_step_frame(maxps4_fex_engine* engine,
         return 0;
     } catch (const std::bad_alloc&) {
         engine->orbis_admitted = false; engine->frame = {}; return -ENOMEM;
+    }
+}
+extern "C" int32_t maxps4_fex_engine_v4_synthetic(maxps4_fex_engine* engine,
+    uint32_t instruction_budget, maxps4_v4_synthetic_report* report) {
+    if (!report) return -EINVAL;
+    *report = {};
+    auto fail = [&](int status, uint32_t reason) {
+        report->status = status; report->stop_reason = reason; return status;
+    };
+    if (!engine || instruction_budget < 2 || instruction_budget > 16)
+        return fail(-EINVAL,MAXPS4_V4_INVALID_REQUEST);
+    std::lock_guard lock(runtime_lock);
+    if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED)
+        return fail(-EAGAIN,MAXPS4_V4_NOT_INITIALIZED);
+    // Local ownership guarantees cleanup on every return and sequential retry.
+    // Do not mutate stable V3 image, probe callbacks or FEX code caches.
+    maxps4::GuestAddressSpace memory;
+    const size_t page = memory.page_size();
+    constexpr uint64_t entry = 0x300000000ULL;
+    constexpr uint8_t code[] = {0xb8,42,0,0,0,0xf4};
+    try {
+        const int staged = maxps4::stage_v4_synthetic_image(memory,entry,code,
+            sizeof(code),entry+page,page);
+        if (staged) return fail(staged,MAXPS4_V4_STAGING_FAILED);
+        report->code_rx = memory.translate(entry,sizeof(code),5) &&
+            !memory.translate(entry,1,2);
+        report->stack_rw_nx = memory.translate(entry+page,page,6) &&
+            !memory.translate(entry+page,1,1);
+        maxps4::OrbisV4ExecutionGate gate(memory);
+        const uint8_t *executable = nullptr, *stack = nullptr;
+        const int admitted = gate.preflight(entry,entry+page,page,executable,stack);
+        // No safe translated-memory FEX dispatcher exists in the pinned core.
+        // Even an unexpected admission must never be reported as CPU success.
+        return fail(admitted ? admitted : -ENOTSUP,MAXPS4_V4_TRANSLATION_REQUIRED);
+    } catch (const std::bad_alloc&) {
+        return fail(-ENOMEM,MAXPS4_V4_STAGING_FAILED);
     }
 }
 extern "C" int32_t maxps4_fex_engine_v4_preflight(maxps4_fex_engine* engine,

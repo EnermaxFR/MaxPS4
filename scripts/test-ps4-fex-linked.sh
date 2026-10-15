@@ -24,6 +24,8 @@ case "$(uname -m)" in
 esac
 python3 -B "$ROOT/MaxPS4-iOS/Tests/FEXDispatcherInitPatchTest.py" "$FEX"
 python3 -B "$ROOT/scripts/patch-fexcore-dispatcher-init.py" "$FEX"
+python3 -B "$ROOT/MaxPS4-iOS/Tests/FEXGuestTranslationPatchTest.py" "$FEX"
+python3 -B "$ROOT/scripts/patch-fexcore-memory-translation.py" "$FEX"
 cmake -S "$FEX" -B "$OUT" -G Ninja \
   -DCMAKE_C_COMPILER="${CC:-clang}" -DCMAKE_CXX_COMPILER="${CXX:-clang++}" \
   -DCMAKE_BUILD_TYPE=Debug -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
@@ -35,7 +37,8 @@ cmake -S "$FEX" -B "$OUT" -G Ninja \
   -DENABLE_FEX_ALLOCATOR=OFF -DENABLE_VIXL_DISASSEMBLER=OFF -DENABLE_ZYDIS=OFF \
   -DOVERRIDE_VERSION=MaxPS4-Linked -DOVERRIDE_HASH=f2b679f6028ce1c38875233aecfcf5d3f8ebecec \
   "${options[@]}" > "$OUT/configure.log" 2>&1
-cmake --build "$OUT" --target maxps4-ps4-linked-test --parallel "${MAXPS4_BUILD_JOBS:-3}" > "$OUT/build.log" 2>&1
+cmake --build "$OUT" --target maxps4-ps4-linked-test maxps4-fex-translation-test --parallel "${MAXPS4_BUILD_JOBS:-3}" > "$OUT/build.log" 2>&1
+python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/translation-tests.txt" "$OUT/Bin/maxps4-fex-translation-test"
 python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/ps4-linked-tests.txt" "$OUT/Bin/maxps4-ps4-linked-test"
 python3 "$ROOT/scripts/run-bounded.py" 10 "$OUT/fixture-export.txt" "$OUT/Bin/maxps4-ps4-linked-test" \
   "$OUT/ps4-libkernel-demo.elf" "$OUT/ps4-libkernel-combined.elf"

@@ -24,7 +24,7 @@ jobs:
       - name: Preserve restricted ELF, libkernel and guest memory regressions
         run: bash scripts/test-ps4-system-services.sh
   swift-arm64:
-    runs-on: macos-15
+    runs-on: macos-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4

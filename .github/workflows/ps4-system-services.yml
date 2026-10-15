@@ -2,6 +2,8 @@ name: PS4 system services
 on:
   pull_request:
     paths:
+      - 'patches/fexcore-guest-memory.patch'
+      - 'MaxPS4-iOS/Tests/FEXGuestTranslationTest.cpp'
       - 'MaxPS4-iOS/Native/PS4PFS*'
       - 'MaxPS4-iOS/Native/PS4PKG*'
       - 'MaxPS4-iOS/Tests/PS4PFS*'
@@ -20,6 +22,8 @@ on:
   push:
     branches: ['codex/ps4-memory-translation-contract']
     paths:
+      - 'patches/fexcore-guest-memory.patch'
+      - 'MaxPS4-iOS/Tests/FEXGuestTranslationTest.cpp'
       - 'MaxPS4-iOS/Native/PS4PFS*'
       - 'MaxPS4-iOS/Native/PS4PKG*'
       - 'MaxPS4-iOS/Tests/PS4PFS*'

@@ -3,6 +3,8 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      - 'patches/fexcore-guest-memory.patch'
+      - 'MaxPS4-iOS/Tests/FEXGuestTranslationTest.cpp'
       - 'MaxPS4-iOS/**'
       - 'experimental/orbis-v3-staging/**'
       - 'scripts/build-orbis-test-ipa.sh'
@@ -11,7 +13,7 @@ permissions:
   contents: read
 jobs:
   orbis-test-ipa:
-    runs-on: macos-15
+    runs-on: macos-latest
     timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4

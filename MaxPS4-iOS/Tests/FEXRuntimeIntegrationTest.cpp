@@ -131,6 +131,26 @@ static int systemServices(maxps4_fex_engine* engine) {
     std::puts("PASS staged libkernel VFS, virtual memory and clock bridge; no guest CPU dispatch");
     return 0;
 }
+static int v4Synthetic(maxps4_fex_engine* engine, bool initialized) {
+    maxps4_v4_synthetic_report report{};
+    CHECK(maxps4_fex_engine_v4_synthetic(engine,2,nullptr)==-EINVAL);
+    CHECK(maxps4_fex_engine_v4_synthetic(nullptr,2,&report)==-EINVAL);
+    CHECK(report.stop_reason==MAXPS4_V4_INVALID_REQUEST && report.status==-EINVAL);
+    for (uint32_t budget : {0U,1U,17U,UINT32_MAX}) {
+        CHECK(maxps4_fex_engine_v4_synthetic(engine,budget,&report)==-EINVAL);
+        CHECK(!report.cpu_valid && !report.rax && !report.rip && !report.rsp && !report.backend);
+    }
+    for (int run=0; run<3; ++run) {
+        std::memset(&report,0xff,sizeof(report));
+        const int expected = initialized ? -ENOTSUP : -EAGAIN;
+        CHECK(maxps4_fex_engine_v4_synthetic(engine,2,&report)==expected);
+        CHECK(report.status==expected);
+        CHECK(report.stop_reason==uint32_t(initialized ? MAXPS4_V4_TRANSLATION_REQUIRED : MAXPS4_V4_NOT_INITIALIZED));
+        CHECK(!report.cpu_valid && !report.rax && !report.rip && !report.rsp && !report.backend);
+        CHECK(report.code_rx==uint32_t(initialized) && report.stack_rw_nx==uint32_t(initialized));
+    }
+    return 0;
+}
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::puts("BEGIN native ABI and real FEX context lifecycle test");
@@ -177,6 +197,7 @@ int main() {
         CHECK(maxps4_fex_engine_stage(first) == MAXPS4_FEX_CONTEXT_CREATED);
         CHECK(systemServices(first) == 0);
         CHECK(stagedCPU(first, false) == 0);
+        CHECK(v4Synthetic(first, false) == 0);
         auto not_initialized = guest_test::elf();
         uint64_t pending_entry = 99;
         CHECK(maxps4_fex_engine_run_elf(first, not_initialized.data(), not_initialized.size(), 3,
@@ -195,6 +216,7 @@ int main() {
         CHECK(maxps4_fex_engine_initialize(first) == 0);
         CHECK(maxps4_fex_engine_initialize(second) == 0);
         std::puts("PASS real InitCore dispatcher initialized twice without reallocation");
+        CHECK(v4Synthetic(first, true) == 0);
         CHECK(stagedCPU(first, true) == 0);
 #endif
 #if !TARGET_OS_IPHONE
