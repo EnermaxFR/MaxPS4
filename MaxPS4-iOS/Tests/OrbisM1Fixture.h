@@ -3,9 +3,10 @@
 #include "../Native/maxps4_orbis_m1.h"
 
 namespace orbis_m1_fixture {
-// Keep fixture VAs outside the macOS ARM64 GPU carve-out at 64..448 GiB.
+// Finite direct fixture at 8 GiB, below the macOS GPU carve-out and 48 TiB.
+// Device VM/JIT admission is still required; this is not general VA translation.
 // The direct backend must reject a collision, never move an ELF behind its pointers.
-constexpr uint64_t bias = 0x300000000000ULL;
+constexpr uint64_t bias = maxps4::OrbisM1::heap_base-0x800000;
 constexpr uint64_t entry = bias+maxps4_ps4_synthetic::entry;
 constexpr uint64_t data = bias+maxps4_ps4_synthetic::data;
 constexpr uint64_t snapshot = data+0x100;

@@ -141,7 +141,7 @@ jobs:
             -L build/fex-app-host -lMaxPS4FEXRuntime \
             -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" \
             -o build/fex-app-host/orbis-v2-swift-test
-          python3 scripts/run-bounded.py 30 build/diagnostics/orbis-v2-swift.txt build/fex-app-host/orbis-v2-swift-test
+          python3 scripts/run-bounded.py 30 build/diagnostics/orbis-v2-swift.txt build/fex-app-host/orbis-v2-swift-test build/fex-app-host/m1-bundle
       - name: Test playable guest pixels through real Swift import and native display
         timeout-minutes: 3
         shell: bash

@@ -20,6 +20,11 @@ struct OrbisV2SwiftBridgeTest {
         precondition(tests.components(separatedBy: "fixture_verified=true").count == 5)
         precondition(tests.components(separatedBy: "cpu_state_verified=true").count == 5)
         precondition(tests.contains("wx_refused=true") && tests.contains("truncated_refused=true"))
+        precondition(CommandLine.arguments.count == 2)
+        let m1 = MaxPS4OrbisTest.m1Autotests(bundleDirectory: URL(fileURLWithPath: CommandLine.arguments[1]))
+        print(m1)
+        precondition(m1.contains("m1_threads=PASS") && m1.contains("m1_multi_module_tls=PASS"))
+        precondition(m1.contains("budget_refusal=PASS"))
         print(tests)
         print("PASS V3 real Swift/C snapshot validation, legal fixture SHA256, W+X refusal, redacted export; real host FEX 42/9 and CPU state verified; no iPhone execution")
     }
