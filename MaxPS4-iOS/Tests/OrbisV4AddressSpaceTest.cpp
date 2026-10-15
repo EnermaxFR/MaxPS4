@@ -103,6 +103,13 @@ int main() {
                                            staged_base+staged_page,staged_page)==-ENOTSUP);
     CHECK(direct_space.allocated()==0);
 
+    CHECK(maxps4::stage_v4_synthetic_image(staged,UINT64_MAX,code,sizeof(code),
+                                           staged_base+staged_page,staged_page)==-EINVAL);
+    CHECK(maxps4::stage_v4_synthetic_image(staged,staged_base,code,staged_page+1,
+                                           staged_base+staged_page,staged_page)==-EINVAL);
+    CHECK(maxps4::stage_v4_synthetic_image(staged,staged_base,code,sizeof(code),
+                                           staged_base+staged_page,0)==-EINVAL);
+    CHECK(staged.allocated()==0);
     CHECK(maxps4::stage_v4_synthetic_image(staged,staged_base,nullptr,sizeof(code),
                                            staged_base+staged_page,staged_page)==-EINVAL);
     CHECK(maxps4::stage_v4_synthetic_image(staged,staged_base,code,sizeof(code),
