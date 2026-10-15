@@ -84,7 +84,7 @@ public:
                 // Preserve fail-closed semantics; never retry with overwrite or
                 // silently relocate memory while FEX uses direct addressing.
                 std::fprintf(stderr,
-                    "M1 direct VM reservation declined: guest=0x%llx guard_base=0x%llx bytes=0x%zx kern_return=%d\\n",
+                    "M1 direct VM reservation declined: guest=0x%llx guard_base=0x%llx bytes=0x%zx kern_return=%d\n",
                     static_cast<unsigned long long>(address),
                     static_cast<unsigned long long>(low), bytes, static_cast<int>(status));
                 return status == KERN_NO_SPACE ? -EADDRINUSE : -ENOMEM;
