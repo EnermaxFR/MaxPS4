@@ -1,3 +1,4 @@
+#include <FEXCore/Utils/LogManager.h>
 #include "maxps4_fex_runtime.h"
 #include "maxps4_native.h"
 #include "GuestELFFixture.h"
@@ -152,6 +153,12 @@ static int v4Synthetic(maxps4_fex_engine* engine, bool initialized) {
     return 0;
 }
 int main() {
+    // Keep assertion text visible when the pinned emitter terminates a check.
+    LogMan::Throw::InstallHandler([](const char* text) { std::fprintf(stderr,"FEX assertion: %s\n",text); });
+    LogMan::Msg::InstallHandler([](LogMan::DebugLevels level,const char* text) {
+        if (level<=LogMan::ERROR) std::fprintf(stderr,"FEX error: %s\n",text);
+    });
+
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::puts("BEGIN native ABI and real FEX context lifecycle test");
     // Same allocator implementation embedded in the native runtime. These

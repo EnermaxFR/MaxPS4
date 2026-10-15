@@ -1,3 +1,4 @@
+#include <FEXCore/Utils/LogManager.h>
 #include "GuestELFFixture.h"
 #include "OrbisM1Fixture.h"
 #include "../Native/maxps4_fex_runtime.h"
@@ -230,6 +231,12 @@ static int m1Test() {
     return 0;
 }
 int main(int argc, char** argv) {
+    // Keep assertion text visible when the pinned emitter terminates a check.
+    LogMan::Throw::InstallHandler([](const char* text) { std::fprintf(stderr,"FEX assertion: %s\n",text); });
+    LogMan::Msg::InstallHandler([](LogMan::DebugLevels level,const char* text) {
+        if (level<=LogMan::ERROR) std::fprintf(stderr,"FEX error: %s\n",text);
+    });
+
     if (argc == 2 && !std::strcmp(argv[1],"--m2")) {
         CHECK(maxps4_fex_test_m2_low_va(nullptr)==-EINVAL);
         for (unsigned i=0;i<3;++i) {

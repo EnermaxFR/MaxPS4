@@ -1,3 +1,4 @@
+#include <FEXCore/Utils/LogManager.h>
 #include "maxps4_orbis_v4_translation.h"
 #include "Common/HostFeatures.h"
 #include <FEXCore/Config/Config.h>
@@ -38,6 +39,12 @@ public:
     std::optional<FEXCore::ExecutableFileSectionInfo> LookupExecutableFileSection(FEXCore::Core::InternalThreadState*,uint64_t) override { return {}; }
 };
 int main() {
+    // Keep assertion text visible when the pinned emitter terminates a check.
+    LogMan::Throw::InstallHandler([](const char* text) { std::fprintf(stderr,"FEX assertion: %s\n",text); });
+    LogMan::Msg::InstallHandler([](LogMan::DebugLevels level,const char* text) {
+        if (level<=LogMan::ERROR) std::fprintf(stderr,"FEX error: %s\n",text);
+    });
+
     FEXCore::Config::Initialize(); FEXCore::Config::Load();
     FEXCore::Config::Set(FEXCore::Config::CONFIG_IS64BIT_MODE,"1");
     FEXCore::Config::Set(FEXCore::Config::CONFIG_DISABLETELEMETRY,"1");
@@ -46,6 +53,7 @@ int main() {
     FEXCore::Config::Set(FEXCore::Config::CONFIG_DISABLE_VIXL_INDIRECT_RUNTIME_CALLS,"0");
 #endif
     for (bool lse : {false,true}) {
+        std::fprintf(stderr,"BEGIN translated FEX lse=%d\n",lse);
         auto features=FEX::FetchHostFeatures();
 #if !defined(VIXL_SIMULATOR)
         if (lse && !features.SupportsAtomics) continue;
@@ -104,6 +112,7 @@ int main() {
         stage({0x48,0xbf,0,0,0,0,4,0,0,0, 0x48,0xc7,0x47,8,21,0,0,0,
                0x48,0x8b,0x47,8, 0xf0,0x48,0x0f,0xc1,0x47,8,
                0xf3,0x0f,0x6f,0x47,8, 0xf3,0x0f,0x7f,0x47,32, 0x8b,0x47,32,0xf4});
+        std::fprintf(stderr,"BEGIN translated scalar/vector/atomic execution\n");
         CHECK(run(code)==42);
         CHECK(run(code,false,true)==42);
         CHECK(run(code)==42); // cached code, same immutable mapping snapshot
