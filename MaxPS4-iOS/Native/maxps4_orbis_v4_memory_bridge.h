@@ -3,7 +3,6 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
-#include <atomic>
 #include <type_traits>
 
 namespace maxps4 {
@@ -58,7 +57,7 @@ public:
     template<class T>
     int compare_exchange_guest(uint64_t guest, T& expected, T desired,
                                bool& exchanged) {
-        static_assert(std::is_integral_v<T> &&
+        static_assert(std::is_integral_v<T> && !std::is_same_v<T,bool> &&
                       (sizeof(T) == 1 || sizeof(T) == 2 ||
                        sizeof(T) == 4 || sizeof(T) == 8),
                       "Only native 8/16/32/64-bit integer atomics supported");
@@ -72,15 +71,17 @@ public:
         const uint8_t* ptr = nullptr;
         const int status = resolve_operand(guest,sizeof(T),6,ptr);
         if (status) return status;
-        // atomic_ref may require stronger alignment than the C++ value type.
-        // Never construct it on an insufficiently aligned host address.
-        if (reinterpret_cast<uintptr_t>(ptr) % std::atomic_ref<T>::required_alignment)
+        // Clang/GCC atomics operate on the mapped integer storage without
+        // requiring C++20 atomic_ref or constructing an atomic<T> over guest
+        // bytes. Reject targets that would call a locking runtime fallback.
+        static_assert(__atomic_always_lock_free(sizeof(T), nullptr),
+                      "Guest CAS requires native lock-free atomics");
+        if (reinterpret_cast<uintptr_t>(ptr) % sizeof(T))
             return -EINVAL;
         auto* typed = reinterpret_cast<T*>(const_cast<uint8_t*>(ptr));
         // No software load/store fallback: preserve hardware atomicity.
-        std::atomic_ref<T> atom(*typed);
-        exchanged = atom.compare_exchange_strong(expected,desired,
-                         std::memory_order_seq_cst,std::memory_order_seq_cst);
+        exchanged = __atomic_compare_exchange_n(typed,&expected,desired,false,
+                                                __ATOMIC_SEQ_CST,__ATOMIC_SEQ_CST);
         return 0;
     }
 private:

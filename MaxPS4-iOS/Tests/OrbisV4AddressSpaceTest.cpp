@@ -6,7 +6,35 @@
 #include <cstdlib>
 #include <cstring>
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); std::exit(1); } } while (0)
+template<class T> void check_cas_width() {
+    maxps4::GuestAddressSpace memory;
+    const size_t page=memory.page_size();
+    const uint64_t base=0x710000000ULL;
+    CHECK(memory.reserve(base,page)==0);
+    CHECK(memory.map(base,page,6)==0);
+    maxps4::OrbisV4MemoryBridge bridge(memory);
+    const uint64_t address=base+page-sizeof(T);
+    T expected=0;
+    bool exchanged=false;
+    CHECK(bridge.compare_exchange_guest<T>(address,expected,T{37},exchanged)==0);
+    CHECK(exchanged && expected==0);
+    CHECK(bridge.compare_exchange_guest<T>(address,expected,T{99},exchanged)==0);
+    CHECK(!exchanged && expected==37);
+    T actual=0;
+    CHECK(memory.read(address,&actual,sizeof(actual))==0 && actual==37);
+    CHECK(memory.protect(base,page,2)==0); // Write permission alone is insufficient.
+    expected=37;
+    CHECK(bridge.compare_exchange_guest<T>(address,expected,T{99},exchanged)==-EFAULT);
+    CHECK(!exchanged && expected==37);
+    CHECK(memory.release(base)==0);
+    CHECK(bridge.compare_exchange_guest<T>(address,expected,T{99},exchanged)==-EFAULT);
+    CHECK(!exchanged && expected==37);
+}
 int main() {
+    check_cas_width<uint8_t>();
+    check_cas_width<uint16_t>();
+    check_cas_width<uint32_t>();
+    check_cas_width<uint64_t>();
     using maxps4::GuestAddressSpace;
     GuestAddressSpace space;
     const size_t page=space.page_size();
