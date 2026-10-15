@@ -74,6 +74,11 @@ int main() {
     CHECK(memory.write_span(base+page-2,across,sizeof(across))==0);
     CHECK(memory.read(base+page-2,result_bytes,sizeof(result_bytes))==0);
     for (size_t i=0;i<sizeof(across);++i) CHECK(result_bytes[i]==across[i]);
+    CHECK(memory.protect(base+page,page,0)==0);
+    uint8_t blocked_read[4]={0xa5,0xa5,0xa5,0xa5};
+    CHECK(memory.read(base+page-2,blocked_read,sizeof(blocked_read))==-EFAULT);
+    for (const auto byte : blocked_read) CHECK(byte==0xa5);
+    CHECK(memory.protect(base+page,page,6)==0);
     CHECK(memory.protect(base+page,page,4)==0);
     const uint8_t replacement[4]={1,1,1,1};
     CHECK(memory.write_span(base+page-2,replacement,sizeof(replacement))==-EFAULT);
