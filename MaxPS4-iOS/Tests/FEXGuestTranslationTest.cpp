@@ -74,6 +74,7 @@ int main() {
                 CHECK(r.guest!=r.host);
                 space.ranges.push_back({alias && r.guest==code+3*page ? code+page : r.guest,r.host,r.size,r.permissions});
             }
+            observed.fs_cached=data; observed.gs_cached=data;
             observed.rip=entry; observed.gregs[FEXCore::X86State::REG_RSP]=data+2048;
             observed.callret_sp=reinterpret_cast<uintptr_t>(callret.data())+callret.size()/4;
             ctx->ExecuteThread(current);
@@ -141,6 +142,15 @@ int main() {
             bytes=address; bytes.insert(bytes.end(),{0xf0,0x48,0xf7,0x1f,0x48,0x8b,0x07,0xf4});
             replace(bytes); CHECK(run(code)==uint64_t(-42)); verify(uint64_t(-42));
         }
+        {   // Effective addresses retain guest TLS bases and signed/scaled offsets.
+            uint64_t value=42; CHECK(memory.write(data+8,&value,8)==0);
+            replace({0x64,0x8b,0x04,0x25,8,0,0,0,0xf4}); CHECK(run(code)==42);
+            replace({0x65,0x8b,0x04,0x25,8,0,0,0,0xf4}); CHECK(run(code)==42);
+            auto bytes=address; bytes[2]=16;
+            bytes.insert(bytes.end(),{0x8b,0x47,0xf8,0xf4}); replace(bytes); CHECK(run(code)==42);
+            bytes=address; bytes.insert(bytes.end(),{0xb9,2,0,0,0,0x8b,0x04,0x8f,0xf4});
+            replace(bytes); CHECK(run(code)==42);
+        }
         // A translated load between CMP and SETZ must preserve guest NZCV.
         auto flags=address;
         flags.insert(flags.end(),{0x31,0xc0,0x39,0xc0,0x8b,0x0f,0x0f,0x94,0xc0,0x0f,0xb6,0xc0,0xf4});
@@ -189,8 +199,8 @@ int main() {
     }
     FEXCore::Config::Shutdown();
 #if defined(VIXL_SIMULATOR)
-    std::puts("PASS translated FEX decoder/scalar/vector/TSO/atomic/remap/lease; backend=ARM64 simulator (not device)");
+    std::puts("PASS translated FEX decoder/scalar/vector/TSO/atomic/TLS/remap/lease; backend=ARM64 simulator (not device)");
 #else
-    std::puts("PASS translated FEX decoder/scalar/vector/TSO/atomic/remap/lease; backend=native ARM64 (not iPhone)");
+    std::puts("PASS translated FEX decoder/scalar/vector/TSO/atomic/TLS/remap/lease; backend=native ARM64 (not iPhone)");
 #endif
 }

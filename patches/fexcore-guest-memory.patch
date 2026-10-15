@@ -418,7 +418,7 @@ index 3e01eeb7..d1ae3e3a 100644
    ARMEmitter::ExtendedMemOperand GenerateMemOperand(IR::OpSize AccessSize, ARMEmitter::Register Base, IR::OrderedNodeWrapper Offset,
                                                      IR::MemOffsetType OffsetType, uint8_t OffsetScale);
 diff --git a/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp b/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
-index 849df0f2..f2a5a845 100644
+index 849df0f2..7c0ab642 100644
 --- a/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
 +++ b/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
 @@ -15,7 +15,51 @@ $end_info$
@@ -440,7 +440,7 @@ index 849df0f2..f2a5a845 100644
 +  const auto Dst = GetReg(Node);
 +  // Compute the complete effective address BEFORE translating; offsets and TLS
 +  // bases remain in the guest domain. Dst is a normal RA-owned SSA value.
-+  const auto EA = ApplyMemOperand(IR::OpSize::i64Bit, GetReg(Addr), TMP1,
++  const auto EA = ApplyMemOperand(static_cast<IR::OpSize>(Scale), GetReg(Addr), TMP1,
 +                                 Offset, OffsetType, Scale);
 +  mov(ARMEmitter::Size::i64Bit, TMP2, EA);
 +  mrs(TMP4, ARMEmitter::SystemRegister::NZCV);

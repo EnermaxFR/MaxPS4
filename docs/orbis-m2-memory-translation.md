@@ -45,6 +45,27 @@ hôtes Linux/macOS, sous timeout externe. Sur x86, le simulateur ARM64 VIXL est
 explicitement identifié, avec sa limitation connue des moniteurs exclusifs.
 Il ne démontre pas les propriétés de concurrence du matériel ARM64.
 
+Résultats locaux (Linux x86_64, Clang 19.1.7, FEX épinglé + VIXL épinglé) :
+
+- Suite liée complète `scripts/test-ps4-fex-linked.sh` : succès, comprenant la
+  nouvelle traduction et les régressions libkernel/framebuffer existantes.
+- Nouvelle suite : CAS et XADD 8/16/32/64 bits (succès/mismatch), CASPair 64/128,
+  swap, opérations ALU verrouillées et NEG, NZCV, FS/GS, offsets négatifs et
+  indexés, remplacement de code, deux caches de threads, fetch entre mappings
+  non contigus et cible de multiblock ; chemins LSE et exclusifs exécutés.
+- Tests mémoire V4 C++17 stricts : succès. ASan/UBSan : succès local avec
+  `detect_leaks=0` ; aucune preuve locale LeakSanitizer n'est revendiquée.
+- Une première configuration avec GCC a échoué : FEX impose Clang. La relance
+  utilise Clang 19 extrait dans le workspace. Un lancement local concurrent de
+  builds a aussi échoué avec `Text file busy` ; le script complet a ensuite été
+  relancé séquentiellement avec succès.
+- La tentative locale de compilation iOS échoue explicitement avec code 127 :
+  `xcrun: command not found`. Cet hôte Linux ne possède pas Xcode/SDK iOS.
+- Les workflows mémoire V4, services/FEX, liaison Darwin/iOS et IPA SideStore
+  ont été déclenchés sur la branche expérimentale. Au premier contrôle, leurs
+  jobs sont `queued`, sans étape exécutée ; aucun résultat CI/IPA de ce nouveau
+  patch n'est encore acquis. Les liens/résultats finaux sont consignés dans la PR.
+
 **Limites :** le raccordement au runtime M2 public reste désactivé, car ses
 chemins mémoire généraux et ses fautes ne sont pas encore tous couverts. L'API
 synthétique existante conserve son refus `TRANSLATION_REQUIRED`. Cette étape

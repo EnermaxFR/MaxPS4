@@ -7,12 +7,14 @@ on:
       - 'MaxPS4-iOS/Native/maxps4_guest_address_space.h'
       - 'MaxPS4-iOS/Native/maxps4_orbis_v4_*.h'
       - 'MaxPS4-iOS/Tests/OrbisV4AddressSpaceTest.cpp'
+      - 'MaxPS4-iOS/Tests/OrbisV4TranslationTest.cpp'
       - '.github/workflows/orbis-v4-memory.yml'
   pull_request:
     paths:
       - 'MaxPS4-iOS/Native/maxps4_guest_address_space.h'
       - 'MaxPS4-iOS/Native/maxps4_orbis_v4_*.h'
       - 'MaxPS4-iOS/Tests/OrbisV4AddressSpaceTest.cpp'
+      - 'MaxPS4-iOS/Tests/OrbisV4TranslationTest.cpp'
       - '.github/workflows/orbis-v4-memory.yml'
 permissions:
   contents: read
@@ -29,12 +31,15 @@ jobs:
       - name: Build and run isolated guest address-space regression
         run: |
           mkdir -p build/orbis-v4
-          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -I MaxPS4-iOS/Native \
-            MaxPS4-iOS/Tests/OrbisV4AddressSpaceTest.cpp \
-            -o build/orbis-v4/address-space-test
-          build/orbis-v4/address-space-test
+          for suite in OrbisV4AddressSpaceTest OrbisV4TranslationTest; do
+            c++ -std=c++17 -pthread -Wall -Wextra -Werror -pedantic -I MaxPS4-iOS/Native \
+              "MaxPS4-iOS/Tests/$suite.cpp" -o "build/orbis-v4/$suite"
+            "build/orbis-v4/$suite"
+          done
       - name: Run translated memory checks with sanitizers
         run: |
-          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer \
-            MaxPS4-iOS/Tests/OrbisV4AddressSpaceTest.cpp -o build/orbis-v4/address-space-sanitized
-          build/orbis-v4/address-space-sanitized
+          for suite in OrbisV4AddressSpaceTest OrbisV4TranslationTest; do
+            c++ -std=c++17 -pthread -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer \
+              "MaxPS4-iOS/Tests/$suite.cpp" -o "build/orbis-v4/$suite-sanitized"
+            "build/orbis-v4/$suite-sanitized"
+          done
