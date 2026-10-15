@@ -192,6 +192,15 @@ int main() {
             for(auto r:lease.ranges()) space.ranges.push_back({r.guest,r.host,r.size,r.permissions});
             uint8_t byte=0; CHECK(!space.ReadGuestInstruction(code,&byte,1));
         }
+        CHECK(memory.protect(code,page,0)==0);
+        {
+            auto lease=memory.lease(); space.ranges.clear();
+            for(auto r:lease.ranges()) space.ranges.push_back({r.guest,r.host,r.size,r.permissions});
+            uint8_t byte=0x59; CHECK(!space.ReadGuestInstruction(code,&byte,1));
+            CHECK(byte==0x59);
+            const uint8_t* host=reinterpret_cast<const uint8_t*>(1);
+            CHECK(lease.resolve_contiguous(code,1,5,host)==-EFAULT && !host);
+        }
         CHECK(memory.protect(code,page,5)==0); CHECK(run(code)==99);
         CHECK(memory.release(code)==0);
         // Decoder crosses two adjacent guest pages backed by independent host reservations.

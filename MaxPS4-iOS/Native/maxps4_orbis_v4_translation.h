@@ -20,6 +20,9 @@ public:
     public:
         explicit Lease(OrbisV4Translation& owner) : owner_(owner), lock_(owner.mutex_) {
             for (const auto& r : owner_.memory_.regions()) {
+                // PROT_NONE is a valid protection state, not corrupt metadata.
+                // Omit inaccessible ranges so native resolution faults safely.
+                if (!r.permissions) continue;
                 const auto* host = owner_.memory_.translate(r.address,r.size,r.permissions);
                 if (!host) throw std::runtime_error("Inconsistent guest mapping");
                 ranges_.push_back({r.address,reinterpret_cast<uintptr_t>(host),r.size,r.permissions});
@@ -84,3 +87,4 @@ private:
     GuestAddressSpace memory_;
 };
 }
+

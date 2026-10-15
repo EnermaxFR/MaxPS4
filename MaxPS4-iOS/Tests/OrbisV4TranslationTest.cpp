@@ -43,10 +43,28 @@ int main() {
     CHECK(invalidations.load()==before+1);
     { auto lease=memory.lease(); CHECK(lease.ranges().empty()); CHECK(!lease.memory().translate(base,1,6)); }
     CHECK(memory.reserve(base,page)==0); CHECK(memory.map(base,page,6)==0);
+    CHECK(memory.write(base,&value,1)==0);
     CHECK(memory.protect(base,page,4)==0);
     { auto lease=memory.lease(); CHECK(!lease.memory().translate(base,1,2)); CHECK(lease.memory().translate(base,1,4)); }
+    // A revoked mapping must remain leasable, and fault without leaking an
+    // old host pointer. Restoring permissions must make the same VA usable.
+    CHECK(memory.protect(base,page,0)==0);
+    {
+        auto lease=memory.lease();
+        CHECK(lease.ranges().empty());
+        const uint8_t* host=reinterpret_cast<const uint8_t*>(1);
+        CHECK(lease.resolve_contiguous(base,1,4,host)==-EFAULT && !host);
+        uint8_t unchanged=0x59;
+        CHECK(lease.memory().read(base,&unchanged,1)==-EFAULT && unchanged==0x59);
+    }
     CHECK(memory.protect(base,page,6)==0);
+    {
+        auto lease=memory.lease();
+        const uint8_t* host=nullptr;
+        CHECK(lease.resolve_contiguous(base,1,4,host)==0 && host && *host==42);
+    }
     CHECK(memory.write(base,&value,1)==0); memory.clear();
     { auto lease=memory.lease(); CHECK(lease.ranges().empty()); }
     std::puts("PASS translation leases, invalidation-before-mutation, failed invalidation rollback, protection, release and reuse");
 }
+
