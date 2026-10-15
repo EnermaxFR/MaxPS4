@@ -4,6 +4,8 @@
 Use a regular log file: an inherited pipe in a diagnostic subprocess must not
 keep tee/communicate waiting after the check itself has exited.
 """
+import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -25,9 +27,21 @@ def main():
         except subprocess.TimeoutExpired:
             output.write(f"\nFAIL: deadline exceeded ({seconds:g} seconds); child terminated\n")
             status = 124
-    print(path.read_text(errors="replace"), end="", flush=True)
+    captured = path.read_text(errors="replace")
+    print(captured, end="", flush=True)
+    # Fatal test diagnostics retain module-relative PCs even for PIE binaries.
+    # Resolve a bounded backtrace using standard binutils when CI provides it.
+    resolver = shutil.which("addr2line")
+    offsets = re.findall(r"\(\+(0x[0-9a-fA-F]+)\)", captured)
+    if status and resolver and offsets:
+        try:
+            subprocess.run([resolver, "-f", "-C", "-e", sys.argv[3], *offsets[:24]],
+                           timeout=10, check=False)
+        except subprocess.TimeoutExpired:
+            print("Native backtrace symbolization exceeded 10 seconds", flush=True)
     return status
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
