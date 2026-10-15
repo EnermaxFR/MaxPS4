@@ -1,4 +1,4 @@
-#include "../Native/maxps4_orbis_v4_memory_bridge.h"
+#include "../Native/maxps4_orbis_v4_execution_gate.h"
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -15,6 +15,14 @@ int main() {
     CHECK(space.reserve(base,2*page)==-EEXIST);
     CHECK(space.map(base,page,6)==0);
     maxps4::OrbisV4MemoryBridge bridge(space);
+    maxps4::OrbisV4ExecutionGate gate(space);
+    const uint8_t* executable=nullptr;
+    const uint8_t* writable_stack=nullptr;
+    CHECK(gate.preflight(base,base+page,page,executable,writable_stack)==-ENOTSUP);
+    CHECK(executable==nullptr && writable_stack==nullptr);
+    CHECK(gate.preflight(base,UINT64_MAX,page,executable,writable_stack)==-EOVERFLOW);
+    CHECK(executable==nullptr && writable_stack==nullptr);
+    CHECK(gate.preflight(0,base,page,executable,writable_stack)==-EINVAL);
     const uint8_t* direct=nullptr;
     CHECK(bridge.admit_fex_direct(base,1,4,direct)==-ENOTSUP);
     CHECK(direct==nullptr);
