@@ -27,6 +27,26 @@ public:
         }
         const std::vector<Range>& ranges() const { return ranges_; }
         const GuestAddressSpace& memory() const { return owner_.memory_; }
+        // Resolve only complete operands in one contiguous translated mapping.
+        // The lease keeps host storage and permissions stable for the caller.
+        // A split operand must take an explicit slow path, never a raw JIT load.
+        int resolve_contiguous(uint64_t guest, size_t bytes, uint32_t permissions,
+                               const uint8_t*& host) const {
+            host = nullptr;
+            if (!bytes || !permissions || (permissions & ~7U) ||
+                (permissions & 3U) == 3U || guest > UINT64_MAX - bytes)
+                return -EINVAL;
+            for (const auto& r : ranges_) {
+                if (guest < r.guest || guest - r.guest >= r.size) continue;
+                const uint64_t offset = guest - r.guest;
+                if (bytes > r.size - offset || (r.permissions & permissions) != permissions)
+                    return -EFAULT;
+                if (r.host > UINT64_MAX - offset) return -EFAULT;
+                host = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(r.host + offset));
+                return 0;
+            }
+            return -EFAULT;
+        }
     private:
         OrbisV4Translation& owner_;
         std::unique_lock<std::mutex> lock_;
