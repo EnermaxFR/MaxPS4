@@ -248,6 +248,14 @@ int main() {
     CHECK(!exchanged);
     CHECK(atomic_bridge.compare_exchange_guest<uint64_t>(atomic_base+page-4,expected,99,exchanged)==-EINVAL);
     CHECK(!exchanged);
+    // Aligned 64-bit CAS at the last valid slot of a guest page.
+    expected=0;
+    CHECK(atomic_bridge.compare_exchange_guest<uint64_t>(atomic_base+page-sizeof(uint64_t),expected,7,exchanged)==0);
+    CHECK(exchanged);
+    CHECK(atomic_space.protect(atomic_base,page,4)==0);
+    expected=42;
+    CHECK(atomic_bridge.compare_exchange_guest<uint64_t>(atomic_base,expected,99,exchanged)==-EFAULT);
+    CHECK(!exchanged);
     CHECK(atomic_space.release(atomic_base)==0);
     std::puts("PASS Orbis V4 isolated guest address-space checks");
 }
