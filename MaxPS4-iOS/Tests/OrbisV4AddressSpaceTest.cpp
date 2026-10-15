@@ -178,5 +178,24 @@ int main() {
         CHECK(life.read(base,unchanged,2)==-EFAULT);
         CHECK(life.release(base)==0 && life.allocated()==0);
     }
+    // A translated access spanning two separately mapped RW pages must preserve
+    // guest ordering. A later permission downgrade must reject the whole write.
+    GuestAddressSpace spanning;
+    const uint64_t span_base = 0x500000000ULL;
+    CHECK(spanning.reserve(span_base,2*page)==0);
+    CHECK(spanning.map(span_base,page,6)==0);
+    CHECK(spanning.map(span_base+page,page,6)==0);
+    const uint8_t across[6]={11,22,33,44,55,66};
+    uint8_t across_read[6]={};
+    CHECK(spanning.write(span_base+page-3,across,sizeof(across))==0);
+    CHECK(spanning.read(span_base+page-3,across_read,sizeof(across_read))==0);
+    CHECK(std::memcmp(across,across_read,sizeof(across))==0);
+    CHECK(spanning.protect(span_base+page,page,4)==0);
+    const uint8_t replacement[6]={1,1,1,1,1,1};
+    CHECK(spanning.write(span_base+page-3,replacement,sizeof(replacement))==-EFAULT);
+    std::memset(across_read,0,sizeof(across_read));
+    CHECK(spanning.read(span_base+page-3,across_read,sizeof(across_read))==0);
+    CHECK(std::memcmp(across,across_read,sizeof(across))==0);
+    CHECK(spanning.release(span_base)==0);
     std::puts("PASS Orbis V4 isolated guest address-space checks");
 }
