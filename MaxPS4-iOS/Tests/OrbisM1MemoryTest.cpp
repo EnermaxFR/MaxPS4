@@ -38,7 +38,16 @@ int main() {
     GuestAddressSpace collision(GuestAddressSpace::Backend::fex_direct);
     CHECK(collision.reserve(direct_base,page) == -EADDRINUSE);
     CHECK(*reinterpret_cast<const uint64_t*>(direct.translate(direct_base,8,4)) == value);
+    // Failed fixed reservations must not consume a budget, publish mappings,
+    // overwrite another owner, or poison a later attempt at the same address.
+    CHECK(collision.allocated() == 0 && collision.regions().empty());
+    CHECK(!collision.translate(direct_base,8,4));
     CHECK(direct.release(direct_base) == 0);
+    CHECK(collision.reserve(direct_base,page) == 0);
+    CHECK(collision.map(direct_base,page,6,&value,8) == 0);
+    CHECK(*reinterpret_cast<const uint64_t*>(collision.translate(direct_base,8,4)) == value);
+    collision.clear();
+    CHECK(collision.allocated() == 0 && collision.regions().empty());
 
     auto file = orbis_m1_fixture::make();
     {
