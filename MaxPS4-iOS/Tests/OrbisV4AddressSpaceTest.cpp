@@ -23,6 +23,12 @@ int main() {
     CHECK(gate.preflight(base,UINT64_MAX,page,executable,writable_stack)==-EOVERFLOW);
     CHECK(executable==nullptr && writable_stack==nullptr);
     CHECK(gate.preflight(0,base,page,executable,writable_stack)==-EINVAL);
+    CHECK(gate.preflight(base,0,page,executable,writable_stack)==-EINVAL);
+    CHECK(gate.preflight(base,base+page,0,executable,writable_stack)==-EINVAL);
+    CHECK(gate.preflight(base,base+page,GuestAddressSpace::budget+1,
+                         executable,writable_stack)==-EINVAL);
+    CHECK(gate.preflight(base,base+page,page,executable,writable_stack)==-ENOTSUP);
+    CHECK(executable==nullptr && writable_stack==nullptr);
     const uint8_t* direct=nullptr;
     CHECK(bridge.admit_fex_direct(base,1,4,direct)==-ENOTSUP);
     CHECK(direct==nullptr);
