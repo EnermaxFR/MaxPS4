@@ -146,6 +146,9 @@ int main() {
     CHECK(::munmap(occupied,bytes)==0);
     CHECK(direct_space.reserve(guest,page)==0);
     CHECK(direct_space.reservation_failure().error==0);
+    CHECK(direct_space.reservation_failure().guest==0);
+    CHECK(direct_space.reservation_failure().bytes==0);
+    CHECK(direct_space.reservation_failure().host_status==0);
     CHECK(direct_space.map(guest,page,5,code,sizeof(code))==0);
     CHECK(direct_space.translate(guest,sizeof(code),5)==middle);
     CHECK(!direct_space.translate(guest-1,1,4));
