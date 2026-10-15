@@ -3,6 +3,9 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <atomic>
+#include <cstring>
+#include <type_traits>
 
 namespace maxps4 {
 // Experimental FEX-facing admission boundary. No translated guest address
@@ -35,6 +38,28 @@ public:
     }
     int write_guest(uint64_t guest, const void* src, size_t bytes) {
         return memory_.write(guest,src,bytes);
+    }
+    // Single-mapping atomic primitive for a future translated JIT slow path.
+    // The caller must serialize map/protect/release against this operation.
+    // Never emulate a split-page atomic with separate reads and writes.
+    template<class T>
+    int compare_exchange_guest(uint64_t guest, T& expected, T desired,
+                               bool& exchanged) {
+        static_assert(std::is_integral_v<T> &&
+                      (sizeof(T) == 1 || sizeof(T) == 2 ||
+                       sizeof(T) == 4 || sizeof(T) == 8),
+                      "Only native 8/16/32/64-bit integer atomics supported");
+        exchanged = false;
+        if (guest % alignof(T)) return -EINVAL;
+        // Both permissions are mandatory; no read-only or execute-only CAS.
+        const auto* ptr = memory_.translate(guest,sizeof(T),6);
+        if (!ptr) return -EFAULT; // Includes unmapped and split-region access.
+        auto* typed = reinterpret_cast<T*>(const_cast<uint8_t*>(ptr));
+        // No software load/store fallback: preserve hardware atomicity.
+        std::atomic_ref<T> atom(*typed);
+        exchanged = atom.compare_exchange_strong(expected,desired,
+                         std::memory_order_seq_cst,std::memory_order_seq_cst);
+        return 0;
     }
 private:
     GuestAddressSpace& memory_;
