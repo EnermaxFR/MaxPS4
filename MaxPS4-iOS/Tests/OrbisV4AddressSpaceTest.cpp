@@ -319,6 +319,15 @@ int main() {
         CHECK(lease.resolve_contiguous(lease_base,1,8,host)==-EINVAL && !host);
         CHECK(lease.resolve_contiguous(lease_base,1,6,host)==0 && host);
         CHECK(lease.resolve_contiguous(UINT64_MAX,2,4,host)==-EINVAL && !host);
+        // Reject invalid combined permissions and overflow without leaking
+        // a pointer from a previous successful translation.
+        CHECK(lease.resolve_contiguous(lease_base,1,3,host)==-EINVAL && !host);
+        CHECK(lease.resolve_contiguous(lease_base,1,7,host)==-EINVAL && !host);
+        CHECK(lease.resolve_contiguous(lease_base,1,0x80,host)==-EINVAL && !host);
+        CHECK(lease.resolve_contiguous(lease_base+page,1,4,host)==0 && host);
+        CHECK(lease.resolve_contiguous(lease_base+page,1,6,host)==-EFAULT && !host);
+        CHECK(lease.resolve_contiguous(lease_base+page-1,2,2,host)==-EFAULT && !host);
+        CHECK(lease.resolve_contiguous(UINT64_MAX-1,2,4,host)==-EINVAL && !host);
     }
     CHECK(translated.protect(lease_base,page,4)==0);
     {
