@@ -86,8 +86,13 @@ public:
                 failure_ = {address,bytes,static_cast<int>(status),error};
                 return error;
             }
-            if (vm_protect(mach_task_self(),requested,bytes,FALSE,VM_PROT_NONE) != KERN_SUCCESS) {
-                vm_deallocate(mach_task_self(),requested,bytes); return -EACCES;
+            const kern_return_t protect_status =
+                vm_protect(mach_task_self(),requested,bytes,FALSE,VM_PROT_NONE);
+            if (protect_status != KERN_SUCCESS) {
+                // Preserve the actual Mach error; no reservation is published.
+                vm_deallocate(mach_task_self(),requested,bytes);
+                failure_ = {address,bytes,static_cast<int>(protect_status),-EACCES};
+                return -EACCES;
             }
             host = reinterpret_cast<void*>(requested);
         } else
