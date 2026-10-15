@@ -55,6 +55,19 @@ public:
         std::unique_lock<std::mutex> lock_;
         std::vector<Range> ranges_;
     };
+    // Checked split-region slow paths. Hold one lease across validation and
+    // copying so protect/unmap cannot invalidate a partially completed access.
+    // GuestAddressSpace validates the entire span before changing destination.
+    int read(uint64_t guest, void* destination, size_t bytes, bool instruction=false) {
+        auto pinned = lease();
+        return pinned.memory().read(guest,destination,bytes,instruction);
+    }
+    int write_span(uint64_t guest, const void* source, size_t bytes) {
+        std::lock_guard lock(mutex_);
+        // Invalidate before writes: generated code may have cached guest bytes.
+        invalidate_();
+        return memory_.write(guest,source,bytes);
+    }
     Lease lease() { return Lease(*this); }
     size_t page_size() const { return memory_.page_size(); }
     int reserve(uint64_t guest, size_t bytes) {
