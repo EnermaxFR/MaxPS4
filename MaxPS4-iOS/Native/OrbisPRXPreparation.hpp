@@ -126,6 +126,7 @@ private:
                     s.resolved = true;
                 }
             }
+            std::set<uint64_t> relocationTargets;
             for (const auto& r : m.metadata.relocations) {
                 check(r.supported,"Relocation PRX non prise en charge");
                 if (r.type == 0) continue;
@@ -137,7 +138,10 @@ private:
                     value = (r.type == 6 || r.type == 7) ? addresses[r.symbol] : addSigned(addresses[r.symbol],r.addend);
                     check((r.type != 6 && r.type != 7) || r.addend == 0,"GLOB_DAT/JUMP_SLOT avec addend non nul");
                 }
-                auto* p = target(m,sum(m.base,r.target),2);
+                uint64_t destination = sum(m.base,r.target);
+                check(relocationTargets.insert(destination).second,
+                    "Relocations PRX dupliquées sur la même cible");
+                auto* p = target(m,destination,2);
                 check(p,"Cible PRX hors mémoire writable");
                 for (size_t j = 0; j < 8; ++j) p[j] = uint8_t(value>>(j*8));
             }
