@@ -96,6 +96,13 @@ int main(int argc, char** argv) {
     size_t failure = 0;
     auto fail = [&](auto files) { ++failure; if(p.prepare(files)) { std::fprintf(stderr,"Accepted PRX failure %zu\n",failure); std::abort(); } assert(!p.error.empty() && p.modules.empty() && p.initializationOrder.empty()); };
     fail(std::vector<maxps4::OrbisPRXPreparation::Input>{{"b.prx",consumer,0x20000}});
+    // Same-module PT_LOAD alias: RX [0x1000,0x1100) and RW
+    // [0x1080,0x1380) must never share guest addresses.
+    // A failed transaction must discard the prior successful preparation.
+    auto overlap=inputs;
+    put(overlap[0].bytes,0x1080,64+56+16);
+    fail(overlap);
+    assert(p.error.find("chevauch") != std::string::npos);
     auto wrong=inputs; wrong[1].base=0x10000; fail(wrong);
     wrong=inputs; wrong[1].bytes=tls; fail(wrong);
     wrong=inputs; put(wrong[1].bytes,0x8000000000000000ULL,0xc28); fail(wrong);
