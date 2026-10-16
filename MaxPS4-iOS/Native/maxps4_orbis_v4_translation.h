@@ -16,6 +16,20 @@ public:
     explicit OrbisV4Translation(Invalidator invalidate) : invalidate_(std::move(invalidate)) {
         if (!invalidate_) throw std::invalid_argument("JIT invalidator required");
     }
+    ~OrbisV4Translation() noexcept {
+        std::lock_guard lock(mutex_);
+        if (memory_.allocated()) {
+            // Generated code embeds host addresses, including when callers
+            // omit explicit clear(). Revoke them before releasing storage.
+            // The invalidator/context must outlive nonempty ownership. A
+            // throwing invalidator terminates rather than releasing memory
+            // still referenced by native code; clear() permits earlier retry.
+            invalidate_();
+            memory_.clear();
+        }
+        // After explicit clear(), the context may already have been destroyed.
+        // Do not invoke its callback again for an empty address space.
+    }
     class Lease {
     public:
         explicit Lease(OrbisV4Translation& owner) : owner_(owner), lock_(owner.mutex_) {
