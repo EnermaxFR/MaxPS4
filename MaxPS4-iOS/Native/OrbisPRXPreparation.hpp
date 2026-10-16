@@ -139,6 +139,10 @@ private:
                     check((r.type != 6 && r.type != 7) || r.addend == 0,"GLOB_DAT/JUMP_SLOT avec addend non nul");
                 }
                 uint64_t destination = sum(m.base,r.target);
+                // A RELA write occupies eight bytes. Reject noncanonical or
+                // overflowing destinations before interval comparisons.
+                check(destination <= (uint64_t(1)<<47) - 8,
+                    "Cible RELA PRX hors espace utilisateur");
                 auto next = relocationTargets.lower_bound(destination);
                 check(next == relocationTargets.end() ||
                     (destination <= UINT64_MAX - 8 && destination + 8 <= *next),
