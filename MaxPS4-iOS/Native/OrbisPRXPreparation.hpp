@@ -110,7 +110,16 @@ private:
                 auto& s = m.metadata.symbols[i];
                 check(s.kind == 0 || s.kind == 1 || s.kind == 2,"Type de symbole PRX non pris en charge");
                 check(s.binding == 0 || s.binding == 1,"Symboles weak/GNU non pris en charge");
-                if (s.defined) addresses[i] = sum(m.base,s.value);
+                if (s.defined) {
+                    addresses[i] = sum(m.base,s.value);
+                    // Do not publish a synthetic export address outside the
+                    // staged module. A later FEX mapping must not trust it.
+                    bool mapped = false;
+                    for (const auto& region : m.regions)
+                        if (addresses[i] >= region.address &&
+                            addresses[i] - region.address < region.bytes.size()) mapped = true;
+                    check(mapped,"Symbole PRX défini hors segments préparés");
+                }
                 else if (!s.encoded.empty()) {
                     check(s.qualified && s.binding == 1,"Import PRX non qualifié/global");
                     size_t hits = 0;
