@@ -38,6 +38,16 @@ int main(int argc,char** argv) {
     Diagnostic pfs;
     const auto inspect=[&]() { calls=bytes=0; guard=true; pfs.inspect(pkg,read); };
     inspect(); assert(pfs.status==Diagnostic::Status::encrypted && calls==1 && bytes==72);
+    // Regression from Kero Blaster PKG: mode 0x000d must remain opaque.
+    // Only the 72-byte PFS header is inspected; never scan encrypted payload.
+    for (uint16_t encryptedMode : {uint16_t(0x0004),uint16_t(0x000c),uint16_t(0x000d),uint16_t(0x010d)}) {
+        put(b,0x61c,encryptedMode,2,true); inspect();
+        assert(pfs.status==Diagnostic::Status::encrypted);
+        assert(pfs.mode==encryptedMode && pfs.bytesRead==72);
+        assert(calls==1 && bytes==72);
+        assert(std::strstr(pfs.message,"eboot.bin demeure inaccessible"));
+    }
+
     for (uint16_t mode : {uint16_t(8),uint16_t(9),uint16_t(10),uint16_t(0x108),uint16_t(0)}) {
         put(b,0x61c,mode,2,true); inspect();
         assert(pfs.status==Diagnostic::Status::unsupported && calls==1 && bytes==72);
@@ -72,6 +82,14 @@ int main(int argc,char** argv) {
     assert(maxps4_pkg_inventory_report(source.c_str(),report.data(),report.size())==0);
     assert(std::strstr(report.data(),"PFS chiffré déclaré : inaccessible"));
     assert(std::strstr(report.data(),"eboot.bin demeure inaccessible"));
+    assert(!std::strstr(report.data(),"Kero Blaster readiness"));
+    b=fixture(0x000d);
+    const char contentID[]="UP0969-CUSA06015_00-KEROBLASTERUS000";
+    std::memcpy(b.data()+0x40,contentID,sizeof(contentID)); write();
+    assert(maxps4_pkg_inventory_report(source.c_str(),report.data(),report.size())==0);
+    assert(std::strstr(report.data(),"Kero Blaster readiness : NON PRÊT"));
+    assert(std::strstr(report.data(),"Premier blocage réel : PFS inaccessible ; eboot.bin inaccessible"));
+    assert(std::strstr(report.data(),"Erreur générale FEX -48 : non résolue"));
     char tiny[8]{}; assert(maxps4_pkg_inventory_report(source.c_str(),tiny,sizeof(tiny))==-ENOSPC && tiny[7]==0);
     const auto link=temp/"link.pkg"; std::filesystem::create_symlink(source,link);
     assert(maxps4_pkg_inventory_report(link.c_str(),report.data(),report.size())<0);

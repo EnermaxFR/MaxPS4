@@ -282,6 +282,17 @@ static int inventoryReport(const char* path, char* output, size_t capacity, bool
             // PKG metadata and plaintext artwork are never executable admission.
             // The standalone ELF path is a distinct, explicit user-supplied workflow.
             report << "[PKG.RUNTIME] admitted=0 ; libkernel=unresolved ; PRX=unresolved\n";
+            if (pkg.titleID == "CUSA06015") {
+                report << "Kero Blaster readiness : NON PRÊT (identité déclarée CUSA06015, authenticité non vérifiée).\n"
+                       << "Premier blocage réel : "
+                       << (!pfsAccessible ? "PFS inaccessible ; eboot.bin inaccessible" :
+                           !pfsEboot ? "eboot.bin absent du PFS accessible" :
+                           "eboot.bin présent mais ELF/PRX et imports non validés") << ".\n"
+                       << "Étapes suivantes non testées pour ce jeu : mémoire FEX, threads/TLS, services système, "
+                          "graphismes, audio, commandes et sauvegardes.\n"
+                       << "Passerelle PRX expérimentale : mapping de fixtures seulement ; aucun dispatch du jeu validé.\n"
+                       << "Erreur générale FEX -48 : non résolue ; validation physique iPhone requise.\n";
+            }
             report << "Diagnostic démarrage : NON PRÊT (inventaire PKG uniquement).\n";
             report << (pfsAccessible ? "Accès PFS : " : "Blocage 1/3 : PFS ")
                    << (pfsAccessible ? "lu en lecture seule (D32 contigu)" : (pkg.pfsSize ? "présent mais opaque/non monté" : "absent ou non exposé"))

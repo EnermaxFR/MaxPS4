@@ -61,6 +61,14 @@ private:
                 for (const auto& old : modules) for (const auto& r : old.regions)
                     check(!s.memsz || r.bytes.empty() || address >= r.address+r.bytes.size() ||
                         r.address >= address+s.memsz,"Modules PRX se chevauchant");
+                // Reject overlapping PT_LOAD/SCE_RELRO regions within the same
+                // module as well as between modules. Otherwise target() could
+                // silently choose the first writable alias for a relocation.
+                for (const auto& r : m.regions)
+                    check(!s.memsz || r.bytes.empty() ||
+                        address >= r.address+r.bytes.size() ||
+                        r.address >= address+s.memsz,
+                        "Segments PRX du même module se chevauchant");
                 Region region{address,s.flags,std::vector<uint8_t>(size_t(s.memsz),0)};
                 if (s.filesz) std::memcpy(region.bytes.data(),input.bytes.data()+s.offset,size_t(s.filesz));
                 allocated += size_t(s.memsz); m.regions.push_back(std::move(region));
@@ -102,7 +110,16 @@ private:
                 auto& s = m.metadata.symbols[i];
                 check(s.kind == 0 || s.kind == 1 || s.kind == 2,"Type de symbole PRX non pris en charge");
                 check(s.binding == 0 || s.binding == 1,"Symboles weak/GNU non pris en charge");
-                if (s.defined) addresses[i] = sum(m.base,s.value);
+                if (s.defined) {
+                    addresses[i] = sum(m.base,s.value);
+                    // Do not publish a synthetic export address outside the
+                    // staged module. A later FEX mapping must not trust it.
+                    bool mapped = false;
+                    for (const auto& region : m.regions)
+                        if (addresses[i] >= region.address &&
+                            addresses[i] - region.address < region.bytes.size()) mapped = true;
+                    check(mapped,"Symbole PRX défini hors segments préparés");
+                }
                 else if (!s.encoded.empty()) {
                     check(s.qualified && s.binding == 1,"Import PRX non qualifié/global");
                     size_t hits = 0;
@@ -111,6 +128,7 @@ private:
                     for (size_t dep : dependencies) for (const auto& exported : modules[dep].metadata.symbols)
                         if (exported.defined && exported.qualified && exported.binding == 1 &&
                             exported.nid == s.nid && exported.library == s.library && exported.module == s.module &&
+                            exported.kind == s.kind &&
                             exported.libraryVersion == s.libraryVersion && exported.moduleVersion == s.moduleVersion) {
                             addresses[i] = sum(modules[dep].base,exported.value); ++hits;
                         }
@@ -118,6 +136,7 @@ private:
                     s.resolved = true;
                 }
             }
+            std::set<uint64_t> relocationTargets;
             for (const auto& r : m.metadata.relocations) {
                 check(r.supported,"Relocation PRX non prise en charge");
                 if (r.type == 0) continue;
@@ -129,7 +148,20 @@ private:
                     value = (r.type == 6 || r.type == 7) ? addresses[r.symbol] : addSigned(addresses[r.symbol],r.addend);
                     check((r.type != 6 && r.type != 7) || r.addend == 0,"GLOB_DAT/JUMP_SLOT avec addend non nul");
                 }
-                auto* p = target(m,sum(m.base,r.target),2);
+                uint64_t destination = sum(m.base,r.target);
+                // A RELA write occupies eight bytes. Reject noncanonical or
+                // overflowing destinations before interval comparisons.
+                check(destination <= (uint64_t(1)<<47) - 8,
+                    "Cible RELA PRX hors espace utilisateur");
+                auto next = relocationTargets.lower_bound(destination);
+                check(next == relocationTargets.end() ||
+                    (destination <= UINT64_MAX - 8 && destination + 8 <= *next),
+                    "Relocations PRX dont les écritures se chevauchent");
+                check(next == relocationTargets.begin() ||
+                    (*std::prev(next) <= UINT64_MAX - 8 && *std::prev(next) + 8 <= destination),
+                    "Relocations PRX dont les écritures se chevauchent");
+                relocationTargets.insert(next,destination);
+                auto* p = target(m,destination,2);
                 check(p,"Cible PRX hors mémoire writable");
                 for (size_t j = 0; j < 8; ++j) p[j] = uint8_t(value>>(j*8));
             }

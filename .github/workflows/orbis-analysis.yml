@@ -49,6 +49,8 @@ jobs:
           xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
             -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/OrbisMetadataTest.cpp -o build/orbis/prx-ios.o
           xcrun lipo -archs build/orbis/bridge-ios.o | grep -w arm64
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/OrbisPRXFEXBridgeTest.cpp -o build/orbis/prx-fex-ios.o
           xcrun --sdk iphoneos swiftc -parse-as-library -target arm64-apple-ios18.0 -sdk "$SDK" \
             -import-objc-header MaxPS4-iOS/Native/OrbisAnalysisBridge.h \
             -emit-object MaxPS4-iOS/Sources/MaxPS4OrbisAnalyzer.swift -o build/orbis/swift-ios.o
