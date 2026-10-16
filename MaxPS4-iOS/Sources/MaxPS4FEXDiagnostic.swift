@@ -26,6 +26,15 @@ struct MaxPS4FEXDiagnostic: Sendable {
         ].joined(separator: "\n")
     }
 
+    // A PKG is an inventory container, not an ELF execution input. Check magic
+    // before whole-file allocation or engine/JIT creation, regardless of suffix.
+    static func pkgExecutionRefusal(prefix: Data) -> String? {
+        guard prefix.starts(with: [0x7f, 0x43, 0x4e, 0x54]) else { return nil }
+        return "[ELF.CONTAINER] PKG/CNT détecté : ce conteneur n’est pas un ELF autonome. " +
+            "Utiliser Analyser PKG/PFS dans la bibliothèque. " +
+            "Aucune initialisation JIT ni exécution tentée ; aucun eboot.bin en clair présumé."
+    }
+
     /// Imported plaintext file -> real engine-owned guest pages -> entry readback.
     /// Staging succeeds independently of JIT permission, and never dispatches CPU.
     static func stagePS4(url: URL) -> String {
@@ -33,6 +42,8 @@ struct MaxPS4FEXDiagnostic: Sendable {
         do {
             let handle = try FileHandle(forReadingFrom: url)
             defer { try? handle.close() }
+            let prefix = try handle.read(upToCount: 4) ?? Data()
+            if let refusal = pkgExecutionRefusal(prefix: prefix) { return refusal }
             let size = try handle.seekToEnd()
             guard size >= 64, size <= 64 * 1024 * 1024 else {
                 return "MaxPS4 : fichier hors budget ELF/SELF (64 Mio)"
@@ -80,6 +91,8 @@ struct MaxPS4FEXDiagnostic: Sendable {
         do {
             let handle = try FileHandle(forReadingFrom: url)
             defer { try? handle.close() }
+            let prefix = try handle.read(upToCount: 4) ?? Data()
+            if let refusal = pkgExecutionRefusal(prefix: prefix) { return refusal }
             let size = try handle.seekToEnd()
             guard size >= 64, size <= 32 * 1024 * 1024 else { return "ELF hors budget (32 Mio)" }
             try handle.seek(toOffset: 0)

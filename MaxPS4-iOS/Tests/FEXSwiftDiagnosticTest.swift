@@ -4,6 +4,26 @@ import Darwin
 @main
 struct FEXSwiftDiagnosticTest {
     static func main() {
+        // Reproduce the documented PKG -> ELF error, even with an .elf suffix.
+        // Use a sparse oversized container to verify refusal precedes ELF budgets.
+        let container = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".elf")
+        defer { try? FileManager.default.removeItem(at: container) }
+        do {
+            try Data([0x7f, 0x43, 0x4e, 0x54]).write(to: container)
+            let writer = try FileHandle(forWritingTo: container)
+            try writer.truncate(atOffset: 128 * 1024 * 1024)
+            try writer.close()
+        } catch { fatalError("Could not create synthetic CNT: \(error)") }
+        let previousJIT = maxps4_jit_state()
+        for report in [MaxPS4FEXDiagnostic.executeTestELF(url: container),
+                       MaxPS4FEXDiagnostic.stagePS4(url: container)] {
+            precondition(report.contains("[ELF.CONTAINER]") && report.contains("PKG/CNT détecté"), report)
+            precondition(report.contains("Aucune initialisation JIT ni exécution tentée"), report)
+        }
+        precondition(maxps4_jit_state() == previousJIT)
+        precondition(MaxPS4FEXDiagnostic.pkgExecutionRefusal(prefix: Data([0x7f,0x45,0x4c,0x46])) == nil)
+        precondition(MaxPS4FEXDiagnostic.pkgExecutionRefusal(prefix: Data([0x7f,0x43])) == nil)
+        print("PASS imported CNT rejected before ELF allocation, engine creation and JIT; suffix ignored")
         let m2 = MaxPS4FEXDiagnostic.testM2LowVA()
         precondition(m2.contains("Validation M2 : réussie"), m2)
         precondition(m2.contains("JIT : 42") && m2.contains("TLS : 8"), m2)

@@ -8,12 +8,24 @@ n'est pas disponible dans cet espace de travail. Aucun octet propriétaire,
 clé, licence ou payload déchiffré n'est ajouté aux fixtures.
 
 L'import `MaxPS4Emulator.importGame` vérifiait seulement 32 octets avant copie.
-Il ne renvoyait pas directement `-8`. Les chargeurs ELF et le pont Orbis renvoient
-`-ENOEXEC` (`-8` sur iOS/Linux) pour plusieurs refus distincts. La cause historique
-exacte n'est donc **pas établie** sans le rapport et la révision de l'ancien essai.
-Un CNT transmis à un chargeur ELF reproduit ce code, mais cela ne prouve pas que
-cet aiguillage était celui de l'essai utilisateur. Le PFS chiffré/opaque et un
-échec ELF sont des diagnostics différents.
+Il ne renvoyait pas directement `-8`. La note historique
+[`orbis-m2-iphone-validation.md`](orbis-m2-iphone-validation.md) rapporte en
+revanche **une exécution PKG à -8, backend absent, entrée 0**. Cela concorde avec
+le chemin `executeTestELF` → `run_elf` / `interpret_elf` → `GuestELF::load` :
+la signature CNT ne correspond pas à ELF et le chargeur renvoie `-ENOEXEC`
+(`-8` sur iOS/Linux), avant publication d'entrée ou de backend. Les fichiers
+PKG de moins de 32 Mio pouvaient atteindre ce chargeur sans précontrôle du format.
+
+Le précontrôle reconnaît désormais CNT sur quatre octets, avant allocation du
+fichier, création du moteur ou JIT, dans `executeTestELF` **et** `stagePS4`.
+Le message `[ELF.CONTAINER]` dirige vers l'analyse PKG/PFS, quelle que soit
+l'extension du fichier. Un test Swift utilise un faux `.elf` CNT sparse de
+128 Mio pour vérifier que ce refus précède aussi les limites de taille ELF.
+Le test natif reproduit indépendamment le `-ENOEXEC` de signature.
+
+Cette note historique n'est pas le rapport complet de l'essai Kero Blaster :
+elle localise un chemin reproductible, sans établir l'état réel du PKG commercial
+ni son accessibilité PFS. Un PFS chiffré/opaque et un échec ELF restent distincts.
 
 ## Changements
 

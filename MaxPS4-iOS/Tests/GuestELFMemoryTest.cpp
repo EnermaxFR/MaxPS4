@@ -20,6 +20,12 @@ int main() {
     CHECK(image.load(file.data(), 63, 3) == -EINVAL);
     CHECK(image.load(file.data(), file.size(), 0) == -EINVAL);
     CHECK(image.load(file.data(), file.size(), 1000001) == -EINVAL);
+    // Historical PKG execution -8: CNT fails the ELF identity gate, with
+    // no guest entry/mapping left behind even after a prior valid load.
+    CHECK(image.load(file.data(),file.size(),3) == 0);
+    auto cnt = file; cnt[1] = 'C'; cnt[2] = 'N'; cnt[3] = 'T';
+    CHECK(image.load(cnt.data(),cnt.size(),3) == -ENOEXEC);
+    CHECK(image.entry() == 0 && !image.entry_pointer() && image.segments().empty());
     auto rejects = [&](size_t offset, uint64_t value, size_t width) {
         auto broken = file;
         put(broken, value, offset, width);
