@@ -10,6 +10,23 @@ ENTRY_BYTES = 32
 MAX_ENTRIES = 4096
 
 
+def classify_prefix(prefix):
+    """Classify only visible magic, not runtime support."""
+    if prefix.startswith(bytes.fromhex("00505346")):
+        return "SFO"
+    if prefix.startswith(bytes.fromhex("89504e470d0a1a0a")):
+        return "PNG"
+    if prefix.startswith(b"DDS "):
+        return "DDS"
+    if prefix.startswith(bytes.fromhex("7f454c46")):
+        return "ELF_CANDIDATE_ONLY"
+    if prefix.startswith(b"<?xml") or prefix.startswith(bytes.fromhex("efbbbf3c3f786d6c")):
+        return "XML"
+    if prefix.startswith(b"{"):
+        return "JSON_CANDIDATE_ONLY"
+    return "UNKNOWN"
+
+
 def inspect(path):
     size = os.stat(path).st_size
     with open(path, "rb") as f:
@@ -37,9 +54,17 @@ def inspect(path):
             length = struct.unpack_from(">I", row, 20)[0]
             if offset > size or length > size - offset:
                 raise ValueError(f"PKG.BODY_RANGE: entry {i} outside source")
-            entries.append({"index": i, "id": f"0x{entry_id:08x}",
+            next_position = f.tell()
+            f.seek(offset)
+            prefix = f.read(min(length, 16))
+            f.seek(next_position)
+            entries.append({"visible_prefix": classify_prefix(prefix), "index": i, "id": f"0x{entry_id:08x}",
                             "offset": offset, "size": length})
-    return {"stage": "PKG.TABLE_RANGE", "structure": "bounded",
+    counts = {}
+    for entry in entries:
+        kind = entry["visible_prefix"]
+        counts[kind] = counts.get(kind, 0) + 1
+    return {"visible_prefix_counts": counts, "stage": "PKG.TABLE_RANGE", "structure": "bounded",
             "execution_supported": False, "file_size": size,
             "content_id_header_untrusted": content_id,
             "entry_count": count, "entries": entries}
