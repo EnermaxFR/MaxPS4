@@ -2,6 +2,7 @@
 #include "OrbisPRXPreparation.hpp"
 #include "OrbisLinker.hpp"
 #include "maxps4_orbis_v4_memory_bridge.h"
+#include "maxps4_orbis_v4_translation.h"
 #include <memory>
 
 namespace maxps4 {
@@ -35,6 +36,30 @@ public:
     }
     const GuestAddressSpace* memory() const { return memory_.get(); }
     const std::string& diagnostic() const { return diagnostic_; }
+    // Snapshot a validated PRX into a separately owned, lease-pinned address
+    // space. Serialize this call with map/unload on this offline bridge;
+    // the invalidator must not reenter or mutate this staging bridge.
+    // No CPU admission is granted. The invalidator must cover every FEX cache
+    // using the returned owner and outlive its close/destruction.
+    std::unique_ptr<OrbisV4Translation> make_translation(OrbisV4Translation::Invalidator invalidate) const {
+        if (!memory_ || memory_->regions().empty())
+            throw std::logic_error("PRX not mapped; translated snapshot refused");
+        const auto& regions = memory_->regions();
+        const uint64_t page = memory_->page_size();
+        const uint64_t low = regions.front().address / page * page;
+        const auto& last = regions.back();
+        const uint64_t high = (last.address + last.size + page - 1) / page * page;
+        auto pending = std::make_unique<OrbisV4Translation>(std::move(invalidate));
+        if (pending->reserve(low,static_cast<size_t>(high-low)))
+            throw std::runtime_error("PRX translated reservation failed");
+        for (const auto& r : regions) {
+            // The validated staging owner remains live throughout each copy.
+            const auto* source = memory_->translate(r.address,r.size,4);
+            if (!source || pending->map(r.address,r.size,r.permissions,source,r.size))
+                throw std::runtime_error("PRX translated mapping failed");
+        }
+        return pending; // Publish only after every region has been copied.
+    }
     void unload() { memory_.reset(); }
     int admit_dispatch(uint64_t entry, const uint8_t*& host) {
         host = nullptr;

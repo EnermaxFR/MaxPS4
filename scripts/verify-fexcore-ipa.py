@@ -64,6 +64,7 @@ def verify(path):
         assert ipa.read(scripts[0]) == (Path(__file__).resolve().parents[1] / 'MaxPS4-iOS/Resources/JIT/maxps4-stik.js').read_bytes()
         main = ipa.read(prefix + 'MaxPS4')
         assert b'maxps4.testFEXCore' in main, 'Diagnostic FEXCore button not present in compiled app'
+        assert b'maxps4.orbisDirectory.v4PRX' in main, 'Distinct V4 PRX action missing from compiled app'
         runtime = ipa.read(framework + 'MaxPS4FEXRuntime')
         kind, libraries, _, imports, _ = macho(main)
         rkind, dependencies, exports, unresolved, identifiers = macho(runtime)
@@ -72,7 +73,7 @@ def verify(path):
         assert load_path in libraries and identifiers == [load_path]
         assert all(n.startswith(('/usr/lib/', '/System/Library/')) for n in dependencies)
         assert not any('FEXCore' in n or 'LogMan' in n or 'maxps4_' in n for n in unresolved)
-        required = {'_maxps4_fex_engine_' + n for n in ('open', 'initialize', 'cpuid', 'interpret_elf', 'run_elf', 'close', 'stage')}
+        required = {'_maxps4_fex_engine_' + n for n in ('open', 'initialize', 'cpuid', 'interpret_elf', 'run_elf', 'run_v4_prx', 'close', 'stage')}
         required |= {'_maxps4_jit_' + n for n in ('begin', 'cancel', 'state', 'error', 'leases', 'confirmation', 'launch_failed')}
         assert required <= exports and required <= imports, 'App must actually import the FEX/session ABI'
         assert any('CreateNewContext' in name for name in exports), 'Real FEX C++ runtime absent'

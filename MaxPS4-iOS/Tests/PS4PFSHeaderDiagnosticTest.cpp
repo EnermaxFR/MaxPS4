@@ -88,6 +88,20 @@ int main(int argc,char** argv) {
     std::memcpy(b.data()+0x40,contentID,sizeof(contentID)); write();
     assert(maxps4_pkg_inventory_report(source.c_str(),report.data(),report.size())==0);
     assert(std::strstr(report.data(),"Kero Blaster readiness : NON PRÊT"));
+    assert(std::strstr(report.data(),"mode=0xd"));
+    assert(std::strstr(report.data(),"PFS chiffré déclaré : inaccessible"));
+    assert(std::strstr(report.data(),"[PKG.CANDIDATE_SCAN] candidates=0 ; bytes=0"));
+    // Importable does not mean executable: refuse even the size query, without
+    // publishing a length or touching a caller's destination buffer.
+    assert(maxps4_pkg_validate_import(source.c_str(),report.data(),report.size())==0);
+    unsigned char untouched[8]; std::memset(untouched,0xa5,sizeof(untouched));
+    size_t extracted=123;
+    assert(maxps4_pkg_pfs_read_file(source.c_str(),"eboot.bin",nullptr,0,&extracted)<0);
+    assert(extracted==0);
+    extracted=123;
+    assert(maxps4_pkg_pfs_read_file(source.c_str(),"eboot.bin",untouched,sizeof(untouched),&extracted)<0);
+    assert(extracted==0);
+    for (auto byte:untouched) assert(byte==0xa5);
     assert(std::strstr(report.data(),"Premier blocage réel : PFS inaccessible ; eboot.bin inaccessible"));
     assert(std::strstr(report.data(),"Erreur générale FEX -48 : non résolue"));
     char tiny[8]{}; assert(maxps4_pkg_inventory_report(source.c_str(),tiny,sizeof(tiny))==-ENOSPC && tiny[7]==0);

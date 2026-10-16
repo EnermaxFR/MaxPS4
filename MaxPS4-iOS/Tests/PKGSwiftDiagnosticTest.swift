@@ -37,13 +37,28 @@ struct PKGSwiftDiagnosticTest {
         let encryptedPFS = try MaxPS4PKGInspector.inspect(url: url)
         precondition(encryptedPFS.contains("PFS chiffré déclaré : inaccessible"))
         precondition(encryptedPFS.contains("budget de lecture=72 octets"))
+        // Match the reported Kero Blaster mode, without any commercial payload.
+        little(0x61c, 0x000d, 2); try data.write(to: url)
+        let blockedLaunch = MaxPS4PKGInspector.launchSummary(url: url)
+        precondition(blockedLaunch.contains("Jeu détecté : conteneur PKG PS4 reconnu"))
+        precondition(blockedLaunch.contains("Jeu importé : copie locale du PKG présente"))
+        precondition(blockedLaunch.contains("PFS chiffré déclaré : inaccessible"))
+        precondition(blockedLaunch.contains("mode=0xd"))
+        precondition(blockedLaunch.contains("eboot.bin inaccessible"))
+        precondition(blockedLaunch.contains("Lancement indisponible"))
         little(0x61c, 8, 2); try data.write(to: url)
         let plainPFS = try MaxPS4PKGInspector.inspect(url: url)
         precondition(plainPFS.contains("PFS non chiffré déclaré : contenu non pris en charge"))
         precondition(plainPFS.contains("eboot.bin demeure inaccessible"))
+        let unsupportedLaunch = MaxPS4PKGInspector.launchSummary(url: url)
+        precondition(unsupportedLaunch.contains("PFS non chiffré déclaré"))
+        precondition(unsupportedLaunch.contains("Lancement indisponible"))
         little(0x608, 20130305, 8); try data.write(to: url)
         let unknownPFS = try MaxPS4PKGInspector.inspect(url: url)
         precondition(unknownPFS.contains("chiffrement indéterminé"))
+        let unknownLaunch = MaxPS4PKGInspector.launchSummary(url: url)
+        precondition(unknownLaunch.contains("chiffrement indéterminé"))
+        precondition(!unknownLaunch.contains("PFS chiffré déclaré : inaccessible"))
         // Real Foundation copy/commit transaction, with an injected disk-save failure.
         let manager = FileManager.default
         let directory = manager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -94,6 +109,10 @@ struct PKGSwiftDiagnosticTest {
         try Data([0x7f, 0x43, 0x4e, 0x54]).write(to: url)
         let rejected = try MaxPS4PKGInspector.inspect(url: url)
         precondition(rejected.contains("Rejet"))
+        let invalidLaunch = MaxPS4PKGInspector.launchSummary(url: url)
+        precondition(invalidLaunch.contains("copie locale non validée"))
+        precondition(invalidLaunch.contains("Lancement indisponible"))
+        precondition(!invalidLaunch.contains("structure validée"))
         do {
             _ = try MaxPS4PKGInspector.inspect(url: url, requireValidPackage: true)
             fatalError("Truncated package passed import validation")
@@ -109,6 +128,9 @@ struct PKGSwiftDiagnosticTest {
         let afterRejectedImport = try manager.contentsOfDirectory(atPath: directory.path)
         precondition(commits == 3 && afterRejectedImport.isEmpty)
         try FileManager.default.removeItem(at: url)
+        let missingLaunch = MaxPS4PKGInspector.launchSummary(url: url)
+        precondition(missingLaunch.contains("copie locale non validée"))
+        precondition(missingLaunch.contains("Lancement indisponible"))
         do {
             _ = try MaxPS4PKGInspector.inspect(url: url)
             fatalError("Missing source was accepted")
@@ -120,6 +142,9 @@ struct PKGSwiftDiagnosticTest {
             precondition(file == Data("hello".utf8))
             let plainReport = try MaxPS4PKGInspector.inspect(url: plain)
             precondition(plainReport.contains("PFS non chiffré accessible"))
+            let accessibleLaunch = MaxPS4PKGInspector.launchSummary(url: plain)
+            precondition(accessibleLaunch.contains("eboot.bin répertorié dans le PFS"))
+            precondition(accessibleLaunch.contains("Lancement indisponible"))
             for (pkg, name) in [("pfs-plain.pkg", "../eboot.bin"), ("pfs-plain.pkg", "keystone"),
                                 ("pfs-encrypted.pkg", "eboot.bin"), ("pfs-unknown.pkg", "eboot.bin")] {
                 do {

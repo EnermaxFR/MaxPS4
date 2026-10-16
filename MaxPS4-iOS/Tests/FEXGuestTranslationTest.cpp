@@ -1,5 +1,7 @@
 #include <FEXCore/Utils/LogManager.h>
 #include "maxps4_orbis_v4_translation.h"
+#include "OrbisPRXFEXBridge.hpp"
+#include "OrbisFixture.h"
 #include "Common/HostFeatures.h"
 #include <FEXCore/Config/Config.h>
 #include <FEXCore/Core/Context.h>
@@ -153,6 +155,54 @@ int main() {
             CHECK(refusals==10);
             space.ranges.clear();
             std::puts("PASS 10 malformed FEX snapshots refused before decode/JIT; bytes unchanged; no dispatch");
+        }
+        // Real synthetic SCE PRX -> relocation -> validated staging -> owned
+        // translation -> lease-pinned FEX snapshot. No test byte substitution
+        // after loading, no direct guest==host dispatch and no application gate.
+        {
+            auto bytes=orbis_test::fixture(false);
+            orbis_test::put(bytes,0x4000,64+16); orbis_test::put(bytes,0x8000,120+16);
+            orbis_test::put(bytes,0x4000,0xb20);
+            orbis_test::put(bytes,0x8000,0xc00); orbis_test::put(bytes,0x8008,0xc18);
+            orbis_test::put(bytes,0x4000,0xc28);
+            // mov rdi,0x48010; mov eax,[rdi]; hlt. Guest VA is never a host pointer.
+            const uint8_t program[]={0x48,0xbf,0x10,0x80,0x04,0,0,0,0,0,0x8b,0x07,0xf4};
+            std::copy(std::begin(program),std::end(program),bytes.begin()+0x400);
+            orbis_test::put(bytes,42,0x610,4);
+            maxps4::OrbisPRXPreparation prepared;
+            CHECK(prepared.prepare({{"synthetic.prx",bytes,0x40000}}));
+            maxps4::OrbisPRXFEXBridge bridge;
+            CHECK(bridge.map(prepared));
+            const uint8_t* denied=reinterpret_cast<const uint8_t*>(1);
+            CHECK(bridge.admit_dispatch(0x44000,denied)==-ENOTSUP && !denied);
+            auto invalidate=[&] { ctx->ClearCodeCache(thread,false); ctx->ClearCodeCache(second,false); };
+            auto owner=bridge.make_translation(invalidate);
+            const size_t page=owner->page_size();
+            CHECK(owner->reserve(0x50000,page)==0 && owner->map(0x50000,page,6)==0);
+            prepared.unload(); bridge.unload();
+            uint64_t relocated=0;
+            CHECK(owner->read(0x48000,&relocated,8)==0 && relocated==0x44000);
+            for (auto* current : {thread,second,thread}) {
+                auto lease=owner->lease(); space.ranges.clear();
+                for (const auto& r:lease.ranges()) {
+                    CHECK(r.guest!=r.host);
+                    space.ranges.push_back({r.guest,r.host,r.size,r.permissions});
+                }
+                CHECK(space.ValidateGuestMemoryRanges());
+                auto& cpu=current->CurrentFrame->State;
+                cpu.rip=0x44000; cpu.gregs[FEXCore::X86State::REG_RSP]=0x50000+page-16;
+                cpu.gregs[FEXCore::X86State::REG_RAX]=0;
+                cpu.callret_sp=reinterpret_cast<uintptr_t>(callret.data())+callret.size()/4;
+                FEXCore::Core::GuestMemoryFaultData fault{};
+                cpu.GuestMemoryFaultRecord=&fault;
+                ctx->ExecuteThread(current);
+                cpu.GuestMemoryFaultRecord=nullptr;
+                CHECK(cpu.gregs[FEXCore::X86State::REG_RAX]==42 && !fault.Bytes);
+                space.ranges.clear();
+            }
+            owner->close(); // Both threads/context still live; invalidate before unmap.
+            CHECK(owner->reserve(0x44000,page)==-ESHUTDOWN);
+            std::puts("PASS synthetic SCE PRX relocated, snapshotted and executed by real translated FEX on two threads; loader unloaded, private RW/NX stack, terminal cleanup; direct dispatch still refused");
         }
         size_t invalidations=0;
         maxps4::OrbisV4Translation memory([&] { ctx->ClearCodeCache(thread,false); ctx->ClearCodeCache(second,false); ++invalidations; });

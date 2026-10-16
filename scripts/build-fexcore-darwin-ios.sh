@@ -16,7 +16,7 @@ TARGETS=(FEXCore_shared)
 RUNTIME=OFF
 if [[ "${3:-}" == --runtime || "${3:-}" == --host-runtime ]]; then
   RUNTIME=ON
-  TARGETS+=(MaxPS4FEXRuntime maxps4-fex-runtime-test maxps4-ps4-linked-test maxps4-fex-translation-test)
+  TARGETS+=(MaxPS4FEXRuntime maxps4-fex-runtime-test maxps4-ps4-linked-test maxps4-fex-translation-test maxps4-v4-c-abi-smoke)
 fi
 if [[ "${3:-}" == --host-runtime ]]; then
   SDK=$(xcrun --sdk macosx --show-sdk-path)
@@ -110,13 +110,31 @@ echo "PASS complete strict $SYSTEM ARM64 Darwin linkage; device execution NOT te
 if [[ "$RUNTIME" == ON ]]; then
   NATIVE="$OUT/libMaxPS4FEXRuntime.dylib"
   file "$NATIVE" > "$OUT/native-mach-o.txt"
+  xcrun lipo -archs "$NATIVE" | tee "$OUT/native-architectures.txt"
+  test "$(xcrun lipo -archs "$NATIVE")" = arm64
+  xcrun nm -gU "$NATIVE" > "$OUT/native-defined.txt"
+  grep -Eq '(^|[[:space:]])_maxps4_fex_engine_run_v4_prx$' "$OUT/native-defined.txt"
   xcrun nm -u "$NATIVE" > "$OUT/native-undefined.txt"
   xcrun otool -L "$NATIVE" > "$OUT/native-libraries.txt"
   if xcrun nm -u "$NATIVE" | grep -E 'FEXCore|LogMan|maxps4_'; then
     echo 'Native engine contains unresolved runtime symbols' >&2
     exit 1
   fi
+  SWIFT_TARGET=arm64-apple-ios18.0
+  if [[ "$SYSTEM" == Darwin ]]; then SWIFT_TARGET=arm64-apple-macosx15.0; fi
+  # Compile AND link the imported C request/function against the real runtime.
+  # The iOS executable is never run on the macOS host.
+  xcrun swiftc -parse-as-library -target "$SWIFT_TARGET" -sdk "$SDK" \
+    -import-objc-header "$ROOT/MaxPS4-iOS/Native/maxps4_fex_runtime.h" \
+    "$ROOT/MaxPS4-iOS/Tests/V4PRXLinkSmoke.swift" \
+    -L "$OUT" -lMaxPS4FEXRuntime -Xlinker -rpath -Xlinker "$OUT" \
+    -o "$OUT/v4-swift-abi-smoke" 2>&1 | tee "$OUT/v4-swift-abi-build.log"
+  xcrun nm -u "$OUT/v4-swift-abi-smoke" > "$OUT/v4-swift-abi-imports.txt"
+  grep -Eq '(^|[[:space:]])_maxps4_fex_engine_run_v4_prx$' "$OUT/v4-swift-abi-imports.txt"
+  echo "PASS $SYSTEM ARM64 C and Swift V4 ABI compiled/linked; no device execution" > "$OUT/v4-abi-link-status.txt"
   if [[ "$SYSTEM" == Darwin ]]; then
+    "$OUT/Bin/maxps4-v4-c-abi-smoke" | tee "$OUT/v4-c-abi-smoke.txt"
+    "$OUT/v4-swift-abi-smoke" | tee "$OUT/v4-swift-abi-smoke.txt"
     python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/ps4-linked-tests.txt" "$OUT/Bin/maxps4-ps4-linked-test"
     python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/m1-linked-tests.txt" "$OUT/Bin/maxps4-ps4-linked-test" --m1
     "$OUT/Bin/maxps4-ps4-linked-test" --m1-bundle "$OUT/orbis-bundle/m1"

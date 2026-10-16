@@ -9,6 +9,14 @@ mkdir -p "$OUT"
 python3 scripts/run-bounded.py 30 "$OUT/prx-fex-bridge-tests.txt" "$OUT/prx-fex-bridge-test"
 "${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror -pedantic -pthread \
   -fsanitize=address,undefined -fno-omit-frame-pointer \
+  MaxPS4-iOS/Tests/OrbisPRXTranslationTest.cpp -o "$OUT/prx-translation-test"
+python3 scripts/run-bounded.py 30 "$OUT/prx-translation-tests.txt" "$OUT/prx-translation-test"
+"${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror -pedantic -pthread \
+  -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer \
+  MaxPS4-iOS/Tests/OrbisV4PRXLaunchTest.cpp -o "$OUT/v4-prx-launch-test"
+python3 scripts/run-bounded.py 30 "$OUT/v4-prx-launch-tests.txt" "$OUT/v4-prx-launch-test"
+"${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror -pedantic -pthread \
+  -fsanitize=address,undefined -fno-omit-frame-pointer \
   MaxPS4-iOS/Tests/OrbisMetadataTest.cpp MaxPS4-iOS/Native/OrbisAnalysisBridge.cpp \
   MaxPS4-iOS/Native/maxps4_guest_elf.cpp MaxPS4-iOS/Native/maxps4_ps4_libkernel.cpp \
   MaxPS4-iOS/Native/maxps4_ps4_virtual_memory.cpp MaxPS4-iOS/Native/maxps4_ps4_threads.cpp \

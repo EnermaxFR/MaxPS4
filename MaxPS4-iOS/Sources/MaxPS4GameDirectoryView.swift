@@ -14,7 +14,7 @@ struct MaxPS4GameDirectoryView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Pré-démarrage du jeu PS4").font(.title2.bold())
+                    Text("Précontrôle d’un dossier Orbis").font(.title2.bold())
                     Text("Lecture seule du dossier source. Aucun déchiffrement PKG/PFS, aucune clé ou licence utilisée.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Button("Sélectionner le dossier accessible…") { importing = true }
@@ -23,10 +23,20 @@ struct MaxPS4GameDirectoryView: View {
                         Text(directory.lastPathComponent).font(.headline)
                         Button("Actualiser le précontrôle") { inspect(directory) }
                             .buttonStyle(.bordered).disabled(busy)
-                        Button("Lancement expérimental FEX — diagnostic") { launch(directory) }
+                        Button("Vérifier et tenter l’exécution bornée") { launch(directory) }
                             .buttonStyle(.bordered).disabled(busy || !inspectionCompleted)
+                            .accessibilityIdentifier("maxps4.orbisDirectory.attempt")
+                        Button("Tester le PRX traduit V4 (synthétique)") { launch(directory, translatedV4: true) }
+                            .buttonStyle(.bordered).disabled(busy || !inspectionCompleted)
+                            .accessibilityIdentifier("maxps4.orbisDirectory.v4PRX")
+                        Text(inspectionCompleted
+                             ? "Inventaire terminé ; admission CPU non établie. La tentative relit les fichiers et doit réussir la préparation native puis l’initialisation JIT avant toute exécution."
+                             : "Tentative indisponible tant que l’inventaire n’est pas terminé.")
+                            .font(.caption).foregroundStyle(.secondary)
                         Text("Le runtime exige maxps4.json avec un graphe PRX et des biais explicites. Les formats ou instructions non pris en charge sont refusés avant le dispatch. Un succès CPU ne prouve pas le démarrage du jeu.")
                             .font(.caption).foregroundStyle(.secondary)
+                        Text("Le test V4 est distinct : un seul PRX autonome et un manifeste v4ABI=synthetic-hlt-v1 avec v4Entry explicite. TLS, initialisation de jeu et instructions hors du contrat sont refusés (-ENOTSUP), sans repli vers le lanceur existant.")
+                            .font(.caption).foregroundStyle(.orange)
                     }
                     if busy { ProgressView("Diagnostic en cours…") }
                     ShareLink(item: report + (launchReport.isEmpty ? "" : "\n\n" + launchReport)) {
@@ -41,6 +51,7 @@ struct MaxPS4GameDirectoryView: View {
             .navigationTitle("Dossier de jeu")
             .toolbar { Button("Fermer") { dismiss() }.disabled(busy) }
         }
+        .interactiveDismissDisabled(busy)
         .fileImporter(isPresented: $importing, allowedContentTypes: [.folder]) { result in
             switch result {
             case .success(let url):
@@ -69,7 +80,7 @@ struct MaxPS4GameDirectoryView: View {
         }
     }
 
-    private func launch(_ url: URL) {
+    private func launch(_ url: URL, translatedV4: Bool = false) {
         busy = true
         Task {
             let result = await Task.detached(priority: .utility) {
@@ -78,8 +89,8 @@ struct MaxPS4GameDirectoryView: View {
                 // Recheck before attempting the existing bounded runtime path.
                 let preflight = MaxPS4OrbisAnalyzer.inspectDirectory(url: url)
                 guard preflight.inspectionCompleted else { return preflight.text }
-                return "Tentative expérimentale — fichiers du dossier sélectionné\n" +
-                    MaxPS4FEXDiagnostic.executeOrbisDirectory(url: url)
+                return (translatedV4 ? "Tentative PRX traduit V4 — ABI synthétique explicite\n" : "Tentative Orbis bornée — fichiers du dossier sélectionné\n") +
+                    MaxPS4FEXDiagnostic.executeOrbisDirectory(url: url, translatedV4: translatedV4)
             }.value
             launchReport = result
             busy = false

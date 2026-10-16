@@ -5,6 +5,7 @@
 #include "maxps4_guest_stack.h"
 #include "maxps4_orbis_v4_execution_gate.h"
 #include "maxps4_orbis_v4_synthetic_stage.h"
+#include "OrbisV4PRXLaunch.hpp"
 #include <algorithm>
 #include <iterator>
 #include "maxps4_jit_memory.h"
@@ -58,7 +59,8 @@ public:
     // Private M1 storage is pinned by runtime_lock and the process lifetime.
     // No mapping-mutating libkernel VM provider is exposed during dispatch.
     std::vector<FEXCore::HLE::GuestMemoryRange> ranges;
-    bool UsesGuestMemoryTranslation() const override { return m1 && !m1->space.fex_direct(); }
+    bool v4_translation = false;
+    bool UsesGuestMemoryTranslation() const override { return v4_translation || (m1 && !m1->space.fex_direct()); }
     std::span<const FEXCore::HLE::GuestMemoryRange> GuestMemoryRanges() const override { return ranges; }
     uint32_t calls = 0;
     int callback_error = 0;
@@ -925,6 +927,90 @@ extern "C" int32_t maxps4_fex_engine_v4_preflight(maxps4_fex_engine* engine,
     const uint8_t* writable_stack = nullptr;
     return engine->v4_execution_gate.preflight(entry,stack,stack_bytes,
                                                executable,writable_stack);
+}
+extern "C" int32_t maxps4_fex_engine_run_v4_prx(maxps4_fex_engine* engine,
+    const maxps4_v4_prx_request* request, uint64_t* result, uint32_t* backend) {
+    if (result) *result=0;
+    if (backend) *backend=0;
+    if (!engine || !request || !result || !backend) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    if (engine->stage!=MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
+    try {
+        Mapping callret(FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE,PROT_READ|PROT_WRITE);
+        if (callret.address==MAP_FAILED) return -ENOMEM;
+        std::array<FEXCore::Core::CPUState::gdt_segment,32> gdt{};
+        FEXCore::Core::InternalThreadState* thread=nullptr;
+        // Declared before owner: owner invalidates/unmaps while thread is live;
+        // then restore the handler and destroy the thread before local buffers.
+        struct Cleanup {
+            maxps4_fex_engine* engine;
+            FEXCore::Core::InternalThreadState*& thread;
+            std::vector<FEXCore::HLE::GuestMemoryRange> old_ranges;
+            bool old_mode;
+            ~Cleanup() {
+                if (thread) {
+                    thread->CurrentFrame->State.GuestMemoryFaultRecord=nullptr;
+                    engine->context->ClearCodeCache(thread,false);
+                    engine->context->DestroyThread(thread);
+                }
+                engine->probe.ranges=std::move(old_ranges);
+                engine->probe.v4_translation=old_mode;
+            }
+        } cleanup{engine,thread,std::move(engine->probe.ranges),engine->probe.v4_translation};
+        engine->probe.ranges.clear();
+        std::unique_ptr<maxps4::OrbisV4Translation> owner;
+        const int prepared=maxps4::OrbisV4PRXLaunch::prepare(*request,[&] {
+            if (thread) engine->context->ClearCodeCache(thread,false);
+        },owner);
+        if (prepared) return prepared;
+        const uint64_t rsp=maxps4::OrbisV4PRXLaunch::stack+owner->page_size()-16;
+        thread=engine->context->CreateThread(request->entry,rsp);
+        if (!thread) return -ENOMEM;
+        thread->CallRetStackBase=static_cast<uint8_t*>(callret.address);
+        auto& state=thread->CurrentFrame->State;
+        std::fill(std::begin(state.gregs),std::end(state.gregs),0);
+        state.rip=request->entry; state.gregs[FEXCore::X86State::REG_RSP]=rsp;
+        state.fs_cached=0; state.gs_cached=0;
+        state.callret_sp=reinterpret_cast<uintptr_t>(callret.address)+callret.size/4;
+        state.segment_arrays[FEXCore::Core::CPUState::SEGMENT_ARRAY_INDEX_GDT]=gdt.data();
+        state.segment_arrays[FEXCore::Core::CPUState::SEGMENT_ARRAY_INDEX_LDT]=gdt.data();
+        state.cs_idx=FEXCore::Core::CPUState::DEFAULT_USER_CS<<3;
+        auto* segment=FEXCore::Core::CPUState::GetSegmentFromIndex(state,state.cs_idx);
+        FEXCore::Core::CPUState::SetGDTBase(segment,0);
+        FEXCore::Core::CPUState::SetGDTLimit(segment,0xF'FFFFU);
+        segment->L=1; segment->D=0;
+        state.cs_cached=FEXCore::Core::CPUState::CalculateGDTBase(*segment);
+        // Clear shared translations left by another API using this context.
+        engine->context->ClearCodeCache(thread,false);
+        uint64_t value=0;
+        {
+            auto lease=owner->lease();
+            engine->probe.v4_translation=true;
+            for (const auto& r:lease.ranges())
+                engine->probe.ranges.push_back({r.guest,r.host,r.size,r.permissions});
+            if (!engine->probe.ValidateGuestMemoryRanges()) return -ENOTSUP;
+            FEXCore::Core::GuestMemoryFaultData fault{};
+            state.GuestMemoryFaultRecord=&fault;
+            struct ClearV4Fault {
+                FEXCore::Core::CPUState& state;
+                ~ClearV4Fault() { state.GuestMemoryFaultRecord=nullptr; }
+            } clear_fault{state};
+            engine->context->ExecuteThread(thread);
+            state.GuestMemoryFaultRecord=nullptr;
+            if (fault.Bytes) return -EFAULT;
+            value=state.gregs[FEXCore::X86State::REG_RAX];
+            engine->probe.ranges.clear();
+        }
+        owner->close();
+        *result=value;
+#if defined(VIXL_SIMULATOR)
+        *backend=MAXPS4_CPU_FEX_ARM64_SIMULATOR;
+#else
+        *backend=MAXPS4_CPU_FEX_ARM64_JIT;
+#endif
+        return 0;
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
+      catch (const std::exception&) { return -ENOTSUP; }
 }
 extern "C" int32_t maxps4_fex_engine_run_orbis(maxps4_fex_engine* engine,
     uint64_t* result, uint32_t* backend, uint64_t* entry) {

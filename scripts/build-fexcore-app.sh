@@ -12,6 +12,7 @@ cp build/fex-app-ios/libMaxPS4FEXRuntime.dylib "$FRAMEWORK/MaxPS4FEXRuntime"
 xcrun install_name_tool -id '@rpath/MaxPS4FEXRuntime.framework/MaxPS4FEXRuntime' "$FRAMEWORK/MaxPS4FEXRuntime"
 cp MaxPS4-iOS/Native/maxps4_fex_runtime.h "$FRAMEWORK/Headers/MaxPS4FEXRuntime.h"
 cp MaxPS4-iOS/Native/maxps4_jit_memory.h "$FRAMEWORK/Headers/"
+cp MaxPS4-iOS/Native/OrbisLinkerBridge.h "$FRAMEWORK/Headers/"
 cat > "$FRAMEWORK/Modules/module.modulemap" <<'MAP'
 framework module MaxPS4FEXRuntime { umbrella header "MaxPS4FEXRuntime.h" export * }
 MAP
@@ -24,6 +25,13 @@ p.write_bytes(plistlib.dumps(dict(CFBundleIdentifier='com.enermaxfr.maxps4.fexru
     CFBundlePackageType='FMWK', CFBundleShortVersionString='0.3.0', CFBundleVersion='132',
     CFBundleSupportedPlatforms=['iPhoneOS'], MinimumOSVersion='18.0')))
 PY
+# Exercise the public framework module, independently of the app's source
+# bridging header. This catches missing transitive headers and link exports.
+xcrun swiftc -parse-as-library -D MAXPS4_V4_FRAMEWORK_SMOKE \
+  -target arm64-apple-ios18.0 -sdk "$(xcrun --sdk iphoneos --show-sdk-path)" \
+  -F build/frameworks -framework MaxPS4FEXRuntime \
+  MaxPS4-iOS/Tests/V4PRXLinkSmoke.swift -o build/diagnostics/v4-framework-link-smoke \
+  2>&1 | tee build/diagnostics/v4-framework-link.log
 # Ad-hoc signing authenticates the edited Mach-O only; SideStore must re-sign it.
 codesign --force --sign - "$FRAMEWORK"
 # Preserve the existing exact logo as an Xcode app-icon asset.
@@ -85,13 +93,13 @@ xcrun nm -gU "$FRAMEWORK/MaxPS4FEXRuntime" > build/diagnostics/fex-app-runtime-e
 # Every public ABI entry must be exported by the embedded runtime. Only
 # entries actually called by the Swift app are required in its undefined imports;
 # the compiler may legitimately omit unused public functions.
-for symbol in maxps4_fex_test_ps4_libkernel maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_interpret_elf maxps4_fex_engine_run_elf maxps4_jit_begin maxps4_jit_cancel maxps4_jit_confirmation maxps4_jit_launch_failed; do
+for symbol in maxps4_fex_test_ps4_libkernel maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_interpret_elf maxps4_fex_engine_run_elf maxps4_fex_engine_run_v4_prx maxps4_jit_begin maxps4_jit_cancel maxps4_jit_confirmation maxps4_jit_launch_failed; do
   if ! grep -q "_${symbol}$" build/diagnostics/fex-app-runtime-exports.txt; then
     echo "Missing FEXCore runtime export: ${symbol}" >&2
     exit 1
   fi
 done
-for symbol in maxps4_fex_test_ps4_libkernel maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_run_elf maxps4_jit_begin; do
+for symbol in maxps4_fex_test_ps4_libkernel maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_run_elf maxps4_fex_engine_run_v4_prx maxps4_jit_begin; do
   if ! grep -q "_${symbol}$" build/diagnostics/fex-app-imports.txt; then
     echo "Missing required app import: ${symbol}" >&2
     exit 1

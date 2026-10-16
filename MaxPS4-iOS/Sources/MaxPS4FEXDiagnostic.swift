@@ -281,7 +281,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
 
     // An authorized plaintext bundle has an explicit graph. A recognized PKG
     // or opaque PFS never supplies these bytes implicitly.
-    static func executeOrbisDirectory(url: URL) -> String {
+    static func executeOrbisDirectory(url: URL, translatedV4: Bool = false) -> String {
 #if MAXPS4_FEX_APP
         struct Manifest: Decodable {
             struct Module: Decodable { let path: String; let loadBias: UInt64; let dependencies: [String] }
@@ -309,7 +309,8 @@ struct MaxPS4FEXDiagnostic: Sendable {
                 guard bytes.count == Int(size) else { throw CocoaError(.fileReadCorruptFile) }
                 return bytes
             }
-            let manifest = try JSONDecoder().decode(Manifest.self, from: read("maxps4.json", limit: 65536))
+            let manifestBytes = try read("maxps4.json", limit: 65536)
+            let manifest = try JSONDecoder().decode(Manifest.self, from: manifestBytes)
             guard basename(manifest.root), !manifest.modules.isEmpty, manifest.modules.count <= 128,
                   Set(manifest.modules.map(\.path)).count == manifest.modules.count,
                   manifest.modules.contains(where: { $0.path == manifest.root }),
@@ -323,6 +324,35 @@ struct MaxPS4FEXDiagnostic: Sendable {
                 total += bytes.count
                 guard total <= 64 * 1024 * 1024 else { return "Import Orbis refusé : budget total de 64 Mio dépassé." }
                 storage.append(bytes as NSData)
+            }
+            if translatedV4 {
+                struct V4Options: Decodable { let v4ABI: String; let v4Entry: UInt64 }
+                guard let options = try? JSONDecoder().decode(V4Options.self, from: manifestBytes),
+                      options.v4ABI == "synthetic-hlt-v1",
+                      manifest.modules.count == 1, let module = manifest.modules.first,
+                      module.path == manifest.root, module.dependencies.isEmpty else {
+                    return "V4 refusé (-ENOTSUP) : un PRX autonome, v4ABI=synthetic-hlt-v1 et v4Entry explicite sont requis. TLS, init/fini et ABI de jeu PS4 ne sont pas pris en charge."
+                }
+                var engine: OpaquePointer?
+                let opened = maxps4_fex_engine_open(&engine)
+                guard opened == 0, let engine else { return "Ouverture V4/FEX refusée (\(opened))." }
+                defer { maxps4_fex_engine_close(engine) }
+                let initialized = maxps4_fex_engine_initialize(engine)
+                guard initialized == 0 else { return "V4 : aucune exécution ; initialisation JIT refusée (\(initialized))." }
+                var request = maxps4_v4_prx_request(
+                    file: storage[0].bytes.assumingMemoryBound(to: UInt8.self), length: storage[0].length,
+                    load_bias: module.loadBias, entry: options.v4Entry,
+                    abi: UInt32(MAXPS4_V4_ABI_SYNTHETIC_HLT), instruction_budget: 64)
+                var value: UInt64 = 0
+                var backend: UInt32 = 0
+                let status = withExtendedLifetime(storage) {
+                    maxps4_fex_engine_run_v4_prx(engine, &request, &value, &backend)
+                }
+                guard status == 0, backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT) || backend == UInt32(MAXPS4_CPU_FEX_ARM64_SIMULATOR) else {
+                    return "V4 : exécution refusée ou échouée (\(status)) ; aucun succès publié."
+                }
+                let cpu = backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT) ? "ARM64 natif" : "simulateur ARM64"
+                return "PRX synthétique V4 exécuté par FEX (\(cpu)) : RAX=\(value).\nBail mémoire traduit, pile RW/NX et nettoyage du contexte appliqués. ABI synthetic-hlt-v1 uniquement ; aucun démarrage de jeu PS4 validé."
             }
             var strings: [UnsafeMutablePointer<CChar>] = []
             defer { strings.forEach { free($0) } }

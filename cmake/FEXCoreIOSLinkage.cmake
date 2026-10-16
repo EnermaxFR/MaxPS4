@@ -56,6 +56,9 @@ function(maxps4_complete_fexcore_linkage)
       "${MAXPS4_ROOT}/MaxPS4-iOS/Tests/PS4FEXLinkedExecutionTest.cpp")
     target_compile_features(maxps4-ps4-linked-test PRIVATE cxx_std_23)
     target_link_libraries(maxps4-ps4-linked-test PRIVATE MaxPS4FEXRuntime fmt::fmt)
+    add_executable(maxps4-v4-c-abi-smoke "${MAXPS4_ROOT}/MaxPS4-iOS/Tests/V4PRXLinkSmoke.c")
+    set_target_properties(maxps4-v4-c-abi-smoke PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO LINKER_LANGUAGE CXX)
+    target_link_libraries(maxps4-v4-c-abi-smoke PRIVATE MaxPS4FEXRuntime)
   target_include_directories(maxps4-ps4-linked-test PRIVATE "${CMAKE_SOURCE_DIR}/FEXCore/include" "${CMAKE_BINARY_DIR}/include")
     # Host-only profile: macOS rejected a low-profile thread/TLS reservation.
     # iOS retains the default low profile; this does not fix device error -48.
