@@ -75,7 +75,12 @@ public:
                 failure_ = {address,bytes,0,-EEXIST};
                 return -EEXIST;
             }
-        if (backend_ == Backend::fex_direct && low < 0x100000000ULL) return -ENOTSUP;
+        if (backend_ == Backend::fex_direct && low < 0x100000000ULL) {
+            // Policy refusal, before any OS allocation. Do not report an empty
+            // success record or mislabel this as a host collision (-48 Darwin).
+            failure_ = {address,bytes,0,-ENOTSUP};
+            return -ENOTSUP;
+        }
         void* hint = backend_ == Backend::fex_direct ? reinterpret_cast<void*>(low) : nullptr;
         void* host = MAP_FAILED;
 #if defined(__APPLE__)
