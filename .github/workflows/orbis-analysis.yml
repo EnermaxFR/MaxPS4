@@ -20,6 +20,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - run: bash scripts/test-orbis-analysis.sh
       - name: Preserve restricted ELF, libkernel and guest memory regressions
         run: bash scripts/test-ps4-system-services.sh
@@ -28,6 +30,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - run: bash scripts/test-orbis-analysis.sh
       - name: Test actual Swift report bridge
         run: |

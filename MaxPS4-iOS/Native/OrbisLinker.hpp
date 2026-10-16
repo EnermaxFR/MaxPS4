@@ -66,8 +66,18 @@ public:
         // the advertised permissions. No identity mapping is implied.
         std::vector<Mapping> mappings() const {
             std::vector<Mapping> result;
-            for (const auto& m : modules) for (const auto& s : m.image.segments)
-                result.push_back({m.bias + s.header.address, s.header.memorySize, s.header.flags, s.bytes.data()});
+            for (const auto& m : modules) {
+                if (m.image.requiresTLS) throw std::runtime_error("Linker mapping requires unsupported TLS");
+                for (const auto& s : m.image.segments) {
+                    // Image is public/mutable. Revalidate the copy contract at
+                    // export, before any backend sees a pointer and byte count.
+                    if (!s.header.memorySize || s.header.memorySize != s.bytes.size())
+                        throw std::runtime_error("Linker mapping byte extent mismatch");
+                    if (s.header.address > UINT64_MAX - m.bias)
+                        throw std::runtime_error("Linker mapping bias overflow");
+                    result.push_back({m.bias + s.header.address, s.header.memorySize, s.header.flags, s.bytes.data()});
+                }
+            }
             return result;
         }
         const uint8_t* translate(uint64_t address, size_t count, uint32_t permissions) const {
