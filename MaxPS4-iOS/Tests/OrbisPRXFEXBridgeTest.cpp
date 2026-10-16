@@ -51,6 +51,17 @@ int main() {
     const uint8_t* host = reinterpret_cast<const uint8_t*>(1);
     assert(bridge.admit_dispatch(0x14000,host)==-ENOTSUP && !host);
     assert(bridge.diagnostic().find("dispatch refused")!=std::string::npos);
+    // Refusal must be stable for executable, data and unmapped guest addresses.
+    // No failed dispatch may publish a host pointer or mutate staged PRX bytes.
+    for (uint64_t entry : {uint64_t{0x14000}, uint64_t{0x28000},
+                           uint64_t{0x13000}, uint64_t{0x400000}}) {
+        host = reinterpret_cast<const uint8_t*>(1);
+        assert(bridge.admit_dispatch(entry,host)==-ENOTSUP);
+        assert(host==nullptr);
+        uint64_t after=0;
+        assert(memory->read(0x28000,&after,8)==0 && after==0x14000);
+        assert(bridge.memory()==memory);
+    }
     auto rejected = [&](OrbisPRXPreparation bad) {
         assert(!bridge.map(bad) && !bridge.diagnostic().empty());
         assert(bridge.memory()==memory && memory->regions().size()==4);
@@ -96,6 +107,32 @@ int main() {
     GuestAddressSpace probe;
     if (probe.page_size()==4096) assert(bridge.map(image));
     else assert(!bridge.map(image));
+    bridge.unload();
+    // Public linker images must retain the same owned-byte/range contract as
+    // prepared PRXs, even if a caller mutates an image after successful link.
+    for (size_t i=0; i<image.modules[0].image.segments.size(); ++i)
+        image.modules[0].image.segments[i].header.address=0x10000+i*0x4000;
+    assert(bridge.map(image));
+    const auto* committed=bridge.memory();
+    auto rejectImage = [&](const OrbisLinker::Image& invalid) {
+        assert(!bridge.map(invalid));
+        assert(bridge.memory()==committed && !bridge.diagnostic().empty());
+        host=reinterpret_cast<const uint8_t*>(1);
+        assert(bridge.admit_dispatch(0x50000,host)==-ENOTSUP && !host);
+    };
+    auto invalid=image;
+    // This wraps into a plausible low guest VA; final range checks alone
+    // cannot detect that the linker's bias+segment addition overflowed.
+    invalid.modules[0].bias=UINT64_MAX-0x7fff;
+    rejectImage(invalid);
+    invalid=image; invalid.modules[0].image.segments[0].bytes.clear(); rejectImage(invalid);
+    invalid=image; invalid.modules[0].image.segments[0].bytes.resize(1); rejectImage(invalid);
+    invalid=image; invalid.modules[0].image.segments[0].header.memorySize=UINT64_MAX; rejectImage(invalid);
+    invalid=image; invalid.modules[0].image.requiresTLS=true; rejectImage(invalid);
+    bridge.unload();
+    host=reinterpret_cast<const uint8_t*>(1);
+    assert(bridge.admit_dispatch(0x50000,host)==-ENOENT && !host);
+    assert(bridge.map(image)); // reload after failed transactions and unload
     bridge.unload();
     std::puts("PASS PRX/linker guest mapping, NID/RELA bytes, RX/RW/NX, RELRO, collisions, overflow, transaction retention, unload, dispatch refusal; no guest execution");
 }

@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <future>
 #include <chrono>
+#include <stdexcept>
 
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); std::abort(); } } while (0)
 class CallRetMemory {
@@ -47,7 +48,7 @@ static void instruction_boundaries() {
     std::array<uint8_t,6> output{};
     CHECK(space.ReadGuestInstruction(guest,output.data(),output.size()));
     CHECK((output==std::array<uint8_t,6>{0xb8,42,0,0,0,0xf4}));
-    for (uint32_t permissions : {0U,4U,6U}) {
+    for (uint32_t permissions : {0U,4U,6U,7U,13U}) {
         space.ranges[1].Permissions=permissions;
         output.fill(0xa5);
         CHECK(!space.ReadGuestInstruction(guest,output.data(),output.size()));
@@ -61,6 +62,7 @@ static void instruction_boundaries() {
     // Malformed host arithmetic is refused before dereferencing any byte.
     space.ranges={{guest,UINT64_MAX,4,5}};
     CHECK(!space.ReadGuestInstruction(guest,output.data(),4));
+    CHECK(!space.ReadGuestInstruction(guest,output.data(),1)); // full range wraps
     for (auto byte:output) CHECK(byte==0xa5);
     std::puts("PASS instruction boundary preflight: split RX, hole, NX, overflow; output unchanged on failure");
 }
@@ -110,6 +112,48 @@ int main() {
         segment->L=1; segment->D=0; state.cs_cached=FEXCore::Core::CPUState::CalculateGDTBase(*segment);
         auto* second=ctx->CreateThread(code,data+2048,&state); CHECK(second);
         second->CallRetStackBase=callret.data();
+        // Prove malformed snapshots are rejected on the C++ compile stack,
+        // before decoding bytes or emitting a native memory operand. No guest
+        // dispatch is attempted for these cases, including inaccessible hosts.
+        {
+            std::array<uint8_t,16> source{0xb8,42,0,0,0,0xf4}, writable{};
+            const std::vector<FEXCore::HLE::GuestMemoryRange> valid={
+                {code,reinterpret_cast<uintptr_t>(source.data()),source.size(),5},
+                {data,reinterpret_cast<uintptr_t>(writable.data()),writable.size(),6}};
+            space.ranges=valid;
+            CHECK(space.ValidateGuestMemoryRanges());
+            size_t refusals=0;
+            auto reject=[&] {
+                CHECK(!space.ValidateGuestMemoryRanges());
+                ctx->ClearCodeCache(thread,false);
+                bool rejected=false;
+                try { ctx->CompileRIP(thread,code); }
+                catch (const std::runtime_error& error) {
+                    rejected=std::string(error.what())=="Invalid translated guest memory snapshot";
+                }
+                CHECK(rejected && source[0]==0xb8 && writable[0]==0);
+                ++refusals;
+                space.ranges=valid;
+            };
+            space.ranges.clear(); reject();
+            for (uint32_t permission : {7U,13U,1U}) {
+                space.ranges[0].Permissions=permission; reject();
+            }
+            space.ranges[0].Host=0; reject();
+            space.ranges[0].Host=UINT64_MAX-1; reject();
+            space.ranges[0].Guest=UINT64_MAX-1; reject();
+            space.ranges[0].Size=0; reject();
+            space.ranges[1].Guest=code+1; reject();
+            space.ranges[1].Host=valid[0].Host; reject(); // writable alias of RX
+            // Read-only aliases preserve W^X; ordering is not prescribed.
+            space.ranges[1].Host=valid[0].Host; space.ranges[1].Permissions=4;
+            CHECK(space.ValidateGuestMemoryRanges());
+            std::swap(space.ranges[0],space.ranges[1]);
+            CHECK(space.ValidateGuestMemoryRanges());
+            CHECK(refusals==10);
+            space.ranges.clear();
+            std::puts("PASS 10 malformed FEX snapshots refused before decode/JIT; bytes unchanged; no dispatch");
+        }
         size_t invalidations=0;
         maxps4::OrbisV4Translation memory([&] { ctx->ClearCodeCache(thread,false); ctx->ClearCodeCache(second,false); ++invalidations; });
         const size_t page=memory.page_size();
@@ -453,7 +497,11 @@ int main() {
             CHECK(lease.memory().translate(data,8,6));
         }
         CHECK(released.get()==0); CHECK(invalidations>10);
-        memory.clear(); space.ranges.clear(); ctx->DestroyThread(second); ctx->DestroyThread(thread);
+        // Terminal shutdown must finish while both cache-owning threads live.
+        memory.close(); space.ranges.clear(); ctx->DestroyThread(second); ctx->DestroyThread(thread);
+        // Cleanup after thread destruction must never re-enter the callback.
+        memory.close(); memory.clear();
+        CHECK(memory.reserve(code,page)==-ESHUTDOWN);
     }
     FEXCore::Config::Shutdown();
 #if defined(VIXL_SIMULATOR)

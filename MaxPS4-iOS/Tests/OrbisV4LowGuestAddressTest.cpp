@@ -34,6 +34,10 @@ int main() {
   maxps4::GuestAddressSpace direct(maxps4::GuestAddressSpace::Backend::fex_direct);
   assert(direct.reserve(guest, page) == -ENOTSUP);
   assert(direct.allocated() == 0);
+  const auto refusal=direct.reservation_failure();
+  assert(refusal.guest==guest && refusal.bytes==3*page);
+  assert(refusal.error==-ENOTSUP && refusal.host_status==0);
+  assert(direct.regions().empty());
   assert(memory.release(guest) == 0);
   assert(memory.allocated() == 0);
 }

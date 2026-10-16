@@ -12,6 +12,7 @@ public:
     bool map(const OrbisLinker::Image& image) {
         try { return commit(image.mappings()); }
         catch (const std::bad_alloc&) { return fail("Linker mapping allocation failed"); }
+        catch (const std::runtime_error& error) { return fail(error.what()); }
     }
     bool map(const OrbisPRXPreparation& prepared) {
         std::vector<OrbisLinker::Mapping> mappings;
