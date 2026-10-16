@@ -43,7 +43,7 @@ assert(!test.commands.some(x => /^P|^c$/.test(x)), 'No application breakpoint or
 for (const stage of ['vAttach', 'm100000', 'replay', '_M', 'prepare', 'M100008', 'M100000', 'D']) {
     test = run(stage);
     if (stage === 'D') assert(test.error);
-    else assert.equal(test.error, undefined);
+    else assert(test.error, 'Script failure must reach StikDebug after cleanup');
     if (stage === 'vAttach') assert.equal(test.commands.length, 1);
     else assert.equal(test.commands.at(-1), 'D');
     if (stage === 'prepare') assert(test.commands.includes('_m10000000'));
@@ -53,13 +53,22 @@ for (const stage of ['vAttach', 'm100000', 'replay', '_M', 'prepare', 'M100008',
         assert(!test.commands.some(x => x.startsWith('M')), 'A stale/unreadable challenge must never be overwritten');
     }
     if (stage === 'prepare' || stage === '_M') {
-        assert(test.commands.includes('M100008,20:0200000000000000' + '00'.repeat(24)));
+        assert(test.commands.some(x => /^M100008,20:[0-9a-f]{16}0{48}$/.test(x)), 'Publish fixed stage/region failure metadata');
         assert(!test.commands.includes(writes[0]), 'Failure must never publish successful RX metadata');
     }
 }
-for (const address of ['0', '1234', '20000000000000', 'E22', 'no-memory']) {
+for (const address of ['0', '1234', '20000000000000', '1000000000', 'fffffc000', 'E22', 'no-memory']) {
     test = run('', address);
-    assert.equal(test.prepared.length, 0);
+    assert(test.error);
     assert(!test.commands.includes(writes[0]));
 }
+test = run('', '1000000000');
+assert.equal(test.prepared.length, 0, 'No truncated page writes above 36 bits');
 console.log('PASS shipped Stik controller: exact mailbox/GDB contract, failure cleanup, no false readiness');
+
+
+for (const [failure, code] of [['prepare', '4001000000000000'], ['_M', '3001000000000000']]) {
+    const failed = run(failure);
+    assert(failed.commands.includes('M100008,20:' + code + '00'.repeat(24)), 'Exact stage and region failure status');
+    assert(failed.error, 'No false script completion');
+}

@@ -12,6 +12,7 @@ struct MaxPS4FEXDiagnosticView: View {
     @State private var importingOrbisDirectory = false
     @State private var importedReport: String?
     @State private var ps4LibkernelReport: String?
+    @State private var m2Report: String?
     @State private var analyzingOrbis = false
     @State private var orbisReport: String?
 
@@ -36,6 +37,8 @@ struct MaxPS4FEXDiagnosticView: View {
                         Label("JIT non testé sur cet appareil", systemImage: "questionmark.shield")
                             .foregroundStyle(.secondary)
                     }
+                    Text("CS_DEBUGGED, MAP_JIT et RW/RW ne valident pas le fournisseur RX/RW FEXCore. Utiliser l’activation ci-dessous ; aucun test BRK n’est autorisé. Un simple attachement debugserver ou le script Universal JIT seul ne publie pas la mailbox MaxPS4.")
+                        .font(.footnote)
                     Text("Activer avec StikDebug, attendre la fin de son script et son détachement, puis tester FEXCore. Le test vérifie les permissions RX/RW et l’exécution x86-64. Une confirmation de script seule ne valide pas le JIT.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -55,6 +58,24 @@ struct MaxPS4FEXDiagnosticView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(running)
+                    Button("Tester M2 low VA — JIT 42 / TLS 8") {
+                        running = true
+                        Task {
+                            m2Report = await withCheckedContinuation { continuation in
+                                MaxPS4FEXMetalExecution.queue.async {
+                                    continuation.resume(returning: MaxPS4FEXDiagnostic.testM2LowVA())
+                                }
+                            }
+                            running = false
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(running)
+                    .accessibilityIdentifier("maxps4-m2-low-va-test")
+                    if let m2Report {
+                        Text(m2Report).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                        ShareLink(item: m2Report) { Label("Partager le rapport M2", systemImage: "square.and.arrow.up") }
+                    }
                     Button("Tester ELF PS4 / libkernel") {
                         running = true
                         Task {
@@ -178,4 +199,5 @@ struct MaxPS4FEXDiagnosticView: View {
         }
     }
 }
+
 

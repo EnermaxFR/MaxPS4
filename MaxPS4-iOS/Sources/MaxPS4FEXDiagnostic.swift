@@ -150,6 +150,35 @@ struct MaxPS4FEXDiagnostic: Sendable {
 #endif
     }
 
+    /// Fixed M2 fixture only; no interpreter fallback and no BRK protocol.
+    static func testM2LowVA() -> String {
+#if MAXPS4_FEX_APP
+        var report = maxps4_m2_low_va_report()
+        let status = maxps4_fex_test_m2_low_va(&report)
+        let executed = report.backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT) && report.execute_status == 0
+        let passed = status == 0 && executed && report.rax == 42 && report.memory == 42 && report.tls == 8 &&
+            report.collision_preserved == 1 && report.cleanup == 1 && report.code_rx == 1 && report.stack_rw_nx == 1
+        let revision = Bundle.main.object(forInfoDictionaryKey: "MaxPS4SourceRevision") as? String ?? "non renseignée"
+        return [
+            "M2 low VA — traduction mémoire FEXCore",
+            "Date UTC : " + ISO8601DateFormatter().string(from: Date()),
+            "Révision source : " + revision,
+            "Système : " + ProcessInfo.processInfo.operatingSystemVersionString,
+            "Statut : \(status) ; initialisation : \(report.initialize_status) ; exécution : \(executed ? String(report.execute_status) : "non validée")",
+            "Backend : \(report.backend) (2 requis pour JIT ARM64 natif)",
+            "Entrée invitée : 0x" + String(report.entry, radix: 16),
+            "JIT : \(executed ? String(report.rax) : "non mesuré") (attendu 42) ; mémoire : \(executed ? String(report.memory) : "non mesurée") (attendu 42)",
+            "TLS : \(executed ? String(report.tls) : "non mesuré") (attendu 8)",
+            "Collision préservée : \(report.collision_preserved) ; nettoyage : \(report.cleanup) ; code RX : \(report.code_rx) ; pile RW/NX : \(report.stack_rw_nx) (tous attendus 1)",
+            "Fournisseur RX/RW : état \(maxps4_jit_state()), erreur \(maxps4_jit_error()), étape \(maxps4_jit_failure_stage()), Mach \(maxps4_jit_failure_mach()), région \(maxps4_jit_failure_region()) ; échec script \(maxps4_jit_script_failure())",
+            "Validation M2 : " + (passed ? "réussie" : "échouée"),
+            "Aucun repli interpréteur. Aucun BRK. La correction de -48 exige une validation sur votre iPhone."
+        ].joined(separator: "\n")
+#else
+        return "M2 low VA : moteur FEXCore natif absent de cette compilation"
+#endif
+    }
+
     /// Built-in ELF bytes are shared with the native linked-execution tests.
     /// This path never invokes the restricted interpreter.
     static func testPS4Libkernel() -> String {
@@ -346,7 +375,9 @@ struct MaxPS4FEXDiagnostic: Sendable {
         let mailboxDescriptions = ["session inactive", "nonce absent", "nonce incorrect", "statut non publié", "confirmation rejetée", "confirmation reçue"]
         let mailboxDescription = mailboxDescriptions.indices.contains(mailboxDiagnostic) ? mailboxDescriptions[mailboxDiagnostic] : "inconnu"
         let jitGuidance: String
-        if initialized == -Int32(EAGAIN) && providerAfter == 1 {
+        if initialized == -Int32(EBUSY) && providerAfter == 1 {
+            jitGuidance = "Débogueur encore attaché : canari ARM64 non tenté. Attendre le détachement réussi dans StikDebug, puis réessayer sans réactiver la session."
+        } else if initialized == -Int32(EAGAIN) && providerAfter == 1 {
             jitGuidance = "Activation StikDebug en attente : MaxPS4 n’a pas reçu la confirmation des régions RX. Terminer l’activation dans StikDebug, revenir dans MaxPS4, puis relancer le test. Ne pas libérer la mémoire avant ce test."
         } else if initialized == -Int32(EACCES) && providerAfter == 0 {
             jitGuidance = "JIT non préparé : utiliser « Activer avec StikDebug » avant le test FEXCore."
@@ -405,6 +436,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
         État fournisseur avant/après : \(providerBefore) → \(providerAfter)
         Diagnostic JIT : \(jitGuidance)
         Confirmation StikDebug : \(mailboxDescription) (code \(mailboxDiagnostic))
+        Échec script StikDebug : code \(maxps4_jit_script_failure()) (0 : aucun échec confirmé ; logs StikDebug requis)
         Exécution FEX JIT : statut \(jitStatus) (0 requis pour un succès JIT)
         Point d’entrée ELF64 invité : 0x\(String(elfEntry, radix: 16))
         \(selected == UInt32(MAXPS4_CPU_RESTRICTED_INTERPRETER) ? "RIP invité après repli : 0x" + String(guestRIP, radix: 16) + ", instructions terminées : \(instructions)" : fallbackAttempted ? "Repli interpréteur : échec avant mesure. RIP et compteur indisponibles." : "Repli interpréteur : non utilisé. RIP final et instructions terminées FEX : non exposés par cette API.")
@@ -432,5 +464,6 @@ struct MaxPS4FEXDiagnostic: Sendable {
 #endif
     }
 }
+
 
 

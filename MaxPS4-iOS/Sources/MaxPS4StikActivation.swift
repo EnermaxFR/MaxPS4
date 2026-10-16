@@ -34,11 +34,23 @@ enum MaxPS4StikActivation {
         return "Cette configuration ne contient pas le fournisseur FEXCore."
 #endif
     }
+    nonisolated static func scriptFailure() -> String {
+#if MAXPS4_FEX_APP
+        let code = Int(maxps4_jit_script_failure())
+        guard code >= 0x100 else { return code == 2 ? "Échec script ancien format (2) ; consulter les logs StikDebug." : "Aucun échec script confirmé." }
+        let stage = (code - 0x100) / 16, region = (code - 0x100) % 16
+        let names = ["inconnue", "attachement debugserver", "lecture/challenge mailbox", "allocation RX / plage d’adresse", "préparation RX", "publication mailbox"]
+        let name = names.indices.contains(stage) ? names[stage] : "inconnue"
+        return "Échec StikDebug : \(name), région \(region == 15 ? "sans objet" : String(region)), code \(code). Conserver les logs StikDebug pour la réponse debugserver exacte."
+#else
+        return "Fournisseur absent."
+#endif
+    }
     static func confirmation() -> String {
 #if MAXPS4_FEX_APP
         switch maxps4_jit_confirmation() {
         case 1: return "Nonce StikDebug confirmé pour ce processus. Permissions RX/RW et exécution FEX restent à vérifier par « Tester FEXCore »."
-        case 2: return "StikDebug a signalé un échec. JIT indisponible ; lancer le diagnostic pour conserver l’erreur."
+        case 2: return scriptFailure() + " JIT indisponible ; lancer le diagnostic pour conserver l’erreur."
         default: return "Aucune confirmation StikDebug pour cette demande. JIT indisponible. Vérifier la fin du script, le pairing, le VPN et la signature get-task-allow dans StikDebug. Si le script est ignoré, son option officielle de détection des scripts peut être nécessaire."
         }
 #else
@@ -55,3 +67,4 @@ enum MaxPS4StikActivation {
 #endif
     }
 }
+

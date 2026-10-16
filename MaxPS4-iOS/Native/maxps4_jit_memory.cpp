@@ -19,6 +19,7 @@
 #include <signal.h>
 #include <setjmp.h>
 #include <sys/ucontext.h>
+#include <sys/sysctl.h>
 
 namespace {
 // StikDebug publishes nonce LAST while the task is stopped. Volatile reads are
@@ -170,6 +171,15 @@ extern "C" int32_t maxps4_jit_prepare() {
     if (mailbox.nonce != expected_nonce) return -EAGAIN;
     std::atomic_thread_fence(std::memory_order_acquire);
     if (mailbox.status != 1) return reject_stage(EACCES, "mailbox-status");
+    // A published nonce precedes D. Never run the canary while debugserver
+    // still owns exception delivery; preserve the pending session for retry.
+    int query[] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()};
+    kinfo_proc process {};
+    size_t process_size = sizeof(process);
+    if (sysctl(query, 4, &process, &process_size, nullptr, 0) != 0)
+        return -(errno ? errno : EIO);
+    if (process_size != sizeof(process)) return -EIO;
+    if (process.kp_proc.p_flag & P_TRACED) return -EBUSY;
     const std::array sizes {size_t{16384}, size_t{16 * 1024 * 1024}, page_size};
     // Claim ALL addresses before attempting remaps, so rollback releases every
     // debugger-owned RX allocation even if the first remap is denied.
@@ -253,6 +263,13 @@ extern "C" int32_t maxps4_jit_cancel() {
 }
 extern "C" int32_t maxps4_jit_state() { std::lock_guard guard(lock); return state; }
 extern "C" int32_t maxps4_jit_error() { std::lock_guard guard(lock); return failure; }
+extern "C" int32_t maxps4_jit_script_failure() {
+    std::lock_guard guard(lock);
+    if (!expected_nonce || mailbox.nonce != expected_nonce) return 0;
+    std::atomic_thread_fence(std::memory_order_acquire);
+    const uint64_t status = mailbox.status;
+    return status == 2 || (status >= 0x100 && status <= 0x1ff) ? static_cast<int32_t>(status) : 0;
+}
 extern "C" int32_t maxps4_jit_mailbox_diagnostic() {
     std::lock_guard guard(lock);
     if (state == 0) return 0;
@@ -318,6 +335,7 @@ extern "C" int32_t maxps4_jit_launch_failed(uint64_t) { return -ENOTSUP; }
 extern "C" int32_t maxps4_jit_cancel() { return 0; }
 extern "C" int32_t maxps4_jit_state() { return 0; }
 extern "C" int32_t maxps4_jit_error() { return 0; }
+extern "C" int32_t maxps4_jit_script_failure() { return 0; }
 extern "C" int32_t maxps4_jit_mailbox_diagnostic() { return 0; }
 extern "C" int32_t maxps4_jit_failure_stage() { return 0; }
 extern "C" int32_t maxps4_jit_failure_mach() { return 0; }
@@ -325,3 +343,4 @@ extern "C" int32_t maxps4_jit_failure_region() { return -1; }
 extern "C" uint32_t maxps4_jit_leases() { return 0; }
 extern "C" size_t maxps4_jit_usable_size(void*, size_t) { return 0; }
 #endif
+

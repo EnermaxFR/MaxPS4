@@ -697,6 +697,7 @@ extern "C" int32_t maxps4_fex_engine_v4_synthetic(maxps4_fex_engine* engine,
 extern "C" int32_t maxps4_fex_test_m2_low_va(maxps4_m2_low_va_report* report) {
     if (!report) return -EINVAL;
     *report = {};
+    report->initialize_status = report->execute_status = -ECANCELED;
     maxps4_fex_engine* engine = nullptr;
     int status = maxps4_fex_engine_open(&engine);
     if (status) return report->status = status;
@@ -1167,6 +1168,7 @@ extern "C" int32_t maxps4_fex_engine_run_m1(maxps4_fex_engine* engine,
         return 0;
     } catch (const std::bad_alloc&) { return -ENOMEM; }
 }
+
 
 
 

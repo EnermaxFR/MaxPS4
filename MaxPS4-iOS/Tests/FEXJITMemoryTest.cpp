@@ -46,6 +46,12 @@ int main() {
         CHECK(maxps4_jit_launch_failed(nonce) == -EBUSY);
         mailbox[0] = nonce;
         CHECK(maxps4_jit_confirmation() == 2);
+        CHECK(maxps4_jit_script_failure() == 2);
+        mailbox[1] = 0x141;
+        CHECK(maxps4_jit_script_failure() == 0x141);
+        mailbox[0] = nonce ^ 1;
+        CHECK(maxps4_jit_script_failure() == 0);
+        mailbox[0] = nonce;
         CHECK(maxps4_jit_prepare() == -EACCES);
         CHECK(maxps4_jit_state() == 3 && maxps4_jit_error() == EACCES);
         CHECK(maxps4_jit_cancel() == 0);
@@ -113,3 +119,4 @@ int main() {
     for (int signal = 1; signal < NSIG; ++signal) CHECK(sigismember(&mask, signal) == sigismember(&after, signal));
     std::puts("PASS real Mach memory cleanup, initial denial, signal preservation; iPhone NOT tested");
 }
+

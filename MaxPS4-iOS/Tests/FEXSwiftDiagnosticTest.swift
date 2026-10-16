@@ -4,6 +4,10 @@ import Darwin
 @main
 struct FEXSwiftDiagnosticTest {
     static func main() {
+        let m2 = MaxPS4FEXDiagnostic.testM2LowVA()
+        precondition(m2.contains("Validation M2 : réussie"), m2)
+        precondition(m2.contains("JIT : 42") && m2.contains("TLS : 8"), m2)
+        precondition(m2.contains("Collision préservée : 1 ; nettoyage : 1 ; code RX : 1 ; pile RW/NX : 1"), m2)
         for _ in 0..<3 {
             let linked = MaxPS4FEXDiagnostic.testPS4Libkernel()
             precondition(linked.contains("Chargement ELF : réussi (0)"))
@@ -119,4 +123,5 @@ struct FEXSwiftDiagnosticTest {
         print("PASS Swift lifecycle; macOS host execution only, no iPhone proof")
     }
 }
+
 
