@@ -9,6 +9,8 @@ struct MaxPS4FEXDiagnosticView: View {
     @State private var activationMessage: String?
     @State private var activationRequested = false
     @State private var importingELF = false
+    @State private var importingPKG = false
+    @State private var pkgReport: String?
     @State private var importingOrbisDirectory = false
     @State private var importedReport: String?
     @State private var ps4LibkernelReport: String?
@@ -95,6 +97,18 @@ struct MaxPS4FEXDiagnosticView: View {
                             .textSelection(.enabled)
                         ShareLink(item: ps4LibkernelReport) { Label("Partager le rapport ELF PS4", systemImage: "square.and.arrow.up") }
                     }
+                    Button("Analyser un PKG PS4 (sans exécution)…") { importingPKG = true }
+                        .disabled(running)
+                        .accessibilityIdentifier("maxps4-pkg-analysis")
+                    Text("Inventaire PKG/PFS en lecture seule ; aucun lancement ni déchiffrement.")
+                        .font(.footnote)
+                    if let pkgReport {
+                        Text(pkgReport).font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                        ShareLink(item: pkgReport) {
+                            Label("Partager l’analyse PKG/PFS", systemImage: "square.and.arrow.up")
+                        }
+                    }
                     Button("Analyser un exécutable Orbis") { analyzingOrbis = true; importingELF = true }
                         .disabled(running)
                         .accessibilityIdentifier("maxps4-orbis-analysis")
@@ -142,6 +156,30 @@ struct MaxPS4FEXDiagnosticView: View {
                             .textSelection(.enabled)
                     }
                 }.padding()
+            }
+            .fileImporter(isPresented: $importingPKG, allowedContentTypes: [.data]) { selection in
+                switch selection {
+                case .success(let url):
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    running = true
+                    Task {
+                        defer {
+                            if scoped { url.stopAccessingSecurityScopedResource() }
+                            running = false
+                        }
+                        pkgReport = await withCheckedContinuation { continuation in
+                            MaxPS4FEXMetalExecution.queue.async {
+                                do {
+                                    continuation.resume(returning: try MaxPS4PKGInspector.inspect(url: url))
+                                } catch {
+                                    continuation.resume(returning: error.localizedDescription)
+                                }
+                            }
+                        }
+                    }
+                case .failure(let error):
+                    pkgReport = error.localizedDescription
+                }
             }
             .fileImporter(isPresented: $importingELF, allowedContentTypes: [.data]) { selection in
                 switch selection {
