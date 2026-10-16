@@ -234,6 +234,17 @@ diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/C
  }
  
  static void IRDumper(FEXCore::Core::InternalThreadState* Thread, IR::IREmitter* IREmitter, uint64_t GuestRIP) {
+@@ -558,6 +775,10 @@
+ ContextImpl::GenerateIRResult
+ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t GuestRIP, bool ExtendedDebugInfo, uint64_t MaxInst) {
+   FEXCORE_PROFILE_SCOPED("GenerateIR");
++  if (SyscallHandler && SyscallHandler->UsesGuestMemoryTranslation() &&
++      !SyscallHandler->ValidateGuestMemoryRanges()) {
++    throw std::runtime_error("Invalid translated guest memory snapshot");
++  }
+ 
+   Thread->OpDispatcher->ResetWorkingList();
+ 
 @@ -646,7 +863,13 @@
  
  #ifdef ZYDIS_DISASSEMBLER
@@ -957,7 +968,7 @@ diff --git a/FEXCore/include/FEXCore/HLE/SyscallHandler.h b/FEXCore/include/FEXC
  
  #include <FEXCore/Core/CodeCache.h>
  #include <FEXCore/IR/IR.h>
-@@ -49,9 +50,51 @@
+@@ -49,9 +50,79 @@
  class SyscallHandler;
  class SourcecodeResolver;
  
@@ -977,10 +988,38 @@ diff --git a/FEXCore/include/FEXCore/HLE/SyscallHandler.h b/FEXCore/include/FEXC
 +  // complete dispatch, then inspect the record before publishing CPU success.
 +  virtual bool UsesGuestMemoryTranslation() const { return false; }
 +  virtual std::span<const GuestMemoryRange> GuestMemoryRanges() const { return {}; }
++  static bool ValidGuestMemoryRange(const GuestMemoryRange& R) {
++    return R.Host && R.Size && !(R.Permissions & ~7U) &&
++      (R.Permissions & 3U) != 3U && (!(R.Permissions & 1U) || (R.Permissions & 4U)) &&
++      R.Size - 1 <= UINT64_MAX - R.Guest && R.Size - 1 <= UINT64_MAX - R.Host;
++  }
++  // Validate before decoding/IR generation embeds Host constants in native
++  // code. The frontend still proves ownership and pins this immutable snapshot
++  // until dispatch ends, then invalidates every affected thread/code cache.
++  bool ValidateGuestMemoryRanges() const {
++    const auto Ranges = GuestMemoryRanges();
++    if (Ranges.empty()) return false;
++    for (size_t i = 0; i < Ranges.size(); ++i) {
++      const auto& A = Ranges[i];
++      if (!ValidGuestMemoryRange(A)) return false;
++      for (size_t j = 0; j < i; ++j) {
++        const auto& B = Ranges[j];
++        const bool GuestOverlap = A.Guest >= B.Guest ? A.Guest - B.Guest < B.Size : B.Guest - A.Guest < A.Size;
++        const bool HostOverlap = A.Host >= B.Host ? A.Host - B.Host < B.Size : B.Host - A.Host < A.Size;
++        // Logical overlaps are ambiguous. A host alias must never make the
++        // same guest bytes both writable and executable under different VAs.
++        if (GuestOverlap || (HostOverlap &&
++            (((A.Permissions & 2U) && (B.Permissions & 1U)) ||
++             ((B.Permissions & 2U) && (A.Permissions & 1U))))) return false;
++      }
++    }
++    return true;
++  }
 +  // Fetch can cross noncontiguous host mappings, unlike a native operand.
 +  virtual bool ReadGuestInstruction(uint64_t Address, void* Output, size_t Size) const {
 +    if (!Output || !Size || Size > UINT64_MAX - Address) return false;
 +    const auto Ranges = GuestMemoryRanges();
++    for (const auto& R : Ranges) if (!ValidGuestMemoryRange(R)) return false;
 +    // Validate every byte before touching Output. A later hole or NX region
 +    // must not publish a partial instruction, including across host mappings.
 +    for (size_t i = 0; i < Size; ++i) {
