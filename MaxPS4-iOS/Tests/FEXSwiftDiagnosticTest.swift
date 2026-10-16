@@ -21,6 +21,25 @@ struct FEXSwiftDiagnosticTest {
             precondition(report.contains("Aucune initialisation JIT ni exécution tentée"), report)
         }
         precondition(maxps4_jit_state() == previousJIT)
+        // The distinct V4 action requires an explicit ABI opt-in before opening
+        // an engine or preparing JIT. Old manifests remain valid for the old API.
+        let v4Directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: v4Directory) }
+        do {
+            try FileManager.default.createDirectory(at: v4Directory, withIntermediateDirectories: true)
+            try Data([0x7f, 0x45, 0x4c, 0x46]).write(to: v4Directory.appendingPathComponent("eboot.bin"))
+            var manifest: [String: Any] = ["root": "eboot.bin", "modules": [
+                ["path": "eboot.bin", "loadBias": 262144, "dependencies": [String]()]
+            ]]
+            for abi in ["", "ps4-startup", "synthetic-hlt-v1"] {
+                if !abi.isEmpty { manifest["v4ABI"] = abi }
+                // Even the supported ABI is refused without an explicit entry.
+                try JSONSerialization.data(withJSONObject: manifest).write(to: v4Directory.appendingPathComponent("maxps4.json"))
+                let refusal = MaxPS4FEXDiagnostic.executeOrbisDirectory(url: v4Directory, translatedV4: true)
+                precondition(refusal.contains("V4 refusé (-ENOTSUP)"), refusal)
+                precondition(maxps4_jit_state() == previousJIT)
+            }
+        } catch { fatalError("V4 manifest fixture failed: \(error)") }
         precondition(MaxPS4FEXDiagnostic.pkgExecutionRefusal(prefix: Data([0x7f,0x45,0x4c,0x46])) == nil)
         precondition(MaxPS4FEXDiagnostic.pkgExecutionRefusal(prefix: Data([0x7f,0x43])) == nil)
         print("PASS imported CNT rejected before ELF allocation, engine creation and JIT; suffix ignored")
@@ -74,6 +93,8 @@ struct FEXSwiftDiagnosticTest {
         }
         if CommandLine.arguments.count > 2 {
             let directory = URL(fileURLWithPath: CommandLine.arguments[2])
+            let v4 = MaxPS4FEXDiagnostic.executeOrbisDirectory(url: directory.appendingPathComponent("v4-synthetic"), translatedV4: true)
+            precondition(v4.contains("PRX synthétique V4 exécuté") && v4.contains("RAX=42"), v4)
             let result = MaxPS4FEXDiagnostic.executeOrbisDirectory(url: directory)
             precondition(result.contains("Exécution FEX ARM64 natif terminée : RAX = 42"), result)
             print("PASS Swift authorized manifest -> SCE ELF/PRX -> FEX native ARM64 -> RAX 42")

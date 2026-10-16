@@ -30,6 +30,10 @@ int main() {
     auto inspect = [&](const fs::path& path, int expected = 0) {
         std::vector<char> report(2*1024*1024);
         assert(maxps4_game_directory_report(path.c_str(),report.data(),report.size())==expected);
+        // Completion is an inventory result, including a missing eboot, valid
+        // ELF/PRX or a present manifest. It never grants CPU admission.
+        if (expected==0)
+            assert(std::strstr(report.data(),"[ORBIS.PREFLIGHT] execution_admitted=0"));
         return std::string(report.data());
     };
     auto text = inspect(root);

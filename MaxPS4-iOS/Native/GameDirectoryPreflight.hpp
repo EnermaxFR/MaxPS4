@@ -191,6 +191,7 @@ class GameDirectoryPreflight {
         append(manifest ? "\nmaxps4.json présent : validation du graphe, biais et instructions réservée au lancement expérimental\n" :
             "\nmaxps4.json absent : graphe PRX et biais explicites requis par le runtime actuel ; aucun manifeste généré\n");
         block("Préparation réelle non effectuée : graphe explicite, biais, relocations et admission CPU à valider");
+        append("[ORBIS.PREFLIGHT] execution_admitted=0 ; inventaire uniquement, aucun dispatch\n");
         block("TLS par thread et ABI de démarrage d'un jeu non raccordés ; rendu/audio PS4 général non connecté");
         append("\nPremier blocage du précontrôle : "+blockers.front()+"\nBlocages / limites observés :\n");
         for (const auto& reason : blockers) append("• "+reason+"\n");

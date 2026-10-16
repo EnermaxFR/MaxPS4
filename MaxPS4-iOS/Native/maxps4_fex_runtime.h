@@ -8,6 +8,25 @@ extern "C" {
 #endif
 // Opaque engine: no FEX C++ types cross the native/Swift boundary.
 typedef struct maxps4_fex_engine maxps4_fex_engine;
+enum { MAXPS4_V4_ABI_SYNTHETIC_HLT = 1 };
+typedef struct maxps4_v4_prx_request {
+    const uint8_t* file;
+    size_t length;
+    uint64_t load_bias, entry;
+    uint32_t abi, instruction_budget;
+} maxps4_v4_prx_request;
+// Distinct one-shot V4 API. Requires initialized engine; immutable plaintext
+// ET_SCE_DYNAMIC bytes for one self-contained PRX. No imports/dependencies,
+// TLS, init/fini, syscalls or PS4 startup ABI. Explicit SYNTHETIC_HLT ABI only:
+// zero integer registers, private 16-byte-aligned RW/NX stack, no arguments,
+// no CALL/RET. Admits finite MOV EAX,imm32 / ADD EAX,imm32 / NOP /
+// MOV RDI,imm64 / MOV EAX,[RDI] (proven readable) / final HLT only.
+// Unsupported requirements/instructions return -ENOTSUP. No fallback.
+// Owner lease spans validation/compilation/dispatch; close precedes thread
+// destruction. Output fields are zero on every failure. Serialized with other
+// engine execution; caller serializes engine close and keeps file bytes stable.
+int32_t maxps4_fex_engine_run_v4_prx(maxps4_fex_engine* engine,
+    const maxps4_v4_prx_request* request, uint64_t* result, uint32_t* backend);
 // Self-contained synthetic Orbis test, using the existing loader/linker/FEX
 // runtime. Status -ECANCELED means an operation was not attempted. Values are
 // valid only when their operation succeeded; no interpreter fallback occurs.
@@ -49,7 +68,9 @@ int32_t maxps4_fex_engine_initialize(maxps4_fex_engine *engine);
 int32_t maxps4_fex_engine_open(maxps4_fex_engine **out);
 void maxps4_fex_engine_close(maxps4_fex_engine *engine);
 int32_t maxps4_fex_engine_stage(const maxps4_fex_engine *engine);
-// CPU entry snapshot from the last successfully completed guest execution.
+// Legacy CPU entry snapshot from the last successfully completed execution
+// through the existing launcher. The distinct V4 PRX API leaves this intact
+// and reports its result/backend exclusively through its own output fields.
 typedef struct maxps4_fex_cpu_report {
     uint64_t entry, rax, argc, page_size;
     uint32_t rsp_alignment, zero_integer_registers, entry_matches,

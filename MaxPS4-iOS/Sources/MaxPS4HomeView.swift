@@ -26,6 +26,7 @@ struct MaxPS4HomeView: View {
     @State private var inspectionReport: String?
     @State private var selectedGameDetails: MaxPS4Game?
     @State private var detailsReport: String?
+    @State private var detailsLaunchSummary: String?
     @State private var jitStatusReport: String?
     @State private var showingFEXDiagnostic = false
     @State private var showingMetalDiagnostic = false
@@ -201,7 +202,7 @@ struct MaxPS4HomeView: View {
                 }
             }
         }
-        .sheet(item: $selectedGameDetails, onDismiss: { detailsReport = nil }) { game in
+        .sheet(item: $selectedGameDetails, onDismiss: { detailsReport = nil; detailsLaunchSummary = nil }) { game in
             NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
@@ -239,7 +240,8 @@ struct MaxPS4HomeView: View {
                             Text("Taille locale : " + ByteCountFormatter.string(fromByteCount: value.int64Value, countStyle: .file))
                         }
                         Text("Date d’import : " + game.importedAt.formatted(date: .abbreviated, time: .shortened))
-                        Text("Exécution PS4 indisponible")
+                        Text(detailsLaunchSummary ?? emulator.launchReadinessReport(for: game))
+                            .textSelection(.enabled)
                             .foregroundStyle(.orange)
                         Button("Essayer le moteur (diagnostic)") {
                             emulator.tryGameEngine(game)
@@ -305,6 +307,17 @@ struct MaxPS4HomeView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
+                }
+                .task(id: game.id) {
+                    detailsLaunchSummary = nil
+                    if game.fileName.lowercased().hasSuffix(".pkg") {
+                        let url = URL(fileURLWithPath: game.localPath)
+                        let summary = await Task.detached(priority: .userInitiated) {
+                            MaxPS4PKGInspector.launchSummary(url: url)
+                        }.value
+                        guard !Task.isCancelled else { return }
+                        detailsLaunchSummary = summary
+                    }
                 }
                 .navigationTitle("Fiche du jeu")
                 .navigationBarTitleDisplayMode(.inline)
@@ -414,6 +427,18 @@ struct MaxPS4HomeView: View {
                             .foregroundStyle(.white)
                     }
                 }
+
+                secondaryAction(
+                    icon: "folder",
+                    title: "Dossier Orbis accessible",
+                    subtitle: "Précontrôle puis tentative bornée si le runtime admet les fichiers"
+                ) {
+                    showingGameDirectory = true
+                }
+                .accessibilityIdentifier("maxps4.library.orbisDirectory")
+                Text("Sélection distincte du PKG importé : eboot.bin, PRX et maxps4.json déjà accessibles. Aucun déchiffrement ni installation automatique.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 HStack {
                     Image(systemName: "magnifyingglass")
@@ -972,11 +997,7 @@ struct MaxPS4HomeView: View {
 
         return VStack(alignment: .leading, spacing: 10) {
             Button {
-                if isPKG {
-                    selectedGameDetails = game
-                } else {
-                    emulator.launch(game)
-                }
+                selectedGameDetails = game
             } label: {
                 ZStack(alignment: .bottomLeading) {
                     LinearGradient(
@@ -1028,13 +1049,9 @@ struct MaxPS4HomeView: View {
 
             HStack {
                 Button {
-                    if isPKG {
-                        selectedGameDetails = game
-                    } else {
-                        emulator.launch(game)
-                    }
+                    selectedGameDetails = game
                 } label: {
-                    Label(isPKG ? "Infos" : "Ouvrir", systemImage: isPKG ? "info.circle" : "play.fill")
+                    Label("Infos", systemImage: "info.circle")
                         .font(.caption.weight(.semibold))
                 }
 

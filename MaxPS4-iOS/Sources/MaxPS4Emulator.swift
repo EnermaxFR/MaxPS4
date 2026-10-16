@@ -588,23 +588,22 @@ final class MaxPS4Emulator: ObservableObject {
     func launchReadinessReport(for game: MaxPS4Game) -> String {
         let fileURL = URL(fileURLWithPath: game.localPath)
         guard fileManager.fileExists(atPath: fileURL.path) else {
-            return "Fichier introuvable : \\(game.fileName). Vérifie les données importées."
+            return "Fichier introuvable : \(game.fileName). Vérifie les données importées."
         }
         if fileURL.pathExtension.lowercased() == "pkg" {
-            return "\(game.name) : PKG reconnu et conservé. Lancement bloqué : eboot.bin, modules PRX et ressources du PFS ne sont pas accessibles par cet import. Fournir un dossier obtenu par une voie autorisée avec des ELF/PRX en clair et maxps4.json, puis utiliser « Importer et exécuter un dossier Orbis compatible » dans le diagnostic FEXCore. Aucun jeu lancé depuis ce PKG."
+            return "\(game.name) : PKG conservé dans la bibliothèque. Exécutable : accès non établi ; consulter l’analyse PKG/PFS de la fiche. Lancement indisponible : cet import n’installe pas le contenu du PKG. Un dossier Orbis accessible peut être précontrôlé séparément ; il ne garantit pas le lancement d’un jeu."
         }
         guard let nativeEngine else {
-            let cpuProbeStatus = maxps4NativeAetherCPUProbe() == 1 ? "réussi" : "échoué"
-            return "\\(game.name) : bibliothèque native ABI \\(maxps4NativeABIVersion()) liée ; lancement PS4 indisponible (capacités : \\(maxps4NativeCapabilities())) ; test CPU AetherPS4 : \\(cpuProbeStatus)."
+            return "\(game.name) : fichier importé présent ; accès et admission de l’exécutable à vérifier par l’analyse. Lancement PS4 indisponible : aucun moteur de jeu natif connecté. La liaison de la bibliothèque native ne suffit pas à rendre un jeu jouable."
         }
         guard nativeEngine.isReady else {
-            return "\\(game.name) : moteur natif détecté, mais pas prêt à exécuter un jeu."
+            return "\(game.name) : moteur natif détecté, mais pas prêt à exécuter un jeu."
         }
         if let backend = nativeEngine as? any MaxPS4ShadPS4Backend,
            !backend.capabilities.canLaunchPS4Game {
-            return "\\(game.name) : moteur PS4 incomplet. " + backend.capabilities.diagnostic
+            return "\(game.name) : moteur PS4 incomplet. " + backend.capabilities.diagnostic
         }
-        return "\\(game.name) : moteur déclaré prêt. Le lancement reste expérimental."
+        return "\(game.name) : moteur déclaré prêt. Le lancement reste expérimental."
     }
 
     func launch(_ game: MaxPS4Game) {

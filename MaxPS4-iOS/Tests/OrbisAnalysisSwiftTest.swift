@@ -24,9 +24,11 @@ struct OrbisAnalysisSwiftTest {
         defer { try? FileManager.default.removeItem(at: directory) }
         let missing = MaxPS4OrbisAnalyzer.inspectDirectory(url: directory)
         precondition(missing.inspectionCompleted && missing.text.contains("eboot.bin manquant"))
+        precondition(missing.text.contains("[ORBIS.PREFLIGHT] execution_admitted=0"))
         try FileManager.default.copyItem(at: url, to: directory.appendingPathComponent("eboot.bin"))
         let inventory = MaxPS4OrbisAnalyzer.inspectDirectory(url: directory)
         precondition(inventory.inspectionCompleted && inventory.text.contains("NID=aI+OeCz8xrQ"))
+        precondition(inventory.text.contains("[ORBIS.PREFLIGHT] execution_admitted=0"))
         precondition(inventory.text == MaxPS4OrbisAnalyzer.inspectDirectory(url: directory).text)
         precondition(inventory.text.contains("aucune exécution"))
         precondition(!MaxPS4OrbisAnalyzer.inspectDirectory(url: invalid).inspectionCompleted)

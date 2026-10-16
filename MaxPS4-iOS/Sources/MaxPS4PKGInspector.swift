@@ -2,6 +2,29 @@ import Foundation
 
 /// Bounded PKG/PFS inspection and selected plaintext reads; no decryption or launch.
 enum MaxPS4PKGInspector {
+    /// Library copy, container recognition and executable access are separate.
+    /// This summary never grants execution, even for a readable plaintext PFS.
+    static func launchSummary(url: URL) -> String {
+        do {
+            let report = try inspect(url: url, requireValidPackage: true)
+            let evidence = report.components(separatedBy: "\n").filter {
+                $0.hasPrefix("Diagnostic en-tête PFS :") ||
+                $0.hasPrefix("Diagnostic PKG/PFS :") ||
+                $0.hasPrefix("Extraction eboot.bin :")
+            }
+            let executable = report.contains("Fichier PFS uroot : eboot.bin ;")
+                ? "Exécutable : eboot.bin répertorié dans le PFS ; lecture et admission ELF/SELF non validées pour le lancement."
+                : "Exécutable : eboot.bin inaccessible ou non répertorié ; aucun exécutable admis."
+            return (["Jeu détecté : conteneur PKG PS4 reconnu (ne prouve pas sa compatibilité).",
+                     "Jeu importé : copie locale du PKG présente et structure validée.",
+                     executable] + evidence + [
+                        "Lancement indisponible : cet import conserve le PKG, sans installer ni lancer son contenu. Un PFS lisible ne suffit pas : un exécutable admis et un moteur PS4 opérationnel sont aussi nécessaires."
+                     ]).joined(separator: "\n")
+        } catch {
+            return "Jeu détecté / importé : entrée de bibliothèque présente, mais copie locale non validée.\nExécutable : accès non établi.\nLancement indisponible : \(error.localizedDescription)"
+        }
+    }
+
     enum ReportError: LocalizedError {
         case failed(Int32, String)
         var errorDescription: String? {

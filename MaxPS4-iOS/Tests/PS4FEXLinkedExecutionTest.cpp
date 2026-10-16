@@ -5,6 +5,8 @@
 #include "PS4LinkedELFFixture.h"
 #include "PS4OrbisExecutionFixture.h"
 #include "PS4PlayableFixture.h"
+#include "OrbisV4PRXFixture.h"
+#include <future>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -264,6 +266,44 @@ static int m1Test() {
     CHECK(maxps4_fex_engine_run_m1(engine,file.data(),file.size(),1,snapshot,&report) == -E2BIG);
     return 0;
 }
+static int v4PRXTest() {
+    maxps4_fex_engine* engine=nullptr;
+    CHECK(maxps4_fex_engine_open(&engine)==0 && engine);
+    struct Close { maxps4_fex_engine* e; ~Close() { maxps4_fex_engine_close(e); } } close{engine};
+    auto bytes=v4_prx_fixture::make();
+    maxps4_v4_prx_request request{bytes.data(),bytes.size(),0x40000,0x44000,MAXPS4_V4_ABI_SYNTHETIC_HLT,3};
+    uint64_t result=123; uint32_t backend=123;
+    CHECK(maxps4_fex_engine_run_v4_prx(engine,&request,&result,&backend)==-EAGAIN && !result && !backend);
+    CHECK(maxps4_fex_engine_initialize(engine)==0);
+    for (uint32_t expected : {0U,42U,99U,7U}) {
+        bytes=v4_prx_fixture::make(expected); request.file=bytes.data();
+        CHECK(maxps4_fex_engine_run_v4_prx(engine,&request,&result,&backend)==0);
+        CHECK(result==expected && (backend==2 || backend==3));
+        CHECK(maxps4_fex_engine_probe(engine,&result,&backend)==0 && result==42);
+        bytes[0x400]=0x0f; // Unsupported instruction stream must not dispatch.
+        result=backend=123;
+        CHECK(maxps4_fex_engine_run_v4_prx(engine,&request,&result,&backend)==-ENOTSUP && !result && !backend);
+        bytes[0x400]=0x48;
+        request.instruction_budget=2;
+        CHECK(maxps4_fex_engine_run_v4_prx(engine,&request,&result,&backend)==-ENOTSUP && !result && !backend);
+        request.instruction_budget=3;
+        CHECK(maxps4_fex_engine_run_v4_prx(engine,&request,&result,&backend)==0 && result==expected);
+    }
+    // Concurrent callers on one engine are serialized; no snapshot or context
+    // can be destroyed while another call dispatches on it.
+    auto call=[&] {
+        uint64_t value=0; uint32_t cpu=0;
+        return maxps4_fex_engine_run_v4_prx(engine,&request,&value,&cpu)==0 && value==7 && (cpu==2 || cpu==3);
+    };
+    auto first=std::async(std::launch::async,call);
+    auto second=std::async(std::launch::async,call);
+    CHECK(first.get() && second.get());
+    result=backend=123;
+    CHECK(maxps4_fex_engine_run_v4_prx(engine,nullptr,&result,&backend)==-EINVAL && !result && !backend);
+    CHECK(maxps4_fex_engine_probe(engine,&result,&backend)==0 && result==42);
+    std::printf("PASS public V4 PRX API: real FEX backend=%u, translated guest load returns 42/99/7, failure outputs zero, repeat/concurrent callers, old launcher preserved\n",backend);
+    return 0;
+}
 int main(int argc, char** argv) {
     std::setvbuf(stdout,nullptr,_IONBF,0);
 #if defined(__linux__)
@@ -279,6 +319,8 @@ int main(int argc, char** argv) {
     LogMan::Msg::InstallHandler([](LogMan::DebugLevels level,const char* text) {
         if (level<=LogMan::ERROR) std::fprintf(stderr,"FEX error: %s\n",text);
     });
+    if (argc==1) { const int status=v4PRXTest(); if (status) return status; }
+    if (argc==2 && !std::strcmp(argv[1],"--v4-prx")) return v4PRXTest();
 
     if (argc == 2 && !std::strcmp(argv[1],"--m2")) {
         CHECK(maxps4_fex_test_m2_low_va(nullptr)==-EINVAL);
@@ -340,6 +382,14 @@ int main(int argc, char** argv) {
         std::ofstream manifest(directory/"maxps4.json");
         manifest << R"({"root":"app.elf","modules":[{"path":"app.elf","loadBias":1048576,"dependencies":["provider.prx"]},{"path":"provider.prx","loadBias":2097152,"dependencies":[]}]})";
         CHECK(bool(manifest));
+        const auto v4=directory/"v4-synthetic";
+        std::filesystem::create_directories(v4);
+        const auto bytes=v4_prx_fixture::make();
+        std::ofstream prx(v4/"eboot.bin",std::ios::binary);
+        prx.write(reinterpret_cast<const char*>(bytes.data()),bytes.size()); CHECK(bool(prx));
+        std::ofstream v4manifest(v4/"maxps4.json");
+        v4manifest << R"({"root":"eboot.bin","modules":[{"path":"eboot.bin","loadBias":262144,"dependencies":[]}],"v4ABI":"synthetic-hlt-v1","v4Entry":278528})";
+        CHECK(bool(v4manifest));
         return 0;
     }
     // Export the identical tested bytes for the application's import picker.
