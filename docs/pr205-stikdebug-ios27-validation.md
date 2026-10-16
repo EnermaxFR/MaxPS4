@@ -2,11 +2,11 @@
 
 ## Diagnostic et limites
 
-Le diagnostic réel communiqué par l’utilisateur montre CS_DEBUGGED actif,
+Le diagnostic initial communiqué par l’utilisateur montrait CS_DEBUGGED actif,
 MAP_JIT refusé avec errno 1, P_TRACED absent et un alias RW/RW de 16 384 octets.
-RX et l’exécution ARM64 n’ont pas été testés. Il ne mesure pas la mailbox du
+RX et l’exécution ARM64 n’avaient pas été testés dans ce diagnostic initial. Il ne mesure pas la mailbox du
 fournisseur FEXCore : aucune cause unique d’échec StikDebug n’est établie sans
-les logs d’activation. Aucun succès iPhone, ni correction de -48, n’est annoncé.
+les logs d’activation. Le rapport physique ultérieur ci-dessous valide uniquement les cas bornés indiqués ; aucune correction générale de -48 n’est annoncée.
 
 Le parcours FEX utilise `maxps4_jit_begin` → URL avec PID/bundle et script fixe
 `maxps4-stik.js` → allocations debugserver RX → préparation des pages → publication
@@ -51,8 +51,9 @@ renvoient parfois OK sans inspecter les paquets de réponse de chaque page : le
 nonce prouve uniquement la publication, jamais les droits ou l’exécution.
 Le canari et les contrôles Mach demeurent obligatoires. Un debugserver ordinaire
 ou le script `universal.js` seul ne publie pas la mailbox spécifique MaxPS4.
-Compatibilité de source vérifiée, compatibilité réelle avec la version installée
-et iOS 27.2 encore à mesurer. Aucun framework StikJIT/helper n’est embarqué.
+Compatibilité de source vérifiée ; le rapport physique ci-dessous confirme les
+résultats des diagnostics bornés sous iOS 27.2, sans fournir les logs détaillés
+d’attachement ni les versions installées de StikDebug et SideStore. Aucun framework StikJIT/helper n’est embarqué.
 
 ## Mémoire FEX et -48
 
@@ -65,7 +66,55 @@ d’erreur exacts, pas interpréter un code Mach comme errno. M2 utilise RIP inv
 0x400000, un marqueur hôte occupé, pile privée, TLS et XADD/load/store.
 Ses résultats attendus ne prouvent pas à eux seuls la correction de tout ELF.
 
-## Manipulations exactes sur l’iPhone
+## Validation physique rapportée — 16 octobre 2026
+
+Source testée : `a3d8da72fcc961aed470d9f20939067d9baafea6`, build principal
+1000176. iPhone sous **iOS 27.2 (24B5110a)** ; horodatage du rapport :
+**2026-10-16 08:19:40 UTC**. Preuve communiquée par l’utilisateur dans
+[le commentaire 6211253159](https://github.com/EnermaxFR/MaxPS4/pull/205#issuecomment-6211253159),
+non reproduite par l’agent.
+
+- ELF/libkernel synthétique v1 : ouverture FEX, chargement, initialisation JIT,
+  exécution, lecture et vérification tous au statut 0 ; backend natif FEXCore
+  ARM64 2 ; `scePthreadSelf` appelé une fois ; mémoire résultat invitée 2 et RAX 2.
+  Après nettoyage : 0 segment invité perdu et 0 région RX/RW restante.
+- M2, adresse invitée basse `0x400000` : statut 0, backend 2, RAX 42,
+  mémoire invitée 42, TLS 8.
+- Marqueur de collision hôte préservé=1, nettoyage=1, code RX=1,
+  pile RW/NX=1.
+- Aucun -48 observé dans ce diagnostic borné sur appareil. Cela valide le cas
+  low-VA testé, sans prouver que toutes les dispositions mémoire PS4 ni tous
+  les scénarios -48 sont corrigés.
+
+Le modèle iPhone, les versions SideStore/StikDebug, les logs d’activation et
+une seconde exécution M2 ne sont pas précisés dans ce rapport ; ne pas les
+déduire des résultats. Cette preuve concerne le SHA testé ci-dessus, pas une
+nouvelle révision du code natif.
+
+Les opérations traduites non prises en charge (split/bulk/masked/gather/cache/
+ValidateCode), le redémarrage général après faute native et l’exécution arbitraire
+de PS4 ELF/PRX restent non validés et refusés par les gardes existantes.
+GPU et exécution de jeux PS4 restent non validés. Aucun BRK autorisé.
+
+## Prochain incrément minimal recommandé
+
+Commencer par un diagnostic synthétique borné des accès scalaires traversant
+deux mappings invités adjacents, avant les atomiques inter-mappings ou la
+reprise après faute native. Premier incrément : tests de refus uniquement,
+sans élargir les opérations admises ni modifier les gardes de production.
+Tester lecture/écriture à la frontière, deuxième plage absente ou sans
+permission, et débordement d’adresse ; vérifier refus déterministe avant tout
+accès hôte, absence d’écriture partielle, marqueurs hôtes préservés et nettoyage.
+Un test négatif refusé ne constitue pas une exécution traduite réussie.
+
+L’admission ultérieure d’un accès scalaire traversant deux plages nécessitera
+une validation complète des deux plages et permissions avant effet de bord,
+des tests Linux/macOS ARM64 et un nouveau rapport iPhone lié au SHA.
+Conserver le refus des atomiques inter-mappings : ne pas les simuler par deux
+accès non atomiques. La reprise après faute reste un incrément distinct, après
+définition et validation de l’état invité récupérable.
+
+## Manipulations exactes sur l’iPhone (protocole de reproduction)
 
 1. Installer la nouvelle IPA issue du workflow **MaxPS4 FEXCore SideStore IPA**
    via SideStore. Re-signer l’app ET son framework. Activer le mode développeur,
