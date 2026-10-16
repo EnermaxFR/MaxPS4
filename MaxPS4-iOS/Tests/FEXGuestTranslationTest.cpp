@@ -178,7 +178,10 @@ int main() {
             auto invalidate=[&] { ctx->ClearCodeCache(thread,false); ctx->ClearCodeCache(second,false); };
             auto owner=bridge.make_translation(invalidate);
             const size_t page=owner->page_size();
-            CHECK(owner->reserve(0x50000,page)==0 && owner->map(0x50000,page,6)==0);
+            // Keep both reservation guards disjoint on 4 KiB AND 16 KiB
+            // hosts. 0x50000 overlaps the PRX guard on Apple ARM64.
+            const uint64_t private_stack=0x44000+16*page;
+            CHECK(owner->reserve(private_stack,page)==0 && owner->map(private_stack,page,6)==0);
             prepared.unload(); bridge.unload();
             uint64_t relocated=0;
             CHECK(owner->read(0x48000,&relocated,8)==0 && relocated==0x44000);
@@ -190,7 +193,7 @@ int main() {
                 }
                 CHECK(space.ValidateGuestMemoryRanges());
                 auto& cpu=current->CurrentFrame->State;
-                cpu.rip=0x44000; cpu.gregs[FEXCore::X86State::REG_RSP]=0x50000+page-16;
+                cpu.rip=0x44000; cpu.gregs[FEXCore::X86State::REG_RSP]=private_stack+page-16;
                 cpu.gregs[FEXCore::X86State::REG_RAX]=0;
                 cpu.callret_sp=reinterpret_cast<uintptr_t>(callret.data())+callret.size()/4;
                 FEXCore::Core::GuestMemoryFaultData fault{};
