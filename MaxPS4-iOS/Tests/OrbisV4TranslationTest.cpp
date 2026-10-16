@@ -4,8 +4,52 @@
 #include <cstdio>
 #include <cstdlib>
 #include <future>
+#include <memory>
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x); std::abort(); } } while(0)
+static void destruction_invalidates_host_addresses() {
+    // Model two thread caches embedding translated host constants. Their
+    // invalidator must still be able to inspect owned storage when called.
+    std::vector<const uint8_t*> cached_hosts;
+    unsigned invalidations=0;
+    auto owner=std::make_unique<maxps4::OrbisV4Translation>([&] {
+        for (const auto* host : cached_hosts) CHECK(*host==0x59);
+        cached_hosts.clear();
+        ++invalidations;
+    });
+    const size_t page=owner->page_size();
+    constexpr uint64_t guest=0x400000;
+    const uint8_t marker=0x59;
+    CHECK(owner->reserve(guest,page)==0);
+    CHECK(owner->map(guest,page,5,&marker,1)==0);
+    {
+        auto lease=owner->lease();
+        const uint8_t* host=nullptr;
+        CHECK(lease.resolve_contiguous(guest,1,5,host)==0);
+        CHECK(reinterpret_cast<uintptr_t>(host)!=guest && *host==marker);
+        cached_hosts={host,host};
+    }
+    const auto before=invalidations;
+    owner.reset(); // No explicit clear/release: this was the missing path.
+    CHECK(invalidations==before+1);
+    CHECK(cached_hosts.empty());
+
+    // Explicit cleanup may be followed by destruction of the FEX context.
+    // An empty owner must not call back into that destroyed context later.
+    bool context_alive=true;
+    unsigned empty_invalidations=0;
+    auto cleared=std::make_unique<maxps4::OrbisV4Translation>([&] {
+        CHECK(context_alive); ++empty_invalidations;
+    });
+    CHECK(cleared->reserve(guest,page)==0);
+    cleared->clear();
+    const auto after_clear=empty_invalidations;
+    context_alive=false;
+    cleared.reset();
+    CHECK(empty_invalidations==after_clear);
+    std::puts("PASS destruction invalidates cached host addresses before unmap; empty destruction skips callback");
+}
 int main() {
+    destruction_invalidates_host_addresses();
     constexpr uint64_t base=0x300000000ULL;
     std::atomic<unsigned> invalidations{0};
     bool reject=false;
