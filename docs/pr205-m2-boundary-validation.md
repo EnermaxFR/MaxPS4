@@ -1,5 +1,65 @@
 # PR #205 — limites de mappings M2
 
+## Rapport iPhone 8d18f605 — preuve scalaire manquante
+
+[Rapport communiqué par le testeur](https://github.com/EnermaxFR/MaxPS4/pull/205#issuecomment-6212800149),
+iPhone iOS 27.2, diagnostic du 16 octobre 2026 à 09:47:13 UTC, source
+`8d18f605f490d1d21e1bd951e8042a9cdac0cdc8` : ELF/libkernel synthétique
+résultat 2 ; M2 statut 0/backend 2/JIT 42/mémoire 42/TLS 8 ; collision et
+nettoyage 1 ; limites 16/16, mémoire préservée 1. **Le rapport partagé ne
+contient pas les 11 paires : le slow path n'est pas déclaré validé physiquement.**
+La version exacte de l'OS, le modèle et les versions SideStore/StikDebug ne
+sont pas précisés dans ce nouveau commentaire.
+
+Audit : les 11 tests sont dans `maxps4_fex_test_m2_low_va`, appelé par le bouton
+M2 et par le rapport ELF/libkernel, sans exclusion iOS. Ils sont exécutés après
+les premiers refus et avant les derniers refus ; le code impose 11 succès avant
+le statut global 0. Mais le compteur était local, uniquement écrit sur stderr :
+ni la structure C ni Swift ne le publiaient. Cela explique l'absence dans le
+rapport sans remplacer la preuve explicite demandée sur appareil.
+
+Le nouvel incrément ajoute au pont C les compteurs attendu/tenté/réussi,
+les statuts scalaire/exécution/vérification (initialement `-ECANCELED`) et
+la dernière largeur/coupure. Un cas est compté tenté juste avant le dispatch,
+réussi seulement après vérification de RAX, backend, flags et tous les octets.
+Les deux rapports Swift affichent ces données avec la révision source déjà
+embarquée dans Info.plist. Le succès M2 exige explicitement 11/11 tentées et
+11/11 réussies ainsi que tous les statuts nuls. Les tests Swift vérifient aussi
+le refus d'un rapport incomplet et le format d'un échec partiel.
+
+Le diagnostic exerce en plus **55 refus scalaires** : 11 coupures × load/store
+face à un trou ou PROT_NONE, et 11 stores face à une page R. Chaque refus exige
+`-EFAULT`, aucune publication de résultat/backend, chaque octet des pages
+préservé et le marqueur hôte intact. Les 16 refus vectoriels/atomiques restent
+séparés et inchangés. Le JIT conserve sa prévalidation complète sous lease,
+W^X et le refus des atomiques split ; aucun nouveau fallback n'est ajouté.
+
+Nouvelle vérification iPhone : re-signer app **et framework** de la nouvelle
+IPA ; vérifier sa révision source ; StikDebug → trois régions RX et
+`MaxPS4 detach: OK` → même processus → JIT natif 42 → M2 deux fois.
+Partager les deux rapports complets avec : backend 2, JIT/mémoire 42, TLS 8,
+collision/nettoyage/RX/RW-NX 1, **paires exécutées 11/11 et réussies 11/11**,
+statuts scalaire/exécution/vérification 0, largeur 8/coupure 7,
+**refus scalaires 55/55/statut 0/mémoire préservée 1** et limites
+16/16/statut 0/mémoire préservée 1. Puis ELF/libkernel attendu 2, avec les
+mêmes compteurs M2 dans son rapport. Tout compteur incomplet ou statut non nul
+est un échec ; ne pas assimiler `-ECANCELED` à un succès. Aucun crash attendu.
+
+Vérifications locales de cet incrément : mémoire V4/M1/TLS native et ASan/UBSan
+avec Clang 19 réussie ; services PS4 ASan/UBSan et ABI C réussis ; véritable
+frontend/JIT FEX épinglé avec VIXL sur Linux x86_64 (backend 3) réussi.
+TSO off/on × LSE off/on, registres/flags, octets exacts, alias, huit mappings,
+CAS/XADD, ELF/libkernel 2 et M1/deux threads conservés. M2 répété trois fois :
+11 tentées/11 réussies, statuts 0, largeur 8/coupure 7, 55/55 refus scalaires,
+16/16 autres refus, mémoire préservée 1, 42/TLS 8, collision/nettoyage 1.
+Application/idempotence et refus de dérive du patch sans mutation réussis.
+LeakSanitizer désactivé localement sous ptrace, ASan/UBSan actifs. Les résultats
+CI ARM64/macOS/Swift/iPhoneOS et l'IPA doivent être vérifiés sur le SHA publié ;
+ces tests locaux ne sont pas une preuve physique iPhone.
+
+PR brouillon, main inchangée, aucune fusion, budget 0 €. Aucun BRK dangereux,
+aucune correction générale de -48 ni exécution de jeux PS4 revendiquée.
+
 ## Validation physique de b12d7b13
 
 [Rapport communiqué par le testeur](https://github.com/EnermaxFR/MaxPS4/pull/205#issuecomment-6212218789),
@@ -52,7 +112,7 @@ désactivé et LSE/LL-SC. Les tests CAS/XADD 8/16/32/64 existants restent conser
 Le diagnostic iPhone M2 conserve 42/TLS 8 et le compteur de refus **16/16**.
 Avant les refus, il exécute **11 paires store/load scalaires** (toutes les
 coupures 16/32/64 bits), vérifie chaque octet et les flags ; un échec empêche
-le statut global 0. Log attendu : `M2 scalar cross-mapping: 11/11 store/load pairs; bytes and flags preserved`.
+le statut global 0. Les nouveaux rapports exposent explicitement les compteurs et statuts (voir ci-dessus).
 Les 16 refus sont désormais **load/store vectoriels 128 bits + CAS/XADD 64 bits**
 × trou/RW/R/PROT_NONE. Ce changement explicite garde les vecteurs split refusés
 alors que les scalaires valides deviennent admis. ELF/libkernel reste attendu 2.

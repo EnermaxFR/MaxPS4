@@ -158,6 +158,12 @@ typedef struct maxps4_m2_low_va_report {
     uint64_t rax, memory, tls, entry, rsp;
     int32_t boundary_status;
     uint32_t boundary_cases, boundary_preserved;
+    // Counts are published even on failure; -ECANCELED means not attempted.
+    int32_t scalar_status, scalar_execute_status, scalar_verify_status;
+    uint32_t scalar_expected, scalar_executed, scalar_passed;
+    uint32_t scalar_width, scalar_split; // Current/failed pair, in bytes.
+    int32_t scalar_rejection_status;
+    uint32_t scalar_rejection_cases, scalar_rejection_preserved;
 } maxps4_m2_low_va_report;
 int32_t maxps4_fex_test_m2_low_va(maxps4_m2_low_va_report *report);
 // Experimental V4 direct-memory preflight. Requires explicitly mapped V4 pages;

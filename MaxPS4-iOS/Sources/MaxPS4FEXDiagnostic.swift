@@ -150,15 +150,30 @@ struct MaxPS4FEXDiagnostic: Sendable {
 #endif
     }
 
+#if MAXPS4_FEX_APP
+    static func m2Passed(_ status: Int32, _ report: maxps4_m2_low_va_report) -> Bool {
+        status == 0 && report.status == 0 && report.initialize_status == 0 &&
+            report.backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT) && report.execute_status == 0 && report.rax == 42 && report.memory == 42 && report.tls == 8 &&
+            report.collision_preserved == 1 && report.cleanup == 1 && report.code_rx == 1 && report.stack_rw_nx == 1 &&
+            report.boundary_status == 0 && report.boundary_cases == 16 && report.boundary_preserved == 1 &&
+            report.scalar_expected == 11 && report.scalar_executed == 11 && report.scalar_passed == 11 &&
+            report.scalar_status == 0 && report.scalar_execute_status == 0 && report.scalar_verify_status == 0 &&
+            report.scalar_rejection_status == 0 && report.scalar_rejection_cases == 55 && report.scalar_rejection_preserved == 1
+    }
+
+    static func scalarM2Details(_ report: maxps4_m2_low_va_report) -> String {
+        "Paires scalaires : exécutées \(report.scalar_executed)/\(report.scalar_expected) ; réussies \(report.scalar_passed)/\(report.scalar_expected) ; statut \(report.scalar_status) ; exécution \(report.scalar_execute_status) ; vérification \(report.scalar_verify_status) ; dernière largeur \(report.scalar_width), coupure \(report.scalar_split) octets\n" +
+        "Refus scalaires : statut \(report.scalar_rejection_status) ; vérifiés \(report.scalar_rejection_cases)/55 ; mémoire préservée \(report.scalar_rejection_preserved) (attendu 1)"
+    }
+#endif
+
     /// Fixed M2 fixture only; no interpreter fallback and no BRK protocol.
     static func testM2LowVA() -> String {
 #if MAXPS4_FEX_APP
         var report = maxps4_m2_low_va_report()
         let status = maxps4_fex_test_m2_low_va(&report)
         let executed = report.backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT) && report.execute_status == 0
-        let passed = status == 0 && executed && report.rax == 42 && report.memory == 42 && report.tls == 8 &&
-            report.collision_preserved == 1 && report.cleanup == 1 && report.code_rx == 1 && report.stack_rw_nx == 1 &&
-            report.boundary_status == 0 && report.boundary_cases == 16 && report.boundary_preserved == 1
+        let passed = m2Passed(status, report)
         let revision = Bundle.main.object(forInfoDictionaryKey: "MaxPS4SourceRevision") as? String ?? "non renseignée"
         return [
             "M2 low VA — traduction mémoire FEXCore",
@@ -173,6 +188,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
             "Collision préservée : \(report.collision_preserved) ; nettoyage : \(report.cleanup) ; code RX : \(report.code_rx) ; pile RW/NX : \(report.stack_rw_nx) (tous attendus 1)",
             "Fournisseur RX/RW : état \(maxps4_jit_state()), erreur \(maxps4_jit_error()), étape \(maxps4_jit_failure_stage()), Mach \(maxps4_jit_failure_mach()), région \(maxps4_jit_failure_region()) ; échec script \(maxps4_jit_script_failure())",
             "Limites mappings : statut \(report.boundary_status) ; refus vérifiés \(report.boundary_cases)/16 ; mémoire préservée \(report.boundary_preserved) (attendu 1)",
+            scalarM2Details(report),
             "Validation M2 : " + (passed ? "réussie" : "échouée"),
             "Aucun repli interpréteur. Aucun BRK. La correction de -48 exige une validation sur votre iPhone."
         ].joined(separator: "\n")
@@ -237,6 +253,8 @@ struct MaxPS4FEXDiagnostic: Sendable {
             "Régions RX/RW utilisées après nettoyage : \(report.jit_regions_after) (avant : \(report.jit_regions_before))",
             "Validation globale : " + (status == 0 ? "réussie" : "échouée (\(status))"),
             "M2 low-VA 0x400000 : statut \(m2Status), backend \(m2.backend), RAX \(m2.rax), mémoire \(m2.memory) (attendu 42), TLS \(m2.tls) (attendu 8)",
+            scalarM2Details(m2),
+            "Limites mappings M2 : statut \(m2.boundary_status) ; refus vérifiés \(m2.boundary_cases)/16 ; mémoire préservée \(m2.boundary_preserved)",
             "M2 collision hôte préservée : \(m2.collision_preserved), nettoyage : \(m2.cleanup), code RX : \(m2.code_rx), pile RW/NX : \(m2.stack_rw_nx)",
             "Ce diagnostic borné doit être exécuté sur iPhone ; aucune correction générale de -48 n’est annoncée.",
             "RIP final et instructions terminées FEX : non exposés par cette API.",

@@ -334,6 +334,10 @@ int main() {
         CHECK(m2.entry==0x400000 && m2.rax==42 && m2.memory==42 && m2.tls==8);
         CHECK(m2.cleanup && m2.collision_preserved && m2.code_rx && m2.stack_rw_nx);
         CHECK(m2.boundary_status==0 && m2.boundary_cases==16 && m2.boundary_preserved==1);
+        CHECK(m2.scalar_status==0 && m2.scalar_execute_status==0 && m2.scalar_verify_status==0);
+        CHECK(m2.scalar_expected==11 && m2.scalar_executed==11 && m2.scalar_passed==11);
+        CHECK(m2.scalar_width==8 && m2.scalar_split==7);
+        CHECK(m2.scalar_rejection_status==0 && m2.scalar_rejection_cases==55 && m2.scalar_rejection_preserved==1);
         for (size_t i = 0; i < signal_numbers.size(); ++i) {
             struct sigaction action {};
             CHECK(::sigaction(signal_numbers[i], nullptr, &action) == 0);

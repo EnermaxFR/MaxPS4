@@ -698,6 +698,9 @@ extern "C" int32_t maxps4_fex_test_m2_low_va(maxps4_m2_low_va_report* report) {
     if (!report) return -EINVAL;
     *report = {};
     report->boundary_status = report->initialize_status = report->execute_status = -ECANCELED;
+    report->scalar_status = report->scalar_execute_status = report->scalar_verify_status = -ECANCELED;
+    report->scalar_rejection_status = -ECANCELED;
+    report->scalar_expected = 11;
     maxps4_fex_engine* engine = nullptr;
     int status = maxps4_fex_engine_open(&engine);
     if (status) return report->status = status;
@@ -784,37 +787,82 @@ extern "C" int32_t maxps4_fex_test_m2_low_va(maxps4_m2_low_va_report* report) {
                         if (boundary && ((error=process.space.map(data+page,page,6,sentinels.data(),page)) ||
                             (error=process.space.protect(data+page,page,permission)))) return error;
                         if (boundary==1) {
-                            unsigned scalar_cases=0;
-                            for (unsigned width : {2U,4U,8U}) for (unsigned split=1;split<width;++split) {
-                                if ((error=process.space.write(data,sentinels.data(),page)) ||
-                                    (error=process.space.write(data+page,sentinels.data(),page))) return error;
-                                maxps4_ps4_synthetic::Program scalar;
-                                scalar.reg(3,data+page-split);
-                                scalar.bytes({0xb8,42,0,0,0,0x31,0xc9,0x39,0xc9});
-                                if (width==2) scalar.bytes({0x66});
-                                if (width==8) scalar.bytes({0x48});
-                                scalar.bytes({0x89,0x03});
-                                if (width==2) scalar.bytes({0x66});
-                                if (width==8) scalar.bytes({0x48});
-                                scalar.bytes({0x8b,0x03,0x0f,0x95,0xc1,0x0f,0xb6,0xc9,
-                                              0x48,0xc1,0xe1,32,0x48,0x09,0xc8,0xf4});
-                                if ((error=process.space.release(entry)) ||
-                                    (error=process.space.reserve(entry,page)) ||
-                                    (error=process.space.map(entry,page,5,scalar.code.data(),scalar.code.size()))) return error;
-                                uint64_t result=0; uint32_t backend=0;
-                                if ((error=executeImage(engine,process.source,&result,&backend,
-                                        nullptr,false,false,&process,&thread))) return error;
-                                if (result!=42 || backend!=report->backend) return -EIO;
-                                std::vector<uint8_t> expected(2*page,0x59), actual(2*page);
-                                for(unsigned i=0;i<width;++i) expected[page-split+i]=i?0:42;
-                                if ((error=process.space.read(data,actual.data(),actual.size()))) return error;
-                                if (actual!=expected) return -EIO;
-                                ++scalar_cases;
-                            }
-                            if (scalar_cases!=11) return -EIO;
-                            std::fprintf(stderr,"M2 scalar cross-mapping: %u/11 store/load pairs; bytes and flags preserved\n",scalar_cases);
+                            report->scalar_status = [&]() -> int {
+                                for (unsigned width : {2U,4U,8U}) for (unsigned split=1;split<width;++split) {
+                                    report->scalar_width=width; report->scalar_split=split;
+                                    report->scalar_execute_status=report->scalar_verify_status=-ECANCELED;
+                                    if ((error=process.space.write(data,sentinels.data(),page)) ||
+                                        (error=process.space.write(data+page,sentinels.data(),page))) return error;
+                                    maxps4_ps4_synthetic::Program scalar;
+                                    scalar.reg(3,data+page-split);
+                                    scalar.bytes({0xb8,42,0,0,0,0x31,0xc9,0x39,0xc9});
+                                    if (width==2) scalar.bytes({0x66});
+                                    if (width==8) scalar.bytes({0x48});
+                                    scalar.bytes({0x89,0x03});
+                                    if (width==2) scalar.bytes({0x66});
+                                    if (width==8) scalar.bytes({0x48});
+                                    scalar.bytes({0x8b,0x03,0x0f,0x95,0xc1,0x0f,0xb6,0xc9,
+                                                  0x48,0xc1,0xe1,32,0x48,0x09,0xc8,0xf4});
+                                    if ((error=process.space.release(entry)) ||
+                                        (error=process.space.reserve(entry,page)) ||
+                                        (error=process.space.map(entry,page,5,scalar.code.data(),scalar.code.size()))) return error;
+                                    uint64_t result=0; uint32_t backend=0;
+                                    ++report->scalar_executed;
+                                    report->scalar_execute_status=executeImage(engine,process.source,&result,&backend,
+                                            nullptr,false,false,&process,&thread);
+                                    if (report->scalar_execute_status) return report->scalar_execute_status;
+                                    report->scalar_verify_status=-EIO;
+                                    if (result!=42 || backend!=report->backend) return -EIO;
+                                    std::vector<uint8_t> expected(2*page,0x59), actual(2*page);
+                                    for(unsigned i=0;i<width;++i) expected[page-split+i]=i?0:42;
+                                    if ((error=process.space.read(data,actual.data(),actual.size()))) return error;
+                                    if (actual!=expected) return -EIO;
+                                    report->scalar_verify_status=0;
+                                    ++report->scalar_passed;
+                                }
+                                return report->scalar_executed==report->scalar_expected &&
+                                    report->scalar_passed==report->scalar_expected ? 0 : -EIO;
+                            }();
+                            if (report->scalar_status) return report->scalar_status;
                             if ((error=process.space.write(data,sentinels.data(),page)) ||
                                 (error=process.space.write(data+page,sentinels.data(),page))) return error;
+                        }
+                        // Check every scalar cut against holes and permissions,
+                        // including all bytes on both sides after rejected stores.
+                        // Read-only second pages permit loads, so reject stores only.
+                        if (boundary!=1) {
+                            report->scalar_rejection_status = [&]() -> int {
+                                for (unsigned width : {2U,4U,8U}) for (unsigned split=1;split<width;++split)
+                                for (bool store : {false,true}) {
+                                    if (!store && boundary==2) continue;
+                                    maxps4_ps4_synthetic::Program negative;
+                                    negative.reg(3,data+page-split);
+                                    negative.bytes({0xb8,42,0,0,0});
+                                    if (width==2) negative.bytes({0x66});
+                                    if (width==8) negative.bytes({0x48});
+                                    negative.bytes({static_cast<uint8_t>(store ? 0x89 : 0x8b),0x03,0xf4});
+                                    if ((error=process.space.release(entry)) ||
+                                        (error=process.space.reserve(entry,page)) ||
+                                        (error=process.space.map(entry,page,5,negative.code.data(),negative.code.size()))) return error;
+                                    uint64_t result=0xfeed; uint32_t backend=0;
+                                    const int rejected=executeImage(engine,process.source,&result,&backend,
+                                        nullptr,false,false,&process,&thread);
+                                    if (rejected!=-EFAULT || result!=0xfeed || backend) return -EIO;
+                                    if ((error=process.space.read(data,check.data(),page))) return error;
+                                    if (check!=sentinels) return -EIO;
+                                    if (boundary) {
+                                        if ((error=process.space.protect(data+page,page,4)) ||
+                                            (error=process.space.read(data+page,check.data(),page))) return error;
+                                        if (check!=sentinels) return -EIO;
+                                        if ((error=process.space.protect(data+page,page,permission))) return error;
+                                    }
+                                    std::memcpy(&observed,marker,8);
+                                    if (observed!=sentinel) return -EIO;
+                                    ++report->scalar_rejection_cases;
+                                }
+                                return 0;
+                            }();
+                            if (report->scalar_rejection_status) return report->scalar_rejection_status;
                         }
                         for (const auto& operation : operations) {
                             maxps4_ps4_synthetic::Program negative;
@@ -844,6 +892,8 @@ extern "C" int32_t maxps4_fex_test_m2_low_va(maxps4_m2_low_va_report* report) {
                             ++report->boundary_cases;
                         }
                     }
+                    if (report->scalar_rejection_cases!=55) return -EIO;
+                    report->scalar_rejection_preserved=1;
                     report->boundary_preserved=1;
                     return 0;
                 }();
@@ -860,6 +910,10 @@ extern "C" int32_t maxps4_fex_test_m2_low_va(maxps4_m2_low_va_report* report) {
         status,report->backend,static_cast<unsigned long long>(report->entry),
         static_cast<unsigned long long>(report->rax),static_cast<unsigned long long>(report->memory),
         static_cast<unsigned long long>(report->tls),report->collision_preserved,report->cleanup,report->boundary_cases,report->boundary_status,report->boundary_preserved);
+    std::fprintf(stderr,"M2 scalar cross-mapping: executed=%u passed=%u expected=%u status=%d execute=%d verify=%d width=%u split=%u; scalar refusals=%u/55 status=%d preserved=%u\n",
+        report->scalar_executed,report->scalar_passed,report->scalar_expected,report->scalar_status,
+        report->scalar_execute_status,report->scalar_verify_status,report->scalar_width,report->scalar_split,
+        report->scalar_rejection_cases,report->scalar_rejection_status,report->scalar_rejection_preserved);
     return status;
 }
 extern "C" int32_t maxps4_fex_engine_v4_preflight(maxps4_fex_engine* engine,

@@ -288,6 +288,10 @@ int main(int argc, char** argv) {
             CHECK(report.status==0 && report.entry==0x400000 && report.rax==42 && report.memory==42 && report.tls==8);
             CHECK(report.cleanup && report.collision_preserved && report.code_rx && report.stack_rw_nx);
             CHECK(report.boundary_status==0 && report.boundary_cases==16 && report.boundary_preserved==1);
+            CHECK(report.scalar_status==0 && report.scalar_execute_status==0 && report.scalar_verify_status==0);
+            CHECK(report.scalar_expected==11 && report.scalar_executed==11 && report.scalar_passed==11);
+            CHECK(report.scalar_width==8 && report.scalar_split==7);
+            CHECK(report.scalar_rejection_status==0 && report.scalar_rejection_cases==55 && report.scalar_rejection_preserved==1);
             CHECK(report.backend==MAXPS4_CPU_FEX_ARM64_JIT || report.backend==MAXPS4_CPU_FEX_ARM64_SIMULATOR);
         }
         return 0;
