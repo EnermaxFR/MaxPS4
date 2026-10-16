@@ -103,6 +103,12 @@ int main(int argc, char** argv) {
     put(overlap[0].bytes,0x1080,64+56+16);
     fail(overlap);
     assert(p.error.find("chevauch") != std::string::npos);
+    // Also reject the overlap in a dependent module; the provider's
+    // successful staging must not survive a later-module failure.
+    overlap=inputs;
+    put(overlap[1].bytes,0x1080,64+56+16);
+    fail(overlap);
+    assert(p.error.find("chevauch") != std::string::npos);
     auto wrong=inputs; wrong[1].base=0x10000; fail(wrong);
     wrong=inputs; wrong[1].bytes=tls; fail(wrong);
     wrong=inputs; put(wrong[1].bytes,0x8000000000000000ULL,0xc28); fail(wrong);
