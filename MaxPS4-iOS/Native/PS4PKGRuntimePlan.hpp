@@ -185,12 +185,14 @@ public:
         }
         // Require Orbis ELF, not SELF or CNT. No protected container processing.
         if (!bytes || size < 4 || std::memcmp(bytes, "\177ELF", 4)) {
-            diagnostic = "Module : ELF Orbis autonome non chiffré requis ; PKG/SELF refusé"; return false;
+            diagnostic = "[ELF.CONTAINER] Module : ELF Orbis autonome non chiffré requis ; PKG/SELF refusé"; return false;
         }
         PreparedModule pending;
         const int result = pending.image.load(bytes, size);
         if (result) {
-            diagnostic = "Module : rejet du chargeur Orbis ELF/PRX (code " + std::to_string(result) + ")";
+            diagnostic = "[" + std::string(pending.image.stage) + "] index=" +
+                std::to_string(pending.image.diagnosticIndex) +
+                " ; Module : rejet du chargeur Orbis ELF/PRX (code " + std::to_string(result) + ")";
             return false;
         }
         pending.logicalPath = logicalPath;

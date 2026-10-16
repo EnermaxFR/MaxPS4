@@ -139,6 +139,18 @@ int main(int argc,char** argv) {
     assert(std::string(report.data()).find("Extraction eboot.bin : fichier PFS non chiffré repéré ; taille=5 octets")!=std::string::npos);
     assert(std::string(report.data()).find("budget de lecture=72 octets")!=std::string::npos);
     assert(std::string(report.data()).find("eboot.bin demeure inaccessible")==std::string::npos);
+    assert(std::string(report.data()).find("format=inconnu ou tronqué ; admitted=0")!=std::string::npos);
+    // Filenames do not prove format, and magic never proves executable validity.
+    for (const auto* magic : {"\177ELF", "\117\025\075\035"}) {
+        auto candidate=good; std::memcpy(candidate.data()+4*bs,magic,4);
+        pkg=pfsFixture::package(candidate); write();
+        assert(maxps4_pkg_validate_import(source.c_str(),report.data(),report.size())==0);
+        assert(std::string(report.data()).find("[PKG.CANDIDATE] path=eboot.bin ; size=5 ; prefix=5")!=std::string::npos);
+        assert(std::string(report.data()).find("format=ELF candidat")!=std::string::npos ||
+               std::string(report.data()).find("format=SELF candidat")!=std::string::npos);
+        assert(std::string(report.data()).find("[PKG.RUNTIME] admitted=0")!=std::string::npos);
+    }
+    pkg=pfsFixture::package(good); write();
     size_t length=0; uint8_t out[8]={0xaa};
     assert(maxps4_pkg_pfs_read_file(source.c_str(),"eboot.bin",nullptr,0,&length)==-ENOSPC && length==5);
     assert(maxps4_pkg_pfs_read_file(source.c_str(),"eboot.bin",out,4,&length)==-ENOSPC && out[0]==0xaa);
@@ -162,6 +174,8 @@ int main(int argc,char** argv) {
     assert(maxps4_pkg_inventory_report(source.c_str(),report.data(),report.size())==0);
     assert(std::string(report.data()).find("PFS chiffré déclaré : inaccessible")!=std::string::npos);
     assert(std::string(report.data()).find("Extraction eboot.bin : impossible depuis ce PKG")!=std::string::npos);
+    assert(maxps4_pkg_validate_import(source.c_str(),report.data(),report.size())==0);
+    assert(std::string(report.data()).find("[PKG.CANDIDATE_SCAN] candidates=0 ; bytes=0")!=std::string::npos);
     if(argc>1) {
         const std::filesystem::path artifacts(argv[1]); std::filesystem::create_directories(artifacts);
         for(const auto* name:{"pfs-plain.pkg","pfs-encrypted.pkg","pfs-unknown.pkg"}) {

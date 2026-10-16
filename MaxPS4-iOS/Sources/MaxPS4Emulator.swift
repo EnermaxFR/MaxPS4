@@ -136,7 +136,7 @@ final class MaxPS4Emulator: ObservableObject {
 
         let name = url.lastPathComponent.lowercased()
         guard name == "eboot.bin" || name.hasSuffix(".self") || name.hasSuffix(".elf") || name.hasSuffix(".pkg") else {
-            status = "Format non pris en charge : sélectionnez PKG, eboot.bin, SELF ou ELF"
+            status = "[IMPORT.FORMAT] Format non pris en charge : sélectionnez PKG, eboot.bin, SELF ou ELF"
             return
         }
 
@@ -149,17 +149,17 @@ final class MaxPS4Emulator: ObservableObject {
         // Identification only: PKG packages are not decrypted, extracted or launched.
         // ELF magic is a useful preliminary check, not proof of PS4 compatibility.
         guard let header = try? FileHandle(forReadingFrom: url) else {
-            status = "Impossible de lire le fichier importé"
+            status = "[IMPORT.OPEN] Impossible de lire le fichier importé"
             return
         }
         defer { try? header.close() }
         guard let bytes = try? header.read(upToCount: 32), bytes.count >= 20 else {
-            status = "Fichier invalide : en-tête incomplet"
+            status = "[IMPORT.HEADER] Fichier invalide : en-tête incomplet"
             return
         }
         if isPKG {
             guard Array(bytes.prefix(4)) == [0x7F, 0x43, 0x4E, 0x54] else {
-                status = "PKG invalide : signature PS4 absente"
+                status = "[PKG.MAGIC] PKG invalide : signature PS4 absente"
                 return
             }
         } else {
@@ -178,11 +178,10 @@ final class MaxPS4Emulator: ObservableObject {
         }
         }
 
+        let previousGames = games
         do {
             let folder = try importFolder()
             let destination = uniqueDestination(for: url.lastPathComponent, in: folder)
-            try fileManager.copyItem(at: url, to: destination)
-
             let prettyName = destination
                 .deletingPathExtension()
                 .lastPathComponent
@@ -198,11 +197,15 @@ final class MaxPS4Emulator: ObservableObject {
                 importedAt: Date()
             )
 
-            games.insert(game, at: 0)
-            try saveLibrary()
+            try MaxPS4PKGInspector.copyForLibrary(url: url, destination: destination, validatePackage: isPKG) {
+                games.insert(game, at: 0)
+                try saveLibrary()
+            }
             status = isPKG ? "PKG PS4 importé (non exécutable) : \(destination.lastPathComponent)" : "Importé : \(destination.lastPathComponent)"
         } catch {
-            status = "Import impossible : \(error.localizedDescription)"
+            games = previousGames
+            let native = error as NSError
+            status = "Import impossible : \(error.localizedDescription)\n[IMPORT.RESULT] domaine=\(native.domain) code=\(native.code)"
         }
     }
 

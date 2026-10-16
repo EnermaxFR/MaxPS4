@@ -51,6 +51,12 @@ jobs:
               MaxPS4-iOS/Native/PS4PKGBridge.cpp "MaxPS4-iOS/Tests/$suite.cpp" -o "$RUNNER_TEMP/$suite"
             python3 scripts/run-bounded.py 30 "build/diagnostics/$suite.txt" "$RUNNER_TEMP/$suite"
           done
+          xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -c MaxPS4-iOS/Native/PS4PKGBridge.cpp -o "$RUNNER_TEMP/pkg-import-bridge.o"
+          swiftc -parse-as-library -import-objc-header MaxPS4-iOS/Native/PS4PKGBridge.h \
+            MaxPS4-iOS/Sources/MaxPS4PKGInspector.swift MaxPS4-iOS/Tests/PKGSwiftDiagnosticTest.swift \
+            "$RUNNER_TEMP/pkg-import-bridge.o" -lc++ -o "$RUNNER_TEMP/pkg-import-test"
+          "$RUNNER_TEMP/pkg-import-test" | tee build/diagnostics/pkg-import-tests.txt
           swiftc -parse-as-library \
             MaxPS4-iOS/Sources/MaxPS4GuestMemory.swift \
             MaxPS4-iOS/Sources/MaxPS4ELFLoader.swift \

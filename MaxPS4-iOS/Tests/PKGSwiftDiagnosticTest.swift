@@ -44,9 +44,67 @@ struct PKGSwiftDiagnosticTest {
         little(0x608, 20130305, 8); try data.write(to: url)
         let unknownPFS = try MaxPS4PKGInspector.inspect(url: url)
         precondition(unknownPFS.contains("chiffrement indéterminé"))
+        // Real Foundation copy/commit transaction, with an injected disk-save failure.
+        let manager = FileManager.default
+        let directory = manager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try manager.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? manager.removeItem(at: directory) }
+        let destination = directory.appendingPathComponent("imported.pkg")
+        var commits = 0
+        enum SaveFailure: Error { case diskFull }
+        do {
+            try MaxPS4PKGInspector.copyForLibrary(url: url, destination: destination, validatePackage: true) {
+                commits += 1
+                throw SaveFailure.diskFull
+            }
+            fatalError("Failed library save was accepted")
+        } catch let error as MaxPS4PKGInspector.ImportError {
+            precondition(error.stage == "IMPORT.LIBRARY_COMMIT" && error.cleanup.isEmpty)
+        }
+        let afterRollback = try manager.contentsOfDirectory(atPath: directory.path)
+        precondition(commits == 1 && afterRollback.isEmpty)
+        let sourceAfterRollback = try Data(contentsOf: url)
+        precondition(sourceAfterRollback == data)
+        try MaxPS4PKGInspector.copyForLibrary(url: url, destination: destination, validatePackage: true) { commits += 1 }
+        let imported = try Data(contentsOf: destination)
+        precondition(commits == 2 && imported == data)
+        // A collision never replaces or removes a pre-existing library file.
+        let sentinel = Data("existing library entry".utf8)
+        try sentinel.write(to: destination)
+        do {
+            try MaxPS4PKGInspector.copyForLibrary(url: url, destination: destination, validatePackage: true) { commits += 1 }
+            fatalError("Existing destination was replaced")
+        } catch let error as MaxPS4PKGInspector.ImportError {
+            precondition(error.stage == "IMPORT.PUBLISH_COPY" && error.cleanup.isEmpty)
+        }
+        let afterCollision = try Data(contentsOf: destination)
+        precondition(commits == 2 && afterCollision == sentinel)
+        let afterCollisionFiles = try manager.contentsOfDirectory(atPath: directory.path)
+        precondition(afterCollisionFiles == ["imported.pkg"])
+        try manager.removeItem(at: destination)
+        // Valid encrypted containers are inventory-only imports, not ELF failures.
+        little(0x61c, 12, 2); try data.write(to: url)
+        try MaxPS4PKGInspector.copyForLibrary(url: url, destination: destination, validatePackage: true) { commits += 1 }
+        let encryptedImport = try Data(contentsOf: destination)
+        precondition(commits == 3 && encryptedImport == data)
+        try manager.removeItem(at: destination)
         try Data([0x7f, 0x43, 0x4e, 0x54]).write(to: url)
         let rejected = try MaxPS4PKGInspector.inspect(url: url)
         precondition(rejected.contains("Rejet"))
+        do {
+            _ = try MaxPS4PKGInspector.inspect(url: url, requireValidPackage: true)
+            fatalError("Truncated package passed import validation")
+        } catch MaxPS4PKGInspector.ReportError.failed(let code, let text) {
+            precondition(code == -Int32(POSIXErrorCode.ENOEXEC.rawValue) && text.contains("[PKG.HEADER] accepted=0"))
+        }
+        do {
+            try MaxPS4PKGInspector.copyForLibrary(url: url, destination: destination, validatePackage: true) { commits += 1 }
+            fatalError("Malformed package was copied")
+        } catch let error as MaxPS4PKGInspector.ImportError {
+            precondition(error.stage == "IMPORT.PKG_VALIDATE")
+        }
+        let afterRejectedImport = try manager.contentsOfDirectory(atPath: directory.path)
+        precondition(commits == 3 && afterRejectedImport.isEmpty)
         try FileManager.default.removeItem(at: url)
         do {
             _ = try MaxPS4PKGInspector.inspect(url: url)
@@ -67,6 +125,6 @@ struct PKGSwiftDiagnosticTest {
                 } catch MaxPS4PKGInspector.ReportError.failed {}
             }
         }
-        print("PASS Swift/native PKG report, plaintext copy, encryption refusal, PFS header statuses and bounded extraction, truncation and missing source")
+        print("PASS transactional library import, rollback after save failure, destination collision preservation, strict validation; Swift/native PKG report, plaintext copy, encryption refusal, PFS header statuses and bounded extraction, truncation and missing source")
     }
 }

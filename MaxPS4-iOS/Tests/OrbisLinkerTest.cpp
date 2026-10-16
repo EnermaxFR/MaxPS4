@@ -73,6 +73,14 @@ int main(int argc, char** argv) {
     setTag(consumer,0x61000031,48); put(consumer,0x918,0x2008); put(consumer,0x920,(uint64_t{1}<<32)|99);
     reject(batch(),"unsupported x86-64 relocation");
     check(std::all_of(consumer.begin()+0x300,consumer.begin()+0x400,[](uint8_t b){return b==0;}),"caller file never modified"); consumer=original;
+    // -ENOEXEC at the C bridge retains a machine-stable SCE/PRX/NID stage.
+    auto notELF = consumer; std::memcpy(notELF.data(),"\177CNT",4);
+    auto wrongContainer = batch(); wrongContainer[0].file.bytes = notELF.data();
+    Linker::Image untouched; Linker::Report containerReport;
+    check(!Linker::link(wrongContainer,{},untouched,diagnostic,4096,&containerReport),"CNT cannot enter ELF staging");
+    check(diagnostic.find("[ORBIS.ELF]")!=std::string::npos &&
+          diagnostic.find("[ELF.CONTAINER]")!=std::string::npos && untouched.modules.empty() &&
+          !containerReport.committed,"container refusal has stage and no partial image");
     // ABI arithmetic, including signed negative addends and ignored JUMP_SLOT addend.
     for (uint32_t type : {1U,6U,7U,8U}) {
         put(consumer,0x908,(type==8 ? 0 : uint64_t{1}<<32)|type); put(consumer,0x910,UINT64_MAX-7);
