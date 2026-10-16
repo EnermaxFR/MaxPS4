@@ -103,3 +103,61 @@ The FEX patch and its instruction translation behavior remain unchanged.
 No PFS/key/decryption work, PR merge, GitHub push, paid operation or device run
 is part of this change. General guest execution, unsupported translated IR,
 PRX dispatch and physical iPhone collision diagnosis remain open.
+
+## Follow-up: terminal context shutdown (2026-10-16)
+
+The follow-up on `d71b7fe` adds `close()` to finish ownership while the borrowed
+FEX context and cache-owning threads are still live. Unlike reusable `clear()`,
+successful close is terminal. It invalidates before unmapping under the lease
+mutex, then refuses reads and mutations with `-ESHUTDOWN` and new leases with
+`std::logic_error`. Repeated close/clear and destruction cannot call the released
+context. A throwing close leaves both storage and the open state intact for retry.
+Even an initially empty owner becomes terminal when closed.
+
+`OrbisV4LifetimeTest.cpp` covers blocked mutations while leased, invalidation
+before unmapping, exact host-address reuse without overwrite, repeated release,
+guest remapping, shared ownership through worker completion, exception unwind,
+reserved-only and inaccessible mappings, and termination before unmapping when
+destructor invalidation throws. It also checks every public access path after
+context shutdown and recovery after a failed close. The V4 script runs this
+suite in native and ASan/UBSan modes; its path triggers the memory CI workflow.
+The linked FEX fixture now closes before destroying both threads and checks
+that subsequent cleanup and allocation cannot re-enter their invalidator.
+
+Follow-up validation uses `/tmp/maxps4-orbis-v4-resume` for logs. The V4 script
+runs outside sandbox tracing with leak detection enabled, because the sandbox
+reproduces LeakSanitizer's unsupported-ptrace fatal error. The existing pinned
+AetherPS4 checkout is available for this follow-up; the linked translation target
+was checked with CMake and its executable passed all four TSO/LSE combinations
+through `scripts/run-bounded.py`. This supersedes the earlier linked-test
+availability limitation for this fixture only. The backend reports ARM64 VIXL
+simulation on x86, with upstream exclusive-instruction simulation limitations;
+no physical iPhone or native ARM64 execution is established.
+
+## Mission 5 final validation (2026-10-16)
+
+On `experiment/maxps4-ubuntu-codex`, the reviewed follow-up changes only memory
+owner shutdown, its regression tests, their CI trigger and this audit. No FEX
+patch, emitter, unrelated runtime component or device execution gate is changed.
+
+All four scripts were rerun and exited 0 with ASan/UBSan and leak detection
+enabled, outside sandbox tracing:
+
+| Script | Result |
+| --- | --- |
+| `scripts/test-orbis-analysis.sh` | PRX bridge, metadata and directory preflight passed. |
+| `scripts/test-orbis-runtime.sh` | 3370 linker checks and executable-image checks passed. |
+| `scripts/test-orbis-v4-memory.sh` | Six suites plus M1 memory passed in native and sanitized modes, including lifetime and terminal shutdown regressions. |
+| `scripts/test-ps4-system-services.sh` | Fourteen C++ suites and both C ABI compilation checks passed. |
+
+Persistent analysis/runtime/memory logs are under `/tmp/maxps4-mission5`.
+The services script reports to the session and removes its temporary build
+directory on exit. No sanitizer diagnostic was emitted.
+
+The linked FEX translation target was rebuilt from the current source, using
+AetherPS4 `3347fc13f19860855ce91b66356940989ea6b6a6` and VIXL
+`5f418449c48f6ca3ad37c47ec632f17a561c0580`. Its bounded run exited 0 for
+TSO/LSE `(0,0)`, `(0,1)`, `(1,0)` and `(1,1)`; see
+`/tmp/maxps4-mission5/fex-translation-tests.txt`. This remains ARM64 simulation
+on x86, with the upstream exclusive-instruction limitations stated above.
+`git diff --check` passed. Physical iPhone validation remains outstanding.

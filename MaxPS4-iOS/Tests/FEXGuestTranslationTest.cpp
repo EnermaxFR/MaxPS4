@@ -497,7 +497,11 @@ int main() {
             CHECK(lease.memory().translate(data,8,6));
         }
         CHECK(released.get()==0); CHECK(invalidations>10);
-        memory.clear(); space.ranges.clear(); ctx->DestroyThread(second); ctx->DestroyThread(thread);
+        // Terminal shutdown must finish while both cache-owning threads live.
+        memory.close(); space.ranges.clear(); ctx->DestroyThread(second); ctx->DestroyThread(thread);
+        // Cleanup after thread destruction must never re-enter the callback.
+        memory.close(); memory.clear();
+        CHECK(memory.reserve(code,page)==-ESHUTDOWN);
     }
     FEXCore::Config::Shutdown();
 #if defined(VIXL_SIMULATOR)

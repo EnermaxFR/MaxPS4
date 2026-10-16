@@ -15,7 +15,7 @@ for mode in native sanitized; do
   if [[ "$mode" == sanitized ]]; then
     extra+=(-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
   fi
-  for suite in OrbisV4AddressSpaceTest OrbisV4LowGuestAddressTest OrbisV4TranslationTest GuestDynamicTLSTest GuestDynamicTLSAllocationTest; do
+  for suite in OrbisV4AddressSpaceTest OrbisV4LowGuestAddressTest OrbisV4TranslationTest OrbisV4LifetimeTest GuestDynamicTLSTest GuestDynamicTLSAllocationTest; do
     "$CXX" "${extra[@]}" "MaxPS4-iOS/Tests/$suite.cpp" -o "$OUT/$suite-$mode"
     "$OUT/$suite-$mode" 2>&1 | tee "$OUT/$suite-$mode.txt"
   done

@@ -23,16 +23,28 @@ public:
             // omit explicit clear(). Revoke them before releasing storage.
             // The invalidator/context must outlive nonempty ownership. A
             // throwing invalidator terminates rather than releasing memory
-            // still referenced by native code; clear() permits earlier retry.
+            // still referenced by native code; close()/clear() permit earlier retry.
             invalidate_();
             memory_.clear();
         }
-        // After explicit clear(), the context may already have been destroyed.
+        // After explicit close()/clear(), the context may already be destroyed.
         // Do not invoke its callback again for an empty address space.
+    }
+    // Finish ownership while the invalidator's context/threads are still live.
+    // Unlike clear(), this is terminal: later cleanup is harmless and attempts
+    // to reuse memory cannot call a context that may already be destroyed.
+    // If invalidation throws, storage and the open state remain unchanged.
+    void close() {
+        std::lock_guard lock(mutex_);
+        if (closed_) return;
+        invalidate_();
+        memory_.clear();
+        closed_ = true;
     }
     class Lease {
     public:
         explicit Lease(OrbisV4Translation& owner) : owner_(owner), lock_(owner.mutex_) {
+            if (owner_.closed_) throw std::logic_error("Guest memory owner is closed");
             for (const auto& r : owner_.memory_.regions()) {
                 // PROT_NONE is a valid protection state, not corrupt metadata.
                 // Omit inaccessible ranges so native resolution faults safely.
@@ -69,15 +81,17 @@ public:
         std::unique_lock<std::mutex> lock_;
         std::vector<Range> ranges_;
     };
-    // Checked split-region slow paths. Hold one lease across validation and
+    // Checked split-region slow paths. Hold the owner lock across validation and
     // copying so protect/unmap cannot invalidate a partially completed access.
     // GuestAddressSpace validates the entire span before changing destination.
     int read(uint64_t guest, void* destination, size_t bytes, bool instruction=false) {
-        auto pinned = lease();
-        return pinned.memory().read(guest,destination,bytes,instruction);
+        std::lock_guard lock(mutex_);
+        if (closed_) return -ESHUTDOWN;
+        return memory_.read(guest,destination,bytes,instruction);
     }
     int write_span(uint64_t guest, const void* source, size_t bytes) {
         std::lock_guard lock(mutex_);
+        if (closed_) return -ESHUTDOWN;
         // Invalidate before writes: generated code may have cached guest bytes.
         invalidate_();
         return memory_.write(guest,source,bytes);
@@ -85,33 +99,46 @@ public:
     Lease lease() { return Lease(*this); }
     size_t page_size() const { return memory_.page_size(); }
     int reserve(uint64_t guest, size_t bytes) {
-        std::lock_guard lock(mutex_); invalidate_();
+        std::lock_guard lock(mutex_);
+        if (closed_) return -ESHUTDOWN;
+        invalidate_();
         return memory_.reserve(guest,bytes);
     }
     int map(uint64_t guest, size_t bytes, uint32_t permissions,
             const void* source=nullptr, size_t count=0) {
-        std::lock_guard lock(mutex_); invalidate_();
+        std::lock_guard lock(mutex_);
+        if (closed_) return -ESHUTDOWN;
+        invalidate_();
         return memory_.map(guest,bytes,permissions,source,count);
     }
     int protect(uint64_t guest, size_t bytes, uint32_t permissions) {
-        std::lock_guard lock(mutex_); invalidate_();
+        std::lock_guard lock(mutex_);
+        if (closed_) return -ESHUTDOWN;
+        invalidate_();
         return memory_.protect(guest,bytes,permissions);
     }
     int release(uint64_t guest) {
-        std::lock_guard lock(mutex_); invalidate_();
+        std::lock_guard lock(mutex_);
+        if (closed_) return -ESHUTDOWN;
+        invalidate_();
         return memory_.release(guest);
     }
     void clear() {
-        std::lock_guard lock(mutex_); invalidate_(); memory_.clear();
+        std::lock_guard lock(mutex_);
+        if (closed_) return;
+        invalidate_(); memory_.clear();
     }
     int write(uint64_t guest, const void* source, size_t bytes) {
-        std::lock_guard lock(mutex_); invalidate_();
+        std::lock_guard lock(mutex_);
+        if (closed_) return -ESHUTDOWN;
+        invalidate_();
         return memory_.write(guest,source,bytes);
     }
 private:
     std::mutex mutex_;
     Invalidator invalidate_;
     GuestAddressSpace memory_;
+    bool closed_ = false;
 };
 }
 
