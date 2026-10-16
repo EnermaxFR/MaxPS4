@@ -766,14 +766,14 @@ extern "C" int32_t maxps4_fex_test_m2_low_va(maxps4_m2_low_va_report* report) {
                 report->collision_preserved = observed == sentinel;
                 if (report->rax != 42 || report->memory != 42 || report->tls != 8 ||
                     !report->collision_preserved || !report->code_rx || !report->stack_rw_nx) return -EIO;
-                // Fixed negative fixtures only. Each invocation retires its JIT
-                // cache before replacing RX code or changing data permissions.
+                // Bounded scalar successes and negative fixtures. Each invocation
+                // retires its JIT cache before RX or permission mutations.
                 // No signal recovery, software atomic fallback or BRK is used.
                 report->boundary_status = [&]() -> int {
                     const std::vector<uint8_t> sentinels(page,0x59);
                     std::vector<uint8_t> check(page);
                     const std::vector<std::vector<uint8_t>> operations={
-                        {0x48,0x8b,0x03}, {0x48,0x89,0x03},
+                        {0xf3,0x0f,0x6f,0x03}, {0xf3,0x0f,0x7f,0x03},
                         {0xf0,0x48,0x0f,0xc1,0x03}, {0xf0,0x48,0x0f,0xb1,0x0b}};
                     for (int boundary=0; boundary<4; ++boundary) {
                         if ((error=process.space.release(data)) ||
@@ -783,6 +783,39 @@ extern "C" int32_t maxps4_fex_test_m2_low_va(maxps4_m2_low_va_report* report) {
                         const uint32_t permission=boundary==2 ? 4 : boundary==3 ? 0 : 6;
                         if (boundary && ((error=process.space.map(data+page,page,6,sentinels.data(),page)) ||
                             (error=process.space.protect(data+page,page,permission)))) return error;
+                        if (boundary==1) {
+                            unsigned scalar_cases=0;
+                            for (unsigned width : {2U,4U,8U}) for (unsigned split=1;split<width;++split) {
+                                if ((error=process.space.write(data,sentinels.data(),page)) ||
+                                    (error=process.space.write(data+page,sentinels.data(),page))) return error;
+                                maxps4_ps4_synthetic::Program scalar;
+                                scalar.reg(3,data+page-split);
+                                scalar.bytes({0xb8,42,0,0,0,0x31,0xc9,0x39,0xc9});
+                                if (width==2) scalar.bytes({0x66});
+                                if (width==8) scalar.bytes({0x48});
+                                scalar.bytes({0x89,0x03});
+                                if (width==2) scalar.bytes({0x66});
+                                if (width==8) scalar.bytes({0x48});
+                                scalar.bytes({0x8b,0x03,0x0f,0x95,0xc1,0x0f,0xb6,0xc9,
+                                              0x48,0xc1,0xe1,32,0x48,0x09,0xc8,0xf4});
+                                if ((error=process.space.release(entry)) ||
+                                    (error=process.space.reserve(entry,page)) ||
+                                    (error=process.space.map(entry,page,5,scalar.code.data(),scalar.code.size()))) return error;
+                                uint64_t result=0; uint32_t backend=0;
+                                if ((error=executeImage(engine,process.source,&result,&backend,
+                                        nullptr,false,false,&process,&thread))) return error;
+                                if (result!=42 || backend!=report->backend) return -EIO;
+                                std::vector<uint8_t> expected(2*page,0x59), actual(2*page);
+                                for(unsigned i=0;i<width;++i) expected[page-split+i]=i?0:42;
+                                if ((error=process.space.read(data,actual.data(),actual.size()))) return error;
+                                if (actual!=expected) return -EIO;
+                                ++scalar_cases;
+                            }
+                            if (scalar_cases!=11) return -EIO;
+                            std::fprintf(stderr,"M2 scalar cross-mapping: %u/11 store/load pairs; bytes and flags preserved\n",scalar_cases);
+                            if ((error=process.space.write(data,sentinels.data(),page)) ||
+                                (error=process.space.write(data+page,sentinels.data(),page))) return error;
+                        }
                         for (const auto& operation : operations) {
                             maxps4_ps4_synthetic::Program negative;
                             negative.reg(3,data+page-4);

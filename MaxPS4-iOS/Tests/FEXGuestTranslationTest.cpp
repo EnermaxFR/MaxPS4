@@ -79,8 +79,9 @@ int main() {
 #if defined(VIXL_SIMULATOR)
     FEXCore::Config::Set(FEXCore::Config::CONFIG_DISABLE_VIXL_INDIRECT_RUNTIME_CALLS,"0");
 #endif
-    for (bool lse : {false,true}) {
-        std::fprintf(stderr,"BEGIN translated FEX lse=%d\n",lse);
+    for (bool tso : {false,true}) for (bool lse : {false,true}) {
+        FEXCore::Config::Set(FEXCore::Config::CONFIG_TSOENABLED,tso?"1":"0");
+        std::fprintf(stderr,"BEGIN translated FEX tso=%d lse=%d\n",tso,lse);
         auto features=FEX::FetchHostFeatures();
 #if !defined(VIXL_SIMULATOR)
         if (lse && !features.SupportsAtomics) continue;
@@ -116,13 +117,18 @@ int main() {
             CHECK(memory.reserve(code,page)==0); CHECK(memory.map(code,page,5,bytes.data(),bytes.size())==0);
         };
         FEXCore::Core::GuestMemoryFaultData operand_fault {};
-        auto run=[&](uint64_t entry, bool alias=false, bool alternate=false) {
+        auto run=[&](uint64_t entry, bool alias=false, bool alternate=false, bool data_alias=false, unsigned fragment=0) {
             auto* current=alternate?second:thread;
             auto& observed=current->CurrentFrame->State;
             auto lease=memory.lease(); space.ranges.clear();
             for (auto r:lease.ranges()) {
                 CHECK(r.guest!=r.host);
-                space.ranges.push_back({alias && r.guest==code+3*page ? code+page : r.guest,r.host,r.size,r.permissions});
+                if (data_alias && r.guest==data+page) continue;
+                if (fragment && r.guest==data) {
+                    for (unsigned i=0;i<8;++i) space.ranges.push_back({data+i,r.host+i,1,fragment==2 && i==7 ? 0U : r.permissions});
+                    space.ranges.push_back({data+8,r.host+8,r.size-8,r.permissions});
+                } else space.ranges.push_back({data_alias && r.guest==data+16*page ? data+page :
+                    alias && r.guest==code+3*page ? code+page : r.guest,r.host,r.size,r.permissions});
             }
             observed.fs_cached=data; observed.gs_cached=data;
             observed.rip=entry; observed.gregs[FEXCore::X86State::REG_RSP]=data+2048;
@@ -159,8 +165,10 @@ int main() {
         auto rejected = [&](uint64_t pointer, const std::vector<uint8_t>& operation, uint32_t permissions, uint32_t width=8) {
             std::vector<uint8_t> bytes={0x48,0xbf};
             for (unsigned i=0;i<8;++i) bytes.push_back(static_cast<uint8_t>(pointer>>(8*i)));
+            bytes.insert(bytes.end(),{0x48,0xb8,0x11,0x22,0x33,0x44,0x55,0x66,0x77,0x88});
             bytes.insert(bytes.end(),operation.begin(),operation.end()); bytes.push_back(0xf4);
             replace(bytes); run(code);
+            CHECK(state.gregs[FEXCore::X86State::REG_RAX]==0x8877665544332211ULL);
             const auto& fault=operand_fault;
             if (fault.Bytes!=width || fault.Address!=pointer || fault.Permissions!=permissions)
                 std::fprintf(stderr,"operand fault mismatch: guest=0x%llx width=%u permissions=%u; actual=0x%llx/%u/%u\n",
@@ -179,8 +187,8 @@ int main() {
         replace({0xb8,42,0,0,0,0xf4}); CHECK(run(code)==42);
         CHECK(!operand_fault.Bytes);
         std::puts("PASS low RIP 0x400000; checked split/hole/permissions/atomic rejection and retry");
-        // The raw native operand must never cross mapping metadata, even
-        // when adjacent guest pages happen to have contiguous host storage.
+        // Scalar accesses may cross pinned mappings after complete preflight;
+        // atomics must still fit a single mapping.
         CHECK(memory.release(data)==0);
         CHECK(memory.reserve(data,2*page)==0);
         CHECK(memory.map(data,page,6)==0);
@@ -192,8 +200,8 @@ int main() {
             if (boundary==2) CHECK(memory.protect(data+page,page,4)==0);
             if (boundary==3) CHECK(memory.protect(data+page,page,0)==0);
             for (uint32_t width : {1U,2U,4U,8U}) {
-                // Split accesses and the first byte beyond the mapping
-                // must fault deterministically.
+                // Holes/protections fault deterministically; split atomics
+                // remain refused even across two RW mappings.
                 const uint64_t pointer=data+page-(width>1?width/2:0);
                 std::vector<uint8_t> load, store, atomic={0xf0};
                 if (width==2) { load.push_back(0x66); store.push_back(0x66); atomic.push_back(0x66); }
@@ -202,8 +210,19 @@ int main() {
                 store.insert(store.end(),{static_cast<uint8_t>(width==1?0x88:0x89),0x07});
                 atomic.insert(atomic.end(),{0x0f,static_cast<uint8_t>(width==1?0xc0:0xc1),0x07});
                 // A byte at the next mapping is valid only with permissions.
-                if (width>1 || boundary==0 || boundary==3) rejected(pointer,load,4,width);
-                if (width>1 || boundary!=1) rejected(pointer,store,2,width);
+                if (boundary==0 || boundary==3) rejected(pointer,load,4,width);
+                if (boundary==1 || boundary==2) {
+                    std::vector<uint8_t> bytes={0x48,0xbf};
+                    for(unsigned i=0;i<8;++i) bytes.push_back(pointer>>(8*i));
+                    bytes.insert(bytes.end(),{0x48,0xb8,0x11,0x22,0x33,0x44,0x55,0x66,0x77,0x88});
+                    bytes.insert(bytes.end(),load.begin(),load.end()); bytes.push_back(0xf4);
+                    replace(bytes);
+                    const uint64_t expected=width==1 ? 0x8877665544332259ULL :
+                        width==2 ? 0x8877665544335959ULL :
+                        width==4 ? 0x59595959ULL : 0x5959595959595959ULL;
+                    CHECK(run(code)==expected && !operand_fault.Bytes);
+                }
+                if (boundary!=1) rejected(pointer,store,2,width);
                 if (width>1 || boundary!=1) rejected(pointer,atomic,6,width);
                 atomic[atomic.size()-2]=static_cast<uint8_t>(width==1?0xb0:0xb1);
                 if (width>1 || boundary!=1) rejected(pointer,atomic,6,width); // CAS
@@ -237,13 +256,87 @@ int main() {
         CHECK(memory.map(data,page,6)==0);
         CHECK(memory.map(data+page,page,6)==0);
         CHECK(memory.write(data,marker.data(),marker.size())==0);
-        // Checked copy handles the same boundary; native split stays refused.
+        // Checked copy handles the same boundary.
         const uint64_t crossing=42;
         CHECK(memory.write_span(data+page-4,&crossing,sizeof(crossing))==0);
         uint64_t copied=0;
         CHECK(memory.read(data+page-4,&copied,sizeof(copied))==0 && copied==42);
         CHECK(memory.write(data,marker.data(),marker.size())==0);
         std::puts("PASS native mapping boundary matrix: 8/16/32/64-bit loads, stores, atomics; no partial write");
+        // Every split position, scalar width and load/store direction. The
+        // instruction following each access observes ZF, catching NZCV damage.
+        for (uint32_t width : {2U,4U,8U}) {
+            for (uint32_t split=1; split<width; ++split) {
+                const uint64_t pointer=data+page-split;
+                for (bool store : {false,true}) {
+                    CHECK(memory.write(data,marker.data(),marker.size())==0);
+                    const uint64_t value=0x8877665544332211ULL;
+                    std::vector<uint8_t> bytes={0x48,0xbf};
+                    for (unsigned i=0;i<8;++i) bytes.push_back(pointer>>(8*i));
+                    bytes.insert(bytes.end(),{0x48,0xb8});
+                    for (unsigned i=0;i<8;++i) bytes.push_back(value>>(8*i));
+                    bytes.insert(bytes.end(),{0x31,0xc9,0x39,0xc9}); // ECX=0; ZF=1
+                    if (width==2) bytes.push_back(0x66);
+                    if (width==8) bytes.push_back(0x48);
+                    bytes.insert(bytes.end(),{static_cast<uint8_t>(store?0x89:0x8b),0x07,
+                                              0x0f,0x95,0xc1,0xf4}); // setnz cl; hlt
+                    replace(bytes);
+                    const uint64_t expected=width==2 ? (value & ~0xffffULL)|0x5959 :
+                        width==4 ? 0x59595959 : 0x5959595959595959ULL;
+                    CHECK(run(code)==(store?value:expected));
+                    CHECK(!operand_fault.Bytes);
+                    CHECK(state.gregs[FEXCore::X86State::REG_RCX]==0);
+                    CHECK(state.gregs[FEXCore::X86State::REG_RDI]==pointer);
+                    CHECK(memory.read(data,observed.data(),observed.size())==0);
+                    auto expected_memory=marker;
+                    if (store) for (uint32_t i=0;i<width;++i)
+                        expected_memory[page-split+i]=static_cast<uint8_t>(value>>(8*i));
+                    CHECK(observed==expected_memory);
+                }
+            }
+        }
+        // A destination sharing the address register must not destroy EA.
+        replace({0x48,0xb8,0,0,0,0,4,0,0,0,0x48,0x05,
+                 static_cast<uint8_t>((page-4)&255),static_cast<uint8_t>((page-4)>>8),0,0,
+                 0x48,0x8b,0x00,0xf4});
+        CHECK(memory.write(data,marker.data(),marker.size())==0);
+        CHECK(run(code)==0x5959595959595959ULL && !operand_fault.Bytes);
+        rejected(UINT64_MAX-3,{0x48,0x89,0x07},2);
+        rejected(UINT64_MAX-3,{0x48,0x8b,0x07},4);
+        std::puts("PASS scalar split loads/stores: every 16/32/64-bit split, exact bytes, registers, flags, EA alias and overflow");
+        // Eight logical mappings, plus two noncontiguous guarded host allocations.
+        auto bytes=address;
+        bytes.insert(bytes.end(),{0x48,0xc7,0x07,42,0,0,0,0x48,0x8b,0x07,0xf4});
+        replace(bytes); CHECK(run(code,false,false,false,true)==42 && !operand_fault.Bytes);
+        for (bool store : {false,true}) {
+            CHECK(memory.write(data,marker.data(),marker.size())==0);
+            auto denied=address;
+            denied.insert(denied.end(),{0x48,0xb8,0x11,0x22,0x33,0x44,0x55,0x66,0x77,0x88,
+                0x48,static_cast<uint8_t>(store?0x89:0x8b),0x07,0xf4});
+            replace(denied);
+            CHECK(run(code,false,false,false,2)==0x8877665544332211ULL);
+            CHECK(operand_fault.Address==data && operand_fault.Bytes==8 &&
+                  operand_fault.Permissions==(store?2U:4U));
+            CHECK(memory.read(data,observed.data(),observed.size())==0 && observed==marker);
+        }
+        CHECK(memory.reserve(data+16*page,page)==0);
+        CHECK(memory.map(data+16*page,page,6)==0);
+        {
+            auto lease=memory.lease();
+            const auto* first=lease.memory().translate(data,1,4);
+            const auto* last=lease.memory().translate(data+16*page,1,4);
+            CHECK(first && last && first+page!=last);
+        }
+        bytes={0x48,0xbf};
+        const uint64_t split_pointer=data+page-4;
+        for(unsigned i=0;i<8;++i) bytes.push_back(split_pointer>>(8*i));
+        bytes.insert(bytes.end(),{0x48,0xc7,0x07,42,0,0,0,0x48,0x8b,0x07,0xf4});
+        replace(bytes); CHECK(run(code,false,false,true)==42 && !operand_fault.Bytes);
+        uint32_t tail=0, head=1;
+        CHECK(memory.read(data+page-4,&tail,4)==0 && tail==42);
+        CHECK(memory.read(data+16*page,&head,4)==0 && head==0);
+        CHECK(memory.release(data+16*page)==0);
+        std::puts("PASS scalar split across eight logical ranges and disjoint guarded host mappings");
         // Native-width CAS and XADD: both mismatch and success, all widths.
         for (size_t width : {1U,2U,4U,8U}) {
             uint64_t initial=21; CHECK(memory.write(data,&initial,8)==0);

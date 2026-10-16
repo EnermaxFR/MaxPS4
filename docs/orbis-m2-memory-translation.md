@@ -29,8 +29,12 @@ swap et fetch add/sub/and/clr/or/xor/neg. Les chemins memcpy/memset,
 masked/gather et cache ne sont pas encore raccordés : la
 compilation translated les refuse explicitement. Les accès natifs ne sont
 admis que si l'opérande entier appartient à une même plage host contiguë.
-Un accès de données invalide produit actuellement un trap ARM64 dédié ; la
-conversion en faute guest récupérable reste à implémenter. Aucun programme
+Les accès GPR scalaires 1/2/4/8 octets disposent désormais d'un slow path
+inter-mappings avec prévalidation complète avant copie, sous lease et avec
+préservation de NZCV. Les atomiques split restent refusées. Un accès invalide
+renseigne le record de faute et arrête le dispatch avant l'opérande, sans trap
+ni résultat CPU réussi publié. La reprise générale après faute native reste
+à implémenter. Voir [rapport PR 205](pr205-m2-boundary-validation.md). Aucun programme
 arbitraire n'est autorisé par cette étape.
 
 La première CI native Darwin a révélé un défaut réel d'invalidation du FEX

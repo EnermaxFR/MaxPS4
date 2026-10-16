@@ -18,7 +18,66 @@ aucun ELF/PRX arbitraire ni jeu PS4. **-48 n'est pas déclaré corrigé globalem
 Le modèle iPhone et les versions SideStore/StikDebug ne figurent pas dans ce
 rapport ; aucune exécution locale sur iPhone n'est revendiquée ici.
 
-## Correction et périmètre
+## Incrément courant — slow path scalaire
+
+Les opérandes GPR LoadMem/StoreMem et LoadMemTSO/StoreMemTSO de 1/2/4/8 octets
+calculent leur adresse effective dans le domaine invité. Une plage unique
+conserve un accès natif de la largeur originale. Sinon le JIT vérifie chaque
+octet (bornes invitées/hôtes et permissions) **avant** toute lecture, écriture
+ou modification de la destination. La seconde passe copie en ordre little-endian
+sous la même lease immuable ; aucun pointeur invité n'est déréférencé par l'hôte.
+Le snapshot, le stockage et les permissions restent épinglés jusqu'à la fin du
+dispatch. Les opérations TSO ont des barrières ISH avant/après l'accès.
+
+Les registres invités d'adresse/source et NZCV sont conservés ; les loads 16 bits
+respectent la fusion x86, les loads 32 bits la remise à zéro des bits hauts.
+Un refus enregistre adresse/taille/permissions et arrête l'invocation avant
+l'opérande. Le frontend ne publie aucun résultat CPU réussi. Il ne s'agit pas
+d'une reprise générale à un RIP précis après faute native. Une écriture split
+réussie n'est pas atomique entre threads ; **CAS/XADD et toutes les atomiques
+split/mal alignées restent refusées**, sans fallback logiciel.
+
+Le budget d'émission compte désormais chaque scalaire et ses deux passes,
+avec plafond de 16 Mio et refus avant émission en cas de dépassement. Les
+vecteurs/paires et autres accès natifs restent limités à un mapping ; les
+opérations bulk/masked/gather/cache/ValidateCode non implémentées restent refusées.
+Aucune protection, invalidation, W^X, garde ou activation Stik/BRK n'est affaiblie.
+
+Régressions nouvelles : chaque coupure des largeurs 16/32/64 bits, load/store,
+comparaison de tous les octets et sentinelles, registres/flags, destination égale
+au registre d'adresse, huit mappings logiques, deux allocations hôtes disjointes,
+débordement invité et refus aux trous/protections. Exécution avec TSO activé et
+désactivé et LSE/LL-SC. Les tests CAS/XADD 8/16/32/64 existants restent conservés.
+
+Le diagnostic iPhone M2 conserve 42/TLS 8 et le compteur de refus **16/16**.
+Avant les refus, il exécute **11 paires store/load scalaires** (toutes les
+coupures 16/32/64 bits), vérifie chaque octet et les flags ; un échec empêche
+le statut global 0. Log attendu : `M2 scalar cross-mapping: 11/11 store/load pairs; bytes and flags preserved`.
+Les 16 refus sont désormais **load/store vectoriels 128 bits + CAS/XADD 64 bits**
+× trou/RW/R/PROT_NONE. Ce changement explicite garde les vecteurs split refusés
+alors que les scalaires valides deviennent admis. ELF/libkernel reste attendu 2.
+La validation physique de b12d7b13 ci-dessus ne valide pas ce nouvel incrément.
+
+## Vérifications locales du slow path
+
+- `ASAN_OPTIONS=detect_leaks=0 CXX=clang++-19 bash scripts/test-orbis-v4-memory.sh` :
+  réussi, natif et ASan/UBSan, V4, leases, TLS, M1 et collisions.
+- `ASAN_OPTIONS=detect_leaks=0 CXX=clang++-19 bash scripts/test-ps4-system-services.sh` : réussi.
+- `scripts/test-ps4-fex-linked.sh` : réussi sur le véritable FEX épinglé,
+  Clang 19, Linux x86_64, **backend 3 VIXL**, sans preuve ARM64 native locale.
+  Quatre configurations TSO off/on × LSE off/on ; nouvelles régressions,
+  CAS/XADD tous formats, ELF/libkernel résultat 2, M1/deux threads et TLS passent.
+  M2 répété trois fois : statut 0, entrée 0x400000, RAX/mémoire 42, TLS 8,
+  collision/nettoyage 1, 11/11 paires scalaires, 16/16 refus et mémoire préservée 1.
+- Patch : application/idempotence et refus de dérive sans mutation réussis.
+
+Les erreurs de développement détectées (réservation de fixture empiétant sur
+une garde et type bool du générateur IR à nommer i1) ont été corrigées avant
+l'exécution complète réussie. LeakSanitizer désactivé localement sous ptrace ;
+ASan/UBSan actifs. La CI native Linux/macOS ARM64, iPhoneOS et l'IPA devront
+être vérifiés sur le SHA publié ; les succès b12d7b13 ne leur sont pas attribués.
+
+## Historique b12d7b13 — correction et périmètre
 
 `ReadGuestInstruction` dans le patch FEX copiait les premiers octets avant de
 rencontrer un trou ou une plage NX. Il renvoyait false avec un tampon modifié.
@@ -35,7 +94,7 @@ nouveau n'est admis. Les atomiques restent matérielles : aucune décomposition
 en lectures/écritures, aucune désactivation des protections. W^X, code invité
 RX, pile RW/NX, gardes et distinction VA invitée/hôte sont conservés.
 
-## Régressions
+## Régressions b12d7b13
 
 - Fetch RX vers RX dans deux buffers hôtes distincts ; RX vers trou/NX/PROT_NONE :
   refus et tampon intact ; taille nulle et débordements refusés.
@@ -53,7 +112,7 @@ RX, pile RW/NX, gardes et distinction VA invitée/hôte sont conservés.
   ainsi que le marqueur hôte. Les caches sont retirés avant toute remodification.
   Ces refus ne constituent pas une reprise après une faute native.
 
-## Vérifications locales
+## Vérifications locales b12d7b13
 
 Linux x86_64 :
 
@@ -86,6 +145,7 @@ ces résultats et l'artefact IPA. Aucun appareil iPhone n'est accessible ici.
 3. Tester FEXCore : backend natif ARM64 2, résultat 42.
 4. Tester M2 low VA deux fois. Attendre statut 0, backend 2, entrée 0x400000,
    JIT/mémoire 42, TLS 8, collision/nettoyage/code RX/pile RW-NX tous à 1.
+   Vérifier aussi le log des 11 paires scalaires (voir incrément courant).
    Nouvelle ligne requise : **Limites mappings : statut 0 ; refus vérifiés 16/16 ;
    mémoire préservée 1**. Les logs de refus -EFAULT sont attendus ; aucun signal
    ni crash n'est attendu. Un compteur inférieur à 16 est un échec.
@@ -100,11 +160,10 @@ Toute révision ultérieure reste à valider physiquement ; aucune correction g�
 
 ## Prochaines modifications concrètes
 
-Après validation physique de cet incrément :
+Après validation physique du slow path scalaire :
 
-1. Définir un slow path scalaire JIT inter-mappings avec prévalidation complète,
-   état invité précis et tests de flags/registres ; garder les atomiques split
-   refusées. Traiter la reprise après faute native séparément.
+1. Traiter séparément la reprise après faute native et la précision de RIP/état
+   pour les instructions complexes ; garder les atomiques split refusées.
 2. ELF SCE/PRX : étendre les fixtures de relocations/NID et les rejets des tables
    tronquées, puis admettre une relocation supplémentaire avec rollback du
    chargement complet en cas d'import non résolu.
