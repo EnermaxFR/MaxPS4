@@ -117,6 +117,7 @@ int main(int argc, char** argv) {
     wrong=inputs; wrong[1].bytes[0xb1d]=2; fail(wrong); // Hidden symbols cannot be interposed.
     wrong=inputs; put(wrong[1].bytes,0x2000,0xc18); fail(wrong); // Two RELA entries targeting same 8 bytes.
     wrong=inputs; put(wrong[1].bytes,0x2004,0xc18); fail(wrong); // Partially overlapping 8-byte RELA writes.
+    wrong=inputs; put(wrong[1].bytes,0x200c,0xc00); fail(wrong); // Overlap when the later RELA points backwards into an earlier write.
     wrong=inputs; put(wrong[1].bytes,1,0xc10); fail(wrong); // GLOB_DAT nonzero addend refused.
     wrong=inputs; put(wrong[1].bytes,0,0xb18,4); fail(wrong); // Unnamed undefined symbol cannot resolve to zero.
     wrong=inputs; wrong[1].bytes=kernel; fail(wrong); // No fake HLE trampoline during PRX preparation.
