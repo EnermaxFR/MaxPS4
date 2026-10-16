@@ -139,8 +139,14 @@ private:
                     check((r.type != 6 && r.type != 7) || r.addend == 0,"GLOB_DAT/JUMP_SLOT avec addend non nul");
                 }
                 uint64_t destination = sum(m.base,r.target);
-                check(relocationTargets.insert(destination).second,
-                    "Relocations PRX dupliquées sur la même cible");
+                auto next = relocationTargets.lower_bound(destination);
+                check(next == relocationTargets.end() ||
+                    (destination <= UINT64_MAX - 8 && destination + 8 <= *next),
+                    "Relocations PRX dont les écritures se chevauchent");
+                check(next == relocationTargets.begin() ||
+                    (*std::prev(next) <= UINT64_MAX - 8 && *std::prev(next) + 8 <= destination),
+                    "Relocations PRX dont les écritures se chevauchent");
+                relocationTargets.insert(next,destination);
                 auto* p = target(m,destination,2);
                 check(p,"Cible PRX hors mémoire writable");
                 for (size_t j = 0; j < 8; ++j) p[j] = uint8_t(value>>(j*8));
