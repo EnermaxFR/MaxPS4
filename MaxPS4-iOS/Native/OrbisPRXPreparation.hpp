@@ -61,6 +61,14 @@ private:
                 for (const auto& old : modules) for (const auto& r : old.regions)
                     check(!s.memsz || r.bytes.empty() || address >= r.address+r.bytes.size() ||
                         r.address >= address+s.memsz,"Modules PRX se chevauchant");
+                // Reject overlapping PT_LOAD/SCE_RELRO regions within the same
+                // module as well as between modules. Otherwise target() could
+                // silently choose the first writable alias for a relocation.
+                for (const auto& r : m.regions)
+                    check(!s.memsz || r.bytes.empty() ||
+                        address >= r.address+r.bytes.size() ||
+                        r.address >= address+s.memsz,
+                        "Segments PRX du même module se chevauchant");
                 Region region{address,s.flags,std::vector<uint8_t>(size_t(s.memsz),0)};
                 if (s.filesz) std::memcpy(region.bytes.data(),input.bytes.data()+s.offset,size_t(s.filesz));
                 allocated += size_t(s.memsz); m.regions.push_back(std::move(region));
