@@ -129,3 +129,28 @@ python3 scripts/test-pkg-sparse-ci.py
 
 Les commandes C++/Swift des tests PKG et de la transaction d'import se trouvent
 également dans `.github/workflows/pkg-inventory.yml` et `fexcore-app.yml`.
+
+## Observation supplémentaire : PKG fourni par l'utilisateur (analyse locale, lecture seule)
+
+Le 16 octobre 2026, un fichier portant l'identifiant de contenu
+`UP0969-CUSA06015_00-KEROBLASTERUS000` a été examiné **localement** depuis
+la conversation, sans copie du PKG dans GitHub ni extraction de contenu protégé.
+
+- Taille réelle : **10 223 616 octets**.
+- Quatre octets initiaux : **`7F 43 4E 54`** (signature CNT, et non `7F 45 4C 46` d'un ELF).
+- L'identifiant de contenu est présent en clair dans l'en-tête à l'offset `0x40`.
+- Une recherche brute des séquences `7F 45 4C 46` (ELF), `eboot.bin` et
+  de la signature SELF examinée n'a trouvé aucune occurrence ; la chaîne
+  `param.sfo` apparaît à l'offset décimal **12545**. Ces recherches ne
+  constituent **ni** un parseur PFS **ni** une preuve d'absence de fichiers
+  internes : un conteneur opaque ou chiffré peut les masquer.
+- SHA-256 du fichier fourni :
+  `8f0f6b27ab3bde3c0b500379629cdfd7c6af2f012fb9184808cb626a0b303cfc`.
+
+**Conséquence reproductible :** transmettre ce conteneur CNT directement au
+chargeur ELF est une erreur de catégorie ; l'ancien `-ENOEXEC/-8` est
+cohérent avec ce mauvais chemin. La correction `[ELF.CONTAINER]` doit guider
+l'utilisateur vers **Importer → Analyser PKG/PFS**, sans promettre un
+exécutable exploitable. Le nouveau code d'import doit encore être validé
+sur l'iPhone avec ce fichier précis. Aucun accès au contenu déchiffré ni
+fonctionnement de Kero Blaster n'est démontré.
