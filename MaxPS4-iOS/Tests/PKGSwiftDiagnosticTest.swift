@@ -83,7 +83,10 @@ struct PKGSwiftDiagnosticTest {
         precondition(afterCollisionFiles == ["imported.pkg"])
         try manager.removeItem(at: destination)
         // Valid encrypted containers are inventory-only imports, not ELF failures.
-        little(0x61c, 12, 2); try data.write(to: url)
+        little(0x608, 20130315, 8); little(0x61c, 12, 2); try data.write(to: url)
+        let protectedImportReport = try MaxPS4PKGInspector.inspect(url: url, requireValidPackage: true)
+        precondition(protectedImportReport.contains("PFS chiffré déclaré : inaccessible"))
+        precondition(protectedImportReport.contains("[PKG.CANDIDATE_SCAN] candidates=0 ; bytes=0"))
         try MaxPS4PKGInspector.copyForLibrary(url: url, destination: destination, validatePackage: true) { commits += 1 }
         let encryptedImport = try Data(contentsOf: destination)
         precondition(commits == 3 && encryptedImport == data)

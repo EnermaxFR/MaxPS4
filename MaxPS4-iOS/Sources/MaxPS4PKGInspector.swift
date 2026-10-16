@@ -10,6 +10,9 @@ enum MaxPS4PKGInspector {
                 if code == -Int32(POSIXErrorCode.ENOSPC.rawValue) {
                     return partial + "\nRapport tronqué : limite de stockage de 4 Mio atteinte."
                 }
+                if code == -Int32(POSIXErrorCode.ENOEXEC.rawValue) {
+                    return partial + "\nValidation de structure PKG refusée (ENOEXEC, code \(code))."
+                }
                 return partial + "\nLecture du rapport PKG interrompue (code \(code))"
             }
         }
