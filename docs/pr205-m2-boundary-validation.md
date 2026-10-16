@@ -1,5 +1,23 @@
 # PR #205 — limites de mappings M2
 
+## Validation physique de b12d7b13
+
+[Rapport communiqué par le testeur](https://github.com/EnermaxFR/MaxPS4/pull/205#issuecomment-6212218789),
+source `b12d7b13be92c33d33654b7a9a6df66f9fe4f75d`, iPhone sous iOS
+27.2 (24B5110a), le 16 octobre 2026 à 09:14:38 UTC :
+
+- M2 low VA : statut 0, backend JIT ARM64 2, entrée 0x400000,
+  JIT 42, mémoire 42, TLS 8.
+- Collision, nettoyage, code RX et pile RW/NX : tous à 1.
+- Limites mappings : statut 0, refus vérifiés 16/16, mémoire préservée 1.
+- ELF/libkernel synthétique : réussi, résultat 2.
+
+Cette preuve physique concerne ces diagnostics bornés sur ce SHA. Elle ne
+valide aucun nouveau changement, aucune reprise générale après faute native,
+aucun ELF/PRX arbitraire ni jeu PS4. **-48 n'est pas déclaré corrigé globalement.**
+Le modèle iPhone et les versions SideStore/StikDebug ne figurent pas dans ce
+rapport ; aucune exécution locale sur iPhone n'est revendiquée ici.
+
 ## Correction et périmètre
 
 `ReadGuestInstruction` dans le patch FEX copiait les premiers octets avant de
@@ -76,8 +94,8 @@ ces résultats et l'artefact IPA. Aucun appareil iPhone n'est accessible ici.
 6. Partager les rapports et logs, SHA, modèle iPhone, versions iOS, SideStore et
    StikDebug. Une erreur -48 sur un autre scénario reste à diagnostiquer.
 
-La preuve physique antérieure sous iOS 27.2 concerne a3d8da72 uniquement. La
-nouvelle révision reste à valider physiquement ; aucune correction générale de
+La preuve physique sous iOS 27.2 couvre désormais b12d7b13 (rapport ci-dessus).
+Toute révision ultérieure reste à valider physiquement ; aucune correction générale de
 -48 et aucun jeu PS4 fonctionnel ne sont annoncés. Aucun BRK n'est activé.
 
 ## Prochaines modifications concrètes
