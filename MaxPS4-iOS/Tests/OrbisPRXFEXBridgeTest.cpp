@@ -51,6 +51,17 @@ int main() {
     const uint8_t* host = reinterpret_cast<const uint8_t*>(1);
     assert(bridge.admit_dispatch(0x14000,host)==-ENOTSUP && !host);
     assert(bridge.diagnostic().find("dispatch refused")!=std::string::npos);
+    // Refusal must be stable for executable, data and unmapped guest addresses.
+    // No failed dispatch may publish a host pointer or mutate staged PRX bytes.
+    for (uint64_t entry : {uint64_t{0x14000}, uint64_t{0x28000},
+                           uint64_t{0x13000}, uint64_t{0x400000}}) {
+        host = reinterpret_cast<const uint8_t*>(1);
+        assert(bridge.admit_dispatch(entry,host)==-ENOTSUP);
+        assert(host==nullptr);
+        uint64_t after=0;
+        assert(memory->read(0x28000,&after,8)==0 && after==0x14000);
+        assert(bridge.memory()==memory);
+    }
     auto rejected = [&](OrbisPRXPreparation bad) {
         assert(!bridge.map(bad) && !bridge.diagnostic().empty());
         assert(bridge.memory()==memory && memory->regions().size()==4);
