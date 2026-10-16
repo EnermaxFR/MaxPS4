@@ -16,6 +16,8 @@ permissions:
   contents: read
 jobs:
   orbis-test-ipa:
+    # Issue #207: package this experiment only by dispatch after correctness CI.
+    if: github.event_name != 'pull_request' || github.head_ref != 'experiment/codex-orbis-prx-fex-bridge'
     runs-on: macos-latest
     timeout-minutes: 55
     steps:

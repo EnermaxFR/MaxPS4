@@ -128,6 +128,7 @@ private:
                     for (size_t dep : dependencies) for (const auto& exported : modules[dep].metadata.symbols)
                         if (exported.defined && exported.qualified && exported.binding == 1 &&
                             exported.nid == s.nid && exported.library == s.library && exported.module == s.module &&
+                            exported.kind == s.kind &&
                             exported.libraryVersion == s.libraryVersion && exported.moduleVersion == s.moduleVersion) {
                             addresses[i] = sum(modules[dep].base,exported.value); ++hits;
                         }

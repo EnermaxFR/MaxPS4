@@ -82,6 +82,14 @@ int main(int argc,char** argv) {
     assert(maxps4_pkg_inventory_report(source.c_str(),report.data(),report.size())==0);
     assert(std::strstr(report.data(),"PFS chiffré déclaré : inaccessible"));
     assert(std::strstr(report.data(),"eboot.bin demeure inaccessible"));
+    assert(!std::strstr(report.data(),"Kero Blaster readiness"));
+    b=fixture(0x000d);
+    const char contentID[]="UP0969-CUSA06015_00-KEROBLASTERUS000";
+    std::memcpy(b.data()+0x40,contentID,sizeof(contentID)); write();
+    assert(maxps4_pkg_inventory_report(source.c_str(),report.data(),report.size())==0);
+    assert(std::strstr(report.data(),"Kero Blaster readiness : NON PRÊT"));
+    assert(std::strstr(report.data(),"Premier blocage réel : PFS inaccessible ; eboot.bin inaccessible"));
+    assert(std::strstr(report.data(),"Erreur générale FEX -48 : non résolue"));
     char tiny[8]{}; assert(maxps4_pkg_inventory_report(source.c_str(),tiny,sizeof(tiny))==-ENOSPC && tiny[7]==0);
     const auto link=temp/"link.pkg"; std::filesystem::create_symlink(source,link);
     assert(maxps4_pkg_inventory_report(link.c_str(),report.data(),report.size())<0);
