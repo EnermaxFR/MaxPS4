@@ -38,7 +38,34 @@ public:
     }
     std::optional<FEXCore::ExecutableFileSectionInfo> LookupExecutableFileSection(FEXCore::Core::InternalThreadState*,uint64_t) override { return {}; }
 };
+static void instruction_boundaries() {
+    Space space;
+    const uint8_t left[]={0xb8,42}, right[]={0,0,0,0xf4};
+    constexpr uint64_t guest=0x400000;
+    space.ranges={{guest,reinterpret_cast<uintptr_t>(left),sizeof(left),5},
+                  {guest+sizeof(left),reinterpret_cast<uintptr_t>(right),sizeof(right),5}};
+    std::array<uint8_t,6> output{};
+    CHECK(space.ReadGuestInstruction(guest,output.data(),output.size()));
+    CHECK((output==std::array<uint8_t,6>{0xb8,42,0,0,0,0xf4}));
+    for (uint32_t permissions : {0U,4U,6U}) {
+        space.ranges[1].Permissions=permissions;
+        output.fill(0xa5);
+        CHECK(!space.ReadGuestInstruction(guest,output.data(),output.size()));
+        for (auto byte:output) CHECK(byte==0xa5);
+    }
+    space.ranges.pop_back();
+    CHECK(!space.ReadGuestInstruction(guest,output.data(),output.size()));
+    for (auto byte:output) CHECK(byte==0xa5);
+    CHECK(!space.ReadGuestInstruction(UINT64_MAX-1,output.data(),4));
+    CHECK(!space.ReadGuestInstruction(guest,output.data(),0));
+    // Malformed host arithmetic is refused before dereferencing any byte.
+    space.ranges={{guest,UINT64_MAX,4,5}};
+    CHECK(!space.ReadGuestInstruction(guest,output.data(),4));
+    for (auto byte:output) CHECK(byte==0xa5);
+    std::puts("PASS instruction boundary preflight: split RX, hole, NX, overflow; output unchanged on failure");
+}
 int main() {
+    instruction_boundaries();
     // Keep assertion text visible when the pinned emitter terminates a check.
     LogMan::Throw::InstallHandler([](const char* text) { std::fprintf(stderr,"FEX assertion: %s\n",text); });
     LogMan::Msg::InstallHandler([](LogMan::DebugLevels level,const char* text) {
@@ -129,13 +156,17 @@ int main() {
             CHECK(lease.memory().read(data,&observed,8)==0); CHECK(observed==expected);
         };
         // Rejected native operands stop without a signal or a partial store.
-        auto rejected = [&](uint64_t pointer, const std::vector<uint8_t>& operation, uint32_t permissions) {
+        auto rejected = [&](uint64_t pointer, const std::vector<uint8_t>& operation, uint32_t permissions, uint32_t width=8) {
             std::vector<uint8_t> bytes={0x48,0xbf};
             for (unsigned i=0;i<8;++i) bytes.push_back(static_cast<uint8_t>(pointer>>(8*i)));
             bytes.insert(bytes.end(),operation.begin(),operation.end()); bytes.push_back(0xf4);
             replace(bytes); run(code);
             const auto& fault=operand_fault;
-            CHECK(fault.Bytes==8 && fault.Address==pointer && fault.Permissions==permissions);
+            if (fault.Bytes!=width || fault.Address!=pointer || fault.Permissions!=permissions)
+                std::fprintf(stderr,"operand fault mismatch: guest=0x%llx width=%u permissions=%u; actual=0x%llx/%u/%u\n",
+                    static_cast<unsigned long long>(pointer),width,permissions,
+                    static_cast<unsigned long long>(fault.Address),fault.Bytes,fault.Permissions);
+            CHECK(fault.Bytes==width && fault.Address==pointer && fault.Permissions==permissions);
         };
         rejected(data+page-4,{0x48,0x8b,0x07},4); // split operand
         rejected(data+page,{0x48,0x89,0x07},2);   // unmapped
@@ -148,6 +179,71 @@ int main() {
         replace({0xb8,42,0,0,0,0xf4}); CHECK(run(code)==42);
         CHECK(!operand_fault.Bytes);
         std::puts("PASS low RIP 0x400000; checked split/hole/permissions/atomic rejection and retry");
+        // The raw native operand must never cross mapping metadata, even
+        // when adjacent guest pages happen to have contiguous host storage.
+        CHECK(memory.release(data)==0);
+        CHECK(memory.reserve(data,2*page)==0);
+        CHECK(memory.map(data,page,6)==0);
+        std::vector<uint8_t> marker(2*page,0x59), observed(marker.size());
+        CHECK(memory.write(data,marker.data(),page)==0);
+        for (int boundary : {0,1,2,3}) { // hole, RW, R, PROT_NONE
+            if (boundary==1) CHECK(memory.map(data+page,page,6)==0);
+            if (boundary==1) CHECK(memory.write(data+page,marker.data(),page)==0);
+            if (boundary==2) CHECK(memory.protect(data+page,page,4)==0);
+            if (boundary==3) CHECK(memory.protect(data+page,page,0)==0);
+            for (uint32_t width : {1U,2U,4U,8U}) {
+                // Split accesses and the first byte beyond the mapping
+                // must fault deterministically.
+                const uint64_t pointer=data+page-(width>1?width/2:0);
+                std::vector<uint8_t> load, store, atomic={0xf0};
+                if (width==2) { load.push_back(0x66); store.push_back(0x66); atomic.push_back(0x66); }
+                if (width==8) { load.push_back(0x48); store.push_back(0x48); atomic.push_back(0x48); }
+                load.insert(load.end(),{static_cast<uint8_t>(width==1?0x8a:0x8b),0x07});
+                store.insert(store.end(),{static_cast<uint8_t>(width==1?0x88:0x89),0x07});
+                atomic.insert(atomic.end(),{0x0f,static_cast<uint8_t>(width==1?0xc0:0xc1),0x07});
+                // A byte at the next mapping is valid only with permissions.
+                if (width>1 || boundary==0 || boundary==3) rejected(pointer,load,4,width);
+                if (width>1 || boundary!=1) rejected(pointer,store,2,width);
+                if (width>1 || boundary!=1) rejected(pointer,atomic,6,width);
+                atomic[atomic.size()-2]=static_cast<uint8_t>(width==1?0xb0:0xb1);
+                if (width>1 || boundary!=1) rejected(pointer,atomic,6,width); // CAS
+            }
+            CHECK(memory.read(data,observed.data(),page)==0);
+            for(size_t i=0;i<page;++i) CHECK(observed[i]==0x59);
+            if (boundary==1 || boundary==2) {
+                CHECK(memory.read(data+page,observed.data(),page)==0);
+                for(size_t i=0;i<page;++i) CHECK(observed[i]==0x59);
+            }
+        }
+        // Aligned atomics can also overrun a short logical region without
+        // crossing a host page. This must fault on bounds, not alignment.
+        CHECK(memory.release(data)==0);
+        CHECK(memory.reserve(data,2*page)==0);
+        CHECK(memory.map(data,page-1,6)==0);
+        CHECK(memory.write(data,marker.data(),page-1)==0);
+        for (uint32_t width : {1U,2U,4U,8U}) {
+            std::vector<uint8_t> atomic={0xf0};
+            if (width==2) atomic.push_back(0x66);
+            if (width==8) atomic.push_back(0x48);
+            atomic.insert(atomic.end(),{0x0f,static_cast<uint8_t>(width==1?0xc0:0xc1),0x07});
+            rejected(data+page-width,atomic,6,width);
+            atomic[atomic.size()-2]=static_cast<uint8_t>(width==1?0xb0:0xb1);
+            rejected(data+page-width,atomic,6,width);
+        }
+        CHECK(memory.read(data,observed.data(),page-1)==0);
+        for(size_t i=0;i<page-1;++i) CHECK(observed[i]==0x59);
+        CHECK(memory.release(data)==0);
+        CHECK(memory.reserve(data,2*page)==0);
+        CHECK(memory.map(data,page,6)==0);
+        CHECK(memory.map(data+page,page,6)==0);
+        CHECK(memory.write(data,marker.data(),marker.size())==0);
+        // Checked copy handles the same boundary; native split stays refused.
+        const uint64_t crossing=42;
+        CHECK(memory.write_span(data+page-4,&crossing,sizeof(crossing))==0);
+        uint64_t copied=0;
+        CHECK(memory.read(data+page-4,&copied,sizeof(copied))==0 && copied==42);
+        CHECK(memory.write(data,marker.data(),marker.size())==0);
+        std::puts("PASS native mapping boundary matrix: 8/16/32/64-bit loads, stores, atomics; no partial write");
         // Native-width CAS and XADD: both mismatch and success, all widths.
         for (size_t width : {1U,2U,4U,8U}) {
             uint64_t initial=21; CHECK(memory.write(data,&initial,8)==0);

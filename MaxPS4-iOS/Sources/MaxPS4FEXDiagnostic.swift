@@ -157,7 +157,8 @@ struct MaxPS4FEXDiagnostic: Sendable {
         let status = maxps4_fex_test_m2_low_va(&report)
         let executed = report.backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT) && report.execute_status == 0
         let passed = status == 0 && executed && report.rax == 42 && report.memory == 42 && report.tls == 8 &&
-            report.collision_preserved == 1 && report.cleanup == 1 && report.code_rx == 1 && report.stack_rw_nx == 1
+            report.collision_preserved == 1 && report.cleanup == 1 && report.code_rx == 1 && report.stack_rw_nx == 1 &&
+            report.boundary_status == 0 && report.boundary_cases == 16 && report.boundary_preserved == 1
         let revision = Bundle.main.object(forInfoDictionaryKey: "MaxPS4SourceRevision") as? String ?? "non renseignée"
         return [
             "M2 low VA — traduction mémoire FEXCore",
@@ -171,6 +172,7 @@ struct MaxPS4FEXDiagnostic: Sendable {
             "TLS : \(executed ? String(report.tls) : "non mesuré") (attendu 8)",
             "Collision préservée : \(report.collision_preserved) ; nettoyage : \(report.cleanup) ; code RX : \(report.code_rx) ; pile RW/NX : \(report.stack_rw_nx) (tous attendus 1)",
             "Fournisseur RX/RW : état \(maxps4_jit_state()), erreur \(maxps4_jit_error()), étape \(maxps4_jit_failure_stage()), Mach \(maxps4_jit_failure_mach()), région \(maxps4_jit_failure_region()) ; échec script \(maxps4_jit_script_failure())",
+            "Limites mappings : statut \(report.boundary_status) ; refus vérifiés \(report.boundary_cases)/16 ; mémoire préservée \(report.boundary_preserved) (attendu 1)",
             "Validation M2 : " + (passed ? "réussie" : "échouée"),
             "Aucun repli interpréteur. Aucun BRK. La correction de -48 exige une validation sur votre iPhone."
         ].joined(separator: "\n")

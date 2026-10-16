@@ -287,6 +287,7 @@ int main(int argc, char** argv) {
             CHECK(maxps4_fex_test_m2_low_va(&report)==0);
             CHECK(report.status==0 && report.entry==0x400000 && report.rax==42 && report.memory==42 && report.tls==8);
             CHECK(report.cleanup && report.collision_preserved && report.code_rx && report.stack_rw_nx);
+            CHECK(report.boundary_status==0 && report.boundary_cases==16 && report.boundary_preserved==1);
             CHECK(report.backend==MAXPS4_CPU_FEX_ARM64_JIT || report.backend==MAXPS4_CPU_FEX_ARM64_SIMULATOR);
         }
         return 0;

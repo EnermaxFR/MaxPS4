@@ -156,6 +156,8 @@ typedef struct maxps4_m2_low_va_report {
     int32_t status, initialize_status, execute_status;
     uint32_t backend, collision_preserved, cleanup, code_rx, stack_rw_nx;
     uint64_t rax, memory, tls, entry, rsp;
+    int32_t boundary_status;
+    uint32_t boundary_cases, boundary_preserved;
 } maxps4_m2_low_va_report;
 int32_t maxps4_fex_test_m2_low_va(maxps4_m2_low_va_report *report);
 // Experimental V4 direct-memory preflight. Requires explicitly mapped V4 pages;

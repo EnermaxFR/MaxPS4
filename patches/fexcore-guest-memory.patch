@@ -786,7 +786,7 @@ diff --git a/FEXCore/include/FEXCore/HLE/SyscallHandler.h b/FEXCore/include/FEXC
  
  #include <FEXCore/Core/CodeCache.h>
  #include <FEXCore/IR/IR.h>
-@@ -49,9 +50,39 @@
+@@ -49,9 +50,51 @@
  class SyscallHandler;
  class SourcecodeResolver;
  
@@ -808,18 +808,30 @@ diff --git a/FEXCore/include/FEXCore/HLE/SyscallHandler.h b/FEXCore/include/FEXC
 +  virtual std::span<const GuestMemoryRange> GuestMemoryRanges() const { return {}; }
 +  // Fetch can cross noncontiguous host mappings, unlike a native operand.
 +  virtual bool ReadGuestInstruction(uint64_t Address, void* Output, size_t Size) const {
-+    if (!Output || Size > UINT64_MAX - Address) return false;
-+    auto* Bytes = static_cast<uint8_t*>(Output);
++    if (!Output || !Size || Size > UINT64_MAX - Address) return false;
++    const auto Ranges = GuestMemoryRanges();
++    // Validate every byte before touching Output. A later hole or NX region
++    // must not publish a partial instruction, including across host mappings.
 +    for (size_t i = 0; i < Size; ++i) {
 +      bool Found = false;
-+      for (const auto& R : GuestMemoryRanges()) {
++      for (const auto& R : Ranges) {
++        if ((R.Permissions & 5) != 5 || Address + i < R.Guest) continue;
++        const uint64_t Offset = Address + i - R.Guest;
++        if (Offset >= R.Size) continue;
++        if (!R.Host || Offset > UINT64_MAX - R.Host) return false;
++        Found = true;
++        break;
++      }
++      if (!Found) return false;
++    }
++    auto* Bytes = static_cast<uint8_t*>(Output);
++    for (size_t i = 0; i < Size; ++i) {
++      for (const auto& R : Ranges) {
 +        if ((R.Permissions & 5) == 5 && Address + i >= R.Guest && Address + i - R.Guest < R.Size) {
-+          Bytes[i] = *reinterpret_cast<const uint8_t*>(R.Host + Address + i - R.Guest);
-+          Found = true;
++          Bytes[i] = *reinterpret_cast<const uint8_t*>(R.Host + (Address + i - R.Guest));
 +          break;
 +        }
 +      }
-+      if (!Found) return false;
 +    }
 +    return true;
 +  }

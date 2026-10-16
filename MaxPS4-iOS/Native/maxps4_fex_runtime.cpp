@@ -697,7 +697,7 @@ extern "C" int32_t maxps4_fex_engine_v4_synthetic(maxps4_fex_engine* engine,
 extern "C" int32_t maxps4_fex_test_m2_low_va(maxps4_m2_low_va_report* report) {
     if (!report) return -EINVAL;
     *report = {};
-    report->initialize_status = report->execute_status = -ECANCELED;
+    report->boundary_status = report->initialize_status = report->execute_status = -ECANCELED;
     maxps4_fex_engine* engine = nullptr;
     int status = maxps4_fex_engine_open(&engine);
     if (status) return report->status = status;
@@ -764,8 +764,57 @@ extern "C" int32_t maxps4_fex_test_m2_low_va(maxps4_m2_low_va_report* report) {
                     (error=process.space.read(thread.tls_begin,&report->tls,8))) return error;
                 uint64_t observed = 0; std::memcpy(&observed,marker,8);
                 report->collision_preserved = observed == sentinel;
-                return report->rax == 42 && report->memory == 42 && report->tls == 8 &&
-                    report->collision_preserved && report->code_rx && report->stack_rw_nx ? 0 : -EIO;
+                if (report->rax != 42 || report->memory != 42 || report->tls != 8 ||
+                    !report->collision_preserved || !report->code_rx || !report->stack_rw_nx) return -EIO;
+                // Fixed negative fixtures only. Each invocation retires its JIT
+                // cache before replacing RX code or changing data permissions.
+                // No signal recovery, software atomic fallback or BRK is used.
+                report->boundary_status = [&]() -> int {
+                    const std::vector<uint8_t> sentinels(page,0x59);
+                    std::vector<uint8_t> check(page);
+                    const std::vector<std::vector<uint8_t>> operations={
+                        {0x48,0x8b,0x03}, {0x48,0x89,0x03},
+                        {0xf0,0x48,0x0f,0xc1,0x03}, {0xf0,0x48,0x0f,0xb1,0x0b}};
+                    for (int boundary=0; boundary<4; ++boundary) {
+                        if ((error=process.space.release(data)) ||
+                            (error=process.space.reserve(data,2*page)) ||
+                            (error=process.space.map(data,page,6,sentinels.data(),page))) return error;
+                        // 0=hole, 1=RW, 2=R, 3=PROT_NONE.
+                        const uint32_t permission=boundary==2 ? 4 : boundary==3 ? 0 : 6;
+                        if (boundary && ((error=process.space.map(data+page,page,6,sentinels.data(),page)) ||
+                            (error=process.space.protect(data+page,page,permission)))) return error;
+                        for (const auto& operation : operations) {
+                            maxps4_ps4_synthetic::Program negative;
+                            negative.reg(3,data+page-4);
+                            negative.bytes({0xb8,21,0,0,0,0xb9,42,0,0,0});
+                            negative.code.insert(negative.code.end(),operation.begin(),operation.end());
+                            negative.bytes({0xf4});
+                            if ((error=process.space.release(entry)) ||
+                                (error=process.space.reserve(entry,page)) ||
+                                (error=process.space.map(entry,page,5,negative.code.data(),negative.code.size()))) return error;
+                            uint64_t ignored=0xfeed;
+                            uint32_t ignored_backend=0;
+                            const int rejected=executeImage(engine,process.source,&ignored,&ignored_backend,
+                                nullptr,false,false,&process,&thread);
+                            // Failed dispatch must not publish a CPU result.
+                            if (rejected!=-EFAULT || ignored!=0xfeed || ignored_backend) return -EIO;
+                            if ((error=process.space.read(data,check.data(),page))) return error;
+                            if (check!=sentinels) return -EIO;
+                            if (boundary) {
+                                if ((error=process.space.protect(data+page,page,4)) ||
+                                    (error=process.space.read(data+page,check.data(),page))) return error;
+                                if (check!=sentinels) return -EIO;
+                                if ((error=process.space.protect(data+page,page,permission))) return error;
+                            }
+                            std::memcpy(&observed,marker,8);
+                            if (observed!=sentinel) return -EIO;
+                            ++report->boundary_cases;
+                        }
+                    }
+                    report->boundary_preserved=1;
+                    return 0;
+                }();
+                return report->boundary_status;
             }();
             // All fixture mappings and CPU caches have been retired before this.
             report->cleanup = engine->probe.m1 == nullptr && engine->probe.ranges.empty();
@@ -774,10 +823,10 @@ extern "C" int32_t maxps4_fex_test_m2_low_va(maxps4_m2_low_va_report* report) {
     }
     maxps4_fex_engine_close(engine);
     report->status = status;
-    std::fprintf(stderr,"M2 low-VA diagnostic: status=%d backend=%u entry=0x%llx rax=%llu memory=%llu tls=%llu collision=%u cleanup=%u\n",
+    std::fprintf(stderr,"M2 low-VA diagnostic: status=%d backend=%u entry=0x%llx rax=%llu memory=%llu tls=%llu collision=%u cleanup=%u boundaries=%u boundary_status=%d preserved=%u\n",
         status,report->backend,static_cast<unsigned long long>(report->entry),
         static_cast<unsigned long long>(report->rax),static_cast<unsigned long long>(report->memory),
-        static_cast<unsigned long long>(report->tls),report->collision_preserved,report->cleanup);
+        static_cast<unsigned long long>(report->tls),report->collision_preserved,report->cleanup,report->boundary_cases,report->boundary_status,report->boundary_preserved);
     return status;
 }
 extern "C" int32_t maxps4_fex_engine_v4_preflight(maxps4_fex_engine* engine,
