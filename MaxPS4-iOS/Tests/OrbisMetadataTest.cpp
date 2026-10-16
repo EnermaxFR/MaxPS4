@@ -119,6 +119,7 @@ int main(int argc, char** argv) {
     wrong=inputs; put(wrong[1].bytes,0x2004,0xc18); fail(wrong); // Partially overlapping 8-byte RELA writes.
     wrong=inputs; put(wrong[1].bytes,0x200c,0xc00); fail(wrong); // Overlap when the later RELA points backwards into an earlier write.
     wrong=inputs; put(wrong[1].bytes,UINT64_MAX,0xc18); fail(wrong); // RELA destination must not overflow the PRX base.
+    wrong=inputs; put(wrong[0].bytes,0x3000,0xb08); fail(wrong); // Exported symbol must reside in a staged region.
     wrong=inputs; put(wrong[1].bytes,1,0xc10); fail(wrong); // GLOB_DAT nonzero addend refused.
     wrong=inputs; put(wrong[1].bytes,0,0xb18,4); fail(wrong); // Unnamed undefined symbol cannot resolve to zero.
     wrong=inputs; wrong[1].bytes=kernel; fail(wrong); // No fake HLE trampoline during PRX preparation.
