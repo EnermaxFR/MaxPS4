@@ -1,5 +1,7 @@
 #pragma once
 #include "PM4Type3Decoder.hpp"
+#include "GCNCompute.hpp"
+#include <cstdio>
 #include <array>
 #include <algorithm>
 #include <atomic>
@@ -14,6 +16,7 @@ namespace maxps4::gpu {
 struct GNMCommandExecutor {
     struct State { std::array<uint32_t,1024> context{},shader{},uconfig{};uint32_t instances=1,indexType=0; } state;
     struct Draw { uint8_t opcode=0;uint32_t count=0,initiator=0;uint64_t indexAddress=0; };
+    GCNCompute compute;
     uint64_t packets=0,draws=0,writes=0;size_t remaining=65536;
     std::function<bool(const State&,const Draw&,std::string&)> render;
     std::function<void()> interrupt;
@@ -57,15 +60,23 @@ struct GNMCommandExecutor {
             }
             case 0x2f: if(n!=1)return fail("invalid NUM_INSTANCES");state.instances=p[0];break;
             case 0x2a: if(n!=1||p[0]>2)return fail("index type/endian mode unsupported");state.indexType=p[0];break;
-            case 0x15:{ // DISPATCH_DIRECT encodes work; binding alone is not execution.
+            case 0x15:{
                 if(n!=4)return fail("invalid DISPATCH_DIRECT payload");
-                std::ostringstream reason;
-                reason<<"GPU packet semantics not implemented: GCN compute execution required; CS=0x"<<std::hex
-                      <<((uint64_t(state.shader[0x20c])<<8)|(uint64_t(state.shader[0x20d])<<40))
-                      <<" groups="<<std::dec<<p[0]<<','<<p[1]<<','<<p[2]
-                      <<" local="<<state.shader[0x207]<<','<<state.shader[0x208]<<','<<state.shader[0x209]
-                      <<" initiator=0x"<<std::hex<<p[3];
-                return fail(reason.str());
+                const uint64_t program=(uint64_t(state.shader[0x20c])<<8)|(uint64_t(state.shader[0x20d])<<40);
+                std::fprintf(stderr,"GCN.DISPATCH program=0x%llx groups=%u,%u,%u local=%u,%u,%u rsrc=%08x,%08x\n",
+                    (unsigned long long)program,p[0],p[1],p[2],state.shader[0x207],state.shader[0x208],state.shader[0x209],state.shader[0x212],state.shader[0x213]);
+                for(unsigned j=0;j<((state.shader[0x213]>>1)&31) && j<16;++j)
+                    std::fprintf(stderr,"GCN.USER s%u=0x%08x\n",j,state.shader[0x240+j]);
+                std::string detail;
+                const bool success=compute.dispatch(memory,state.shader,{p[0],p[1],p[2]},p[3],detail);
+                const auto& st=compute.stats;
+                for(size_t j=0;j<st.scalarReads;++j)std::fprintf(stderr,"GCN.SCALAR address=0x%llx value=0x%08x\n",(unsigned long long)st.scalarAddress[j],st.scalarValue[j]);
+                std::fprintf(stderr,"GCN.RESULT success=%u groups=%llu lanes=%llu instructions=%llu loads=%llu stores=%llu verified=%llu first=0x%llx:%08x last=0x%llx:%08x\n",
+                    unsigned(success),(unsigned long long)st.groups,(unsigned long long)st.lanes,(unsigned long long)st.instructions,
+                    (unsigned long long)st.loads,(unsigned long long)st.stores,(unsigned long long)st.verified,
+                    (unsigned long long)st.firstWrite,st.firstValue,(unsigned long long)st.lastWrite,st.lastValue);
+                if(!success)return fail(detail);
+                break;
             }
             case 0x50:{ // DMA_DATA (base PS4): bounded memory transfers / shader prefetch.
                 if(n!=6)return fail("invalid DMA_DATA payload");

@@ -11,7 +11,7 @@ for mode in native sanitized; do
     flags+=(-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
   fi
   for suite in PM4Type3DecoderTest PM4CommandInterpreterTest PM4GuestSubmissionTest \
-    PM4MetalDrawPlanTest LinearTextureSnapshotTest GNMCommandExecutorTest OrbisV4GraphicsServicesTest; do
+    PM4MetalDrawPlanTest LinearTextureSnapshotTest GCNComputeTest GNMCommandExecutorTest OrbisV4GraphicsServicesTest; do
     sources=("MaxPS4-iOS/Tests/$suite.cpp")
     if [[ "$suite" == PM4GuestSubmissionTest ]]; then
       sources+=(MaxPS4-iOS/Native/maxps4_guest_elf.cpp)

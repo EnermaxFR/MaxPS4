@@ -165,7 +165,7 @@ struct OrbisV4GraphicsServices {
             if(result.outcome!=O::Returned||result.value||!flip)return result;return g->flip(vo,m);
         });
         // PS4 compute shader binding emits three SET_SH_REG packets and a trailing NOP.
-        // This binds registers only: actual GCN dispatch remains unsupported by the executor.
+        // This binds registers; the executor validates the bounded GCN compute profile.
         for(const auto& name:{"sceGnmSetCsShader","sceGnmSetCsShaderWithModifier"})svc.implement(name,[name=std::string(name)](const R& r,M& m){
             constexpr uint32_t count=25;
             const uint32_t modifier=name=="sceGnmSetCsShaderWithModifier"?uint32_t(r.rcx):0;
@@ -235,8 +235,7 @@ struct OrbisV4GraphicsServices {
                 ?trap("GNM push marker packet write failed"):ok();
         });
         // DISPATCH_DIRECT is a 9-DWORD PM4 compute dispatch command.
-        // Encoding is not execution: the PM4 executor must reject GCN dispatch
-        // until a real compute backend is installed.
+        // Execution is performed by the PM4 executor with checked guest memory.
         svc.implement("sceGnmDispatchDirect",[](const R& r,M& m){
             if(!r.rdi || (r.rdi&3) || r.rsi!=9 ||
                (uint32_t(r.rdx|r.rcx|r.r8)&0x80000000U))return ok(uint64_t(-1));

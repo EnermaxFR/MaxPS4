@@ -69,7 +69,7 @@ int main(){
         gpu::GNMCommandExecutor dispatchExecutor;std::string dispatchError;
         assert(!dispatchExecutor.execute(lease,base+0x1700,
             std::vector<uint32_t>(dispatchPacket.begin(),dispatchPacket.end()),dispatchError));
-        assert(dispatchError.find("GPU packet semantics not implemented")!=std::string::npos);
+        assert(dispatchError.find("GCN compute program=")!=std::string::npos);
         dispatchExecutor.state.shader[0x20c]=0x1234;
         dispatchExecutor.state.shader[0x207]=64;
         dispatchExecutor.state.shader[0x208]=1;
@@ -77,8 +77,8 @@ int main(){
         dispatchExecutor.remaining=65536;
         assert(!dispatchExecutor.execute(lease,base+0x1700,
             std::vector<uint32_t>(dispatchPacket.begin(),dispatchPacket.end()),dispatchError));
-        assert(dispatchError.find("CS=0x123400")!=std::string::npos);
-        assert(dispatchError.find("groups=32640,1,1 local=64,1,1")!=std::string::npos);
+        assert(dispatchError.find("program=0x123400")!=std::string::npos);
+        assert(dispatchError.find("missing workgroup ID input")!=std::string::npos);
         assert(dispatchExecutor.draws==0&&dispatchExecutor.writes==0);
         // Mission 56: bounded debug marker is a NOP packet, not a GPU draw.
         const char pushMarker[]="hello!";

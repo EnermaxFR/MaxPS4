@@ -58,7 +58,7 @@ int main() {
         assert(!run(cycle,error)&&error.find("recursion/word budget")!=std::string::npos);
         // Nonempty GCN work cannot complete through a command-only engine.
         assert(!run(packet(0x15,{1,1,1,1}),error));
-        assert(error.find("GCN compute execution required")!=std::string::npos);
+        assert(error.find("GCN compute program=")!=std::string::npos);
         assert(!run(packet(0x15,{1,1,1}),error)&&error.find("invalid DISPATCH_DIRECT")!=std::string::npos);
         assert(!run(packet(0x2d,{3,2}),error)&&engine.draws==0&&interrupts==1);
     }
