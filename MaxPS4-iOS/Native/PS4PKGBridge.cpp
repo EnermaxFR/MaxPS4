@@ -29,12 +29,12 @@ bool sameSource(const struct stat& before,const struct stat& after) {
 }
 }
 
-int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity) {
+static int inventoryReport(const char* path, char* output, size_t capacity, bool requireValid) {
     if (!output || !capacity) return -EINVAL;
     output[0] = 0;
     auto sourceError = [&](int code, const char* message) {
         // Error handling must not allocate, especially after bad_alloc.
-        std::snprintf(output, capacity, "Source PKG : %s", message);
+        std::snprintf(output, capacity, "[PKG.SOURCE] errno=%d ; Source PKG : %s", code, message);
         return -code;
     };
     if (!path) return sourceError(EINVAL, "chemin absent");
@@ -59,7 +59,11 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
         maxps4::PS4PKGInventory pkg;
         std::ostringstream report;
         report << "MaxPS4 • inventaire PKG générique (lecture seule)\n";
-        if (!pkg.parse(size, read)) {
+        const bool valid = pkg.parse(size, read);
+        report << '[' << pkg.stage << "] accepted=" << valid
+               << " ; offset=" << pkg.diagnosticOffset << " ; declared=" << pkg.declaredSize
+               << " ; observed=" << pkg.observedSize << '\n';
+        if (!valid) {
             report << "Rejet : " << pkg.error << '\n';
         } else {
             report << "Format : PKG PS4 / CNT (signature reconnue, authenticité non vérifiée)\n"
@@ -102,6 +106,8 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                        "PFS non chiffré déclaré : en-tête reconnu ; accès D32 détaillé ci-dessous" : header.message)
                    << " ; mode=0x" << std::hex << header.mode << std::dec
                    << " ; budget de lecture=" << header.bytesRead << " octets (maximum 72)\n";
+            report << "[PKG.PFS] status=" << static_cast<int>(pfs.status)
+                   << " ; accessible=" << (pfs.status == maxps4::PS4PFSReadOnly::Status::accessible) << '\n';
             report << "Diagnostic PKG/PFS : " << pfs.diagnostic << " ; mode=0x" << std::hex << pfs.mode
                    << std::dec << " ; bloc=" << pfs.blockSize << '\n';
             report << "Budgets PFS : inspection 8 Mio (en-tête inclus), répertoire 1 Mio, "
@@ -110,6 +116,36 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                 report << "Fichier PFS uroot : " << f.path << " ; octets=" << f.size << '\n';
             const bool pfsAccessible = pfs.status == maxps4::PS4PFSReadOnly::Status::accessible;
             const bool pfsEboot = std::any_of(pfs.files.begin(),pfs.files.end(),[](const auto& f) { return f.path=="eboot.bin"; });
+            // Inspect only prefixes of explicitly accessible executable candidates.
+            // Names select candidates; magic describes bytes, never admission.
+            size_t candidateCount = 0, candidateBytes = 0;
+            if (pfsAccessible) for (const auto& f : pfs.files) {
+                const auto slash = f.path.find_last_of('/');
+                std::string base = f.path.substr(slash == std::string::npos ? 0 : slash + 1);
+                std::transform(base.begin(), base.end(), base.begin(), [](unsigned char c) {
+                    return c >= 'A' && c <= 'Z' ? char(c + 32) : char(c);
+                });
+                const auto dot = base.find_last_of('.');
+                const std::string suffix = dot == std::string::npos ? "" : base.substr(dot);
+                if (base != "eboot.bin" && suffix != ".elf" && suffix != ".prx" &&
+                    suffix != ".sprx" && suffix != ".self") continue;
+                if (!pfs.allowedSelection(f.path)) continue;
+                if (candidateCount == 128) {
+                    report << "[PKG.CANDIDATE_LIMIT] maximum=128 ; suite non inspectée\n"; break;
+                }
+                ++candidateCount;
+                std::array<uint8_t,64> prefix{};
+                const auto count = static_cast<size_t>(std::min<uint64_t>(f.size,prefix.size()));
+                candidateBytes += count;
+                const char* format = "inconnu ou tronqué";
+                if (count && !pfsRead(f.offset,prefix.data(),count)) format = "lecture incomplète";
+                else if (count >= 4 && !std::memcmp(prefix.data(), "\177ELF", 4)) format = "ELF candidat (non validé)";
+                else if (count >= 4 && !std::memcmp(prefix.data(), "\117\025\075\035", 4)) format = "SELF candidat (protection non déterminée)";
+                report << "[PKG.CANDIDATE] path=" << f.path << " ; size=" << f.size
+                       << " ; prefix=" << count << " ; format=" << format << " ; admitted=0\n";
+            }
+            report << "[PKG.CANDIDATE_SCAN] candidates=" << candidateCount
+                   << " ; bytes=" << candidateBytes << " ; maximum=8192 ; admitted=0\n";
             // Explicit extraction gate: a PKG descriptor or artwork never proves that
             // the game executable is readable. Keep encrypted PFS inaccessible.
             if (pfsAccessible && pfsEboot) {
@@ -171,6 +207,7 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
             std::vector<std::string> names;
             std::string nameDiagnostic;
             const bool namesResolved = pkg.resolveNames(boundedRead, names, nameDiagnostic);
+            report << "[PKG.NAMES] resolved=" << namesResolved << '\n';
             report << (namesResolved ? "Noms de descripteurs résolus (affichage seulement)" : nameDiagnostic) << '\n';
             // Count the names read against the same total inspection budget.
             size_t copied = 0;
@@ -218,6 +255,7 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
                 }
                 report << '\n';
             }
+            report << "[PKG.SFO] parsed=" << sfoRead << '\n';
             report << "Métadonnées SFO : " << sfoDiagnostic << '\n';
             for (const auto* key : {"TITLE", "TITLE_ID", "CONTENT_ID", "APP_VER", "VERSION", "CATEGORY"}) {
                 const auto value = sfo.strings.find(key);
@@ -243,6 +281,18 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
             // A readiness verdict is deliberately separate from descriptor names:
             // PKG metadata and plaintext artwork are never executable admission.
             // The standalone ELF path is a distinct, explicit user-supplied workflow.
+            report << "[PKG.RUNTIME] admitted=0 ; libkernel=unresolved ; PRX=unresolved\n";
+            if (pkg.titleID == "CUSA06015") {
+                report << "Kero Blaster readiness : NON PRÊT (identité déclarée CUSA06015, authenticité non vérifiée).\n"
+                       << "Premier blocage réel : "
+                       << (!pfsAccessible ? "PFS inaccessible ; eboot.bin inaccessible" :
+                           !pfsEboot ? "eboot.bin absent du PFS accessible" :
+                           "eboot.bin présent mais ELF/PRX et imports non validés") << ".\n"
+                       << "Étapes suivantes non testées pour ce jeu : mémoire FEX, threads/TLS, services système, "
+                          "graphismes, audio, commandes et sauvegardes.\n"
+                       << "Passerelle PRX expérimentale : mapping de fixtures seulement ; aucun dispatch du jeu validé.\n"
+                       << "Erreur générale FEX -48 : non résolue ; validation physique iPhone requise.\n";
+            }
             report << "Diagnostic démarrage : NON PRÊT (inventaire PKG uniquement).\n";
             report << (pfsAccessible ? "Accès PFS : " : "Blocage 1/3 : PFS ")
                    << (pfsAccessible ? "lu en lecture seule (D32 contigu)" : (pkg.pfsSize ? "présent mais opaque/non monté" : "absent ou non exposé"))
@@ -274,8 +324,17 @@ int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity)
         const auto count = text.size() < capacity - 1 ? text.size() : capacity - 1;
         std::memcpy(output, text.data(), count);
         output[count] = 0;
-        return count == text.size() ? 0 : -ENOSPC;
+        if (count != text.size()) return -ENOSPC;
+        return requireValid && !valid ? -ENOEXEC : 0;
     } catch (const std::bad_alloc&) { return sourceError(ENOMEM, "budget mémoire indisponible"); }
+}
+
+// Keep diagnostic inspection compatible: malformed input still produces a report.
+int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity) {
+    return inventoryReport(path, output, capacity, false);
+}
+int maxps4_pkg_validate_import(const char* path, char* output, size_t capacity) {
+    return inventoryReport(path, output, capacity, true);
 }
 
 // Host output remains a caller-owned byte buffer; no source-derived disk path.

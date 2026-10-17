@@ -96,12 +96,31 @@ int main(int argc, char** argv) {
     size_t failure = 0;
     auto fail = [&](auto files) { ++failure; if(p.prepare(files)) { std::fprintf(stderr,"Accepted PRX failure %zu\n",failure); std::abort(); } assert(!p.error.empty() && p.modules.empty() && p.initializationOrder.empty()); };
     fail(std::vector<maxps4::OrbisPRXPreparation::Input>{{"b.prx",consumer,0x20000}});
+    // Same-module PT_LOAD alias: RX [0x1000,0x1100) and RW
+    // [0x1080,0x1380) must never share guest addresses.
+    // A failed transaction must discard the prior successful preparation.
+    auto overlap=inputs;
+    put(overlap[0].bytes,0x1080,64+56+16);
+    fail(overlap);
+    assert(p.error.find("chevauch") != std::string::npos);
+    // Also reject the overlap in a dependent module; the provider's
+    // successful staging must not survive a later-module failure.
+    overlap=inputs;
+    put(overlap[1].bytes,0x1080,64+56+16);
+    fail(overlap);
+    assert(p.error.find("chevauch") != std::string::npos);
     auto wrong=inputs; wrong[1].base=0x10000; fail(wrong);
     wrong=inputs; wrong[1].bytes=tls; fail(wrong);
     wrong=inputs; put(wrong[1].bytes,0x8000000000000000ULL,0xc28); fail(wrong);
     wrong=inputs; put(wrong[1].bytes,0xdead,0xc08); fail(wrong);
     wrong=inputs; wrong[1].base=0x800000000000ULL; fail(wrong);
     wrong=inputs; wrong[1].bytes[0xb1d]=2; fail(wrong); // Hidden symbols cannot be interposed.
+    wrong=inputs; wrong[1].bytes[0xb1c]=0x11; fail(wrong); // Object import cannot bind to function NID.
+    wrong=inputs; put(wrong[1].bytes,0x2000,0xc18); fail(wrong); // Two RELA entries targeting same 8 bytes.
+    wrong=inputs; put(wrong[1].bytes,0x2004,0xc18); fail(wrong); // Partially overlapping 8-byte RELA writes.
+    wrong=inputs; put(wrong[1].bytes,0x200c,0xc00); fail(wrong); // Overlap when the later RELA points backwards into an earlier write.
+    wrong=inputs; put(wrong[1].bytes,UINT64_MAX,0xc18); fail(wrong); // RELA destination must not overflow the PRX base.
+    wrong=inputs; put(wrong[0].bytes,0x3000,0xb08); fail(wrong); // Exported symbol must reside in a staged region.
     wrong=inputs; put(wrong[1].bytes,1,0xc10); fail(wrong); // GLOB_DAT nonzero addend refused.
     wrong=inputs; put(wrong[1].bytes,0,0xb18,4); fail(wrong); // Unnamed undefined symbol cannot resolve to zero.
     wrong=inputs; wrong[1].bytes=kernel; fail(wrong); // No fake HLE trampoline during PRX preparation.

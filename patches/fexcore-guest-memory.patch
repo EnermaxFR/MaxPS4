@@ -1,0 +1,1011 @@
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -27,6 +27,7 @@
+ #include "Interface/IR/Passes/RegisterAllocationPass.h"
+ #include "Interface/IR/Passes.h"
+ #include "Interface/IR/PassManager.h"
++#include <stdexcept>
+ #include "Interface/IR/RegisterAllocationData.h"
+ #include "Utils/Allocator.h"
+ #include "Utils/Allocator/HostAllocator.h"
+@@ -540,7 +541,223 @@
+     }
+     LogMan::Msg::IFmt("BACHATA_BUFFER_REUSE: end, releasing CodeInvalidationMutex");
+   }
+-  Allocator::VirtualDontNeed(Thread->CallRetStackBase, FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE);
++  Thread->ClearCallRetStack();
++}
++
++static void TranslateGuestOperands(IR::IREmitter* Emit) {
++  auto View = Emit->ViewIR();
++  for (auto [Block, Header] : View.GetBlocks()) {
++    for (auto [Node, ReadOnlyOp] : View.GetCode(Block)) {
++      auto* Op = const_cast<IR::IROp_Header*>(ReadOnlyOp);
++      uint8_t AddrIndex = 255, OffsetIndex = 255;
++      IR::OrderedNodeWrapper Offset {};
++      auto Type = IR::MemOffsetType::SXTX;
++      uint8_t Scale = 1;
++      uint32_t Bytes = IR::OpSizeToSize(Op->Size), Permissions = 4, Alignment = 1;
++      switch (Op->Op) {
++      case IR::OP_LOADMEM: {
++        auto* M = Op->CW<IR::IROp_LoadMem>();
++        if (M->Class == IR::RegClass::GPR && Bytes <= 8) {
++          Emit->SetWriteCursorBefore(Node);
++          // Dedicated side-effecting IR cannot be folded into an unchecked
++          // native pair by later optimizations. Guest addresses stay logical.
++          IR::Ref Scalar = Emit->_GuestScalarLoad(Op->Size, Emit->UnwrapNode(M->Addr),
++              Emit->UnwrapNode(M->Offset), M->OffsetType, M->OffsetScale, false);
++          Emit->ReplaceUsesWithAfter(Node, Scalar, Node);
++          Emit->Remove(Node);
++          continue;
++        }
++        AddrIndex = M->Addr_Index; OffsetIndex = M->Offset_Index; Offset = M->Offset; Type = M->OffsetType; Scale = M->OffsetScale;
++        M->OffsetScale = 1; M->OffsetType = IR::MemOffsetType::SXTX;
++        Permissions = 4;
++        break;
++      }
++      case IR::OP_LOADMEMTSO: {
++        auto* M = Op->CW<IR::IROp_LoadMemTSO>();
++        if (M->Class == IR::RegClass::GPR && Bytes <= 8) {
++          Emit->SetWriteCursorBefore(Node);
++          // Dedicated side-effecting IR cannot be folded into an unchecked
++          // native pair by later optimizations. Guest addresses stay logical.
++          IR::Ref Scalar = Emit->_GuestScalarLoad(Op->Size, Emit->UnwrapNode(M->Addr),
++              Emit->UnwrapNode(M->Offset), M->OffsetType, M->OffsetScale, true);
++          Emit->ReplaceUsesWithAfter(Node, Scalar, Node);
++          Emit->Remove(Node);
++          continue;
++        }
++        AddrIndex = M->Addr_Index; OffsetIndex = M->Offset_Index; Offset = M->Offset; Type = M->OffsetType; Scale = M->OffsetScale;
++        M->OffsetScale = 1; M->OffsetType = IR::MemOffsetType::SXTX;
++        Permissions = 4;
++        break;
++      }
++      case IR::OP_STOREMEM: {
++        auto* M = Op->CW<IR::IROp_StoreMem>();
++        if (M->Class == IR::RegClass::GPR && Bytes <= 8) {
++          Emit->SetWriteCursorBefore(Node);
++          // Dedicated side-effecting IR cannot be folded into an unchecked
++          // native pair by later optimizations. Guest addresses stay logical.
++          IR::Ref Scalar = Emit->_GuestScalarStore(Op->Size, Emit->UnwrapNode(M->Value), Emit->UnwrapNode(M->Addr),
++              Emit->UnwrapNode(M->Offset), M->OffsetType, M->OffsetScale, false);
++          (void)Scalar;
++          Emit->Remove(Node);
++          continue;
++        }
++        AddrIndex = M->Addr_Index; OffsetIndex = M->Offset_Index; Offset = M->Offset; Type = M->OffsetType; Scale = M->OffsetScale;
++        M->OffsetScale = 1; M->OffsetType = IR::MemOffsetType::SXTX;
++        Permissions = 2;
++        break;
++      }
++      case IR::OP_STOREMEMTSO: {
++        auto* M = Op->CW<IR::IROp_StoreMemTSO>();
++        if (M->Class == IR::RegClass::GPR && Bytes <= 8) {
++          Emit->SetWriteCursorBefore(Node);
++          // Dedicated side-effecting IR cannot be folded into an unchecked
++          // native pair by later optimizations. Guest addresses stay logical.
++          IR::Ref Scalar = Emit->_GuestScalarStore(Op->Size, Emit->UnwrapNode(M->Value), Emit->UnwrapNode(M->Addr),
++              Emit->UnwrapNode(M->Offset), M->OffsetType, M->OffsetScale, true);
++          (void)Scalar;
++          Emit->Remove(Node);
++          continue;
++        }
++        AddrIndex = M->Addr_Index; OffsetIndex = M->Offset_Index; Offset = M->Offset; Type = M->OffsetType; Scale = M->OffsetScale;
++        M->OffsetScale = 1; M->OffsetType = IR::MemOffsetType::SXTX;
++        Permissions = 2;
++        break;
++      }
++      case IR::OP_CAS: {
++        AddrIndex = IR::IROp_CAS::Addr_Index;
++
++        Permissions = 6; Alignment = Bytes;
++        break;
++      }
++      case IR::OP_CASPAIR: {
++        AddrIndex = IR::IROp_CASPair::Addr_Index;
++        Bytes = 2 * IR::OpSizeToSize(Op->ElementSize);
++        Permissions = 6; Alignment = Bytes;
++        break;
++      }
++      case IR::OP_ATOMICSWAP: {
++        AddrIndex = IR::IROp_AtomicSwap::Addr_Index;
++
++        Permissions = 6; Alignment = Bytes;
++        break;
++      }
++      case IR::OP_ATOMICFETCHADD: {
++        AddrIndex = IR::IROp_AtomicFetchAdd::Addr_Index;
++
++        Permissions = 6; Alignment = Bytes;
++        break;
++      }
++      case IR::OP_ATOMICFETCHSUB: {
++        AddrIndex = IR::IROp_AtomicFetchSub::Addr_Index;
++
++        Permissions = 6; Alignment = Bytes;
++        break;
++      }
++      case IR::OP_ATOMICFETCHAND: {
++        AddrIndex = IR::IROp_AtomicFetchAnd::Addr_Index;
++
++        Permissions = 6; Alignment = Bytes;
++        break;
++      }
++      case IR::OP_ATOMICFETCHCLR: {
++        AddrIndex = IR::IROp_AtomicFetchCLR::Addr_Index;
++
++        Permissions = 6; Alignment = Bytes;
++        break;
++      }
++      case IR::OP_ATOMICFETCHOR: {
++        AddrIndex = IR::IROp_AtomicFetchOr::Addr_Index;
++
++        Permissions = 6; Alignment = Bytes;
++        break;
++      }
++      case IR::OP_ATOMICFETCHXOR: {
++        AddrIndex = IR::IROp_AtomicFetchXor::Addr_Index;
++
++        Permissions = 6; Alignment = Bytes;
++        break;
++      }
++      case IR::OP_ATOMICFETCHNEG: {
++        AddrIndex = IR::IROp_AtomicFetchNeg::Addr_Index;
++
++        Permissions = 6; Alignment = Bytes;
++        break;
++      }
++      case IR::OP_LOADMEMPAIR: {
++        auto* M = Op->CW<IR::IROp_LoadMemPair>(); AddrIndex = M->Addr_Index;
++        Emit->SetWriteCursorBefore(Node);
++        Offset = Emit->WrapNode(Emit->_Constant(M->Offset)); M->Offset = 0;
++        Bytes *= 2; Permissions = 4; break;
++      }
++      case IR::OP_STOREMEMPAIR: {
++        auto* M = Op->CW<IR::IROp_StoreMemPair>(); AddrIndex = M->Addr_Index;
++        Emit->SetWriteCursorBefore(Node);
++        Offset = Emit->WrapNode(Emit->_Constant(M->Offset)); M->Offset = 0;
++        Bytes *= 2; Permissions = 2; break;
++      }
++      case IR::OP_VLOADVECTORELEMENT: {
++        AddrIndex = IR::IROp_VLoadVectorElement::Addr_Index;
++        Bytes = IR::OpSizeToSize(Op->ElementSize); Permissions = 4; break;
++      }
++      case IR::OP_VSTOREVECTORELEMENT: {
++        AddrIndex = IR::IROp_VStoreVectorElement::Addr_Index;
++        Bytes = IR::OpSizeToSize(Op->ElementSize); Permissions = 2; break;
++      }
++      case IR::OP_VBROADCASTFROMMEM: {
++        AddrIndex = IR::IROp_VBroadcastFromMem::Address_Index;
++        Bytes = IR::OpSizeToSize(Op->ElementSize); Permissions = 4; break;
++      }
++      case IR::OP_VSTORENONTEMPORAL: {
++        auto* M = Op->CW<IR::IROp_VStoreNonTemporal>(); AddrIndex = M->Addr_Index;
++        Emit->SetWriteCursorBefore(Node);
++        Offset = Emit->WrapNode(Emit->_Constant(static_cast<uint64_t>(static_cast<int64_t>(M->Offset)))); M->Offset = 0;
++         Permissions = 2; break;
++      }
++      case IR::OP_VSTORENONTEMPORALPAIR: {
++        auto* M = Op->CW<IR::IROp_VStoreNonTemporalPair>(); AddrIndex = M->Addr_Index;
++        Emit->SetWriteCursorBefore(Node);
++        Offset = Emit->WrapNode(Emit->_Constant(static_cast<uint64_t>(static_cast<int64_t>(M->Offset)))); M->Offset = 0;
++        Bytes *= 2; Permissions = 2; break;
++      }
++      case IR::OP_VLOADNONTEMPORAL: {
++        auto* M = Op->CW<IR::IROp_VLoadNonTemporal>(); AddrIndex = M->Addr_Index;
++        Emit->SetWriteCursorBefore(Node);
++        Offset = Emit->WrapNode(Emit->_Constant(static_cast<uint64_t>(static_cast<int64_t>(M->Offset)))); M->Offset = 0;
++         Permissions = 4; break;
++      }
++      case IR::OP_PUSH:
++      case IR::OP_PUSHTWO:
++      case IR::OP_POP:
++      case IR::OP_POPTWO:
++      case IR::OP_MEMSET:
++      case IR::OP_MEMCPY:
++      case IR::OP_VLOADVECTORMASKED:
++      case IR::OP_VSTOREVECTORMASKED:
++      case IR::OP_VLOADVECTORGATHERMASKED:
++      case IR::OP_VLOADVECTORGATHERMASKEDQPS:
++      case IR::OP_STOREMEMX87SVEOPTPREDICATE:
++      case IR::OP_LOADMEMX87SVEOPTPREDICATE:
++      case IR::OP_CACHELINECLEAR:
++      case IR::OP_CACHELINECLEAN:
++      case IR::OP_CACHELINEZERO:
++      case IR::OP_PREFETCH:
++      case IR::OP_VALIDATECODE:
++        throw std::runtime_error("Unsupported translated guest memory operation");
++      default: break;
++      }
++      if (AddrIndex != 255) {
++        Emit->SetWriteCursorBefore(Node);
++        IR::Ref Translated;
++        if (Permissions == 6) {
++          Translated = Emit->_TranslateGuestAtomicAddress(Emit->UnwrapNode(Op->Args[AddrIndex]), Bytes);
++        } else {
++          Translated = Emit->_TranslateGuestAddress(Emit->UnwrapNode(Op->Args[AddrIndex]), Emit->UnwrapNode(Offset), Type, Scale, Bytes, Permissions, Alignment);
++        }
++        Emit->ReplaceNodeArgument(Node, AddrIndex, Translated);
++        if (OffsetIndex != 255) Emit->ReplaceNodeArgument(Node, OffsetIndex, Emit->Invalid());
++      }
++    }
++  }
+ }
+ 
+ static void IRDumper(FEXCore::Core::InternalThreadState* Thread, IR::IREmitter* IREmitter, uint64_t GuestRIP) {
+@@ -646,7 +863,13 @@
+ 
+ #ifdef ZYDIS_DISASSEMBLER
+         if (FEXCore::Config::Get_X86DISASSEMBLE()) {
++          std::array<uint8_t, 16> TranslatedBytes {};
+           const uint8_t* InstBytes = reinterpret_cast<const uint8_t*>(InstAddress);
++          if (SyscallHandler && SyscallHandler->UsesGuestMemoryTranslation()) {
++            if (!SyscallHandler->ReadGuestInstruction(InstAddress, TranslatedBytes.data(), DecodedInfo->InstSize))
++              throw std::runtime_error("Non executable guest disassembly");
++            InstBytes = TranslatedBytes.data();
++          }
+           ZydisDisassembledInstruction ZydisInst;
+           if (ZYAN_SUCCESS(ZydisDisassembleIntel(ZydisMachineMode, InstAddress, InstBytes, DecodedInfo->InstSize, &ZydisInst))) {
+             LogMan::Msg::IFmt("    {:#x}: {}", InstAddress, ZydisInst.text);
+@@ -680,7 +903,10 @@
+           auto ExistingCodePtr = reinterpret_cast<uint8_t*>(Block.Entry + BlockInstructionsLength);
+           auto InstAddressReg = Thread->OpDispatcher->_EntrypointOffset(GPRSize, InstAddress - GuestRIP);
+           std::array<uint8_t, 0x10> CodeOriginal;
+-          memcpy(CodeOriginal.data(), ExistingCodePtr, DecodedInfo->InstSize);
++          if (SyscallHandler && SyscallHandler->UsesGuestMemoryTranslation()) {
++            if (!SyscallHandler->ReadGuestInstruction(InstAddress, CodeOriginal.data(), DecodedInfo->InstSize))
++              throw std::runtime_error("Non executable guest code");
++          } else memcpy(CodeOriginal.data(), ExistingCodePtr, DecodedInfo->InstSize);
+           auto CodeChanged = Thread->OpDispatcher->_ValidateCode(CodeOriginal, InstAddressReg, DecodedInfo->InstSize);
+ 
+           auto InvalidateCodeCond = Thread->OpDispatcher->CondJump(CodeChanged);
+@@ -799,6 +1025,9 @@
+     IRDumper(Thread, IREmitter, GuestRIP);
+   }
+ 
++  if (SyscallHandler && SyscallHandler->UsesGuestMemoryTranslation()) {
++    TranslateGuestOperands(IREmitter);
++  }
+   // Run the passmanager over the IR from the dispatcher
+   Thread->PassManager->Run(IREmitter);
+ 
+@@ -1032,7 +1261,7 @@
+     FEXCORE_PROFILE_SCOPED("InvalidateCallRet");
+ 
+     // This may cause access violations in the thread on Windows as zeroing is not atomic, this is handled by the frontend
+-    Allocator::VirtualDontNeed(Thread->CallRetStackBase, FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE);
++    Thread->ClearCallRetStack();
+   }
+ }
+ 
+diff --git a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
+--- a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
+@@ -290,8 +290,13 @@
+     str(TMP2, STATE, offsetof(FEXCore::Core::CPUState, DeferredSignalRefCount));
+ 
+     // Trigger segfault if any deferred signals are pending
+-    strb(ARMEmitter::XReg::zr, STATE,
+-         offsetof(FEXCore::Core::InternalThreadState, InterruptFaultPage) - offsetof(FEXCore::Core::InternalThreadState, BaseFrameState));
++    // CpuStateFrame may extend across a host page. A byte-store immediate is
++    // limited to 4095 even though the interrupt-page contract allows 65520.
++    constexpr size_t InterruptOffset = offsetof(FEXCore::Core::InternalThreadState, InterruptFaultPage) -
++                                       offsetof(FEXCore::Core::InternalThreadState, BaseFrameState);
++    // TMP1 is the compiled block returned by Body; preserve the branch target.
++    LoadConstant(ARMEmitter::Size::i64Bit, TMP2, InterruptOffset);
++    strb(ARMEmitter::XReg::zr, STATE, TMP2.R(), ARMEmitter::ExtendedType::LSL_64, 0);
+ #endif
+   };
+ 
+diff --git a/FEXCore/Source/Interface/Core/Frontend.cpp b/FEXCore/Source/Interface/Core/Frontend.cpp
+--- a/FEXCore/Source/Interface/Core/Frontend.cpp
++++ b/FEXCore/Source/Interface/Core/Frontend.cpp
+@@ -124,7 +124,11 @@
+ }
+ 
+ std::optional<uint8_t> Decoder::PeekByte(uint8_t Offset) {
+-  uint64_t ByteAddress = reinterpret_cast<uint64_t>(InstStream.InstStream + InstructionSize + Offset);
++  uint64_t ByteAddress = reinterpret_cast<uint64_t>(InstStream.InstStream) + InstructionSize + Offset;
++  if (CTX->SyscallHandler && CTX->SyscallHandler->UsesGuestMemoryTranslation()) {
++    uint8_t Byte {};
++    return CTX->SyscallHandler->ReadGuestInstruction(ByteAddress, &Byte, 1) ? std::optional<uint8_t>(Byte) : std::nullopt;
++  }
+   if (CheckRangeExecutable(ByteAddress, 1)) {
+     return InstStream.AdjustedInstStream[InstructionSize + Offset];
+   } else {
+@@ -136,8 +140,10 @@
+   LOGMAN_THROW_A_FMT(Size != 0 && Size <= sizeof(uint64_t), "Unknown data size to read");
+ 
+   uint64_t Res = 0;
+-  uint64_t Address = reinterpret_cast<uint64_t>(InstStream.InstStream + InstructionSize);
+-  if (CheckRangeExecutable(Address, Size)) {
++  uint64_t Address = reinterpret_cast<uint64_t>(InstStream.InstStream) + InstructionSize;
++  if (CTX->SyscallHandler && CTX->SyscallHandler->UsesGuestMemoryTranslation()) {
++    if (!CTX->SyscallHandler->ReadGuestInstruction(Address, &Res, Size)) HitNonExecutableRange = true;
++  } else if (CheckRangeExecutable(Address, Size)) {
+     std::memcpy(&Res, &InstStream.AdjustedInstStream[InstructionSize], Size);
+   } else {
+     HitNonExecutableRange = true;
+@@ -1342,6 +1348,10 @@
+ }
+ 
+ const Decoder::DecodeStream Decoder::AdjustAddrForSpecialRegion(const uint8_t* _InstStream, uint64_t EntryPoint, uint64_t RIP) {
++  if (CTX->SyscallHandler && CTX->SyscallHandler->UsesGuestMemoryTranslation()) {
++    const auto* Guest = reinterpret_cast<const uint8_t*>(RIP);
++    return {.InstStream = Guest, .AdjustedInstStream = Guest};
++  }
+   constexpr uint64_t VSyscall_Base = 0xFFFF'FFFF'FF60'0000ULL;
+   constexpr uint64_t VSyscall_End = VSyscall_Base + 0x1000;
+ 
+diff --git a/FEXCore/Source/Interface/Core/Frontend.h b/FEXCore/Source/Interface/Core/Frontend.h
+--- a/FEXCore/Source/Interface/Core/Frontend.h
++++ b/FEXCore/Source/Interface/Core/Frontend.h
+@@ -136,14 +136,14 @@
+     const uint8_t* AdjustedInstStream;
+ 
+     DecodeStream& operator-=(size_t offset) noexcept {
+-      InstStream -= offset;
+-      AdjustedInstStream -= offset;
++      InstStream = reinterpret_cast<const uint8_t*>(reinterpret_cast<uint64_t>(InstStream) - offset);
++      AdjustedInstStream = reinterpret_cast<const uint8_t*>(reinterpret_cast<uint64_t>(AdjustedInstStream) - offset);
+       return *this;
+     }
+ 
+     DecodeStream& operator+=(size_t offset) noexcept {
+-      InstStream += offset;
+-      AdjustedInstStream += offset;
++      InstStream = reinterpret_cast<const uint8_t*>(reinterpret_cast<uint64_t>(InstStream) + offset);
++      AdjustedInstStream = reinterpret_cast<const uint8_t*>(reinterpret_cast<uint64_t>(AdjustedInstStream) + offset);
+       return *this;
+     }
+   };
+diff --git a/FEXCore/Source/Interface/Core/JIT/AtomicOps.cpp b/FEXCore/Source/Interface/Core/JIT/AtomicOps.cpp
+--- a/FEXCore/Source/Interface/Core/JIT/AtomicOps.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/AtomicOps.cpp
+@@ -10,6 +10,14 @@
+ #include "Interface/Core/JIT/JITClass.h"
+ 
+ namespace FEXCore::CPU {
++DEF_OP(TranslateGuestAtomicAddress) {
++  const auto* Op = IROp->C<IR::IROp_TranslateGuestAtomicAddress>();
++  // Resolve the entire R+W operand once, before the exclusive monitor starts.
++  // Natural alignment rejects split-page atomics, including 16-byte CASPair.
++  EmitGuestAddressTranslation(Op->Addr, IR::OrderedNodeWrapper{}, IR::MemOffsetType::SXTX, 1,
++                              Op->Bytes, 6, Op->Bytes, Node);
++}
++
+ DEF_OP(CASPair) {
+   auto Op = IROp->C<IR::IROp_CASPair>();
+   LOGMAN_THROW_A_FMT(IROp->ElementSize == IR::OpSize::i32Bit || IROp->ElementSize == IR::OpSize::i64Bit, "Wrong element size");
+@@ -20,6 +28,8 @@
+   auto Expected1 = GetReg(Op->ExpectedHi);
+   auto Desired0 = GetReg(Op->DesiredLo);
+   auto Desired1 = GetReg(Op->DesiredHi);
++  // Translated mode supplies an RA-owned TranslateGuestAddress result here.
++  // No translator temporary may survive into CAS/LSE/exclusive sequences.
+   auto MemSrc = GetReg(Op->Addr);
+ 
+   const auto EmitSize = IROp->ElementSize == IR::OpSize::i64Bit ? ARMEmitter::Size::i64Bit : ARMEmitter::Size::i32Bit;
+@@ -99,6 +109,8 @@
+ 
+   auto Expected = GetReg(Op->Expected);
+   auto Desired = GetReg(Op->Desired);
++  // Translated mode supplies an RA-owned TranslateGuestAddress result here.
++  // No translator temporary may survive into CAS/LSE/exclusive sequences.
+   auto MemSrc = GetReg(Op->Addr);
+   auto Dst = GetReg(Node);
+ 
+@@ -146,6 +158,8 @@
+                                                                                                                                  "d CAS "
+                                                                                                                                  "size");
+ 
++  // Translated mode supplies an RA-owned TranslateGuestAddress result here.
++  // No translator temporary may survive into CAS/LSE/exclusive sequences.
+   auto MemSrc = GetReg(Op->Addr);
+   auto Src = GetReg(Op->Value);
+ 
+@@ -172,6 +186,8 @@
+   const auto EmitSize = ConvertSize(IROp);
+   const auto SubEmitSize = ConvertSubRegSize8(IROp->Size);
+ 
++  // Translated mode supplies an RA-owned TranslateGuestAddress result here.
++  // No translator temporary may survive into CAS/LSE/exclusive sequences.
+   auto MemSrc = GetReg(Op->Addr);
+   auto Src = GetReg(Op->Value);
+ 
+@@ -193,6 +209,8 @@
+   const auto EmitSize = ConvertSize(IROp);
+   const auto SubEmitSize = ConvertSubRegSize8(IROp->Size);
+ 
++  // Translated mode supplies an RA-owned TranslateGuestAddress result here.
++  // No translator temporary may survive into CAS/LSE/exclusive sequences.
+   auto MemSrc = GetReg(Op->Addr);
+   auto Src = GetReg(Op->Value);
+ 
+@@ -215,6 +233,8 @@
+   const auto EmitSize = ConvertSize(IROp);
+   const auto SubEmitSize = ConvertSubRegSize8(IROp->Size);
+ 
++  // Translated mode supplies an RA-owned TranslateGuestAddress result here.
++  // No translator temporary may survive into CAS/LSE/exclusive sequences.
+   auto MemSrc = GetReg(Op->Addr);
+   auto Src = GetReg(Op->Value);
+ 
+@@ -237,6 +257,8 @@
+   const auto EmitSize = ConvertSize(IROp);
+   const auto SubEmitSize = ConvertSubRegSize8(IROp->Size);
+ 
++  // Translated mode supplies an RA-owned TranslateGuestAddress result here.
++  // No translator temporary may survive into CAS/LSE/exclusive sequences.
+   auto MemSrc = GetReg(Op->Addr);
+   auto Src = GetReg(Op->Value);
+ 
+@@ -258,6 +280,8 @@
+   const auto EmitSize = ConvertSize(IROp);
+   const auto SubEmitSize = ConvertSubRegSize8(IROp->Size);
+ 
++  // Translated mode supplies an RA-owned TranslateGuestAddress result here.
++  // No translator temporary may survive into CAS/LSE/exclusive sequences.
+   auto MemSrc = GetReg(Op->Addr);
+   auto Src = GetReg(Op->Value);
+ 
+@@ -279,6 +303,8 @@
+   const auto EmitSize = ConvertSize(IROp);
+   const auto SubEmitSize = ConvertSubRegSize8(IROp->Size);
+ 
++  // Translated mode supplies an RA-owned TranslateGuestAddress result here.
++  // No translator temporary may survive into CAS/LSE/exclusive sequences.
+   auto MemSrc = GetReg(Op->Addr);
+   auto Src = GetReg(Op->Value);
+ 
+@@ -300,6 +326,8 @@
+   const auto EmitSize = ConvertSize(IROp);
+   const auto SubEmitSize = ConvertSubRegSize8(IROp->Size);
+ 
++  // Translated mode supplies an RA-owned TranslateGuestAddress result here.
++  // No translator temporary may survive into CAS/LSE/exclusive sequences.
+   auto MemSrc = GetReg(Op->Addr);
+ 
+   if (CTX->HostFeatures.SupportsAtomics) {
+diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+--- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+@@ -37,6 +37,7 @@
+ 
+ #include <cstdio>
+ #include <cstring>
++#include <stdexcept>
+ #include <unistd.h>
+ 
+ namespace {
+@@ -935,7 +936,29 @@
+ 
+   // Fairly excessive buffer range to make sure we don't overflow
+   // One page baseline, plus SSANodeMultipler bytes, plus another page for guard page.
+-  const uint32_t DesiredBufferRange = AlignUp(FEXCore::Utils::FEX_PAGE_SIZE * 2 + SSACount * SSANodeMultiplier, FEXCore::Utils::FEX_PAGE_SIZE);
++  uint64_t RequiredBufferRange = FEXCore::Utils::FEX_PAGE_SIZE * 2 + uint64_t{SSACount} * SSANodeMultiplier;
++  if (CTX->SyscallHandler && CTX->SyscallHandler->UsesGuestMemoryTranslation()) {
++    // A translation node emits a checked range ladder, not six instructions.
++    // Size it before emission: these frontends install no native fault handler
++    // to recover an underestimated temporary-buffer guard-page write.
++    constexpr uint64_t MaxTranslatedTemporaryBytes = 16 * 1024 * 1024;
++    const uint64_t RangeCount = CTX->SyscallHandler->GuestMemoryRanges().size();
++    if (RangeCount > (MaxTranslatedTemporaryBytes - 4096) / 2048)
++      throw std::runtime_error("Too many translated guest mappings");
++    const uint64_t TranslationBytes = 4096 + 2048 * RangeCount;
++    for (auto [Block, Header] : IR->GetBlocks()) {
++      for (auto [Node, Op] : IR->GetCode(Block)) {
++        if (Op->Op == IR::OP_TRANSLATEGUESTADDRESS || Op->Op == IR::OP_TRANSLATEGUESTATOMICADDRESS ||
++            Op->Op == IR::OP_GUESTSCALARLOAD || Op->Op == IR::OP_GUESTSCALARSTORE)
++          RequiredBufferRange += TranslationBytes;
++      }
++    }
++    // Match the existing iPhone code-pool ceiling; never allocate an unbounded
++    // temporary block or rely on a native trap to grow one.
++    if (RequiredBufferRange > MaxTranslatedTemporaryBytes)
++      throw std::runtime_error("Translated JIT block exceeds bounded temporary space");
++  }
++  const uint32_t DesiredBufferRange = AlignUp(static_cast<uint32_t>(RequiredBufferRange), FEXCore::Utils::FEX_PAGE_SIZE);
+ 
+   // JIT output is first written to a temporary buffer and later relocated to the CodeBuffer.
+   // This minimizes lock contention of CodeBufferWriteMutex.
+@@ -1164,7 +1187,7 @@
+       LOGMAN_THROW_A_FMT(CurrentCodeBuffer->LookupCache.get() == ThreadState->LookupCache->Shared, "INVARIANT VIOLATED: SharedLookupCache "
+                                                                                                    "doesn't match up!\n");
+       if (auto Prev = CheckCodeBufferUpdate()) {
+-        Allocator::VirtualDontNeed(ThreadState->CallRetStackBase, FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE);
++        ThreadState->ClearCallRetStack();
+         auto lk = ThreadState->LookupCache->AcquireWriteLock();
+         ThreadState->LookupCache->ChangeGuestToHostMapping(*Prev, *CurrentCodeBuffer->LookupCache, lk);
+       }
+diff --git a/FEXCore/Source/Interface/Core/JIT/JITClass.h b/FEXCore/Source/Interface/Core/JIT/JITClass.h
+--- a/FEXCore/Source/Interface/Core/JIT/JITClass.h
++++ b/FEXCore/Source/Interface/Core/JIT/JITClass.h
+@@ -315,6 +315,14 @@
+     return IsFPR(IR::PhysicalRegister(Wrap).AsRegClass());
+   }
+ 
++  void EmitGuestScalarMemory(IR::OrderedNodeWrapper Addr, IR::OrderedNodeWrapper Offset,
++      IR::MemOffsetType OffsetType, uint8_t Scale, uint32_t Bytes,
++      ARMEmitter::Register Value, bool Store, bool TSO);
++
++  void EmitGuestAddressTranslation(IR::OrderedNodeWrapper Addr, IR::OrderedNodeWrapper Offset,
++      IR::MemOffsetType OffsetType, uint8_t Scale, uint32_t Bytes, uint32_t Permissions,
++      uint32_t Alignment, IR::Ref Node);
++
+   [[nodiscard]]
+   ARMEmitter::ExtendedMemOperand GenerateMemOperand(IR::OpSize AccessSize, ARMEmitter::Register Base, IR::OrderedNodeWrapper Offset,
+                                                     IR::MemOffsetType OffsetType, uint8_t OffsetScale);
+diff --git a/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp b/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
+--- a/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
+@@ -15,7 +15,181 @@
+ #include <FEXCore/Utils/CompilerDefs.h>
+ #include <FEXCore/Utils/MathUtils.h>
+ 
++#include <FEXCore/HLE/SyscallHandler.h>
++
+ namespace FEXCore::CPU {
++// Scalar split accesses use only pinned host mappings. Validate the whole
++// operand before changing memory or its destination; never split an atomic.
++void Arm64JITCore::EmitGuestScalarMemory(IR::OrderedNodeWrapper Addr, IR::OrderedNodeWrapper Offset,
++    IR::MemOffsetType OffsetType, uint8_t Scale, uint32_t Bytes,
++    ARMEmitter::Register Value, bool Store, bool TSO) {
++  const uint32_t Permissions = Store ? 2 : 4;
++  const auto EA = ApplyMemOperand(static_cast<IR::OpSize>(Scale), GetReg(Addr), TMP1, Offset, OffsetType, Scale);
++  mov(ARMEmitter::Size::i64Bit, TMP2, EA);
++  mrs(TMP4, ARMEmitter::SystemRegister::NZCV);
++  ARMEmitter::ForwardLabel Fault, Done;
++  LoadConstant(ARMEmitter::Size::i64Bit, TMP1, UINT64_MAX - (Bytes - 1));
++  cmp(ARMEmitter::Size::i64Bit, TMP2, TMP1);
++  (void)b(ARMEmitter::Condition::CC_HI, &Fault);
++  const auto Ranges = CTX->SyscallHandler->GuestMemoryRanges();
++  const auto Usable = [&](const auto& R) {
++    return (R.Permissions & Permissions) == Permissions && R.Host && R.Size &&
++      R.Size - 1 <= UINT64_MAX - R.Guest && R.Size - 1 <= UINT64_MAX - R.Host;
++  };
++  // Keep native-width accesses when the complete operand fits one mapping.
++  for (const auto& R : Ranges) {
++    if (!Usable(R) || R.Size < Bytes) continue;
++    ARMEmitter::ForwardLabel Next;
++    LoadConstant(ARMEmitter::Size::i64Bit, TMP1, R.Guest);
++    sub(ARMEmitter::Size::i64Bit, TMP3, TMP2, TMP1);
++    LoadConstant(ARMEmitter::Size::i64Bit, TMP1, R.Size - Bytes);
++    cmp(ARMEmitter::Size::i64Bit, TMP3, TMP1);
++    (void)b(ARMEmitter::Condition::CC_HI, &Next);
++    LoadConstant(ARMEmitter::Size::i64Bit, TMP1, R.Host);
++    add(ARMEmitter::Size::i64Bit, TMP1, TMP1, TMP3);
++    if (TSO) dmb(ARMEmitter::BarrierScope::ISH);
++    if (Store) {
++      switch (Bytes) {
++      case 1: strb(Value, TMP1, 0); break;
++      case 2: strh(Value, TMP1, 0); break;
++      case 4: str(Value.W(), TMP1, 0); break;
++      case 8: str(Value.X(), TMP1, 0); break;
++      }
++    } else {
++      switch (Bytes) {
++      case 1: ldrb(Value, TMP1, 0); break;
++      case 2: ldrh(Value, TMP1, 0); break;
++      case 4: ldr(Value.W(), TMP1, 0); break;
++      case 8: ldr(Value.X(), TMP1, 0); break;
++      }
++    }
++    if (TSO) dmb(ARMEmitter::BarrierScope::ISH);
++    (void)b(&Done);
++    (void)Bind(&Next);
++  }
++  // Resolve each byte twice, under the same immutable lease. The first pass
++  // has no effects; the second cannot discover a new permission or bounds fault.
++  const auto ResolveByte = [&](uint32_t i) {
++    ARMEmitter::ForwardLabel Found;
++    for (const auto& R : Ranges) {
++      if (!Usable(R)) continue;
++      ARMEmitter::ForwardLabel Next;
++      add(ARMEmitter::Size::i64Bit, TMP1, TMP2, i);
++      LoadConstant(ARMEmitter::Size::i64Bit, TMP3, R.Guest);
++      sub(ARMEmitter::Size::i64Bit, TMP3, TMP1, TMP3);
++      LoadConstant(ARMEmitter::Size::i64Bit, TMP1, R.Size - 1);
++      cmp(ARMEmitter::Size::i64Bit, TMP3, TMP1);
++      (void)b(ARMEmitter::Condition::CC_HI, &Next);
++      LoadConstant(ARMEmitter::Size::i64Bit, TMP1, R.Host);
++      add(ARMEmitter::Size::i64Bit, TMP1, TMP1, TMP3);
++      (void)b(&Found);
++      (void)Bind(&Next);
++    }
++    (void)b(&Fault);
++    (void)Bind(&Found);
++  };
++  for (uint32_t i = 0; i < Bytes; ++i) ResolveByte(i);
++  if (TSO) dmb(ARMEmitter::BarrierScope::ISH);
++  if (!Store) LoadConstant(ARMEmitter::Size::i64Bit, Value, 0);
++  for (uint32_t i = 0; i < Bytes; ++i) {
++    ResolveByte(i);
++    if (Store) {
++      lsr(ARMEmitter::Size::i64Bit, TMP3, Value, 8 * i);
++      strb(TMP3, TMP1, 0);
++    } else {
++      ldrb(TMP3, TMP1, 0);
++      orr(ARMEmitter::Size::i64Bit, Value, Value, TMP3, ARMEmitter::ShiftType::LSL, 8 * i);
++    }
++  }
++  if (TSO) dmb(ARMEmitter::BarrierScope::ISH);
++  (void)b(&Done);
++  (void)Bind(&Fault);
++  ARMEmitter::ForwardLabel Stop;
++  ldr(TMP3, STATE, offsetof(FEXCore::Core::CpuStateFrame, State.GuestMemoryFaultRecord));
++  (void)cbz(ARMEmitter::Size::i64Bit, TMP3, &Stop);
++  str(TMP2, TMP3, offsetof(FEXCore::Core::GuestMemoryFaultData, Address));
++  LoadConstant(ARMEmitter::Size::i64Bit, TMP1, Bytes);
++  str(TMP1.W(), TMP3, offsetof(FEXCore::Core::GuestMemoryFaultData, Bytes));
++  LoadConstant(ARMEmitter::Size::i64Bit, TMP1, Permissions);
++  str(TMP1.W(), TMP3, offsetof(FEXCore::Core::GuestMemoryFaultData, Permissions));
++  (void)Bind(&Stop);
++  msr(ARMEmitter::SystemRegister::NZCV, TMP4);
++  ResetStack();
++  ldr(TMP1, STATE, offsetof(FEXCore::Core::CpuStateFrame, Pointers.ThreadStopHandlerSpillSRA));
++  br(TMP1);
++  (void)Bind(&Done);
++  msr(ARMEmitter::SystemRegister::NZCV, TMP4);
++}
++
++DEF_OP(GuestScalarLoad) {
++  const auto* Op = IROp->C<IR::IROp_GuestScalarLoad>();
++  EmitGuestScalarMemory(Op->Addr, Op->Offset, Op->OffsetType, Op->OffsetScale,
++                        IR::OpSizeToSize(IROp->Size), GetReg(Node), false, Op->TSO);
++}
++
++DEF_OP(GuestScalarStore) {
++  const auto* Op = IROp->C<IR::IROp_GuestScalarStore>();
++  EmitGuestScalarMemory(Op->Addr, Op->Offset, Op->OffsetType, Op->OffsetScale,
++                        IR::OpSizeToSize(IROp->Size), GetZeroableReg(Op->Value), true, Op->TSO);
++}
++
++DEF_OP(TranslateGuestAddress) {
++  const auto* Op = IROp->C<IR::IROp_TranslateGuestAddress>();
++  EmitGuestAddressTranslation(Op->Addr, Op->Offset, Op->OffsetType, Op->Scale,
++                              Op->Bytes, Op->Permissions, Op->Alignment, Node);
++}
++
++void Arm64JITCore::EmitGuestAddressTranslation(IR::OrderedNodeWrapper Addr, IR::OrderedNodeWrapper Offset,
++    IR::MemOffsetType OffsetType, uint8_t Scale, uint32_t Bytes, uint32_t Permissions,
++    uint32_t Alignment, IR::Ref Node) {
++  const auto Dst = GetReg(Node);
++  // Compute the complete effective address BEFORE translating; offsets and TLS
++  // bases remain in the guest domain. Dst is a normal RA-owned SSA value.
++  const auto EA = ApplyMemOperand(static_cast<IR::OpSize>(Scale), GetReg(Addr), TMP1,
++                                 Offset, OffsetType, Scale);
++  mov(ARMEmitter::Size::i64Bit, TMP2, EA);
++  mrs(TMP4, ARMEmitter::SystemRegister::NZCV);
++  ARMEmitter::ForwardLabel Done, Fault;
++  if (Alignment > 1) {
++    ARMEmitter::ForwardLabel Aligned;
++    and_(ARMEmitter::Size::i64Bit, TMP1, TMP2, Alignment - 1);
++    (void)cbz(ARMEmitter::Size::i64Bit, TMP1, &Aligned);
++    (void)b(&Fault);
++    (void)Bind(&Aligned);
++  }
++  for (const auto& R : CTX->SyscallHandler->GuestMemoryRanges()) {
++    if ((R.Permissions & Permissions) != Permissions || R.Size < Bytes) continue;
++    ARMEmitter::ForwardLabel Next;
++    LoadConstant(ARMEmitter::Size::i64Bit, TMP1, R.Guest);
++    sub(ARMEmitter::Size::i64Bit, TMP3, TMP2, TMP1);
++    LoadConstant(ARMEmitter::Size::i64Bit, TMP1, R.Size - Bytes);
++    cmp(ARMEmitter::Size::i64Bit, TMP3, TMP1);
++    (void)b(ARMEmitter::Condition::CC_HI, &Next);
++    LoadConstant(ARMEmitter::Size::i64Bit, TMP1, R.Host);
++    add(ARMEmitter::Size::i64Bit, Dst, TMP1, TMP3);
++    (void)b(&Done);
++    (void)Bind(&Next);
++  }
++  (void)Bind(&Fault);
++  // Stop this invocation before the native operand. Restore NZCV before the
++  // dispatcher spills SRA, and unwind dynamic spill slots as ExitFunction does.
++  ARMEmitter::ForwardLabel Stop;
++  ldr(TMP3, STATE, offsetof(FEXCore::Core::CpuStateFrame, State.GuestMemoryFaultRecord));
++  (void)cbz(ARMEmitter::Size::i64Bit, TMP3, &Stop);
++  str(TMP2, TMP3, offsetof(FEXCore::Core::GuestMemoryFaultData, Address));
++  LoadConstant(ARMEmitter::Size::i64Bit, TMP1, Bytes);
++  str(TMP1.W(), TMP3, offsetof(FEXCore::Core::GuestMemoryFaultData, Bytes));
++  LoadConstant(ARMEmitter::Size::i64Bit, TMP1, Permissions);
++  str(TMP1.W(), TMP3, offsetof(FEXCore::Core::GuestMemoryFaultData, Permissions));
++  (void)Bind(&Stop);
++  msr(ARMEmitter::SystemRegister::NZCV, TMP4);
++  ResetStack();
++  ldr(TMP1, STATE, offsetof(FEXCore::Core::CpuStateFrame, Pointers.ThreadStopHandlerSpillSRA));
++  br(TMP1);
++  (void)Bind(&Done);
++  msr(ARMEmitter::SystemRegister::NZCV, TMP4);
++}
++
+ 
+ DEF_OP(LoadContext) {
+   const auto Op = IROp->C<IR::IROp_LoadContext>();
+diff --git a/FEXCore/Source/Interface/Core/LookupCache.cpp b/FEXCore/Source/Interface/Core/LookupCache.cpp
+--- a/FEXCore/Source/Interface/Core/LookupCache.cpp
++++ b/FEXCore/Source/Interface/Core/LookupCache.cpp
+@@ -81,15 +81,31 @@
+ void LookupCache::ClearL2Cache(const FEXCore::LookupCacheBaseLockToken& lk) {
+   // Clear out the page memory
+   // PagePointer and PageMemory are sequential with each other. Clear both at once.
++#if defined(__APPLE__)
++  // MADV_DONTNEED on Darwin does not promise zero-fill on the next read.
++  // Explicitly discard lookup tags while dispatch is excluded by the owner.
++  // Do not memset the entire sparsely reserved guest page-pointer table.
++  auto* Pointers = reinterpret_cast<uintptr_t*>(PagePointer);
++  for (const auto Index : AllocatedPageIndices) Pointers[Index] = 0;
++  std::memset(reinterpret_cast<void*>(PageMemory), 0, AllocateOffset);
++#else
+   FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(PagePointer),
+                                       ctx->Config.VirtualMemSize / FEXCore::Utils::FEX_PAGE_SIZE * 8 + CODE_SIZE, false);
++#endif
++  AllocatedPageIndices.clear();
+   AllocateOffset = 0;
+ }
+ 
+-void LookupCache::ClearThreadLocalCaches(const LookupCacheWriteLockToken&) {
+-  // TODO: Preserve code cache entries?
+-  // Clear L1 and L2 by clearing the full cache.
++void LookupCache::ClearThreadLocalCaches(const LookupCacheWriteLockToken& lk) {
++#if defined(__APPLE__)
++  ClearL2Cache(lk);
++  std::memset(reinterpret_cast<void*>(L1Pointer), 0, MAX_L1_SIZE);
++#else
++  // Linux anonymous MADV_DONTNEED guarantees subsequent zero-fill.
+   FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(PagePointer), TotalCacheSize, false);
++  AllocatedPageIndices.clear();
++  AllocateOffset = 0;
++#endif
+ 
+   // TODO: Rename this member to avoid confusion with code caching
+   CachedCodePages.clear();
+diff --git a/FEXCore/Source/Interface/Core/LookupCache.h b/FEXCore/Source/Interface/Core/LookupCache.h
+--- a/FEXCore/Source/Interface/Core/LookupCache.h
++++ b/FEXCore/Source/Interface/Core/LookupCache.h
+@@ -13,6 +13,7 @@
+ #include <FEXCore/fextl/memory_resource.h>
+ 
+ #include <cstdint>
++#include <cstring>
+ #include <stddef.h>
+ #include <utility>
+ #include <mutex>
+@@ -282,7 +283,12 @@
+           // Madvise the entries that we are dropping. Gives the memory back to the OS.
+           LookupCacheEntry* FirstZeroL1Entry = &reinterpret_cast<LookupCacheEntry*>(L1Pointer)[CurrentL1Entries];
+           size_t ZeroMemorySize = (MAX_L1_ENTRIES - CurrentL1Entries) * sizeof(LookupCacheEntry);
++#if defined(__APPLE__)
++          // Darwin MADV_DONTNEED is advisory and can retain stale block tags.
++          std::memset(FirstZeroL1Entry, 0, ZeroMemorySize);
++#else
+           FEXCore::Allocator::VirtualDontNeed(FirstZeroL1Entry, ZeroMemorySize, false);
++#endif
+ 
+           // Update the thread's L1 pointer mask to increase how much cache it uses.
+           // Since we're in C-code, this is safe to update here.
+@@ -441,6 +447,9 @@
+           CacheBlockMapping(FullAddress, Entry, false, lk);
+           return;
+         }
++        // Remember every allocated L2 index, including subsequently invalidated
++        // blocks, so a Darwin clear can zero only committed table pages.
++        AllocatedPageIndices.push_back(Address);
+         Pointers[Address] = NewPageBacking;
+         LocalPagePointer = NewPageBacking;
+       }
+@@ -488,6 +497,7 @@
+   constexpr static size_t MAX_L1_SIZE = MAX_L1_ENTRIES * sizeof(LookupCacheEntry);
+ 
+   size_t AllocateOffset {};
++  fextl::vector<uint64_t> AllocatedPageIndices;
+ 
+   FEXCore::Context::ContextImpl* ctx;
+   uint64_t VirtualMemSize {};
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -498,7 +498,7 @@
+   const auto OperandSize = (Op->Flags & FEXCore::X86Tables::DecodeFlags::FLAG_OPERAND_SIZE) ? OpSize::i16Bit : GPRSize;
+ 
+   // First we move RBP in to RSP and then behave effectively like a pop
+-  auto SP = _RMWHandle(LoadGPRRegister(X86State::REG_RBP));
++  Ref SP = _RMWHandle(LoadGPRRegister(X86State::REG_RBP));
+   auto NewGPR = Pop(OperandSize, SP);
+ 
+   // Store the new stack pointer
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+@@ -13,6 +13,7 @@
+ #include <FEXCore/Core/Context.h>
+ #include <FEXCore/Core/X86Enums.h>
+ #include <FEXCore/IR/IR.h>
++#include <FEXCore/HLE/SyscallHandler.h>
+ 
+ #include <FEXCore/Utils/LogManager.h>
+ #include <FEXCore/Utils/MathUtils.h>
+@@ -2566,7 +2567,21 @@
+     return _StoreMemPairAutoTSO(RegClass::FPR, Size, A, Value1, Value2, Align);
+   }
+ 
+-  Ref Pop(IR::OpSize Size, Ref SP_RMW) {
++  Ref _Push(IR::OpSize GPRSize, IR::OpSize Size, Ref Value, Ref OldSP) {
++    if (CTX->SyscallHandler && CTX->SyscallHandler->UsesGuestMemoryTranslation()) {
++      Ref NewSP = Sub(GPRSize, OldSP, IR::OpSizeToSize(Size));
++      _StoreMemGPRAutoTSO(Size, NewSP, Value);
++      return NewSP; // Guest RSP, never the translated storage pointer.
++    }
++    return IREmitter::_Push(GPRSize, Size, Value, OldSP);
++  }
++
++  Ref Pop(IR::OpSize Size, Ref& SP_RMW) {
++    if (CTX->SyscallHandler && CTX->SyscallHandler->UsesGuestMemoryTranslation()) {
++      Ref Value = _LoadMemGPRAutoTSO(Size, SP_RMW);
++      SP_RMW = Add(GetGPROpSize(), SP_RMW, IR::OpSizeToSize(Size));
++      return Value;
++    }
+     Ref Value = _AllocateGPR(false);
+     _Pop(Size, SP_RMW, Value);
+     return Value;
+@@ -2574,9 +2589,7 @@
+ 
+   Ref Pop(IR::OpSize Size) {
+     Ref SP = _RMWHandle(LoadGPRRegister(X86State::REG_RSP));
+-    Ref Value = _AllocateGPR(false);
+-
+-    _Pop(Size, SP, Value);
++    Ref Value = Pop(Size, SP);
+ 
+     // Store the new stack pointer
+     StoreGPRRegister(X86State::REG_RSP, SP);
+diff --git a/FEXCore/Source/Interface/IR/IR.json b/FEXCore/Source/Interface/IR/IR.json
+--- a/FEXCore/Source/Interface/IR/IR.json
++++ b/FEXCore/Source/Interface/IR/IR.json
+@@ -529,6 +529,27 @@
+         "DestSize": "OpSize::i64Bit"
+       },
+ 
++      "GPR = GuestScalarLoad OpSize:#Size, GPR:$Addr, GPR:$Offset, MemOffsetType:$OffsetType, u8:$OffsetScale, i1:$TSO": {
++        "Inline": ["", "Mem"],
++        "DestSize": "Size",
++        "HasSideEffects": true
++      },
++      "GuestScalarStore OpSize:#Size, GPR:$Value, GPR:$Addr, GPR:$Offset, MemOffsetType:$OffsetType, u8:$OffsetScale, i1:$TSO": {
++        "DestSize": "Size",
++        "Inline": ["Zero", "", "Mem"],
++        "HasSideEffects": true
++      },
++
++      "GPR = TranslateGuestAtomicAddress GPR:$Addr, u32:$Bytes": {
++        "DestSize": "OpSize::i64Bit",
++        "HasSideEffects": true
++      },
++
++      "GPR = TranslateGuestAddress GPR:$Addr, GPR:$Offset, MemOffsetType:$OffsetType, u8:$Scale, u32:$Bytes, u32:$Permissions, u32:$Alignment": {
++        "DestSize": "OpSize::i64Bit",
++        "HasSideEffects": true
++      },
++
+       "SSA = LoadMem RegisterClass:$Class, OpSize:#Size, GPR:$Addr, GPR:$Offset, OpSize:$Align, MemOffsetType:$OffsetType, u8:$OffsetScale": {
+         "Inline": ["", "Mem"],
+         "DestSize": "Size"
+diff --git a/FEXCore/include/FEXCore/Core/CoreState.h b/FEXCore/include/FEXCore/Core/CoreState.h
+--- a/FEXCore/include/FEXCore/Core/CoreState.h
++++ b/FEXCore/include/FEXCore/Core/CoreState.h
+@@ -71,6 +71,13 @@
+ static_assert(std::is_trivially_copyable_v<NonAtomicRefCounter<uint64_t>>, "needs to be trivially copyable");
+ static_assert(sizeof(NonAtomicRefCounter<uint64_t>) == sizeof(uint64_t), "Needs to be correct size");
+ 
++// Frontend-owned for one dispatch. Keep CpuStateFrame's pinned ABI unchanged.
++struct GuestMemoryFaultData {
++  uint64_t Address {};
++  uint32_t Bytes {};
++  uint32_t Permissions {};
++};
++
+ struct alignas(64) CPUState {
+   // Allows more efficient handling of the register
+   // file in the event AVX is not supported.
+@@ -107,7 +114,10 @@
+   uint64_t L1Pointer {};
+   uint64_t L1Mask {};
+   uint64_t callret_sp {};
+-  uint64_t _pad1 {};
++  union {
++    uint64_t _pad1 {};
++    GuestMemoryFaultData* GuestMemoryFaultRecord;
++  };
+ 
+   // Cacheline: 1,2,3,4
+   // The high 128-bits of AVX registers when not being emulated by SVE256.
+diff --git a/FEXCore/include/FEXCore/Debug/InternalThreadState.h b/FEXCore/include/FEXCore/Debug/InternalThreadState.h
+--- a/FEXCore/include/FEXCore/Debug/InternalThreadState.h
++++ b/FEXCore/include/FEXCore/Debug/InternalThreadState.h
+@@ -9,6 +9,7 @@
+ #include <FEXCore/fextl/vector.h>
+ 
+ #include <cstddef>
++#include <cstring>
+ #include <cstdint>
+ #include <shared_mutex>
+ #include <type_traits>
+@@ -110,6 +111,15 @@
+   void* FrontendPtr;
+ 
+   static constexpr size_t CALLRET_STACK_SIZE {0x400000};
++  void ClearCallRetStack() {
++    if (!CallRetStackBase) return;
++#if defined(__APPLE__)
++    // These are cached host return targets. Advisory discard is insufficient.
++    std::memset(CallRetStackBase, 0, CALLRET_STACK_SIZE);
++#else
++    FEXCore::Allocator::VirtualDontNeed(CallRetStackBase, CALLRET_STACK_SIZE);
++#endif
++  }
+ 
+   // The low address of the call-ret stack allocation (not including guard pages)
+   void* CallRetStackBase {};
+diff --git a/FEXCore/include/FEXCore/HLE/SyscallHandler.h b/FEXCore/include/FEXCore/HLE/SyscallHandler.h
+--- a/FEXCore/include/FEXCore/HLE/SyscallHandler.h
++++ b/FEXCore/include/FEXCore/HLE/SyscallHandler.h
+@@ -2,6 +2,7 @@
+ #pragma once
+ #include <cstdint>
+ #include <optional>
++#include <span>
+ 
+ #include <FEXCore/Core/CodeCache.h>
+ #include <FEXCore/IR/IR.h>
+@@ -49,9 +50,51 @@
+ class SyscallHandler;
+ class SourcecodeResolver;
+ 
++// Mapping snapshots are immutable for the whole compile/dispatch lease. The
++// owner must stop dispatch and clear ALL thread code caches before replacement.
++struct GuestMemoryRange {
++  uint64_t Guest;
++  uint64_t Host;
++  uint64_t Size;
++  uint32_t Permissions; // ELF R=4, W=2, X=1
++};
++
+ class SyscallHandler {
+ public:
+   virtual ~SyscallHandler() = default;
++  // Frontends pin ranges and set CPUState::GuestMemoryFaultRecord for the
++  // complete dispatch, then inspect the record before publishing CPU success.
++  virtual bool UsesGuestMemoryTranslation() const { return false; }
++  virtual std::span<const GuestMemoryRange> GuestMemoryRanges() const { return {}; }
++  // Fetch can cross noncontiguous host mappings, unlike a native operand.
++  virtual bool ReadGuestInstruction(uint64_t Address, void* Output, size_t Size) const {
++    if (!Output || !Size || Size > UINT64_MAX - Address) return false;
++    const auto Ranges = GuestMemoryRanges();
++    // Validate every byte before touching Output. A later hole or NX region
++    // must not publish a partial instruction, including across host mappings.
++    for (size_t i = 0; i < Size; ++i) {
++      bool Found = false;
++      for (const auto& R : Ranges) {
++        if ((R.Permissions & 5) != 5 || Address + i < R.Guest) continue;
++        const uint64_t Offset = Address + i - R.Guest;
++        if (Offset >= R.Size) continue;
++        if (!R.Host || Offset > UINT64_MAX - R.Host) return false;
++        Found = true;
++        break;
++      }
++      if (!Found) return false;
++    }
++    auto* Bytes = static_cast<uint8_t*>(Output);
++    for (size_t i = 0; i < Size; ++i) {
++      for (const auto& R : Ranges) {
++        if ((R.Permissions & 5) == 5 && Address + i >= R.Guest && Address + i - R.Guest < R.Size) {
++          Bytes[i] = *reinterpret_cast<const uint8_t*>(R.Host + (Address + i - R.Guest));
++          break;
++        }
++      }
++    }
++    return true;
++  }
+ 
+   virtual uint64_t HandleSyscall(FEXCore::Core::CpuStateFrame* Frame, FEXCore::HLE::SyscallArguments* Args) = 0;
+ 

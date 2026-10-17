@@ -50,6 +50,10 @@ private:
                      uint64_t entry);
     uint32_t blockers = 0;
     std::vector<Segment> regions;
+    // Own the complete reservation, including one inaccessible host page on
+    // either side. arena points past the leading guard; guest offsets retain
+    // their original relative layout for the restricted FEX backend.
+    void* reservation = nullptr;
     void* arena = nullptr;
     size_t arena_size = 0;
     uint64_t guest_base = 0, guest_entry = 0;
@@ -61,6 +65,8 @@ private:
 // No branches, stack operations, arbitrary memory accesses or syscalls.
 int validate_guest_program(const uint8_t* bytes, size_t length, uint32_t budget);
 }
+
+
 
 
 

@@ -13,6 +13,7 @@ int main() {
     assert(maxps4_jit_prepare() == -ENOTSUP);
     assert(maxps4_jit_launch_failed(99) == -ENOTSUP);
     assert(maxps4_jit_confirmation() == 0);
+    assert(maxps4_jit_script_failure() == 0);
     assert(maxps4_jit_mailbox_diagnostic() == 0);
     assert(maxps4_jit_state() == 0 && maxps4_jit_error() == 0);
     assert(maxps4_jit_failure_stage() == 0 && maxps4_jit_failure_mach() == 0);
@@ -21,3 +22,4 @@ int main() {
     assert(maxps4_jit_cancel() == 0);
     std::puts("PASS unsupported-host session ABI; no JIT publication or leases");
 }
+

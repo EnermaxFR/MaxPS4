@@ -16,6 +16,7 @@ int32_t maxps4_jit_launch_failed(uint64_t nonce);
 int32_t maxps4_jit_cancel(void);
 int32_t maxps4_jit_state(void); // 0 idle, 1 waiting, 2 ready, 3 failed
 int32_t maxps4_jit_error(void);
+int32_t maxps4_jit_script_failure(void); // confirmed status 0x100..0x1ff, or legacy 2; otherwise 0
 int32_t maxps4_jit_mailbox_diagnostic(void); // 0 idle, 1 absent, 2 stale, 3..4 rejected, 5 published
 int32_t maxps4_jit_failure_stage(void); // 0 unknown; 1..12 documented in Swift diagnostic
 int32_t maxps4_jit_failure_mach(void);
@@ -32,3 +33,4 @@ size_t maxps4_jit_usable_size(void *write, size_t size);
 #endif
 
 #pragma GCC visibility pop
+

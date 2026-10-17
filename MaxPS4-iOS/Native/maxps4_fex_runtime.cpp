@@ -1,7 +1,10 @@
 #include "maxps4_guest_frame.h"
+#include "maxps4_guest_dynamic_tls.h"
+#include "maxps4_orbis_m1.h"
 #include "maxps4_fex_runtime.h"
 #include "maxps4_guest_stack.h"
 #include "maxps4_orbis_v4_execution_gate.h"
+#include "maxps4_orbis_v4_synthetic_stage.h"
 #include <algorithm>
 #include <iterator>
 #include "maxps4_jit_memory.h"
@@ -32,7 +35,9 @@
 #include <unistd.h>
 #include <cerrno>
 #include <mutex>
+#include <memory>
 #include <new>
+#include <stdexcept>
 
 extern "C" int maxps4_native_guest_x86_run(const uint8_t*, size_t, uint32_t,
                                            uint64_t*) noexcept;
@@ -43,11 +48,18 @@ class ProbeAddressSpace final : public FEXCore::HLE::SyscallHandler {
 public:
     ProbeAddressSpace() { OSABI = FEXCore::HLE::SyscallOSABI::OS_GENERIC; }
     maxps4::GuestELF* image = nullptr;
+    maxps4::OrbisM1* m1 = nullptr;
     maxps4::PS4DynamicLinker* linker = nullptr;
     maxps4::PS4Libkernel* kernel = nullptr;
     maxps4::PS4GuestMemory* memory = nullptr;
     uint64_t private_stack = 0;
+    uint64_t guest_id = 1;
     size_t private_stack_size = 0;
+    // Private M1 storage is pinned by runtime_lock and the process lifetime.
+    // No mapping-mutating libkernel VM provider is exposed during dispatch.
+    std::vector<FEXCore::HLE::GuestMemoryRange> ranges;
+    bool UsesGuestMemoryTranslation() const override { return m1 && !m1->space.fex_direct(); }
+    std::span<const FEXCore::HLE::GuestMemoryRange> GuestMemoryRanges() const override { return ranges; }
     uint32_t calls = 0;
     int callback_error = 0;
     uint64_t HandleSyscall(FEXCore::Core::CpuStateFrame* frame, FEXCore::HLE::SyscallArguments*) override {
@@ -58,12 +70,18 @@ public:
         const uint64_t rsp = r[x86::REG_RSP];
         int64_t result = maxps4::ps4::kernel_error(maxps4::ps4::nosys);
         if (!image || !linker || !kernel || !memory || r[x86::REG_RAX] > UINT32_MAX ||
-            !linker->gate(*image,state.rip,static_cast<uint32_t>(r[x86::REG_RAX]),service)) {
+            !linker->gate(*image,m1 ? reinterpret_cast<uintptr_t>(image->translate(state.rip,2,5)) : state.rip,
+                static_cast<uint32_t>(r[x86::REG_RAX]),service)) {
             callback_error = -EPERM;
         } else if (rsp < private_stack || private_stack_size < 16 ||
                    rsp - private_stack > private_stack_size - 16 || (rsp & 7)) {
             callback_error = -EFAULT;
             result = maxps4::ps4::kernel_error(maxps4::ps4::fault);
+        } else if (m1) {
+            const maxps4::PS4KernelCall call{r[x86::REG_RDI],r[x86::REG_RSI],r[x86::REG_RDX],
+                r[x86::REG_R10],r[x86::REG_R8],r[x86::REG_R9],rsp};
+            result = kernel->invoke(service,call,guest_id);
+            ++calls;
         } else {
             // Never expose the rebased CPU RSP or CALL return pointer. Copy only
             // the seventh argument from the proven private CPU stack into a
@@ -90,6 +108,12 @@ public:
     }
     FEXCore::HLE::ExecutableRangeInfo QueryGuestExecutableRange(
         FEXCore::Core::InternalThreadState*, uint64_t address) override {
+        if (UsesGuestMemoryTranslation()) {
+            for (const auto& r : ranges)
+                if ((r.Permissions & 5) == 5 && address >= r.Guest && address-r.Guest < r.Size)
+                    return {r.Guest,r.Size,false};
+            return {0,0,false};
+        }
         if (image) for (const auto& segment : image->segments()) {
             if (!(segment.permissions & 1)) continue;
             // FEX receives rebased host addresses only for the restricted
@@ -105,7 +129,7 @@ public:
             if (executable_bytes != segment.file_size) continue;
             const auto* pointer = image->translate(segment.address, executable_bytes, 5);
             if (!pointer) continue;
-            const auto begin = reinterpret_cast<uintptr_t>(pointer);
+            const auto begin = m1 ? segment.address : reinterpret_cast<uintptr_t>(pointer);
             if (address >= begin && address - begin < executable_bytes) {
                 // Verify the exact requested instruction address in the PS4
                 // logical address domain, not only the segment's first byte.
@@ -125,8 +149,8 @@ public:
 };
 class Mapping final {
 public:
-    Mapping(size_t bytes, int protection) : size(bytes), address(
-        ::mmap(nullptr, bytes, protection, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)) {}
+    Mapping(size_t bytes, int protection, void* hint = nullptr) : size(bytes), address(
+        ::mmap(hint, bytes, protection, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)) {}
     ~Mapping() {
         if (address != MAP_FAILED && ::munmap(address, size) != 0) {
             std::fprintf(stderr, "FEX probe mapping cleanup failed: errno=%d\n", errno);
@@ -311,9 +335,18 @@ struct PM4Request {
     size_t* written;
 };
 int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
-    uint64_t* result, uint32_t* backend, const PM4Request* submission, bool linked = false, bool persistent_frame = false) {
+    uint64_t* result, uint32_t* backend, const PM4Request* submission, bool linked = false, bool persistent_frame = false,
+    maxps4::OrbisM1* m1 = nullptr, const maxps4::GuestThreadMemory* guest_thread = nullptr,
+    FEXCore::Core::InternalThreadState* scheduled = nullptr, uint64_t guest_id = 1,
+    maxps4::PS4Libkernel* shared_kernel = nullptr, bool* scheduled_consumed = nullptr) {
+    if (scheduled_consumed) *scheduled_consumed = false;
+    if (scheduled && !scheduled_consumed) return -EINVAL;
+    engine->cpu_report = {};
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
-    // FEX still uses rebased host addresses for the admitted instruction set.
+    const bool translated = m1 && !m1->space.fex_direct();
+    // Translated M1 requires a logical stack and the immutable snapshot below.
+    // Arbitrary ELF/PKG dispatch still passes its existing admission gate.
+    if (translated && !guest_thread) return -ENOTSUP;
     // Check the logical PS4 entry via the shared guest-memory contract before
     // giving FEX a host pointer. This is not general address-space translation.
     maxps4::PS4GuestMemory guest_memory(image);
@@ -325,7 +358,7 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     const size_t fetch_length = guest_memory.contiguous(image.entry(), entry_bytes.size(), 5);
     if (!fetch_length || !guest_memory.fetch(image.entry(), entry_bytes.data(), fetch_length))
         return -EFAULT;
-    const auto* entry_pointer = image.entry_pointer();
+    const auto* entry_pointer = m1 ? m1->space.translate(image.entry(),1,5) : image.entry_pointer();
     if (!entry_pointer) return -EFAULT;
     const long host_page = ::sysconf(_SC_PAGESIZE);
     if (host_page <= 0) return -EIO;
@@ -340,37 +373,63 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     if (::mprotect(stack_base, page, PROT_READ | PROT_WRITE) != 0 ||
         ::mprotect(callret_base, callret_size, PROT_READ | PROT_WRITE) != 0) return -errno;
     std::array<FEXCore::Core::CPUState::gdt_segment, 32> gdt {};
+    maxps4::GuestELF empty_image;
+    maxps4::PS4GuestMemory m1_memory(empty_image,m1 ? &m1->space : nullptr);
+    maxps4::PS4Libkernel m1_kernel(m1_memory);
+    engine->probe.ranges.clear();
+    if (translated) for (const auto& r : m1->space.regions()) {
+        if (!r.permissions) continue;
+        const auto* host = m1->space.translate(r.address,r.size,r.permissions);
+        if (!host) return -EFAULT;
+        engine->probe.ranges.push_back({r.address,reinterpret_cast<uintptr_t>(host),r.size,r.permissions});
+    }
     engine->probe.image = &image;
-    engine->probe.linker = linked ? &engine->linker : nullptr;
-    engine->probe.kernel = linked ? &engine->libkernel : nullptr;
-    engine->probe.memory = linked ? &engine->system_memory : nullptr;
-    engine->probe.private_stack = reinterpret_cast<uintptr_t>(stack_base);
-    engine->probe.private_stack_size = page;
+    engine->probe.m1 = m1;
+    engine->probe.linker = m1 ? &m1->linker : linked ? &engine->linker : nullptr;
+    engine->probe.kernel = m1 ? (shared_kernel ? shared_kernel : &m1_kernel) : linked ? &engine->libkernel : nullptr;
+    engine->probe.guest_id = guest_id;
+    engine->probe.memory = m1 ? &m1_memory : linked ? &engine->system_memory : nullptr;
+    engine->probe.private_stack = guest_thread ? guest_thread->stack_begin : reinterpret_cast<uintptr_t>(stack_base);
+    engine->probe.private_stack_size = guest_thread ? guest_thread->stack_size : page;
     engine->probe.calls = 0;
     engine->probe.callback_error = 0;
     struct ClearRange {
         ProbeAddressSpace& space;
         ~ClearRange() {
-            space.image = nullptr; space.linker = nullptr; space.kernel = nullptr;
+            space.ranges.clear();
+            space.m1 = nullptr; space.image = nullptr; space.linker = nullptr; space.kernel = nullptr;
             space.memory = nullptr; space.private_stack = 0; space.private_stack_size = 0;
+            space.guest_id = 1;
         }
     } clear_range {engine->probe};
-    engine->cpu_report = {};
     uint64_t initial_rsp = 0;
-    const uint64_t initial_rip = reinterpret_cast<uintptr_t>(entry_pointer);
+    const uint64_t initial_rip = m1 ? image.entry() : reinterpret_cast<uintptr_t>(entry_pointer);
     const int stack_status = maxps4::initialize_guest_stack(stack_base, page, initial_rip, page, initial_rsp);
     if (stack_status) return stack_status;
-    auto* thread = engine->context->CreateThread(initial_rip, initial_rsp);
+    if (guest_thread) initial_rsp = guest_thread->rsp;
+    auto* thread = scheduled ? scheduled : engine->context->CreateThread(initial_rip, initial_rsp);
     if (!thread) return -ENOMEM;
     struct DestroyThread {
         FEXCore::Context::Context* context;
         FEXCore::Core::InternalThreadState* thread;
-        ~DestroyThread() { context->DestroyThread(thread); }
-    } destroy {engine->context.get(), thread};
+        bool translated;
+        ~DestroyThread() {
+            if (!thread) return;
+            // Discard embedded host pointers BEFORE mappings/permissions change.
+            // Other scheduled contexts have not dispatched yet; no stale cache
+            // survives this invocation in the shared L3 or the current thread.
+            if (translated) context->ClearCodeCache(thread,false);
+            context->DestroyThread(thread);
+        }
+    } destroy {engine->context.get(), thread, translated};
+    if (scheduled_consumed) *scheduled_consumed = true;
     auto& state = thread->CurrentFrame->State;
+    // Set the complete integer register entry contract explicitly on every run.
+    // Preserve FEX-owned flags, segment and dispatcher frame initialization.
     std::fill(std::begin(state.gregs), std::end(state.gregs), uint64_t{});
     state.gregs[FEXCore::X86State::REG_RSP] = initial_rsp;
     state.rip = initial_rip;
+    if (guest_thread) state.fs_cached = guest_thread->fs_base;
     auto& observed = engine->cpu_report;
     observed.entry = image.entry();
     observed.rsp_alignment = state.gregs[FEXCore::X86State::REG_RSP] & 15;
@@ -379,7 +438,9 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     for (size_t i = 0; i < std::size(state.gregs); ++i)
         if (i != FEXCore::X86State::REG_RSP && state.gregs[i]) observed.zero_integer_registers = 0;
     uint64_t stack_words[9]{};
-    std::memcpy(stack_words, reinterpret_cast<const void*>(initial_rsp), sizeof(stack_words));
+    if (m1) {
+        if (m1->space.read(initial_rsp,stack_words,sizeof(stack_words))) return -EFAULT;
+    } else std::memcpy(stack_words, reinterpret_cast<const void*>(initial_rsp), sizeof(stack_words));
     observed.argc = stack_words[0];
     observed.argv_env_null = stack_words[1] == 0 && stack_words[2] == 0;
     observed.page_size = stack_words[4];
@@ -401,7 +462,26 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     // without allocating another iOS JIT buffer. All engine execution is locked.
     if (!persistent_frame || !engine->frame_code_cached) engine->context->ClearCodeCache(thread, false);
     engine->frame_code_cached = persistent_frame;
-    engine->context->ExecuteThread(thread);
+    FEXCore::Core::GuestMemoryFaultData fault {};
+    state.GuestMemoryFaultRecord = &fault;
+    struct ClearFaultRecord {
+        FEXCore::Core::CPUState& state;
+        ~ClearFaultRecord() { state.GuestMemoryFaultRecord = nullptr; }
+    } clear_fault_record {state};
+    try {
+        // Reject unsupported entry-block IR on the C++ stack, before entering
+        // native dispatcher frames that cannot unwind C++ exceptions safely.
+        if (translated) engine->context->CompileRIP(thread,initial_rip);
+        engine->context->ExecuteThread(thread);
+    } catch (const std::runtime_error& error) {
+        std::fprintf(stderr,"FEX translated compilation rejected: %.160s\n",error.what());
+        return -ENOTSUP;
+    }
+    if (fault.Bytes) {
+        std::fprintf(stderr,"M2 checked operand rejected: guest=0x%llx bytes=%u permissions=%u; dispatch stopped\n",
+            static_cast<unsigned long long>(fault.Address),fault.Bytes,fault.Permissions);
+        return -EFAULT;
+    }
     if (engine->probe.callback_error) return engine->probe.callback_error;
     if (submission) {
         const auto snapshot = maxps4::gpu::snapshotPM4(image, submission->address, submission->count);
@@ -455,7 +535,7 @@ extern "C" int32_t maxps4_fex_engine_stage_ps4(maxps4_fex_engine* engine,
     std::lock_guard lock(runtime_lock);
     engine->libkernel.reset();
     engine->linker.reset();
-    engine->staged_ps4.clear();
+    engine->staged_ps4.clear(); engine->cpu_report = {};
     engine->orbis_admitted = false; engine->frame = {}; engine->frame_sequence = 0; engine->frame_code_cached = false;
     if (!entry || !segments || !blockers) return -EINVAL;
     const int error = engine->staged_ps4.stage_ps4(file, length);
@@ -476,7 +556,7 @@ extern "C" int32_t maxps4_fex_engine_link_ps4(maxps4_fex_engine* engine,
     engine->libkernel.reset();
     engine->dynamic_ps4.reset();
     engine->linker.reset();
-    engine->staged_ps4.clear();
+    engine->staged_ps4.clear(); engine->cpu_report = {};
     engine->orbis_admitted = false; engine->frame = {}; engine->frame_sequence = 0; engine->frame_code_cached = false;
     if (!entry || !imports) return -EINVAL;
     const int error = engine->linker.load(engine->staged_ps4,file,length,budget);
@@ -509,7 +589,7 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis(maxps4_fex_engine* engine,
     if (!engine) return -EINVAL;
     std::lock_guard lock(runtime_lock);
     engine->libkernel.reset(); engine->dynamic_ps4.reset(); engine->linker.reset();
-    engine->staged_ps4.clear(); engine->orbis_admitted = false; engine->frame = {}; engine->frame_sequence = 0; engine->frame_code_cached = false;
+    engine->staged_ps4.clear(); engine->cpu_report = {}; engine->orbis_admitted = false; engine->frame = {}; engine->frame_sequence = 0; engine->frame_code_cached = false;
     auto message = [&](const std::string& text) {
         if (diagnostic && capacity) std::snprintf(diagnostic,capacity,"%s",text.c_str());
     };
@@ -577,6 +657,264 @@ extern "C" int32_t maxps4_fex_engine_step_frame(maxps4_fex_engine* engine,
     } catch (const std::bad_alloc&) {
         engine->orbis_admitted = false; engine->frame = {}; return -ENOMEM;
     }
+}
+extern "C" int32_t maxps4_fex_engine_v4_synthetic(maxps4_fex_engine* engine,
+    uint32_t instruction_budget, maxps4_v4_synthetic_report* report) {
+    if (!report) return -EINVAL;
+    *report = {};
+    auto fail = [&](int status, uint32_t reason) {
+        report->status = status; report->stop_reason = reason; return status;
+    };
+    if (!engine || instruction_budget < 2 || instruction_budget > 16)
+        return fail(-EINVAL,MAXPS4_V4_INVALID_REQUEST);
+    std::lock_guard lock(runtime_lock);
+    if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED)
+        return fail(-EAGAIN,MAXPS4_V4_NOT_INITIALIZED);
+    // Local ownership guarantees cleanup on every return and sequential retry.
+    // Do not mutate stable V3 image, probe callbacks or FEX code caches.
+    maxps4::GuestAddressSpace memory;
+    const size_t page = memory.page_size();
+    constexpr uint64_t entry = 0x300000000ULL;
+    constexpr uint8_t code[] = {0xb8,42,0,0,0,0xf4};
+    try {
+        const int staged = maxps4::stage_v4_synthetic_image(memory,entry,code,
+            sizeof(code),entry+page,page);
+        if (staged) return fail(staged,MAXPS4_V4_STAGING_FAILED);
+        report->code_rx = memory.translate(entry,sizeof(code),5) &&
+            !memory.translate(entry,1,2);
+        report->stack_rw_nx = memory.translate(entry+page,page,6) &&
+            !memory.translate(entry+page,1,1);
+        maxps4::OrbisV4ExecutionGate gate(memory);
+        const uint8_t *executable = nullptr, *stack = nullptr;
+        const int admitted = gate.preflight(entry,entry+page,page,executable,stack);
+        // No safe translated-memory FEX dispatcher exists in the pinned core.
+        // Even an unexpected admission must never be reported as CPU success.
+        return fail(admitted ? admitted : -ENOTSUP,MAXPS4_V4_TRANSLATION_REQUIRED);
+    } catch (const std::bad_alloc&) {
+        return fail(-ENOMEM,MAXPS4_V4_STAGING_FAILED);
+    }
+}
+extern "C" int32_t maxps4_fex_test_m2_low_va(maxps4_m2_low_va_report* report) {
+    if (!report) return -EINVAL;
+    *report = {};
+    report->boundary_status = report->initialize_status = report->execute_status = -ECANCELED;
+    report->scalar_status = report->scalar_execute_status = report->scalar_verify_status = -ECANCELED;
+    report->scalar_rejection_status = -ECANCELED;
+    report->scalar_expected = 11;
+    maxps4_fex_engine* engine = nullptr;
+    int status = maxps4_fex_engine_open(&engine);
+    if (status) return report->status = status;
+    report->initialize_status = maxps4_fex_engine_initialize(engine);
+    status = report->initialize_status;
+    if (!status) {
+        std::lock_guard lock(runtime_lock);
+        try {
+            status = [&]() -> int {
+                maxps4::OrbisM1 process(maxps4::GuestAddressSpace::Backend::translated);
+                const size_t page = process.space.page_size();
+                if (!page) return -ENOTSUP;
+                // A real occupied host mapping is also used as a guest logical
+                // operand. Translation must leave this host marker untouched.
+                // Linux ARM64 may allocate anonymous storage above 47 bits.
+                // A non-fixed hint keeps the collision operand in the PS4 VA
+                // domain without overwriting any occupied host reservation.
+                Mapping occupied(3*page,PROT_READ|PROT_WRITE,reinterpret_cast<void*>(0x800000000ULL));
+                if (occupied.address == MAP_FAILED) return -errno;
+                auto* marker = static_cast<uint8_t*>(occupied.address)+page;
+                const uint64_t sentinel = 0x13579bdf2468ace0ULL;
+                std::memcpy(marker,&sentinel,8);
+                const uint64_t data = reinterpret_cast<uintptr_t>(marker);
+                constexpr uint64_t entry = 0x400000;
+                maxps4_ps4_synthetic::Program code;
+                code.reg(3,data);
+                code.bytes({0xb8,21,0,0,0,0x48,0x89,0x03});
+                code.bytes({0xf0,0x48,0x0f,0xc1,0x03,0x48,0x8b,0x03,0x50,0x58});
+                // Preserve RAX=42 while loading/updating private static TLS.
+                code.bytes({0x64,0x48,0x8b,0x0c,0x25,0xf0,0xff,0xff,0xff});
+                code.bytes({0x48,0x83,0xc1,1});
+                code.bytes({0x64,0x48,0x89,0x0c,0x25,0xf0,0xff,0xff,0xff,0xf4});
+                std::vector<uint8_t> file(256+code.code.size());
+                std::memcpy(file.data(),"\177ELF\2\1\1\11",8);
+                auto put = [&](uint64_t value,size_t at,size_t width=8) {
+                    maxps4_ps4_synthetic::put(file,value,at,width);
+                };
+                put(0xfe00,16,2); put(62,18,2); put(1,20,4); put(entry,24);
+                put(64,32); put(64,52,2); put(56,54,2); put(1,56,2);
+                put(1,64,4); put(5,68,4); put(256,72); put(entry,80);
+                put(code.code.size(),96); put(page,104); put(1,112);
+                std::memcpy(file.data()+256,code.code.data(),code.code.size());
+                int error = process.source.stage_ps4(file.data(),file.size());
+                if (error) return error;
+                if ((error=process.space.reserve(entry,page)) ||
+                    (error=process.space.map(entry,page,5,code.code.data(),code.code.size())) ||
+                    (error=process.space.reserve(data,page)) ||
+                    (error=process.space.map(data,page,6))) return error;
+                process.entry = entry;
+                process.tls.memory_size = process.tls.block_size = 16;
+                process.tls.initial = {7,0,0,0,0,0,0,0};
+                maxps4::GuestThreadMemory thread(process.space);
+                error = thread.initialize(process.tls,0x800000,entry);
+                if (error) return error;
+                report->entry = entry; report->rsp = thread.rsp;
+                report->code_rx = process.space.translate(entry,1,5) && !process.space.translate(entry,1,2);
+                report->stack_rw_nx = process.space.translate(thread.stack_begin,thread.stack_size,6) &&
+                    !process.space.translate(thread.stack_begin,1,1);
+                // Only the constant fixture above bypasses general ELF admission.
+                report->execute_status = executeImage(engine,process.source,&report->rax,&report->backend,
+                    nullptr,false,false,&process,&thread);
+                if (report->execute_status) return report->execute_status;
+                if ((error=process.space.read(data,&report->memory,8)) ||
+                    (error=process.space.read(thread.tls_begin,&report->tls,8))) return error;
+                uint64_t observed = 0; std::memcpy(&observed,marker,8);
+                report->collision_preserved = observed == sentinel;
+                if (report->rax != 42 || report->memory != 42 || report->tls != 8 ||
+                    !report->collision_preserved || !report->code_rx || !report->stack_rw_nx) return -EIO;
+                // Bounded scalar successes and negative fixtures. Each invocation
+                // retires its JIT cache before RX or permission mutations.
+                // No signal recovery, software atomic fallback or BRK is used.
+                report->boundary_status = [&]() -> int {
+                    const std::vector<uint8_t> sentinels(page,0x59);
+                    std::vector<uint8_t> check(page);
+                    const std::vector<std::vector<uint8_t>> operations={
+                        {0xf3,0x0f,0x6f,0x03}, {0xf3,0x0f,0x7f,0x03},
+                        {0xf0,0x48,0x0f,0xc1,0x03}, {0xf0,0x48,0x0f,0xb1,0x0b}};
+                    for (int boundary=0; boundary<4; ++boundary) {
+                        if ((error=process.space.release(data)) ||
+                            (error=process.space.reserve(data,2*page)) ||
+                            (error=process.space.map(data,page,6,sentinels.data(),page))) return error;
+                        // 0=hole, 1=RW, 2=R, 3=PROT_NONE.
+                        const uint32_t permission=boundary==2 ? 4 : boundary==3 ? 0 : 6;
+                        if (boundary && ((error=process.space.map(data+page,page,6,sentinels.data(),page)) ||
+                            (error=process.space.protect(data+page,page,permission)))) return error;
+                        if (boundary==1) {
+                            report->scalar_status = [&]() -> int {
+                                for (unsigned width : {2U,4U,8U}) for (unsigned split=1;split<width;++split) {
+                                    report->scalar_width=width; report->scalar_split=split;
+                                    report->scalar_execute_status=report->scalar_verify_status=-ECANCELED;
+                                    if ((error=process.space.write(data,sentinels.data(),page)) ||
+                                        (error=process.space.write(data+page,sentinels.data(),page))) return error;
+                                    maxps4_ps4_synthetic::Program scalar;
+                                    scalar.reg(3,data+page-split);
+                                    scalar.bytes({0xb8,42,0,0,0,0x31,0xc9,0x39,0xc9});
+                                    if (width==2) scalar.bytes({0x66});
+                                    if (width==8) scalar.bytes({0x48});
+                                    scalar.bytes({0x89,0x03});
+                                    if (width==2) scalar.bytes({0x66});
+                                    if (width==8) scalar.bytes({0x48});
+                                    scalar.bytes({0x8b,0x03,0x0f,0x95,0xc1,0x0f,0xb6,0xc9,
+                                                  0x48,0xc1,0xe1,32,0x48,0x09,0xc8,0xf4});
+                                    if ((error=process.space.release(entry)) ||
+                                        (error=process.space.reserve(entry,page)) ||
+                                        (error=process.space.map(entry,page,5,scalar.code.data(),scalar.code.size()))) return error;
+                                    uint64_t result=0; uint32_t backend=0;
+                                    ++report->scalar_executed;
+                                    report->scalar_execute_status=executeImage(engine,process.source,&result,&backend,
+                                            nullptr,false,false,&process,&thread);
+                                    if (report->scalar_execute_status) return report->scalar_execute_status;
+                                    report->scalar_verify_status=-EIO;
+                                    if (result!=42 || backend!=report->backend) return -EIO;
+                                    std::vector<uint8_t> expected(2*page,0x59), actual(2*page);
+                                    for(unsigned i=0;i<width;++i) expected[page-split+i]=i?0:42;
+                                    if ((error=process.space.read(data,actual.data(),actual.size()))) return error;
+                                    if (actual!=expected) return -EIO;
+                                    report->scalar_verify_status=0;
+                                    ++report->scalar_passed;
+                                }
+                                return report->scalar_executed==report->scalar_expected &&
+                                    report->scalar_passed==report->scalar_expected ? 0 : -EIO;
+                            }();
+                            if (report->scalar_status) return report->scalar_status;
+                            if ((error=process.space.write(data,sentinels.data(),page)) ||
+                                (error=process.space.write(data+page,sentinels.data(),page))) return error;
+                        }
+                        // Check every scalar cut against holes and permissions,
+                        // including all bytes on both sides after rejected stores.
+                        // Read-only second pages permit loads, so reject stores only.
+                        if (boundary!=1) {
+                            report->scalar_rejection_status = [&]() -> int {
+                                for (unsigned width : {2U,4U,8U}) for (unsigned split=1;split<width;++split)
+                                for (bool store : {false,true}) {
+                                    if (!store && boundary==2) continue;
+                                    maxps4_ps4_synthetic::Program negative;
+                                    negative.reg(3,data+page-split);
+                                    negative.bytes({0xb8,42,0,0,0});
+                                    if (width==2) negative.bytes({0x66});
+                                    if (width==8) negative.bytes({0x48});
+                                    negative.bytes({static_cast<uint8_t>(store ? 0x89 : 0x8b),0x03,0xf4});
+                                    if ((error=process.space.release(entry)) ||
+                                        (error=process.space.reserve(entry,page)) ||
+                                        (error=process.space.map(entry,page,5,negative.code.data(),negative.code.size()))) return error;
+                                    uint64_t result=0xfeed; uint32_t backend=0;
+                                    const int rejected=executeImage(engine,process.source,&result,&backend,
+                                        nullptr,false,false,&process,&thread);
+                                    if (rejected!=-EFAULT || result!=0xfeed || backend) return -EIO;
+                                    if ((error=process.space.read(data,check.data(),page))) return error;
+                                    if (check!=sentinels) return -EIO;
+                                    if (boundary) {
+                                        if ((error=process.space.protect(data+page,page,4)) ||
+                                            (error=process.space.read(data+page,check.data(),page))) return error;
+                                        if (check!=sentinels) return -EIO;
+                                        if ((error=process.space.protect(data+page,page,permission))) return error;
+                                    }
+                                    std::memcpy(&observed,marker,8);
+                                    if (observed!=sentinel) return -EIO;
+                                    ++report->scalar_rejection_cases;
+                                }
+                                return 0;
+                            }();
+                            if (report->scalar_rejection_status) return report->scalar_rejection_status;
+                        }
+                        for (const auto& operation : operations) {
+                            maxps4_ps4_synthetic::Program negative;
+                            negative.reg(3,data+page-4);
+                            negative.bytes({0xb8,21,0,0,0,0xb9,42,0,0,0});
+                            negative.code.insert(negative.code.end(),operation.begin(),operation.end());
+                            negative.bytes({0xf4});
+                            if ((error=process.space.release(entry)) ||
+                                (error=process.space.reserve(entry,page)) ||
+                                (error=process.space.map(entry,page,5,negative.code.data(),negative.code.size()))) return error;
+                            uint64_t ignored=0xfeed;
+                            uint32_t ignored_backend=0;
+                            const int rejected=executeImage(engine,process.source,&ignored,&ignored_backend,
+                                nullptr,false,false,&process,&thread);
+                            // Failed dispatch must not publish a CPU result.
+                            if (rejected!=-EFAULT || ignored!=0xfeed || ignored_backend) return -EIO;
+                            if ((error=process.space.read(data,check.data(),page))) return error;
+                            if (check!=sentinels) return -EIO;
+                            if (boundary) {
+                                if ((error=process.space.protect(data+page,page,4)) ||
+                                    (error=process.space.read(data+page,check.data(),page))) return error;
+                                if (check!=sentinels) return -EIO;
+                                if ((error=process.space.protect(data+page,page,permission))) return error;
+                            }
+                            std::memcpy(&observed,marker,8);
+                            if (observed!=sentinel) return -EIO;
+                            ++report->boundary_cases;
+                        }
+                    }
+                    if (report->scalar_rejection_cases!=55) return -EIO;
+                    report->scalar_rejection_preserved=1;
+                    report->boundary_preserved=1;
+                    return 0;
+                }();
+                return report->boundary_status;
+            }();
+            // All fixture mappings and CPU caches have been retired before this.
+            report->cleanup = engine->probe.m1 == nullptr && engine->probe.ranges.empty();
+        } catch (const std::bad_alloc&) { status = -ENOMEM; }
+          catch (...) { status = -EIO; }
+    }
+    maxps4_fex_engine_close(engine);
+    report->status = status;
+    std::fprintf(stderr,"M2 low-VA diagnostic: status=%d backend=%u entry=0x%llx rax=%llu memory=%llu tls=%llu collision=%u cleanup=%u boundaries=%u boundary_status=%d preserved=%u\n",
+        status,report->backend,static_cast<unsigned long long>(report->entry),
+        static_cast<unsigned long long>(report->rax),static_cast<unsigned long long>(report->memory),
+        static_cast<unsigned long long>(report->tls),report->collision_preserved,report->cleanup,report->boundary_cases,report->boundary_status,report->boundary_preserved);
+    std::fprintf(stderr,"M2 scalar cross-mapping: executed=%u passed=%u expected=%u status=%d execute=%d verify=%d width=%u split=%u; scalar refusals=%u/55 status=%d preserved=%u\n",
+        report->scalar_executed,report->scalar_passed,report->scalar_expected,report->scalar_status,
+        report->scalar_execute_status,report->scalar_verify_status,report->scalar_width,report->scalar_split,
+        report->scalar_rejection_cases,report->scalar_rejection_status,report->scalar_rejection_preserved);
+    return status;
 }
 extern "C" int32_t maxps4_fex_engine_v4_preflight(maxps4_fex_engine* engine,
     uint64_t entry, uint64_t stack, size_t stack_bytes) {
@@ -669,7 +1007,7 @@ extern "C" int32_t maxps4_fex_test_ps4_libkernel(maxps4_ps4_elf_test_report* rep
             engine->libkernel.reset();
             engine->dynamic_ps4.reset();
             engine->linker.reset();
-            engine->staged_ps4.clear();
+            engine->staged_ps4.clear(); engine->cpu_report = {};
             engine->orbis_admitted = false; engine->frame = {}; engine->frame_sequence = 0; engine->frame_code_cached = false;
             report->guest_segments_after = static_cast<uint32_t>(engine->staged_ps4.segments().size());
         }
@@ -798,5 +1136,175 @@ extern "C" int32_t maxps4_fex_engine_interpret_elf(maxps4_fex_engine* engine,
         return status;
     } catch (const std::bad_alloc&) { return -ENOMEM; }
 }
+
+extern "C" int32_t maxps4_fex_engine_run_m1_threads(maxps4_fex_engine* engine,
+    const uint8_t* file, size_t length, uint32_t budget, uint64_t snapshot,
+    const maxps4_m1_tls_input* inputs, size_t module_count, size_t thread_count,
+    maxps4_m1_thread_report* reports, size_t report_count) {
+    if (!reports || !report_count || report_count > 4) return -EINVAL;
+    std::fill(reports,reports+report_count,maxps4_m1_thread_report{});
+    if (!engine || !file || !length || !inputs || !module_count || module_count > 16 ||
+        !thread_count || thread_count > 4 || report_count != thread_count ||
+        snapshot > UINT64_MAX-0x108) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
+    try {
+        maxps4::OrbisM1 process(maxps4::GuestAddressSpace::Backend::translated);
+        int status = process.load(file,length,budget);
+        if (status) return status;
+        auto mapping_error = [&](const char* phase, uint64_t id, int error) {
+            const auto failure = process.space.reservation_failure();
+            std::fprintf(stderr,
+                "M1 %s thread=%llu error=%d guest=0x%llx guard_bytes=%zu host_status=%d reservation_error=%d\n",
+                phase, static_cast<unsigned long long>(id), error,
+                static_cast<unsigned long long>(failure.guest), failure.bytes,
+                failure.host_status, failure.error);
+            return error;
+        };
+        if (process.tls.memory_size != 16 || process.tls.block_size != 16 ||
+            process.tls.initial.size() != 8) return -ENOTSUP;
+        if (!process.space.translate(snapshot,0x108,6)) return -EFAULT;
+        maxps4::GuestTLSModules modules;
+        std::vector<uint64_t> ids;
+        for (size_t i=0;i<module_count;++i) {
+            maxps4::PS4ExecutableImage image;
+            status = image.load(inputs[i].bytes,inputs[i].size);
+            if (status) return status;
+            if (image.isSelf) return -ENOTSUP;
+            for (const auto& h : image.headers) if (h.type == 2) return -ENOTSUP;
+            uint64_t id = 0;
+            status = modules.add(image,id);
+            if (status) return status;
+            // This finite fixture ABI snapshots an initialized word and a
+            // zero word; templates with another layout need another harness.
+            const auto* tls = modules.find(id);
+            if (tls->memory_size < 16 || tls->initial.size() != 8) return -ENOTSUP;
+            ids.push_back(id);
+        }
+        maxps4::GuestELF empty;
+        maxps4::PS4GuestMemory memory(empty,&process.space);
+        maxps4::PS4Libkernel kernel(memory);
+        const maxps4::PS4KernelCall mutex_call{snapshot+0x100,0,0,0,0,0,0};
+        if (kernel.invoke(maxps4::PS4KernelService::mutex_init,mutex_call,1)) return -EFAULT;
+        struct Job {
+            std::unique_ptr<maxps4::GuestThreadMemory> memory;
+            std::unique_ptr<maxps4::GuestDynamicTLS> tls;
+            FEXCore::Core::InternalThreadState* cpu = nullptr;
+            std::vector<maxps4::GuestAddressSpace::Region> payloads;
+            uint64_t id = 0;
+        };
+        std::vector<Job> jobs(thread_count);
+        struct Cleanup {
+            FEXCore::Context::Context* context;
+            std::vector<Job>& jobs;
+            ~Cleanup() { for (auto& job : jobs) if (job.cpu) context->DestroyThread(job.cpu); }
+        } cleanup{engine->context.get(),jobs};
+        // Create every ready context and private mapping before any CPU runs.
+        for (size_t i=0;i<thread_count;++i) {
+            auto& job = jobs[i];
+            job.id = i ? kernel.threads().attach() : 1;
+            if (!job.id) return -E2BIG;
+            const uint64_t base = maxps4::OrbisM1::thread_base+i*0x4000000ULL;
+            job.memory = std::make_unique<maxps4::GuestThreadMemory>(process.space);
+            status = job.memory->initialize(process.tls,base,process.entry);
+            if (status) return mapping_error("stack/static-TLS",job.id,status);
+            job.tls = std::make_unique<maxps4::GuestDynamicTLS>(process.space,modules,base+0x1000000);
+            for (auto id : ids) {
+                uint64_t address = 0;
+                status = job.tls->resolve(id,0,modules.find(id)->memory_size,address);
+                if (status) return mapping_error("dynamic-TLS",job.id,status);
+                job.payloads.push_back({address,modules.find(id)->memory_size,6});
+            }
+            status = process.admit(*job.memory,budget,job.payloads);
+            if (status) return status;
+            job.cpu = engine->context->CreateThread(process.entry,job.memory->rsp);
+            if (!job.cpu) return -ENOMEM;
+        }
+        std::vector<maxps4_m1_thread_report> completed(thread_count);
+        for (size_t i=0;i<thread_count;++i) {
+            auto& job = jobs[i];
+            auto& report = completed[i];
+            const uint64_t sentinel = 0xdeadbeef;
+            for (uint64_t address : {snapshot+16,snapshot+0x80,snapshot+0x88}) {
+                status = process.space.write(address,&sentinel,8);
+                if (status) return status;
+            }
+            bool consumed = false;
+            try {
+                status = executeImage(engine,process.source,&report.cpu.rax,&report.cpu.backend,
+                    nullptr,false,false,&process,job.memory.get(),job.cpu,job.id,&kernel,&consumed);
+            } catch (...) {
+                if (consumed) job.cpu = nullptr;
+                throw;
+            }
+            // executeImage joins/destroys an owned CPU context while its GDT and
+            // private call/return mapping are still alive. Cleanup owns contexts
+            // rejected before that ownership transfer.
+            if (consumed) job.cpu = nullptr;
+            if (status) return status;
+            auto& cpu = report.cpu;
+            cpu.entry = process.entry; cpu.rsp = job.memory->rsp; cpu.fs_base = job.memory->fs_base;
+            cpu.calls = engine->probe.calls;
+            const std::pair<uint64_t,uint64_t*> reads[] = {
+                {snapshot,&cpu.memory}, {snapshot+8,&cpu.kernel_return},
+                {snapshot+16,&cpu.zero_memory}, {maxps4::OrbisM1::heap_base,&cpu.heap_word},
+                {job.memory->tls_begin,&cpu.tls_word}, {snapshot+0x80,&report.lock_result},
+                {snapshot+0x88,&report.unlock_result}
+            };
+            for (const auto& read : reads) {
+                status = process.space.read(read.first,read.second,8);
+                if (status) return status;
+            }
+            for (size_t j=0;j<module_count;++j) {
+                status = process.space.read(job.payloads[j].address,&report.modules[j],8);
+                if (status) return status;
+                status = process.space.read(job.payloads[j].address+8,&report.zeros[j],8);
+                if (status) return status;
+            }
+            report.id = job.id; report.joined = 1;
+            if (job.id != 1 && kernel.threads().detach(job.id) != maxps4::ps4::ok) return -EBUSY;
+        }
+        std::copy(completed.begin(),completed.end(),reports);
+        return 0;
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
+      catch (...) { return -EIO; }
+}
+
+extern "C" int32_t maxps4_fex_engine_run_m1(maxps4_fex_engine* engine,
+    const uint8_t* file, size_t length, uint32_t budget, uint64_t snapshot,
+    maxps4_m1_report* report) {
+    if (!report) return -EINVAL;
+    *report = {};
+    if (!engine || !file || !length) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
+    try {
+        maxps4::OrbisM1 process(maxps4::GuestAddressSpace::Backend::translated);
+        int status = process.load(file,length,budget);
+        if (status) { std::fprintf(stderr,"M1 image mapping failed: %d\n",status); return status; }
+        maxps4::GuestThreadMemory thread(process.space);
+        status = thread.initialize(process.tls,maxps4::OrbisM1::thread_base,process.entry);
+        if (status) { std::fprintf(stderr,"M1 thread/TLS mapping failed: %d\n",status); return status; }
+        status = process.admit(thread,budget);
+        if (status) return status;
+        const auto* output = process.space.translate(snapshot,24,4);
+        if (!output) return -EFAULT;
+        uint64_t rax = 0; uint32_t backend = 0;
+        status = executeImage(engine,process.source,&rax,&backend,nullptr,false,false,&process,&thread);
+        if (status) return status;
+        report->rax = rax; report->backend = backend; report->entry = process.entry;
+        report->rsp = thread.rsp; report->fs_base = thread.fs_base;
+        report->calls = engine->probe.calls;
+        std::memcpy(&report->memory,output,8);
+        std::memcpy(&report->kernel_return,output+8,8);
+        std::memcpy(&report->zero_memory,output+16,8);
+        std::memcpy(&report->heap_word,process.space.translate(maxps4::OrbisM1::heap_base,8,4),8);
+        if (thread.tls_begin && process.tls.memory_size >= 8)
+            std::memcpy(&report->tls_word,process.space.translate(thread.tls_begin,8,4),8);
+        return 0;
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
+}
+
+
 
 

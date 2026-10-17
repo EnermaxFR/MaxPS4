@@ -4,6 +4,7 @@
 #include <cassert>
 #include <algorithm>
 #include <cstdio>
+#include <string>
 
 #include "PS4ExecutableFixture.h"
 int main() {
@@ -53,6 +54,19 @@ int main() {
     reject(elf, 72, UINT64_MAX, 8); reject(elf, 112, 3, 8);
     for (size_t length = 0; length < 272; ++length)
         assert(image.load(self.data(), length) != 0 && image.segments.empty());
+    // Identical errno, distinct stage; no stale state from an earlier success.
+    const auto stagedReject = [&](std::vector<uint8_t> bad, const char* stage, int status) {
+        assert(image.load(elf.data(),elf.size()) == 0);
+        assert(image.load(bad.data(),bad.size()) == status);
+        assert(std::string(image.stage) == stage && image.entry == 0 && image.segments.empty() && image.headers.empty());
+    };
+    auto bad = elf; std::memcpy(bad.data(),"\177CNT",4);
+    stagedReject(bad,"ELF.CONTAINER",-ENOEXEC);
+    bad = elf; guest_test::put(bad,183,18,2); stagedReject(bad,"ELF.IDENTITY",-ENOEXEC);
+    bad = elf; guest_test::put(bad,2,16,2); stagedReject(bad,"ELF.TYPE",-ENOEXEC);
+    bad = elf; guest_test::put(bad,UINT64_MAX,32,8); stagedReject(bad,"ELF.PROGRAM_TABLE",-ENOEXEC);
+    bad = elf; guest_test::put(bad,0x10000,24,8); stagedReject(bad,"ELF.ENTRY",-ENOEXEC);
+    bad = self; guest_test::put(bad,0x100802,32,8); stagedReject(bad,"SELF.BLOCK",-ENOTSUP);
     // A PS4 library has no required entry. Dynamic/TLS metadata is retained,
     // explicitly marked as unresolved, and never passed to FEX by this class.
     guest_test::put(elf, 0xfe18, 16, 2); guest_test::put(elf, 0, 24, 8);

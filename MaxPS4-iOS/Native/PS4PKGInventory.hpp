@@ -31,6 +31,9 @@ public:
     std::string contentID, titleID, metadataDiagnostic;
     std::vector<Entry> entries;
     std::string error;
+    // Stable diagnostic ID; failed parses publish diagnostics, never entries.
+    const char* stage = "PKG.HEADER";
+    uint64_t declaredSize = 0, observedSize = 0, diagnosticOffset = 0;
 
     static bool range(uint64_t offset, uint64_t size, uint64_t total) {
         return offset <= total && size <= total - offset;
@@ -89,10 +92,15 @@ public:
         PS4PKGInventory pending;
         pending.fileSize = size;
         try {
-            if (!pending.parseImpl(read)) { error = pending.error; return false; }
+            if (!pending.parseImpl(read)) {
+                error = pending.error; stage = pending.stage;
+                declaredSize = pending.declaredSize; observedSize = pending.observedSize;
+                diagnosticOffset = pending.diagnosticOffset;
+                return false;
+            }
             *this = std::move(pending);
             return true;
-        } catch (const std::bad_alloc&) { error = "Budget mémoire indisponible"; return false; }
+        } catch (const std::bad_alloc&) { stage = "PKG.MEMORY"; error = "Budget mémoire indisponible"; return false; }
     }
     // Only a narrow allowlist with zero flags and valid, unambiguous ranges.
     // Copies opaque bytes into memory; no filesystem paths, DRM, PFS or ELF execution.
@@ -159,8 +167,10 @@ private:
     }
     bool fail(const char* why) { error = why; return false; }
     bool parseImpl(const Reader& read) {
+        stage = "PKG.HEADER"; declaredSize = headerSize; observedSize = fileSize;
         std::array<uint8_t, headerSize> h{};
         if (fileSize < h.size() || !read(0, h.data(), h.size())) return fail("En-tête PKG tronqué / lecture incomplète");
+        stage = "PKG.MAGIC"; declaredSize = 0x7f434e54; observedSize = be(h.data(),4);
         if (std::memcmp(h.data(), "\177CNT", 4)) {
             if (!std::memcmp(h.data(), "\177ELF", 4)) return fail("Format ELF détecté : ce fichier n'est pas un PKG PS4");
             if (!std::memcmp(h.data(), "\177PKG", 4)) return fail("Format PKG PS3/PSP détecté : non pris en charge");
@@ -182,15 +192,24 @@ private:
         pfsFlags = be(h.data() + 0x408, 8);
         pfsOffset = be(h.data() + 0x410, 8); pfsSize = be(h.data() + 0x418, 8);
         packageSize = be(h.data() + 0x430, 8);
+        stage = "PKG.SIZE"; diagnosticOffset = 0x430;
+        declaredSize = packageSize; observedSize = fileSize;
         if (packageSize != fileSize) return fail("Taille PKG déclarée différente de la taille réelle");
+        stage = "PKG.COUNTS"; diagnosticOffset = 0x10;
+        declaredSize = count; observedSize = secondary;
         if (!count || count > maxEntries) return fail("Nombre d'entrées nul ou supérieur à 4096");
         if (secondary != count || secureCount > count) return fail("Compteurs PKG incohérents");
+        stage = "PKG.TABLE_RANGE"; diagnosticOffset = tableOffset;
+        declaredSize = count * 32; observedSize = fileSize;
         if (tableOffset < headerSize || !range(tableOffset, count * 32, fileSize)) return fail("Table PKG hors limites / dans l'en-tête");
+        stage = "PKG.BODY_RANGE"; diagnosticOffset = bodyOffset; declaredSize = bodySize;
         if (!range(bodyOffset, bodySize, fileSize) || (bodySize && bodyOffset < headerSize)) return fail("Corps PKG hors limites");
+        stage = "PKG.PFS_RANGE"; diagnosticOffset = pfsOffset; declaredSize = pfsSize;
         if (!range(pfsOffset, pfsSize, fileSize) || (pfsSize && pfsOffset < headerSize)) return fail("Image PFS hors limites");
         entries.reserve(static_cast<size_t>(count));
         for (size_t i = 0; i < count; ++i) {
             std::array<uint8_t, 32> item{};
+            stage = "PKG.TABLE_READ"; diagnosticOffset = tableOffset + i * 32; declaredSize = 32;
             if (!read(tableOffset + i * 32, item.data(), item.size())) return fail("Table PKG : lecture incomplète");
             Entry e {static_cast<uint32_t>(be(item.data(), 4)), static_cast<uint32_t>(be(item.data()+4, 4)),
                 static_cast<uint32_t>(be(item.data()+8, 4)), static_cast<uint32_t>(be(item.data()+12, 4)),
@@ -229,6 +248,7 @@ private:
                 }
             }
         }
+        stage = "PKG.COMPLETE"; declaredSize = packageSize; observedSize = fileSize; diagnosticOffset = 0;
         return true;
     }
 };

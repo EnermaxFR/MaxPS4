@@ -4,6 +4,53 @@ import Darwin
 @main
 struct FEXSwiftDiagnosticTest {
     static func main() {
+        // Reproduce the documented PKG -> ELF error, even with an .elf suffix.
+        // Use a sparse oversized container to verify refusal precedes ELF budgets.
+        let container = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".elf")
+        defer { try? FileManager.default.removeItem(at: container) }
+        do {
+            try Data([0x7f, 0x43, 0x4e, 0x54]).write(to: container)
+            let writer = try FileHandle(forWritingTo: container)
+            try writer.truncate(atOffset: 128 * 1024 * 1024)
+            try writer.close()
+        } catch { fatalError("Could not create synthetic CNT: \(error)") }
+        let previousJIT = maxps4_jit_state()
+        for report in [MaxPS4FEXDiagnostic.executeTestELF(url: container),
+                       MaxPS4FEXDiagnostic.stagePS4(url: container)] {
+            precondition(report.contains("[ELF.CONTAINER]") && report.contains("PKG/CNT détecté"), report)
+            precondition(report.contains("Aucune initialisation JIT ni exécution tentée"), report)
+        }
+        precondition(maxps4_jit_state() == previousJIT)
+        precondition(MaxPS4FEXDiagnostic.pkgExecutionRefusal(prefix: Data([0x7f,0x45,0x4c,0x46])) == nil)
+        precondition(MaxPS4FEXDiagnostic.pkgExecutionRefusal(prefix: Data([0x7f,0x43])) == nil)
+        print("PASS imported CNT rejected before ELF allocation, engine creation and JIT; suffix ignored")
+        let m2 = MaxPS4FEXDiagnostic.testM2LowVA()
+        precondition(m2.contains("Validation M2 : réussie"), m2)
+        precondition(m2.contains("JIT : 42") && m2.contains("TLS : 8"), m2)
+        precondition(m2.contains("Collision préservée : 1 ; nettoyage : 1 ; code RX : 1 ; pile RW/NX : 1"), m2)
+        precondition(m2.contains("Limites mappings : statut 0 ; refus vérifiés 16/16 ; mémoire préservée 1"), m2)
+        precondition(m2.contains("Paires scalaires : exécutées 11/11 ; réussies 11/11 ; statut 0 ; exécution 0 ; vérification 0"), m2)
+        precondition(m2.contains("Refus scalaires : statut 0 ; vérifiés 55/55 ; mémoire préservée 1"), m2)
+        var counters = maxps4_m2_low_va_report()
+        precondition(maxps4_fex_test_m2_low_va(&counters) == 0)
+        precondition(MaxPS4FEXDiagnostic.m2Passed(0, counters))
+        counters.scalar_passed = 10
+        precondition(!MaxPS4FEXDiagnostic.m2Passed(0, counters))
+        counters.scalar_passed = 11
+        counters.scalar_executed = 10
+        precondition(!MaxPS4FEXDiagnostic.m2Passed(0, counters))
+        counters.scalar_executed = 11
+        counters.scalar_verify_status = -ECANCELED
+        precondition(!MaxPS4FEXDiagnostic.m2Passed(0, counters))
+        var incomplete = maxps4_m2_low_va_report()
+        incomplete.scalar_expected = 11
+        incomplete.scalar_executed = 3
+        incomplete.scalar_passed = 2
+        incomplete.scalar_status = -EFAULT
+        incomplete.scalar_execute_status = -EFAULT
+        incomplete.scalar_verify_status = -ECANCELED
+        let failed = MaxPS4FEXDiagnostic.scalarM2Details(incomplete)
+        precondition(failed.contains("exécutées 3/11 ; réussies 2/11 ; statut \(-EFAULT) ; exécution \(-EFAULT) ; vérification \(-ECANCELED)"), failed)
         for _ in 0..<3 {
             let linked = MaxPS4FEXDiagnostic.testPS4Libkernel()
             precondition(linked.contains("Chargement ELF : réussi (0)"))
@@ -14,6 +61,8 @@ struct FEXSwiftDiagnosticTest {
             precondition(linked.contains("Valeur finale en mémoire invitée [0x10100] : 2 (attendu 2)"))
             precondition(linked.contains("Segments invités après retrait : 0") && linked.contains("Validation globale : réussie"))
             precondition(linked.contains("hôte macOS — aucune preuve iPhone"))
+            precondition(linked.contains("Paires scalaires : exécutées 11/11 ; réussies 11/11 ; statut 0"), linked)
+            precondition(linked.contains("Refus scalaires : statut 0 ; vérifiés 55/55 ; mémoire préservée 1"), linked)
             print(linked)
         }
         if CommandLine.arguments.count > 1 {
@@ -119,4 +168,5 @@ struct FEXSwiftDiagnosticTest {
         print("PASS Swift lifecycle; macOS host execution only, no iPhone proof")
     }
 }
+
 

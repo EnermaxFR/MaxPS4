@@ -4,6 +4,8 @@ on:
   push:
     branches: ['codex/ps4-memory-translation-contract']
     paths:
+      - 'patches/fexcore-guest-memory.patch'
+      - 'MaxPS4-iOS/Tests/FEXGuestTranslationTest.cpp'
       - 'scripts/*fexcore*'
       - 'scripts/run-bounded.py'
       - 'cmake/FEXCoreIOSLinkage.cmake'
@@ -13,6 +15,8 @@ on:
       - 'MaxPS4-iOS/Tests/PS4LinkedELFFixture.h'
   pull_request:
     paths:
+      - 'patches/fexcore-guest-memory.patch'
+      - 'MaxPS4-iOS/Tests/FEXGuestTranslationTest.cpp'
       - 'scripts/*fexcore*'
       - 'scripts/run-bounded.py'
       - 'cmake/FEXCoreIOSLinkage.cmake'
@@ -22,6 +26,9 @@ on:
       - 'MaxPS4-iOS/Tests/PS4FEXLinkedExecutionTest.cpp'
       - 'MaxPS4-iOS/Tests/PS4LinkedELFFixture.h'
       - 'MaxPS4-iOS/Tests/FEXDispatcherInitPatchTest.py'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -34,6 +41,8 @@ jobs:
         platform: [ios-runtime, host-runtime]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Checkout pinned coherent Darwin sources and bundled dependencies
         shell: bash
         run: |

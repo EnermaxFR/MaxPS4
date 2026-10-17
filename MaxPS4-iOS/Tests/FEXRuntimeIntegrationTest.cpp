@@ -1,3 +1,4 @@
+#include <FEXCore/Utils/LogManager.h>
 #include "maxps4_fex_runtime.h"
 #include "maxps4_native.h"
 #include "GuestELFFixture.h"
@@ -131,7 +132,33 @@ static int systemServices(maxps4_fex_engine* engine) {
     std::puts("PASS staged libkernel VFS, virtual memory and clock bridge; no guest CPU dispatch");
     return 0;
 }
+static int v4Synthetic(maxps4_fex_engine* engine, bool initialized) {
+    maxps4_v4_synthetic_report report{};
+    CHECK(maxps4_fex_engine_v4_synthetic(engine,2,nullptr)==-EINVAL);
+    CHECK(maxps4_fex_engine_v4_synthetic(nullptr,2,&report)==-EINVAL);
+    CHECK(report.stop_reason==MAXPS4_V4_INVALID_REQUEST && report.status==-EINVAL);
+    for (uint32_t budget : {0U,1U,17U,UINT32_MAX}) {
+        CHECK(maxps4_fex_engine_v4_synthetic(engine,budget,&report)==-EINVAL);
+        CHECK(!report.cpu_valid && !report.rax && !report.rip && !report.rsp && !report.backend);
+    }
+    for (int run=0; run<3; ++run) {
+        std::memset(&report,0xff,sizeof(report));
+        const int expected = initialized ? -ENOTSUP : -EAGAIN;
+        CHECK(maxps4_fex_engine_v4_synthetic(engine,2,&report)==expected);
+        CHECK(report.status==expected);
+        CHECK(report.stop_reason==uint32_t(initialized ? MAXPS4_V4_TRANSLATION_REQUIRED : MAXPS4_V4_NOT_INITIALIZED));
+        CHECK(!report.cpu_valid && !report.rax && !report.rip && !report.rsp && !report.backend);
+        CHECK(report.code_rx==uint32_t(initialized) && report.stack_rw_nx==uint32_t(initialized));
+    }
+    return 0;
+}
 int main() {
+    // Keep assertion text visible when the pinned emitter terminates a check.
+    LogMan::Throw::InstallHandler([](const char* text) { std::fprintf(stderr,"FEX assertion: %s\n",text); });
+    LogMan::Msg::InstallHandler([](LogMan::DebugLevels level,const char* text) {
+        if (level<=LogMan::ERROR) std::fprintf(stderr,"FEX error: %s\n",text);
+    });
+
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::puts("BEGIN native ABI and real FEX context lifecycle test");
     // Same allocator implementation embedded in the native runtime. These
@@ -177,6 +204,7 @@ int main() {
         CHECK(maxps4_fex_engine_stage(first) == MAXPS4_FEX_CONTEXT_CREATED);
         CHECK(systemServices(first) == 0);
         CHECK(stagedCPU(first, false) == 0);
+        CHECK(v4Synthetic(first, false) == 0);
         auto not_initialized = guest_test::elf();
         uint64_t pending_entry = 99;
         CHECK(maxps4_fex_engine_run_elf(first, not_initialized.data(), not_initialized.size(), 3,
@@ -195,6 +223,7 @@ int main() {
         CHECK(maxps4_fex_engine_initialize(first) == 0);
         CHECK(maxps4_fex_engine_initialize(second) == 0);
         std::puts("PASS real InitCore dispatcher initialized twice without reallocation");
+        CHECK(v4Synthetic(first, true) == 0);
         CHECK(stagedCPU(first, true) == 0);
 #endif
 #if !TARGET_OS_IPHONE
@@ -300,6 +329,15 @@ int main() {
         CHECK(maxps4_fex_engine_run(nullptr, block, sizeof(block), 32, &result, &backend) == -EINVAL);
         CHECK(maxps4_fex_engine_cpuid(second, 0, 0, nullptr) == -EINVAL);
         maxps4_fex_engine_close(second);
+        maxps4_m2_low_va_report m2{};
+        CHECK(maxps4_fex_test_m2_low_va(&m2)==0);
+        CHECK(m2.entry==0x400000 && m2.rax==42 && m2.memory==42 && m2.tls==8);
+        CHECK(m2.cleanup && m2.collision_preserved && m2.code_rx && m2.stack_rw_nx);
+        CHECK(m2.boundary_status==0 && m2.boundary_cases==16 && m2.boundary_preserved==1);
+        CHECK(m2.scalar_status==0 && m2.scalar_execute_status==0 && m2.scalar_verify_status==0);
+        CHECK(m2.scalar_expected==11 && m2.scalar_executed==11 && m2.scalar_passed==11);
+        CHECK(m2.scalar_width==8 && m2.scalar_split==7);
+        CHECK(m2.scalar_rejection_status==0 && m2.scalar_rejection_cases==55 && m2.scalar_rejection_preserved==1);
         for (size_t i = 0; i < signal_numbers.size(); ++i) {
             struct sigaction action {};
             CHECK(::sigaction(signal_numbers[i], nullptr, &action) == 0);
@@ -317,6 +355,7 @@ int main() {
     }
     std::puts("PASS real FEX context lifecycle/CPUID and explicit interpreter fallback; device JIT NOT tested");
 }
+
 
 
 

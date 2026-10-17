@@ -74,7 +74,8 @@ int validate_guest_program(const uint8_t* bytes, size_t length, uint32_t budget)
 }
 GuestELF::~GuestELF() { clear(); }
 void GuestELF::clear() {
-    if (arena) ::munmap(arena, arena_size);
+    if (reservation) ::munmap(reservation, arena_size);
+    reservation = nullptr;
     arena = nullptr;
     arena_size = 0;
     guest_base = guest_entry = 0;
@@ -425,10 +426,15 @@ int GuestELF::map_segments(std::vector<Segment> parsed,
         if (end - begin > limit) return -E2BIG;
     }
     if (parsed.empty() || sources.size() != parsed.size()) return -ENOEXEC;
-    arena_size = static_cast<size_t>(end - begin);
+    // The guards belong to the same reservation as the arena, so adjacent
+    // allocations cannot turn an out-of-range CPU access into valid host data.
+    // Holes between segments remain PROT_NONE as before.
+    if (page > SIZE_MAX / 2 || end - begin > SIZE_MAX - 2 * page) return -E2BIG;
+    arena_size = static_cast<size_t>(end - begin + 2 * page);
     void* mapped = ::mmap(nullptr, arena_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (mapped == MAP_FAILED) { arena_size = 0; return -errno; }
-    arena = mapped;
+    reservation = mapped;
+    arena = static_cast<uint8_t*>(mapped) + page;
     guest_base = begin;
     guest_entry = entry;
     regions = std::move(parsed);
@@ -449,6 +455,8 @@ int GuestELF::map_segments(std::vector<Segment> parsed,
     return 0;
 }
 }
+
+
 
 
 

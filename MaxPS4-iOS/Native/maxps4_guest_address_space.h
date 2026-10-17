@@ -18,6 +18,8 @@ namespace maxps4 {
 class GuestAddressSpace final : public PS4DynamicMemory {
 public:
     enum class Backend { translated, fex_direct };
+    struct ReservationFailure { uint64_t guest = 0; size_t bytes = 0; int host_status = 0; int error = 0; };
+    const ReservationFailure& reservation_failure() const { return failure_; }
     struct Region { uint64_t address; size_t size; uint32_t permissions; };
     static constexpr size_t budget = 32 * 1024 * 1024;
     explicit GuestAddressSpace(Backend backend = Backend::translated) : backend_(backend) {
@@ -58,16 +60,22 @@ public:
         return 0;
     }
     int reserve(uint64_t address, size_t size) {
+        failure_ = {};
         if (!page_) return -ENOTSUP;
         if (!size || address % page_ || size % page_ || address < page_ ||
             address > (uint64_t{1} << 47) - page_ || size > (uint64_t{1} << 47) - address - page_)
             return -EINVAL;
         if (size > budget - allocated_) return -E2BIG;
         const uint64_t low = address - page_, high = address + size + page_;
-        for (const auto& r : reservations_)
-            if (low < r.address + r.size + page_ && r.address - page_ < high) return -EEXIST;
-        if (backend_ == Backend::fex_direct && low < 0x100000000ULL) return -ENOTSUP;
         const size_t bytes = size + 2 * page_;
+        for (const auto& r : reservations_)
+            if (low < r.address + r.size + page_ && r.address - page_ < high) {
+                // An overlap in our own reservation table is not a Mach
+                // failure. Keep it distinguishable from a host VM collision.
+                failure_ = {address,bytes,0,-EEXIST};
+                return -EEXIST;
+            }
+        if (backend_ == Backend::fex_direct && low < 0x100000000ULL) return -ENOTSUP;
         void* hint = backend_ == Backend::fex_direct ? reinterpret_cast<void*>(low) : nullptr;
         void* host = MAP_FAILED;
 #if defined(__APPLE__)
@@ -78,16 +86,33 @@ public:
             vm_address_t requested = static_cast<vm_address_t>(low);
             const kern_return_t status = vm_allocate(mach_task_self(),&requested,bytes,VM_FLAGS_FIXED);
 
-            if (status != KERN_SUCCESS) return status == KERN_NO_SPACE ? -EADDRINUSE : -ENOMEM;
-            if (vm_protect(mach_task_self(),requested,bytes,FALSE,VM_PROT_NONE) != KERN_SUCCESS) {
-                vm_deallocate(mach_task_self(),requested,bytes); return -EACCES;
+            if (status != KERN_SUCCESS) {
+                const int error = status == KERN_NO_SPACE ? -EADDRINUSE : -ENOMEM;
+                failure_ = {address,bytes,static_cast<int>(status),error};
+                return error;
+            }
+            const kern_return_t protect_status =
+                vm_protect(mach_task_self(),requested,bytes,FALSE,VM_PROT_NONE);
+            if (protect_status != KERN_SUCCESS) {
+                // Preserve the actual Mach error; no reservation is published.
+                vm_deallocate(mach_task_self(),requested,bytes);
+                failure_ = {address,bytes,static_cast<int>(protect_status),-EACCES};
+                return -EACCES;
             }
             host = reinterpret_cast<void*>(requested);
         } else
 #endif
         host = ::mmap(hint, bytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (host == MAP_FAILED) return -errno;
-        if (hint && host != hint) { ::munmap(host, bytes); return -EADDRINUSE; }
+        if (host == MAP_FAILED) {
+            const int status = errno;
+            failure_ = {address,bytes,status,-status};
+            return -status;
+        }
+        if (hint && host != hint) {
+            ::munmap(host, bytes);
+            failure_ = {address,bytes,0,-EADDRINUSE}; // Hint relocated, no OS failure.
+            return -EADDRINUSE;
+        }
         try { reservations_.push_back({address,size,host}); }
         catch (...) { ::munmap(host,bytes); throw; }
         allocated_ += size;
@@ -172,6 +197,7 @@ public:
     }
 private:
     struct Reservation { uint64_t address; size_t size; void* host; };
+    ReservationFailure failure_{};
     Backend backend_;
     size_t page_ = 0, allocated_ = 0;
     std::vector<Reservation> reservations_;

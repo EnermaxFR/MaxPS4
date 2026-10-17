@@ -8,6 +8,10 @@ extern "C" {
 // Zero means a complete report, which may describe a rejected/malformed PKG;
 // negative errno reports source I/O or report-generation failures with text.
 int maxps4_pkg_inventory_report(const char* path, char* output, size_t capacity);
+// Same report, but malformed CNT returns -ENOEXEC with its stable PKG.* stage.
+// A valid encrypted/unsupported package remains importable for inventory only.
+// This validates container structure, never executable readiness/authenticity.
+int maxps4_pkg_validate_import(const char* path, char* output, size_t capacity);
 // Revalidates the PKG/PFS, reads one exact uroot-relative selection to memory.
 // No writes, path joining, decryption or execution. Maximum 64 Mio.
 // Query with output=NULL/capacity=0: -ENOSPC and length=required (0 for empty).

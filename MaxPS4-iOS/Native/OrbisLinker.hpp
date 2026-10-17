@@ -24,9 +24,20 @@ public:
         size_t dependencies = 0, imports = 0, resolvedImports = 0;
         size_t relocations = 0, validatedRelocations = 0, ignoredRelocations = 0;
         bool committed = false;
+        const char* stageCode() const {
+            if (phase == "ELF/segments") return "ORBIS.ELF";
+            if (phase == "dynamic metadata") return "ORBIS.SCE";
+            if (phase == "PRX dependencies") return "ORBIS.PRX";
+            if (phase == "NID imports") return "ORBIS.NID";
+            if (phase == "relocations") return "ORBIS.RELOCATION";
+            if (phase == "memory permissions") return "ORBIS.PERMISSIONS";
+            if (phase == "complete") return "ORBIS.COMPLETE";
+            return "ORBIS.INPUT";
+        }
         std::string text() const {
             std::ostringstream out;
             out << "Préparation runtime Orbis (aucune exécution)\n"
+                << '[' << stageCode() << "] committed=" << committed << "\n"
                 << "Étape : " << phase << "\n"
                 << "ELF validés : " << validatedModules << " ; segments validés : " << segments << "\n"
                 << "Dépendances PRX vérifiées : " << dependencies << "\n"
@@ -81,6 +92,7 @@ public:
         } catch (const std::bad_alloc&) { diagnostic = "linker: allocation failed"; }
           catch (const std::runtime_error& e) { diagnostic = e.what(); }
         progress.committed = false;
+        diagnostic = "[" + std::string(progress.stageCode()) + "] " + diagnostic;
         progress.failure = diagnostic;
         if (report) *report = std::move(progress);
         return false;
@@ -265,6 +277,7 @@ private:
             const auto& input = inputs[index];
             const auto* b = input.file.bytes; const auto n = input.file.size;
             require(b && n >= 64 && n <= 64 * 1024 * 1024, "chargeur: invalid ELF file size");
+            require(!std::memcmp(b,"\177ELF",4), "[ELF.CONTAINER] ELF Orbis autonome non chiffré requis ; CNT/SELF refusé");
             const auto phoff = read(b + 32, 8), phnum = read(b + 56, 2);
             require(phoff >= 64 && phnum && phnum <= 128 && range(phoff, phnum * 56, n), "chargeur: invalid program table");
             for (size_t i = 0; i < phnum; ++i) {

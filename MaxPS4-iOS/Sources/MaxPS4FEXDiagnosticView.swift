@@ -9,9 +9,12 @@ struct MaxPS4FEXDiagnosticView: View {
     @State private var activationMessage: String?
     @State private var activationRequested = false
     @State private var importingELF = false
+    @State private var importingPKG = false
+    @State private var pkgReport: String?
     @State private var importingOrbisDirectory = false
     @State private var importedReport: String?
     @State private var ps4LibkernelReport: String?
+    @State private var m2Report: String?
     @State private var analyzingOrbis = false
     @State private var orbisReport: String?
 
@@ -36,6 +39,8 @@ struct MaxPS4FEXDiagnosticView: View {
                         Label("JIT non testé sur cet appareil", systemImage: "questionmark.shield")
                             .foregroundStyle(.secondary)
                     }
+                    Text("CS_DEBUGGED, MAP_JIT et RW/RW ne valident pas le fournisseur RX/RW FEXCore. Utiliser l’activation ci-dessous ; aucun test BRK n’est autorisé. Un simple attachement debugserver ou le script Universal JIT seul ne publie pas la mailbox MaxPS4.")
+                        .font(.footnote)
                     Text("Activer avec StikDebug, attendre la fin de son script et son détachement, puis tester FEXCore. Le test vérifie les permissions RX/RW et l’exécution x86-64. Une confirmation de script seule ne valide pas le JIT.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -55,6 +60,24 @@ struct MaxPS4FEXDiagnosticView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(running)
+                    Button("Tester M2 low VA — JIT 42 / TLS 8") {
+                        running = true
+                        Task {
+                            m2Report = await withCheckedContinuation { continuation in
+                                MaxPS4FEXMetalExecution.queue.async {
+                                    continuation.resume(returning: MaxPS4FEXDiagnostic.testM2LowVA())
+                                }
+                            }
+                            running = false
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(running)
+                    .accessibilityIdentifier("maxps4-m2-low-va-test")
+                    if let m2Report {
+                        Text(m2Report).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                        ShareLink(item: m2Report) { Label("Partager le rapport M2", systemImage: "square.and.arrow.up") }
+                    }
                     Button("Tester ELF PS4 / libkernel") {
                         running = true
                         Task {
@@ -73,6 +96,18 @@ struct MaxPS4FEXDiagnosticView: View {
                         Text(ps4LibkernelReport).font(.system(.body, design: .monospaced))
                             .textSelection(.enabled)
                         ShareLink(item: ps4LibkernelReport) { Label("Partager le rapport ELF PS4", systemImage: "square.and.arrow.up") }
+                    }
+                    Button("Analyser un PKG PS4 (sans exécution)…") { importingPKG = true }
+                        .disabled(running)
+                        .accessibilityIdentifier("maxps4-pkg-analysis")
+                    Text("Inventaire PKG/PFS en lecture seule ; aucun lancement ni déchiffrement.")
+                        .font(.footnote)
+                    if let pkgReport {
+                        Text(pkgReport).font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                        ShareLink(item: pkgReport) {
+                            Label("Partager l’analyse PKG/PFS", systemImage: "square.and.arrow.up")
+                        }
                     }
                     Button("Analyser un exécutable Orbis") { analyzingOrbis = true; importingELF = true }
                         .disabled(running)
@@ -121,6 +156,30 @@ struct MaxPS4FEXDiagnosticView: View {
                             .textSelection(.enabled)
                     }
                 }.padding()
+            }
+            .fileImporter(isPresented: $importingPKG, allowedContentTypes: [.data]) { selection in
+                switch selection {
+                case .success(let url):
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    running = true
+                    Task {
+                        defer {
+                            if scoped { url.stopAccessingSecurityScopedResource() }
+                            running = false
+                        }
+                        pkgReport = await withCheckedContinuation { continuation in
+                            MaxPS4FEXMetalExecution.queue.async {
+                                do {
+                                    continuation.resume(returning: try MaxPS4PKGInspector.inspect(url: url))
+                                } catch {
+                                    continuation.resume(returning: error.localizedDescription)
+                                }
+                            }
+                        }
+                    }
+                case .failure(let error):
+                    pkgReport = error.localizedDescription
+                }
             }
             .fileImporter(isPresented: $importingELF, allowedContentTypes: [.data]) { selection in
                 switch selection {
@@ -178,4 +237,5 @@ struct MaxPS4FEXDiagnosticView: View {
         }
     }
 }
+
 

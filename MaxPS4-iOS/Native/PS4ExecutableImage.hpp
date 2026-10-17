@@ -20,6 +20,9 @@ public:
     };
     struct Segment { Header header; std::vector<uint8_t> bytes; };
     static constexpr size_t memoryBudget = 32 * 1024 * 1024;
+    // Retained on failure without retaining any staged bytes or metadata.
+    const char* stage = "ELF.INPUT";
+    size_t diagnosticIndex = 0;
     uint64_t entry = 0;
     uint16_t type = 0;
     bool isSelf = false, requiresLinker = false, requiresTLS = false;
@@ -42,10 +45,10 @@ public:
         try {
             PS4ExecutableImage pending;
             const int error = pending.parse(file, size);
-            if (error) return error;
+            if (error) { stage = pending.stage; diagnosticIndex = pending.diagnosticIndex; return error; }
             *this = std::move(pending); // No partial image escapes a rejected file.
             return 0;
-        } catch (const std::bad_alloc&) { return -ENOMEM; }
+        } catch (const std::bad_alloc&) { stage = "ELF.MEMORY"; return -ENOMEM; }
     }
 private:
     static uint64_t read(const uint8_t* p, size_t width) {
@@ -61,7 +64,10 @@ private:
         size_t origin = 0, payloadStart = 0;
         std::vector<SelfSegment> selfSegments;
         isSelf = read(file, 4) == 0x1d3d154f;
+        stage = "ELF.CONTAINER";
+        if (!isSelf && std::memcmp(file, "\177ELF", 4)) return -ENOEXEC;
         if (isSelf) {
+            stage = "SELF.HEADER";
             if (file[4] != 0 || file[5] != 1 || file[6] != 1 || file[7] != 0x12 ||
                 file[8] != 1 || file[9] != 1) return -ENOEXEC;
             const size_t count = read(file + 24, 2);
@@ -71,7 +77,9 @@ private:
             payloadStart = read(file + 12, 2) + read(file + 14, 2);
             if (payloadStart < origin + 64 || payloadStart > size || read(file + 16, 4) != size)
                 return -ENOEXEC;
+            stage = "SELF.BLOCK";
             for (size_t i = 0; i < count; ++i) {
+                diagnosticIndex = i;
                 const auto* p = file + 32 + i * 32;
                 SelfSegment s {read(p, 8), read(p + 8, 8), read(p + 16, 8), read(p + 24, 8)};
                 // This narrow loader accepts only plaintext, uncompressed blocks.
@@ -82,29 +90,35 @@ private:
                 selfSegments.push_back(s);
             }
         }
+        stage = "ELF.IDENTITY"; diagnosticIndex = 0;
         const auto* elf = file + origin;
         if (std::memcmp(elf, "\177ELF\2\1\1\11\0", 9) ||
             read(elf + 18, 2) != 62 || read(elf + 20, 4) != 1 ||
             read(elf + 52, 2) != 64 || read(elf + 54, 2) != 56) return -ENOEXEC;
         for (size_t i = 9; i < 16; ++i) if (elf[i]) return -ENOEXEC;
         if (read(elf + 48, 4)) return -ENOEXEC; // No x86-64 processor flags supported.
+        stage = "ELF.TYPE";
         type = static_cast<uint16_t>(read(elf + 16, 2));
         if (type != 0xfe00 && type != 0xfe10 && type != 0xfe18) return -ENOEXEC;
         entry = read(elf + 24, 8);
+        stage = "ELF.PROGRAM_TABLE";
         const uint64_t table = read(elf + 32, 8), count = read(elf + 56, 2);
         if (table < 64 || !count || count > 128 ||
             !range(table, count * 56, size - origin)) return -ENOEXEC;
         if (isSelf && origin + table + count * 56 > payloadStart) return -ENOEXEC;
+        stage = "ELF.SECTION_TABLE";
         const uint64_t shoff = read(elf + 40, 8), shnum = read(elf + 60, 2);
         if (shnum && (read(elf + 58, 2) != 64 || shnum > 4096 ||
             !range(shoff, shnum * 64, size - origin))) return -ENOEXEC;
         const uint64_t shstr = read(elf + 62, 2);
         if ((!shnum && (shoff || (read(elf + 58, 2) != 0 && read(elf + 58, 2) != 64) || shstr)) ||
             (shnum && (shoff < 64 || shstr >= shnum))) return -ENOEXEC;
+        stage = "SELF.BLOCK_ID";
         for (const auto& s : selfSegments)
             if ((s.flags & 0x800) && ((s.flags >> 20) & 0xfff) >= count) return -ENOEXEC;
         size_t allocated = 0;
         for (size_t i = 0; i < count; ++i) {
+            stage = "ELF.SEGMENT"; diagnosticIndex = i;
             const auto* p = elf + table + i * 56;
             Header h {static_cast<uint32_t>(read(p, 4)), static_cast<uint32_t>(read(p + 4, 4)),
                 read(p + 8, 8), read(p + 16, 8), read(p + 32, 8), read(p + 40, 8), read(p + 48, 8)};
@@ -122,6 +136,7 @@ private:
                     old.header.address < h.address + h.memorySize) return -ENOEXEC;
             uint64_t source = h.offset;
             if (isSelf && h.fileSize) {
+                stage = "SELF.SEGMENT_SOURCE";
                 const SelfSegment* match = nullptr;
                 for (const auto& s : selfSegments)
                     if ((s.flags & 0x800) && ((s.flags >> 20) & 0xfff) == i) {
@@ -138,8 +153,10 @@ private:
             allocated += static_cast<size_t>(h.memorySize);
             segments.push_back(std::move(segment));
         }
+        stage = "ELF.LOADABLE"; diagnosticIndex = 0;
         if (segments.empty()) return -ENOEXEC;
         // Shared libraries may have no entry. Executables require file-backed code.
+        stage = "ELF.ENTRY";
         if (type != 0xfe18) {
             bool executableEntry = false;
             for (const auto& s : segments)
@@ -148,6 +165,7 @@ private:
             if (!executableEntry) return -ENOEXEC;
         }
         requiresLinker |= type != 0xfe00;
+        stage = "ELF.COMPLETE";
         return 0;
     }
 };

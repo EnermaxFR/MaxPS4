@@ -132,6 +132,40 @@ int32_t maxps4_fex_engine_configure_frame(maxps4_fex_engine *engine,
 // unchanged on error; metadata zeroed. Caller serializes close against invocation.
 int32_t maxps4_fex_engine_step_frame(maxps4_fex_engine *engine,
     uint32_t buttons, uint8_t *pixels, size_t capacity, uint64_t *sequence, uint32_t *backend);
+// Experimental M2 diagnostic only. No CPU execution is currently supported.
+// cpu_valid/backend and CPU registers stay zero until actual FEX execution is
+// implemented and verified. A budget never implies an enforced FEX timeout.
+enum maxps4_v4_stop_reason {
+    MAXPS4_V4_INVALID_REQUEST = 1, MAXPS4_V4_NOT_INITIALIZED = 2,
+    MAXPS4_V4_STAGING_FAILED = 3, MAXPS4_V4_TRANSLATION_REQUIRED = 4
+};
+typedef struct maxps4_v4_synthetic_report {
+    int32_t status;
+    uint32_t stop_reason, cpu_valid, backend;
+    uint64_t rax, rip, rsp;
+    uint32_t code_rx, stack_rw_nx;
+} maxps4_v4_synthetic_report;
+// Fixed mov eax,42; hlt fixture, translated storage and mandatory direct
+// preflight. Returns -ENOTSUP after staging on initialized engines. Never
+// retries direct collisions using overwrite or dispatches through V3.
+int32_t maxps4_fex_engine_v4_synthetic(maxps4_fex_engine *engine,
+    uint32_t instruction_budget, maxps4_v4_synthetic_report *report);
+// Isolated constant-code diagnostic. Never accepts an ELF or guest bytecode.
+// Low guest RIP, distinct storage, host-VA collision, TLS, stack and atomic RMW.
+typedef struct maxps4_m2_low_va_report {
+    int32_t status, initialize_status, execute_status;
+    uint32_t backend, collision_preserved, cleanup, code_rx, stack_rw_nx;
+    uint64_t rax, memory, tls, entry, rsp;
+    int32_t boundary_status;
+    uint32_t boundary_cases, boundary_preserved;
+    // Counts are published even on failure; -ECANCELED means not attempted.
+    int32_t scalar_status, scalar_execute_status, scalar_verify_status;
+    uint32_t scalar_expected, scalar_executed, scalar_passed;
+    uint32_t scalar_width, scalar_split; // Current/failed pair, in bytes.
+    int32_t scalar_rejection_status;
+    uint32_t scalar_rejection_cases, scalar_rejection_preserved;
+} maxps4_m2_low_va_report;
+int32_t maxps4_fex_test_m2_low_va(maxps4_m2_low_va_report *report);
 // Experimental V4 direct-memory preflight. Requires explicitly mapped V4 pages;
 // does not dispatch guest instructions or alter the V3 execution path.
 // Returns an error until a genuine FEX-direct guest mapping is admitted.
@@ -172,10 +206,32 @@ int32_t maxps4_fex_engine_contiguous_ps4(maxps4_fex_engine *engine,
 int32_t maxps4_fex_engine_run(maxps4_fex_engine *engine, const uint8_t *code,
                             size_t length, uint32_t budget, uint64_t *result,
                             uint32_t *backend);
+// Experimental M1 direct-address backend. No UI integration. Refuses host
+// collisions, unadmitted instructions and unsupported TLS/ABI models.
+typedef struct maxps4_m1_report {
+    uint64_t rax, entry, rsp, fs_base, memory, tls_word, kernel_return, zero_memory, heap_word;
+    uint32_t backend, calls;
+} maxps4_m1_report;
+int32_t maxps4_fex_engine_run_m1(maxps4_fex_engine*, const uint8_t*, size_t,
+    uint32_t budget, uint64_t snapshot_address, maxps4_m1_report*);
+// Experimental deterministic run-to-completion queue. All CPU contexts, stacks
+// and TLS blocks are created before dispatch; dispatch/join in ID order. Direct
+// backend only, no guest pthread_create/join ABI or preemption. Up to 4 threads,
+// 16 PT_TLS templates. Dynamic resolver/DTV ABI is not installed. This fixture
+// API uses FS-relative payload accesses admitted against the exact module spans.
+typedef struct maxps4_m1_tls_input { const uint8_t* bytes; size_t size; } maxps4_m1_tls_input;
+typedef struct maxps4_m1_thread_report {
+    maxps4_m1_report cpu;
+    uint64_t id, modules[16], zeros[16], lock_result, unlock_result;
+    uint32_t joined;
+} maxps4_m1_thread_report;
+int32_t maxps4_fex_engine_run_m1_threads(maxps4_fex_engine*, const uint8_t*, size_t,
+    uint32_t budget, uint64_t snapshot_address, const maxps4_m1_tls_input*, size_t module_count,
+    size_t thread_count, maxps4_m1_thread_report*, size_t report_count);
+
 #ifdef __cplusplus
 }
 #endif
-
 
 
 

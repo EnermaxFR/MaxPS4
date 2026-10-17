@@ -102,6 +102,18 @@ int main() {
     reject(0x20, UINT64_MAX, 8); reject(0x28, UINT64_MAX, 8);
     reject(0x410, UINT64_MAX, 8); reject(0x418, UINT64_MAX, 8);
     reject(0x430, original.size() + 1, 8); reject(0x430, original.size() - 1, 8);
+    // Stable stages distinguish -ENOEXEC causes without publishing parsed data.
+    const auto stageReject = [&](size_t at, uint64_t value, size_t width, const char* stage) {
+        f = original; put(f, at, value, width);
+        assert(!parse() && std::string(pkg.stage) == stage && pkg.entries.empty() && pkg.fileSize == 0);
+    };
+    stageReject(0, 0, 4, "PKG.MAGIC");
+    stageReject(0x430, original.size()+1, 8, "PKG.SIZE");
+    assert(pkg.declaredSize == original.size()+1 && pkg.observedSize == original.size() && pkg.diagnosticOffset == 0x430);
+    stageReject(0x16, 3, 2, "PKG.COUNTS");
+    stageReject(0x18, 0, 4, "PKG.TABLE_RANGE");
+    stageReject(0x20, UINT64_MAX, 8, "PKG.BODY_RANGE");
+    stageReject(0x410, UINT64_MAX, 8, "PKG.PFS_RANGE");
     f = original;
     for (size_t size = 0; size < original.size(); ++size)
         assert(!pkg.parse(size, read) && pkg.entries.empty());
@@ -155,6 +167,9 @@ int main() {
     assert(fwrite(f.data(), 1, f.size(), file) == f.size()); assert(fclose(file) == 0);
     std::vector<char> report(8192);
     assert(maxps4_pkg_inventory_report(path, report.data(), report.size()) == 0);
+    assert(maxps4_pkg_validate_import(path, report.data(), report.size()) == 0);
+    assert(std::string(report.data()).find("[PKG.COMPLETE] accepted=1") != std::string::npos);
+
     const std::string text(report.data());
     assert(text.find("MaxPS4") != std::string::npos);
     assert(text.find("eboot.bin") != std::string::npos);
@@ -242,6 +257,13 @@ int main() {
     assert(observedReport.find("PFS présent mais opaque/non monté ; aucun eboot.bin accessible")!=std::string::npos);
     assert(observedReport.find("Contenu du jeu : non accessible par ce lecteur")!=std::string::npos);
     assert(observedReport.find("Octets inspectés (budget partagé) : 15585")!=std::string::npos);
+    // Diagnostic mode remains available; the import gate rejects a truncated copy.
+    put(f,0x430,f.size()+1,8);
+    file=std::fopen(path,"wb"); assert(file);
+    assert(fwrite(f.data(),1,f.size(),file)==f.size()); assert(fclose(file)==0);
+    assert(maxps4_pkg_inventory_report(path,report.data(),report.size())==0);
+    assert(maxps4_pkg_validate_import(path,report.data(),report.size())==-ENOEXEC);
+    assert(std::string(report.data()).find("[PKG.SIZE] accepted=0")!=std::string::npos);
     f = original;
     // Malformed names cannot consume 1 MiB then restart the payload budget.
     auto large = original;
@@ -358,6 +380,16 @@ int main() {
     assert(!Plan::translateModule(staged, "lib/b.prx", UINT64_MAX, 2, 1));
     assert(Plan::translateModule(staged, "eboot.bin", 0x2fff, 1, 1));
     assert(!Plan::translateModule(staged, "eboot.bin", 0x3000, 1, 1));
+
+    // A later malformed module must roll back a previously prepared provider.
+    auto malformedMain = mainElf;
+    malformedMain[18] = 183; // ARM64 is not an Orbis x86-64 executable.
+    batch[0].bytes = malformedMain.data();
+    assert(!Plan::prepareModules(batch, staged, graphDiagnostic) && staged.empty());
+    assert(graphDiagnostic.find("[ELF.IDENTITY]") != std::string::npos);
+    assert(graphDiagnostic.find("eboot.bin") != std::string::npos);
+    batch[0].bytes = mainElf.data();
+    assert(Plan::prepareModules(batch, staged, graphDiagnostic) && staged.size() == 2);
 
     // A 32 MiB image is individually allowed, but three exceed the batch cap.
     auto largeElf = syntheticElf(0xfe18, 0x3000, 32 * 1024 * 1024);

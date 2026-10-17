@@ -17,26 +17,37 @@ function checked(command) {
 const regions = [];
 let attached = false;
 let mailboxOwned = false;
+// Failure status: 0x100 + stage*16 + region (0..2; 15 means no region).
+// Fixed numeric metadata only; never publish transport strings into app memory.
+let stage = 1, region = 15;
 try {
     const reply = send_command("vAttach;" + get_pid().toString(16));
     if (!reply || !/^T[0-9a-f]{2}/i.test(reply)) throw new Error("Attach: " + reply);
     attached = true;
     // Match the process-local challenge before allocating: a script for a prior
     // request cannot claim a newly activated mailbox at the same address.
+    stage = 2;
     const initial = send_command("m" + MAXPS4_MAILBOX.toString(16) + ",28");
     if (initial !== "00".repeat(8) + le64(MAXPS4_NONCE) + "00".repeat(24))
         throw new Error("Mailbox challenge mismatch or unreadable");
     mailboxOwned = true;
     for (const size of MAXPS4_SIZES) {
+        region = regions.length;
+        stage = 3;
         const allocated = send_command("_M" + size.toString(16) + ",rx");
-        if (!allocated || !/^[0-9a-f]+$/i.test(allocated)) throw new Error("RX allocation: " + allocated);
+        if (!allocated || /^E[0-9a-f]{2}$/i.test(allocated) || !/^[0-9a-f]+$/i.test(allocated)) throw new Error("RX allocation: " + allocated);
         const address = BigInt("0x" + allocated);
         if (address === 0n || address > 0x1fffffffffffffn || address % BigInt(MAXPS4_SIZES[2]) !== 0n) throw new Error("Unaligned RX address");
         regions.push(address);
+        // Both upstream page writers encode only NINE address hex digits.
+        // Reject the whole span before preparation can truncate a high address.
+        if (address + BigInt(size) > 0x1000000000n) throw new Error("RX span exceeds Stik page-writer address range");
+        stage = 4;
         const prepared = prepare_memory_region(Number(address), size);
         if (prepared !== "OK") throw new Error("RX preparation: " + prepared);
         log("MaxPS4 prepared RX region " + address.toString(16) + " size=" + size);
     }
+    stage = 5; region = 15;
     // Publish metadata first and the per-request nonce last, while all threads stop.
     checked("M" + (MAXPS4_MAILBOX + 8n).toString(16) + ",20:" +
             le64(1n) + regions.map(le64).join(""));
@@ -50,10 +61,12 @@ try {
     }
     if (attached && mailboxOwned) {
         try {
-            checked("M" + (MAXPS4_MAILBOX + 8n).toString(16) + ",20:" + le64(2n) + "00".repeat(24));
+            checked("M" + (MAXPS4_MAILBOX + 8n).toString(16) + ",20:" + le64(BigInt(0x100 + stage * 16 + region)) + "00".repeat(24));
             checked("M" + MAXPS4_MAILBOX.toString(16) + ",8:" + le64(MAXPS4_NONCE));
         } catch (mailboxError) { log("Mailbox: " + mailboxError.message); }
     }
+    // Preserve failure for StikDebug; cleanup and detach still run in finally.
+    throw error;
 } finally {
     if (attached) {
         const detached = send_command("D");
@@ -62,3 +75,4 @@ try {
         if (detached !== "OK") throw new Error("Detach failed: " + detached);
     }
 }
+
