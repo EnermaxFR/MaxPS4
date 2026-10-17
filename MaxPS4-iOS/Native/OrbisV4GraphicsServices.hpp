@@ -160,6 +160,28 @@ struct OrbisV4GraphicsServices {
             }
             return m.write_data(r.rdi,packet.data(),sizeof(packet))?trap("GNM init command destination not writable"):ok(size);
         });
+        // PS4 ABI: (uint32_t* cmdbuf, uint32_t size_dwords, int vo_handle, uint32_t index).
+        // Emits a real seven-DWORD WAIT_REG_MEM packet. Never report success
+        // without writing the GPU synchronization command.
+        svc.implement("sceGnmInsertWaitFlipDone",[g](const R& r,M& m){
+            if(r.rsi!=7)return ok(uint64_t(-1));
+            if(!r.rdi || (r.rdi&3) || !m.permitted(r.rdi,7*4,2))
+                return trap("GNM wait-flip command destination invalid");
+            auto port=g->ports.find(uint32_t(r.rdx));
+            if(port==g->ports.end() || r.rcx>=16 || port->second.buffers[r.rcx].group<0)
+                return trap("GNM wait-flip requires a registered VideoOut buffer");
+            if(!port->second.labels)port->second.labels=g->allocate(m,128);
+            if(!port->second.labels)return trap("GNM wait-flip label allocation failed");
+            const uint64_t label=port->second.labels+uint64_t(r.rcx)*8;
+            if((label&3) || !m.permitted(label,8,2))
+                return trap("GNM wait-flip label address invalid");
+            // PM4 WAIT_REG_MEM: memory poll, compare equal to zero.
+            const std::array<uint32_t,7> packet{
+                0xc0053c00U,0x13U,uint32_t(label),uint32_t(label>>32),0,0xffffffffU,10
+            };
+            return m.write_data(r.rdi,packet.data(),sizeof(packet))
+                ?trap("GNM wait-flip packet write failed"):ok();
+        });
         svc.implement("sceVideoOutOpen",[g](const R& r,M&){
             if(r.rsi || r.rdx || r.rcx)return video(1);
             if(!g->ports.empty())return video(9);
