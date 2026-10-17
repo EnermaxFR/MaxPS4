@@ -4,7 +4,19 @@ set -euo pipefail
 SOURCE=${1:?Usage: scripts/build-fexcore-app.sh AETHER_CHECKOUT}
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
+if [[ $(uname -s) != Darwin ]]; then
+  echo 'IPA build requires macOS, Xcode and the iPhoneOS SDK; no IPA generated.' >&2
+  exit 2
+fi
+for command in xcrun xcodebuild xcodegen codesign sips zip; do
+  command -v "$command" >/dev/null || { echo "Missing iOS build tool: $command" >&2; exit 2; }
+done
+xcrun --sdk iphoneos --show-sdk-path >/dev/null
+test -x build/fex-app-host/Bin/maxps4-ps4-linked-test || {
+  echo 'Build and test the host runtime first (build/fex-app-host).' >&2; exit 2;
+}
 mkdir -p build/frameworks build/diagnostics
+python3 scripts/write-build-provenance.py build/diagnostics/source-before.json
 bash scripts/build-fexcore-darwin-ios.sh "$SOURCE" build/fex-app-ios --runtime
 FRAMEWORK=build/frameworks/MaxPS4FEXRuntime.framework
 mkdir -p "$FRAMEWORK/Headers" "$FRAMEWORK/Modules"
@@ -63,13 +75,28 @@ mkdir -p "$ANIMATED"
 build/fex-app-host/Bin/maxps4-ps4-linked-test --animated-playable-bundle "$ANIMATED"
 cp MaxPS4-iOS/Resources/PlayableDemo/maxps4.json "$ANIMATED/"
 test -s "$ANIMATED/app.elf" && test -s "$ANIMATED/provider.prx" && test -s "$ANIMATED/maxps4.json"
+bash scripts/build-m1-device-fixtures.sh build/Payload/MaxPS4.app/M1CollisionFixtures
+bash scripts/build-orbis-v4-homebrew.sh build/Payload/MaxPS4.app/GameBootProbe homebrew/orbis-v4-c-startup/start.c
+bash scripts/build-orbis-v4-homebrew.sh build/Payload/MaxPS4.app/GlobalBootProbe homebrew/orbis-v4-global-startup/start.c
+python3 scripts/write-build-provenance.py build/diagnostics/source-after.json
+python3 - <<'PYPROVENANCE'
+import json
+from pathlib import Path
+before=json.loads(Path('build/diagnostics/source-before.json').read_text())
+after=json.loads(Path('build/diagnostics/source-after.json').read_text())
+assert before['fingerprint']==after['fingerprint'], 'Workspace inputs changed during build'
+Path('build/Payload/MaxPS4.app/BuildProvenance.json').write_text(json.dumps(after,sort_keys=True,indent=2))
+PYPROVENANCE
 # Record the tested source revision before signing, for shareable device proof.
 python3 - <<'PYREVISION'
-import plistlib, subprocess
+import json, plistlib, subprocess
 from pathlib import Path
 path = Path('build/Payload/MaxPS4.app/Info.plist')
 info = plistlib.loads(path.read_bytes())
 info['MaxPS4SourceRevision'] = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+provenance=json.loads(Path('build/Payload/MaxPS4.app/BuildProvenance.json').read_text())
+info['MaxPS4SourceFingerprint']=provenance['fingerprint']
+info['MaxPS4SourceDirty']=provenance['dirty']
 path.write_bytes(plistlib.dumps(info))
 PYREVISION
 # Xcode strips development Headers/Modules during embedding. Re-seal the exact
@@ -90,21 +117,26 @@ set -x
 xcrun nm -u build/Payload/MaxPS4.app/MaxPS4 > build/diagnostics/fex-app-imports.txt
 xcrun otool -L build/Payload/MaxPS4.app/MaxPS4 > build/diagnostics/fex-app-libraries.txt
 xcrun nm -gU "$FRAMEWORK/MaxPS4FEXRuntime" > build/diagnostics/fex-app-runtime-exports.txt
+for symbol in maxps4_fex_m1_collision_diagnostic maxps4_fex_engine_run_m1_threads; do
+  grep -q "_${symbol}$" build/diagnostics/fex-app-runtime-exports.txt
+  grep -q "_${symbol}$" build/diagnostics/fex-app-imports.txt
+done
 # Every public ABI entry must be exported by the embedded runtime. Only
 # entries actually called by the Swift app are required in its undefined imports;
 # the compiler may legitimately omit unused public functions.
-for symbol in maxps4_fex_test_ps4_libkernel maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_interpret_elf maxps4_fex_engine_run_elf maxps4_fex_engine_run_v4_prx maxps4_jit_begin maxps4_jit_cancel maxps4_jit_confirmation maxps4_jit_launch_failed; do
+for symbol in maxps4_fex_test_ps4_libkernel maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_interpret_elf maxps4_fex_engine_run_elf maxps4_fex_engine_run_v4_prx maxps4_fex_eboot_experimental_preflight maxps4_fex_engine_run_eboot_experimental maxps4_fex_eboot_preflight maxps4_fex_engine_run_eboot maxps4_jit_begin maxps4_jit_cancel maxps4_jit_confirmation maxps4_jit_launch_failed; do
   if ! grep -q "_${symbol}$" build/diagnostics/fex-app-runtime-exports.txt; then
     echo "Missing FEXCore runtime export: ${symbol}" >&2
     exit 1
   fi
 done
-for symbol in maxps4_fex_test_ps4_libkernel maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_run_elf maxps4_fex_engine_run_v4_prx maxps4_jit_begin; do
+for symbol in maxps4_fex_test_ps4_libkernel maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_run_elf maxps4_fex_engine_run_v4_prx maxps4_fex_eboot_experimental_preflight maxps4_fex_engine_run_eboot_experimental maxps4_fex_eboot_preflight maxps4_fex_engine_run_eboot maxps4_jit_begin; do
   if ! grep -q "_${symbol}$" build/diagnostics/fex-app-imports.txt; then
     echo "Missing required app import: ${symbol}" >&2
     exit 1
   fi
 done
 (cd build && zip -qry MaxPS4-FEXCore-SideStore.ipa Payload)
+python3 scripts/check-playable-ipa.py build/MaxPS4-FEXCore-SideStore.ipa
 python3 scripts/verify-fexcore-ipa.py build/MaxPS4-FEXCore-SideStore.ipa \
   | tee build/diagnostics/fex-app-ipa-verification.txt
