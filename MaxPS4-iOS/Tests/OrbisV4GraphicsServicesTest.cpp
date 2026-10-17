@@ -35,6 +35,24 @@ int main(){
         const uint8_t bgra[24]={3,2,1,255,6,5,4,255,99,99,99,99,9,8,7,255,12,11,10,255,88,88,88,88};assert(!lease.write_data(buffer,bgra,24));
         assert(call("sceVideoOutRegisterBuffers",h,0,base+0x100,1,base).value==0);
         assert(call("sceVideoOutRegisterBuffers",h,0,base+0x100,1,base).value==0x80290010);
+        // Real PM4 wait-for-flip packet: seven DWORDs and a valid label.
+        assert(call("sceGnmInsertWaitFlipDone",base+0x1800,6,h,0).value==uint64_t(-1));
+        assert(call("sceGnmInsertWaitFlipDone",base+0x1800,7,h,0).value==0);
+        std::array<uint32_t,7> waitPacket{};
+        assert(!lease.read_data(base+0x1800,waitPacket.data(),sizeof(waitPacket)));
+        assert(waitPacket[0]==0xc0053c00U && waitPacket[1]==0x13U);
+        assert(waitPacket[4]==0 && waitPacket[5]==0xffffffffU && waitPacket[6]==10);
+        const uint64_t label=uint64_t(waitPacket[2])|(uint64_t(waitPacket[3])<<32);
+        assert(label==g->ports.at(h).labels);
+        uint32_t clearLabel=0;put(label,clearLabel);
+        gpu::GNMCommandExecutor waitExecutor;std::string waitError;
+        std::vector<uint32_t> waitWords(waitPacket.begin(),waitPacket.end());
+        assert(waitExecutor.execute(lease,base+0x1800,waitWords,waitError));
+        uint32_t busyLabel=1;put(label,busyLabel);waitExecutor.remaining=65536;
+        assert(!waitExecutor.execute(lease,base+0x1800,waitWords,waitError));
+        assert(waitError.find("condition unsatisfied")!=std::string::npos);
+        put(label,clearLabel);
+
         const char name[]="graphics-test";assert(!lease.write_data(base+0x200,name,sizeof(name)));
         assert(call("sceKernelCreateEqueue",base+0x208,base+0x200).value==0);auto q=get64(base+0x208);
         assert(call("sceGnmAddEqEvent",q,64,0xcafe).value==0);
