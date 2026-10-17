@@ -82,6 +82,34 @@ int main(){
         gpu::GNMCommandExecutor markerExecutor;std::string markerError;
         assert(markerExecutor.execute(lease,base+0x1900,
             std::vector<uint32_t>(markerPacket.begin(),markerPacket.end()),markerError));
+        assert(call("sceGnmInsertPopMarker",base+0x1b00,5).value==uint64_t(-1));
+        assert(call("sceGnmInsertPopMarker",base+0x1b01,6).value==uint64_t(-1));
+        assert(call("sceGnmInsertPopMarker",base+0x10000,6).outcome==OrbisV4HostServices::Outcome::Trap);
+        assert(call("sceGnmInsertPopMarker",base+0x1b00,6).value==0);
+        std::array<uint32_t,6> popPacket{};assert(!lease.read_data(base+0x1b00,popPacket.data(),sizeof(popPacket)));
+        assert(popPacket[0]==0xc0041000U&&popPacket[1]==0x68750002U);
+        gpu::GNMCommandExecutor popExecutor;std::string popError;
+        assert(popExecutor.execute(lease,base+0x1b00,std::vector<uint32_t>(popPacket.begin(),popPacket.end()),popError));
+        assert(popExecutor.draws==0&&popExecutor.writes==0);
+        // Mission 57: embedded VS id 0 has real GCN bytes in aligned guest
+        // storage and a complete register-binding stream. No draw is claimed.
+        assert(call("sceGnmSetEmbeddedVsShader",base+0x2000,29,1).value==0x8eee00ffU);
+        assert(call("sceGnmSetEmbeddedVsShader",base+0x2000,28,0).value==uint64_t(-1));
+        assert(g->embeddedVs==0);
+        assert(call("sceGnmSetEmbeddedVsShader",base+0x2000,29,0).value==0);
+        assert(g->embeddedVs && !(g->embeddedVs&255));
+        std::array<uint32_t,29> embeddedPacket{};
+        assert(!lease.read_data(base+0x2000,embeddedPacket.data(),sizeof(embeddedPacket)));
+        gpu::GNMCommandExecutor embeddedExecutor;std::string embeddedError;
+        assert(embeddedExecutor.execute(lease,base+0x2000,
+            std::vector<uint32_t>(embeddedPacket.begin(),embeddedPacket.end()),embeddedError));
+        assert((uint64_t(embeddedExecutor.state.shader[0x48])<<8)==g->embeddedVs);
+        assert(embeddedExecutor.state.shader[0x4a]==0xc0000);
+        assert(embeddedExecutor.state.context[0x1c3]==4);
+        const auto embeddedAddress=g->embeddedVs;
+        uint32_t firstInstruction=0;assert(!lease.read_data(embeddedAddress,&firstInstruction,4));
+        assert(firstInstruction==0xbeeb03ffU);
+        assert(call("sceGnmSetEmbeddedVsShader",base+0x2000,29,0).value==0&&g->embeddedVs==embeddedAddress);
         // Real PM4 wait-for-flip packet: seven DWORDs and a valid label.
         assert(call("sceGnmInsertWaitFlipDone",base+0x1800,6,h,0).value==uint64_t(-1));
         assert(call("sceGnmInsertWaitFlipDone",base+0x1800,7,h,0).value==0);

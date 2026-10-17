@@ -2,6 +2,7 @@
 #include "OrbisV4HostServices.hpp"
 #include "maxps4_ps4_abi.h"
 #include "GuestProviders/GnmInitState.hpp"
+#include "GuestProviders/GnmEmbeddedVS.hpp"
 #include "GNMCommandExecutor.hpp"
 #include <array>
 #include <chrono>
@@ -30,6 +31,7 @@ struct OrbisV4GraphicsServices {
     uint64_t nextQueue=0x52000000, nextPort=1, start=now();
     gpu::GNMCommandExecutor engine;
     uint64_t submitted=0,completed=0;
+    uint64_t embeddedVs=0;
     std::function<bool(std::string&)> openDevice;
     std::function<void()> closeDevice;
     std::function<bool(uint32_t,uint32_t,const std::vector<uint8_t>&,uint64_t,uint64_t,std::string&)> present;
@@ -110,6 +112,31 @@ struct OrbisV4GraphicsServices {
     }
     static std::shared_ptr<OrbisV4GraphicsServices> install(OrbisV4HostServices& svc,std::function<uint64_t(M&,size_t)> alloc){
         auto g=std::make_shared<OrbisV4GraphicsServices>();g->allocate=std::move(alloc);
+        svc.implement("sceGnmSetEmbeddedVsShader",[g](const R& r,M& m){
+            if(r.rdx!=0)return ok(0x8eee00ffU);
+            if(!r.rdi || (r.rdi&3) || r.rsi<29)return ok(uint64_t(-1));
+            if(r.rcx)return trap("GNM embedded VS shader modifier is not supported by this profile");
+            if(!m.permitted(r.rdi,29*4,2))return trap("GNM embedded VS command destination unwritable");
+            if(!g->embeddedVs){
+                const auto& code=gpu::gnm_embedded::FullscreenVS;
+                const uint64_t allocation=g->allocate(m,sizeof(code)+255);
+                if(!allocation || allocation>UINT64_MAX-255)return trap("GNM embedded VS guest storage allocation failed");
+                const uint64_t address=(allocation+255)&~uint64_t(255);
+                if(m.write_data(address,code.data(),sizeof(code)))return trap("GNM embedded VS code storage unwritable");
+                g->embeddedVs=address;
+            }
+            // Bind the actual GCN bytes through a logical guest GPU address,
+            // never a host pointer. These are register packets, not a draw.
+            const std::array<uint32_t,29> packet{
+                0xc0027600U,0x48U,uint32_t(g->embeddedVs>>8),uint32_t(g->embeddedVs>>40),
+                0xc0027600U,0x4aU,0xc0000U,4,
+                0xc0016900U,0x207U,0,
+                0xc0016900U,0x1b1U,0,
+                0xc0016900U,0x1c3U,4,
+                0xc00a1000U,0
+            };
+            return m.write_data(r.rdi,packet.data(),sizeof(packet))?trap("GNM embedded VS packet write failed"):ok();
+        });
         g->engine.interrupt=[weak=std::weak_ptr<OrbisV4GraphicsServices>(g)]{if(auto state=weak.lock())state->trigger(64,-14,0,64);};
         svc.implement("sceGnmAreSubmitsAllowed",[](const R&,M&){return ok(1);}); // Synchronous queue, no outstanding lock.
         svc.implement("sceGnmSubmitDone",[g](const R&,M&){return g->submitted==g->completed?ok():ok(0x80d110ff);});
@@ -146,10 +173,29 @@ struct OrbisV4GraphicsServices {
                 return trap("GNM compute shader packet write failed");
             std::fprintf(stderr,"GNM.SHADER stage=CS program=0x%llx resource1=%08x modifier=%08x\n",
                 (unsigned long long)(uint64_t(regs[0])<<8),resource,modifier);
+            // Capture only an owned, bounded prefix from the actual bound
+            // guest program. This is input for GCN execution work, not a claim
+            // that the shader has run or that the prefix is a complete binary.
+            if(const char* dir=std::getenv("MAXPS4_GPU_DUMP_DIR")){
+                const uint64_t program=uint64_t(regs[0])<<8;
+                std::array<uint8_t,512> code{};
+                if(program && !m.read_data(program,code.data(),code.size())){
+                    std::ostringstream stem;stem<<dir<<"/gcn-cs-0x"<<std::hex<<program;
+                    std::ofstream file(stem.str()+"-prefix.bin",std::ios::binary);
+                    file.write(reinterpret_cast<const char*>(code.data()),code.size());
+                    std::ofstream meta(stem.str()+"-registers.json");
+                    meta<<"{\"program\":"<<program<<",\"prefix_bytes\":"<<code.size()<<",\"resource1\":"<<resource<<",\"resource2\":"<<regs[3]<<",\"local_size\":["<<regs[4]<<','<<regs[5]<<','<<regs[6]<<"]}\n";
+                }
+            }
             return ok();
         });
         // GPU debug marker: PM4 NOP payload with a bounded guest C string.
         // The marker annotates command streams; it does not execute GPU work.
+        svc.implement("sceGnmInsertPopMarker",[](const R& r,M& m){
+            if(!r.rdi || (r.rdi&3) || r.rsi!=6)return ok(uint64_t(-1));
+            const std::array<uint32_t,6> packet{0xc0041000U,0x68750002U,0,0,0,0};
+            return m.write_data(r.rdi,packet.data(),sizeof(packet))?trap("GNM pop marker packet destination unwritable"):ok();
+        });
         svc.implement("sceGnmInsertPushMarker",[](const R& r,M& m){
             if(!r.rdi || (r.rdi&3) || !r.rdx || r.rsi<3 || r.rsi>4096)
                 return ok(uint64_t(-1));
