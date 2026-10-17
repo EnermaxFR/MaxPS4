@@ -42,6 +42,17 @@ int main() {
         assert(!memory.write_data(nestedAddress,nested.data(),nested.size()*4));
         assert(run(packet(0x3f,{uint32_t(nestedAddress),0,uint32_t(nested.size())}),error));
         assert(engine.state.uconfig[0x20]==0xdeadbeef);
+        // Real memory copy/fill and an owned shader-port upload; no MMIO pointer.
+        assert(run(packet(0x50,{0x60000000,uint32_t(destination),0,uint32_t(fence+16),0,8}),error));
+        assert(read64(fence+16)==read64(destination));
+        assert(run(packet(0x50,{0x40000000,0x12345678,0,uint32_t(fence+16),0,8}),error));
+        assert(read64(fence+16)==0x1234567812345678ULL);
+        assert(run(packet(0x50,{0x60000000,uint32_t(destination),0,0x3022c,0,0x28200008}),error));
+        assert(engine.shaderUploads.size()==1&&engine.shaderUploads[0].source==destination);
+        assert(engine.shaderUploads[0].bytes[0]==0x44&&engine.shaderUploads[0].bytes[7]==0x55);
+        assert(!run(packet(0x50,{0x60000000,0,0,0x3022c,0,0x28200008}),error));
+        assert(!run(packet(0x50,{0x60000000,uint32_t(destination),0,0x30230,0,0x28200008}),error));
+        assert(engine.shaderUploads.size()==1&&read64(fence+16)==0x1234567812345678ULL);
         auto cycle=packet(0x3f,{uint32_t(nestedAddress),0,4});
         assert(!memory.write_data(nestedAddress,cycle.data(),cycle.size()*4));
         assert(!run(cycle,error)&&error.find("recursion/word budget")!=std::string::npos);

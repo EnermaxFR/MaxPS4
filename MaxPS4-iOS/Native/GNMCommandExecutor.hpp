@@ -17,6 +17,10 @@ struct GNMCommandExecutor {
     uint64_t packets=0,draws=0,writes=0;size_t remaining=65536;
     std::function<bool(const State&,const Draw&,std::string&)> render;
     std::function<void()> interrupt;
+    // Owned uploads to the shader-prefetch register port. A renderer must still
+    // execute GCN; recording an upload never completes a dispatch or draw.
+    struct ShaderUpload { uint64_t source;std::vector<uint8_t> bytes; };
+    std::vector<ShaderUpload> shaderUploads;
     template<class Memory>
     bool execute(Memory& memory,uint64_t address,const std::vector<uint32_t>& words,std::string& error,unsigned depth=0){
         if(depth>8 || words.size()>remaining){error="PM4 recursion/word budget exhausted";return false;}
@@ -62,6 +66,34 @@ struct GNMCommandExecutor {
                       <<" local="<<state.shader[0x207]<<','<<state.shader[0x208]<<','<<state.shader[0x209]
                       <<" initiator=0x"<<std::hex<<p[3];
                 return fail(reason.str());
+            }
+            case 0x50:{ // DMA_DATA (base PS4): bounded memory transfers / shader prefetch.
+                if(n!=6)return fail("invalid DMA_DATA payload");
+                const auto count=p[5]&0x1fffffU;
+                const uint64_t src=uint64_t(p[1])|(uint64_t(p[2])<<32);
+                const uint64_t dst=uint64_t(p[3])|(uint64_t(p[4])<<32);
+                if(!count)return fail("zero-length DMA_DATA unsupported");
+                // Observed SDK shader upload: L2 memory -> fixed register port.
+                // Keep the real source bytes, never dereference the MMIO port
+                // as guest RAM. Unknown register transfers remain errors.
+                if(p[0]==0x60000000 && dst==0x3022c && (p[5]&~0x1fffffU)==0x28200000){
+                    if(count>65536||shaderUploads.size()>=256||!memory.permitted(src,count,4))
+                        return fail("shader DMA source/budget invalid");
+                    ShaderUpload upload{src,std::vector<uint8_t>(count)};
+                    if(memory.read_data(src,upload.bytes.data(),count))return fail("shader DMA read failed");
+                    shaderUploads.push_back(std::move(upload));break;
+                }
+                const unsigned source=(p[0]>>29)&3,destination=(p[0]>>20)&3;
+                if((p[0]&~0xe0300000U)||(p[5]&~0x003fffffU)||
+                   (source!=0&&source!=2&&source!=3)||(destination!=0&&destination!=3))
+                    return fail("DMA_DATA register/GDS/address mode unsupported");
+                if(!memory.permitted(dst,count,2))return fail("DMA destination unmapped/read-only");
+                std::vector<uint8_t> bytes(count);
+                if(source==2){for(size_t i=0;i<count;++i)bytes[i]=uint8_t(p[1]>>((i&3)*8));}
+                else if(!memory.permitted(src,count,4)||memory.read_data(src,bytes.data(),count))
+                    return fail("DMA source inaccessible");
+                if(memory.write_data(dst,bytes.data(),count))return fail("DMA write failed");
+                std::atomic_thread_fence(std::memory_order_seq_cst);break;
             }
             case 0x37:{
                 if(n<4)return fail("WRITE_DATA too short");const uint32_t destination=(p[0]>>8)&15;
