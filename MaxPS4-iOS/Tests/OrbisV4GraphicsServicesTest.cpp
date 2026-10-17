@@ -35,6 +35,28 @@ int main(){
         const uint8_t bgra[24]={3,2,1,255,6,5,4,255,99,99,99,99,9,8,7,255,12,11,10,255,88,88,88,88};assert(!lease.write_data(buffer,bgra,24));
         assert(call("sceVideoOutRegisterBuffers",h,0,base+0x100,1,base).value==0);
         assert(call("sceVideoOutRegisterBuffers",h,0,base+0x100,1,base).value==0x80290010);
+        // Mission 54: compute shader binding is a real 25-DWORD PM4 stream.
+        const std::array<uint32_t,7> csRegs{0x1234U,0,0xabc000U,0x42U,8,4,1};
+        assert(!lease.write_data(base+0x1500,csRegs.data(),sizeof(csRegs)));
+        assert(call("sceGnmSetCsShaderWithModifier",base+0x1600,24,base+0x1500,0).value==uint64_t(-1));
+        assert(call("sceGnmSetCsShaderWithModifier",base+0x1600,25,base+0x1500,1).value==uint64_t(-1));
+        assert(call("sceGnmSetCsShaderWithModifier",base+0x1600,25,base+0x1500,0x40).value==0);
+        std::array<uint32_t,25> csPacket{};
+        assert(!lease.read_data(base+0x1600,csPacket.data(),sizeof(csPacket)));
+        assert(csPacket[0]==0xc0027602U && csPacket[1]==0x20c && csPacket[2]==0x1234);
+        assert(csPacket[4]==0xc0027602U && csPacket[5]==0x212);
+        assert(csPacket[6]==((csRegs[2]&0xfffffc3fU)|0x40U));
+        assert(csPacket[8]==0xc0037602U && csPacket[9]==0x207);
+        assert(csPacket[10]==8 && csPacket[11]==4 && csPacket[12]==1);
+        assert(csPacket[13]==0xc00a1000U && csPacket[14]==0);
+        gpu::GNMCommandExecutor csExecutor;std::string csError;
+        assert(csExecutor.execute(lease,base+0x1600,std::vector<uint32_t>(csPacket.begin(),csPacket.end()),csError));
+        assert(csExecutor.state.shader[0x20c]==0x1234);
+        assert(csExecutor.state.shader[0x212]==csPacket[6]);
+        assert(csExecutor.state.shader[0x207]==8 && csExecutor.state.shader[0x209]==1);
+        assert(call("sceGnmSetCsShader",base+0x1600,25,base+0x1500).value==0);
+        assert(!lease.read_data(base+0x1600,csPacket.data(),sizeof(csPacket)));
+        assert(csPacket[6]==csRegs[2]);
         // Real PM4 wait-for-flip packet: seven DWORDs and a valid label.
         assert(call("sceGnmInsertWaitFlipDone",base+0x1800,6,h,0).value==uint64_t(-1));
         assert(call("sceGnmInsertWaitFlipDone",base+0x1800,7,h,0).value==0);
