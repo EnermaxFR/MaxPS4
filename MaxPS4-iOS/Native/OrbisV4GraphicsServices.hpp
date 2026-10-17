@@ -123,6 +123,31 @@ struct OrbisV4GraphicsServices {
             auto result=workload?g->submit(m,uint32_t(r.rsi),r.rdx,r.rcx,r.r8,r.r9):g->submit(m,uint32_t(r.rdi),r.rsi,r.rdx,r.rcx,r.r8);
             if(result.outcome!=O::Returned||result.value||!flip)return result;return g->flip(vo,m);
         });
+        // PS4 compute shader binding emits three SET_SH_REG packets and a trailing NOP.
+        // This binds registers only: actual GCN dispatch remains unsupported by the executor.
+        for(const auto& name:{"sceGnmSetCsShader","sceGnmSetCsShaderWithModifier"})svc.implement(name,[name=std::string(name)](const R& r,M& m){
+            constexpr uint32_t count=25;
+            const uint32_t modifier=name=="sceGnmSetCsShaderWithModifier"?uint32_t(r.rcx):0;
+            if(!r.rdi || (r.rdi&3) || r.rsi<count || !r.rdx || (modifier&0xfffffc3fU))
+                return ok(uint64_t(-1));
+            std::array<uint32_t,7> regs{};
+            if(m.read_data(r.rdx,regs.data(),sizeof(regs)))return trap("GNM compute shader register array unreadable");
+            if(regs[1])return ok(uint64_t(-1));
+            if(!m.permitted(r.rdi,count*4,2))return trap("GNM compute shader destination unwritable");
+            const uint32_t resource=modifier?(regs[2]&0xfffffc3fU)|modifier:regs[2];
+            std::array<uint32_t,count> packet{
+                0xc0027602U,0x20cU,regs[0],0,
+                0xc0027602U,0x212U,resource,regs[3],
+                0xc0037602U,0x207U,regs[4],regs[5],regs[6],
+                0xc00a1000U,0
+            };
+            // Remaining NOP payload is explicitly zeroed by value initialization.
+            if(m.write_data(r.rdi,packet.data(),sizeof(packet)))
+                return trap("GNM compute shader packet write failed");
+            std::fprintf(stderr,"GNM.SHADER stage=CS program=0x%llx resource1=%08x modifier=%08x\\n",
+                (unsigned long long)(uint64_t(regs[0])<<8),resource,modifier);
+            return ok();
+        });
         for(const auto& name:{"sceGnmSetVsShader","sceGnmSetPsShader","sceGnmSetPsShader350"})svc.implement(name,[name=std::string(name)](const R& r,M& m){
             const bool vs=name=="sceGnmSetVsShader";const size_t count=vs?29:40;
             if(!r.rdi || (r.rdi&3) || r.rsi<count || (vs && (!r.rdx || (r.rcx&0xfcfffc3f))))return ok(uint64_t(-1));
