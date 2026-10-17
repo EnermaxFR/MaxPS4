@@ -57,6 +57,19 @@ int main(){
         assert(call("sceGnmSetCsShader",base+0x1600,25,base+0x1500).value==0);
         assert(!lease.read_data(base+0x1600,csPacket.data(),sizeof(csPacket)));
         assert(csPacket[6]==csRegs[2]);
+        // Mission 55: encode compute dispatch, but never claim GPU execution.
+        assert(call("sceGnmDispatchDirect",base+0x1700,8,1,1,1,0).value==uint64_t(-1));
+        assert(call("sceGnmDispatchDirect",base+0x1700,9,0x80000000U,1,1,0).value==uint64_t(-1));
+        assert(call("sceGnmDispatchDirect",base+0x1700,9,0x7f80,1,1,0).value==0);
+        std::array<uint32_t,9> dispatchPacket{};
+        assert(!lease.read_data(base+0x1700,dispatchPacket.data(),sizeof(dispatchPacket)));
+        assert(dispatchPacket[0]==0xc0031502U && dispatchPacket[1]==0x7f80);
+        assert(dispatchPacket[2]==1 && dispatchPacket[3]==1 && dispatchPacket[4]==1);
+        assert(dispatchPacket[5]==0xc0021000U);
+        gpu::GNMCommandExecutor dispatchExecutor;std::string dispatchError;
+        assert(!dispatchExecutor.execute(lease,base+0x1700,
+            std::vector<uint32_t>(dispatchPacket.begin(),dispatchPacket.end()),dispatchError));
+        assert(dispatchError.find("GPU packet semantics not implemented")!=std::string::npos);
         // Real PM4 wait-for-flip packet: seven DWORDs and a valid label.
         assert(call("sceGnmInsertWaitFlipDone",base+0x1800,6,h,0).value==uint64_t(-1));
         assert(call("sceGnmInsertWaitFlipDone",base+0x1800,7,h,0).value==0);
