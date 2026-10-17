@@ -144,9 +144,23 @@ struct OrbisV4GraphicsServices {
             // Remaining NOP payload is explicitly zeroed by value initialization.
             if(m.write_data(r.rdi,packet.data(),sizeof(packet)))
                 return trap("GNM compute shader packet write failed");
-            std::fprintf(stderr,"GNM.SHADER stage=CS program=0x%llx resource1=%08x modifier=%08x\\n",
+            std::fprintf(stderr,"GNM.SHADER stage=CS program=0x%llx resource1=%08x modifier=%08x\n",
                 (unsigned long long)(uint64_t(regs[0])<<8),resource,modifier);
             return ok();
+        });
+        // DISPATCH_DIRECT is a 9-DWORD PM4 compute dispatch command.
+        // Encoding is not execution: the PM4 executor must reject GCN dispatch
+        // until a real compute backend is installed.
+        svc.implement("sceGnmDispatchDirect",[](const R& r,M& m){
+            if(!r.rdi || (r.rdi&3) || r.rsi!=9 ||
+               (uint32_t(r.rdx|r.rcx|r.r8)&0x80000000U))return ok(uint64_t(-1));
+            if(!m.permitted(r.rdi,9*4,2))return trap("GNM dispatch destination unwritable");
+            const std::array<uint32_t,9> packet{
+                0xc0031502U|uint32_t(r.r9&1),uint32_t(r.rdx),uint32_t(r.rcx),uint32_t(r.r8),
+                uint32_t(r.r9&0x18)+1U,0xc0021000U,0,0,0
+            };
+            return m.write_data(r.rdi,packet.data(),sizeof(packet))
+                ?trap("GNM dispatch packet write failed"):ok();
         });
         for(const auto& name:{"sceGnmSetVsShader","sceGnmSetPsShader","sceGnmSetPsShader350"})svc.implement(name,[name=std::string(name)](const R& r,M& m){
             const bool vs=name=="sceGnmSetVsShader";const size_t count=vs?29:40;
