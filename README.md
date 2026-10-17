@@ -24,6 +24,21 @@
 
 Les sources amont AetherPS4 sont récupérées pendant certains builds CI pour des tests de portage. Le checkout intégral de shadPS4 fait l'objet de [la PR #83](https://github.com/EnermaxFR/MaxPS4/pull/83) et n'est pas équivalent à un moteur compilé pour iOS.
 
+## Avancement récent — chargeur Orbis et Kero Blaster (17 octobre 2026)
+
+> **Statut de ces travaux :** résultats de développement **locaux** rapportés par les missions Codex 24 à 26. Les modifications ne sont pas encore commitées ni publiées sur GitHub ; leur présence sur `main`, dans une IPA ou sur iPhone **n'est pas établie**.
+
+| Chantier | Résultat rapporté | Limite actuelle |
+| --- | --- | --- |
+| Mission 24 — chargement ELF | Parcours d'analyse, précontrôle mémoire et dispatch Orbis V4 pour un `eboot.bin` ELF en clair ; homebrew exécuté 3 fois via FEX/VIXL, **RAX=4661, backend 3** | Les SELF ne sont pas encore exécutés par ce parcours |
+| Mission 25 — Kero Blaster (CUSA06015) | Analyse locale de `eboot.bin`, `libc.prx` et `libSceFios2.prx`, sans modifier les originaux | Aucun chargement V4 ni lancement du jeu |
+| Mission 26 — en-têtes SELF | Incohérence `SELF.HEADER / -ENOEXEC` expliquée par une annexe `PT_SCE_LIBVERSION` et validation stricte des bornes | Nouveau refus `SELF.BLOCK / -ENOTSUP` pour des blocs non pris en charge, notamment signés |
+| Validation | Régressions SELF, linker, mémoire et FEX ; ASan/UBSan/LeakSanitizer rapportés réussis | Compilation iOS et test sur iPhone physique non effectués pour ces travaux |
+
+**Priorité suivante :** caractériser précisément les blocs SELF non pris en charge (signature, chiffrement éventuel, compression, offsets et correspondance avec les segments ELF) sans affaiblir les contrôles de sécurité. Les autres obstacles identifiés comprennent le démarrage dynamique, des dépendances manquantes et des relocations TLS de type 16.
+
+**Kero Blaster n'est pas jouable dans MaxPS4 à ce stade.** La présence d'un `eboot.bin` SELF et d'un en-tête ELF intégré ne démontre pas que les segments exécutables soient déchiffrés. Aucun contournement du chiffrement ou des licences n'est revendiqué.
+
 ## IPA FEXCore pour SideStore
 
 Le workflow [MaxPS4 FEXCore SideStore IPA](https://github.com/EnermaxFR/MaxPS4/actions/workflows/fexcore-app.yml)
@@ -66,7 +81,7 @@ Les contributions sont bienvenues via [Issues](https://github.com/EnermaxFR/MaxP
 **[Rejoindre le Discord MaxPS4](https://discord.gg/G7BaXN4fd)**
 
 ---
-*Dernière mise à jour documentaire : 11 octobre 2026 — statuts à réévaluer à partir des diagnostics des prochains builds.*
+*Dernière mise à jour documentaire : 17 octobre 2026 — les avancées locales mentionnées ci-dessus restent à publier et à valider sur appareil.*
 
 Développement JIT iPhone : [protocole SideStore + StikDebug et limites de validation](docs/fexcore-stikdebug-jit.md). La PR #131 dépend de la PR #130 ; aucune exécution FEX JIT sur iPhone n’est encore confirmée.
 
