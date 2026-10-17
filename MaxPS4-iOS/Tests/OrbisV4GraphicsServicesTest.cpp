@@ -70,6 +70,18 @@ int main(){
         assert(!dispatchExecutor.execute(lease,base+0x1700,
             std::vector<uint32_t>(dispatchPacket.begin(),dispatchPacket.end()),dispatchError));
         assert(dispatchError.find("GPU packet semantics not implemented")!=std::string::npos);
+        // Mission 56: bounded debug marker is a NOP packet, not a GPU draw.
+        const char pushMarker[]="hello!";
+        assert(!lease.write_data(base+0x1800,pushMarker,sizeof(pushMarker)));
+        assert(call("sceGnmInsertPushMarker",base+0x1900,8,base+0x1800).value==uint64_t(-1));
+        assert(call("sceGnmInsertPushMarker",base+0x1900,9,base+0x1800).value==0);
+        std::array<uint32_t,9> markerPacket{};
+        assert(!lease.read_data(base+0x1900,markerPacket.data(),sizeof(markerPacket)));
+        assert(markerPacket[0]==0xc0071000U && markerPacket[1]==0x68750001U);
+        assert(std::memcmp(markerPacket.data()+2,pushMarker,sizeof(pushMarker))==0);
+        gpu::GNMCommandExecutor markerExecutor;std::string markerError;
+        assert(markerExecutor.execute(lease,base+0x1900,
+            std::vector<uint32_t>(markerPacket.begin(),markerPacket.end()),markerError));
         // Real PM4 wait-for-flip packet: seven DWORDs and a valid label.
         assert(call("sceGnmInsertWaitFlipDone",base+0x1800,6,h,0).value==uint64_t(-1));
         assert(call("sceGnmInsertWaitFlipDone",base+0x1800,7,h,0).value==0);
