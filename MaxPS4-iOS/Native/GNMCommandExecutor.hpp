@@ -115,6 +115,17 @@ struct GNMCommandExecutor {
                 else if(memory.write_data(dst,p+3,(n-3)*4))return fail("WRITE_DATA failed");
                 break;
             }
+            case 0x48:{ // EVENT_WRITE_EOS: CS_DONE, immediate 32-bit fence.
+                // All supported compute work completes synchronously before
+                // this packet. GDS transfers and other event modes stay errors.
+                if(n!=4 || p[0]!=0x62f || (p[2]&0xffff0000U)!=0x40000000U)
+                    return fail("unsupported EVENT_WRITE_EOS event/command");
+                const uint64_t dst=uint64_t(p[1])|(uint64_t(p[2]&0xffff)<<32);
+                if((dst&3)||!memory.permitted(dst,4,2))return fail("EOS fence destination invalid");
+                std::atomic_thread_fence(std::memory_order_seq_cst);
+                if(memory.write_data(dst,p+3,4))return fail("EOS fence write failed");
+                break;
+            }
             case 0x47:{
                 if(n!=5)return fail("invalid EVENT_WRITE_EOP");const uint32_t select=p[2]>>29;
                 const uint64_t dst=uint64_t(p[1])|(uint64_t(p[2]&0xffff)<<32);

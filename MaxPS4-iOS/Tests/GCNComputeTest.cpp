@@ -25,7 +25,70 @@ static std::vector<uint32_t> kernel() {
       0xe0102000, 0x80010100, // buffer_store_format_x v1, v0, s[4:7], 0 idxen
       0xbf810000};
 }
-int main() {
+static int fullDispatch() {
+  constexpr uint64_t base = 0x400000, output = base + 0x4000;
+  constexpr uint32_t count = 32640 * 64, value = 0x89abcdef;
+  OrbisV4Translation owner([] {});
+  assert(!owner.reserve(base, 16 * 1024 * 1024));
+  assert(!owner.map(base, 16 * 1024 * 1024, 6));
+  {
+    auto m = owner.lease();
+    const auto code = kernel();
+    assert(!m.write_data(base, code.data(), code.size() * 4));
+    assert(!m.write_data(base + 0x1000, &value, 4));
+    uint32_t constants[] = {count, 0};
+    assert(!m.write_data(base + 0x2000, constants, 8));
+    std::array<uint32_t, 1024> sh{};
+    sh[0x20c] = base >> 8;
+    sh[0x212] = 0x40;
+    sh[0x213] = 0x98;
+    sh[0x207] = 64;
+    sh[0x208] = sh[0x209] = 1;
+    auto descriptor = [&](unsigned i, uint64_t at, unsigned stride,
+                          unsigned records, unsigned format) {
+      sh[0x240 + i] = uint32_t(at);
+      sh[0x241 + i] = uint32_t(at >> 32) | (stride << 16) | 0x7000;
+      sh[0x242 + i] = records;
+      sh[0x243 + i] = format;
+    };
+    descriptor(0, base + 0x1000, 4, 1, 0x20024004);
+    descriptor(4, output, 4, count, 0x18024004);
+    descriptor(8, base + 0x2000, 16, 1, 0x20077fac);
+    std::array<uint32_t, 1024> scratch;
+    scratch.fill(0xdeadbeef);
+    const uint32_t guard = 0xaabbccdd;
+    assert(!m.write_data(output - 4, &guard, 4));
+    assert(!m.write_data(output + uint64_t(count) * 4, &guard, 4));
+    for (uint32_t i = 0; i < count; i += scratch.size()) {
+      const auto size = std::min<size_t>(scratch.size(), count - i);
+      assert(!m.write_data(output + uint64_t(i) * 4, scratch.data(), size * 4));
+    }
+    GCNCompute engine;
+    std::string error;
+    const bool success = engine.dispatch(m, sh, {32640, 1, 1}, 1, error);
+    if (!success)
+      std::cerr << error << '\n';
+    assert(success && engine.stats.groups == 32640 &&
+           engine.stats.stores == count && engine.stats.verified == count);
+    for (uint32_t i = 0; i < count; i += scratch.size()) {
+      const auto size = std::min<size_t>(scratch.size(), count - i);
+      assert(!m.read_data(output + uint64_t(i) * 4, scratch.data(), size * 4));
+      for (size_t j = 0; j < size; ++j)
+        assert(scratch[j] == value);
+    }
+    uint32_t observed = 0;
+    assert(!m.read_data(output - 4, &observed, 4) && observed == guard);
+    assert(!m.read_data(output + uint64_t(count) * 4, &observed, 4) &&
+           observed == guard);
+  }
+  owner.close();
+  std::cout << "PASS full dispatch: 32640 groups, 2088960 stores/readbacks, "
+               "8355840 output bytes compared, both guards intact\n";
+  return 0;
+}
+int main(int argc, char **) {
+  if (argc > 1)
+    return fullDispatch();
   std::string error;
   std::vector<GCNCompute::Instruction> decoded;
   assert(GCNCompute::decode(kernel(), decoded, error) && decoded.size() == 15);
@@ -107,6 +170,16 @@ int main() {
       assert(get(output + i * 4) == (i < 70 ? values[i % 4] : 0xdeadbeef));
     assert(engine.stats.firstWrite == output &&
            engine.stats.lastWrite == output + 69 * 4);
+    // PS4 uses 40 address bits. High descriptor metadata must not become
+    // a spurious 0x7000... guest address; all accesses still use the lease.
+    reset();
+    sh[0x241] |= 0x7000;
+    sh[0x245] |= 0x7000;
+    sh[0x249] |= 0x7000;
+    assert(engine.dispatch(memory, sh, {3, 1, 1}, 1, error));
+    assert(engine.stats.stores == 70 && engine.stats.firstWrite == output);
+    for (unsigned i = 0; i < 70; ++i)
+      assert(get(output + i * 4) == values[i % 4]);
     // Smaller scalar bound exercises a partial final EXEC and empty group.
     reset();
     put(constants, 65);
@@ -209,11 +282,31 @@ int main() {
     put(constants, 65);
     GNMCommandExecutor pm4;
     pm4.state.shader = sh;
-    std::vector<uint32_t> words{
-        0xc0031502, 3, 1, 1, 1, 0xc0033700, 0x500, uint32_t(constants + 8), 0,
-        0xaabbccdd};
-    assert(pm4.execute(memory, base, words, error) &&
-           pm4.compute.stats.stores == 65 && get(constants + 8) == 0xaabbccdd);
+    std::vector<uint32_t> words{0xc0031502,
+                                3,
+                                1,
+                                1,
+                                1,
+                                0xc0034800,
+                                0x62f,
+                                uint32_t(constants + 8),
+                                0x40000000,
+                                1,
+                                0xc0053c00,
+                                0x13,
+                                uint32_t(constants + 8),
+                                0,
+                                1,
+                                0xffffffff,
+                                10};
+    assert(pm4.execute(memory, base, words, error));
+    assert(pm4.compute.stats.stores == 65 && get(constants + 8) == 1);
+    // Failed compute never signals its following end-of-shader fence.
+    put(constants + 8, 0x12345678);
+    pm4.remaining = 65536;
+    pm4.state.shader[0x213] |= 1; // unsupported scratch
+    assert(!pm4.execute(memory, base, words, error));
+    assert(get(constants + 8) == 0x12345678);
     // Read-only mappings are never writable through the compute backend.
     reset();
     sh[0x244] = uint32_t(base + page * 5);

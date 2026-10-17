@@ -19,5 +19,8 @@ for mode in native sanitized; do
     "${CXX:-c++}" "${flags[@]}" "${sources[@]}" -ldl \
       -o "$OUT/$suite-$mode" > "$OUT/$suite-$mode-build.txt" 2>&1
     python3 scripts/run-bounded.py 30 "$OUT/$suite-$mode.txt" "$OUT/$suite-$mode"
+    if [[ "$suite" == GCNComputeTest ]]; then
+      python3 scripts/run-bounded.py 30 "$OUT/$suite-$mode-full.txt" "$OUT/$suite-$mode" --full
+    fi
   done
 done

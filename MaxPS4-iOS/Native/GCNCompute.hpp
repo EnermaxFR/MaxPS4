@@ -39,6 +39,9 @@ struct GCNCompute {
     std::array<uint32_t, 8> scalarValue{};
     size_t scalarReads = 0;
   } stats;
+  // PS4 buffer descriptors expose a 40-bit GPU address; bits 40..47
+  // are not address bits (see the PS4 resource layout, unlike generic 48-bit
+  // SI).
   static constexpr size_t maxCodeWords = 256;
   static constexpr uint64_t maxThreads = 4 * 1024 * 1024,
                             maxSteps = 64 * 1024 * 1024;
@@ -321,7 +324,7 @@ struct GCNCompute {
               if (offset + 4 > (stride ? stride * records : records))
                 return at("scalar buffer out of bounds");
               const uint64_t address =
-                  ((uint64_t(hi & 65535) << 32) | lo) + offset;
+                  ((uint64_t(hi & 255) << 32) | lo) + offset;
               uint32_t value = 0;
               if ((address & 3) || memory.read_data(address, &value, 4))
                 return at("scalar buffer unreadable/alignment");
@@ -403,7 +406,7 @@ struct GCNCompute {
                       (!stride && relative + 4 > records))
                     return at("formatted buffer out of bounds");
                   const uint64_t address =
-                      ((uint64_t(hi & 65535) << 32) | lo) + relative;
+                      ((uint64_t(hi & 255) << 32) | lo) + relative;
                   if (address & 3)
                     return at("buffer address alignment unsupported");
                   if (i.op == Op::load) {

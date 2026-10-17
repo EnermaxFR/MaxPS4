@@ -53,6 +53,16 @@ int main() {
         assert(!run(packet(0x50,{0x60000000,0,0,0x3022c,0,0x28200008}),error));
         assert(!run(packet(0x50,{0x60000000,uint32_t(destination),0,0x30230,0,0x28200008}),error));
         assert(engine.shaderUploads.size()==1&&read64(fence+16)==0x1234567812345678ULL);
+        // End-of-compute fence writes exactly one DWORD; unknown event/GDS,
+        // malformed/alignment/unmapped destinations never alter the label.
+        assert(run(packet(0x48,{0x62f,uint32_t(fence+16),0x40000000,0x99}),error));
+        assert(read64(fence+16)==0x1234567800000099ULL);
+        assert(!run(packet(0x48,{0x62f,uint32_t(fence+16),0x20000000,0}),error));
+        assert(!run(packet(0x48,{0x630,uint32_t(fence+16),0x40000000,0}),error));
+        assert(!run(packet(0x48,{0x62f,uint32_t(fence+17),0x40000000,0}),error));
+        assert(!run(packet(0x48,{0x62f,0,0x40000000,0}),error));
+        assert(!run(packet(0x48,{0x62f,uint32_t(fence+16),0x40000000}),error));
+        assert(read64(fence+16)==0x1234567800000099ULL&&interrupts==1);
         auto cycle=packet(0x3f,{uint32_t(nestedAddress),0,4});
         assert(!memory.write_data(nestedAddress,cycle.data(),cycle.size()*4));
         assert(!run(cycle,error)&&error.find("recursion/word budget")!=std::string::npos);
