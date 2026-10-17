@@ -36,7 +36,7 @@ struct GNMCommandExecutor {
                 if(n!=6 || p[0]!=0x13 || p[4]!=0xffffffffU || !p[5])
                     return fail("unsupported WAIT_REG_MEM control/mask/interval");
                 const uint64_t at=uint64_t(p[1])|(uint64_t(p[2])<<32);
-                if((at&3)||!memory.permitted(at,4,1))
+                if((at&3)||!memory.permitted(at,4,4)) // ELF PF_R, not PF_X.
                     return fail("WAIT_REG_MEM address invalid");
                 uint32_t observed=0;
                 if(memory.read_data(at,&observed,4))return fail("WAIT_REG_MEM read failed");

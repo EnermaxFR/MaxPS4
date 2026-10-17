@@ -95,6 +95,12 @@ int main(){
         gpu::GNMCommandExecutor waitExecutor;std::string waitError;
         std::vector<uint32_t> waitWords(waitPacket.begin(),waitPacket.end());
         assert(waitExecutor.execute(lease,base+0x1800,waitWords,waitError));
+        // Labels are RW/NX data. Polling must request PF_R, never execute
+        // permission; an inaccessible label still fails before reading.
+        auto invalidWait=waitWords;invalidWait[2]=uint32_t(base+0x10000);
+        waitExecutor.remaining=65536;
+        assert(!waitExecutor.execute(lease,base+0x1800,invalidWait,waitError));
+        assert(waitError.find("address invalid")!=std::string::npos);
         uint32_t busyLabel=1;put(label,busyLabel);waitExecutor.remaining=65536;
         assert(!waitExecutor.execute(lease,base+0x1800,waitWords,waitError));
         assert(waitError.find("condition unsatisfied")!=std::string::npos);
