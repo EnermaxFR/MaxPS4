@@ -66,6 +66,16 @@ int main() {
         auto cycle=packet(0x3f,{uint32_t(nestedAddress),0,4});
         assert(!memory.write_data(nestedAddress,cycle.data(),cycle.size()*4));
         assert(!run(cycle,error)&&error.find("recursion/word budget")!=std::string::npos);
+        // INDEX_TYPE is raw state until a draw needs a memory index fetch.
+        // The SDK 0x400 value must not block generated-index draws, and must
+        // never be silently stripped for a later real indexed fetch.
+        assert(run(packet(0x2a,{0x400}),error)&&engine.state.indexType==0x400);
+        assert(!run(packet(0x2d,{3,2}),error));
+        assert(error.find("needs shader execution/rasterizer")!=std::string::npos);
+        assert(!run(packet(0x27,{3,uint32_t(destination),0,3,0}),error));
+        assert(error.find("unsupported for indexed fetch")!=std::string::npos);
+        assert(!run(packet(0x2a,{0,0}),error));
+        assert(run(packet(0x2a,{0}),error));
         // Nonempty GCN work cannot complete through a command-only engine.
         assert(!run(packet(0x15,{1,1,1,1}),error));
         assert(error.find("GCN compute program=")!=std::string::npos);

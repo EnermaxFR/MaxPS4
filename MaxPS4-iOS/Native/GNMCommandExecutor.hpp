@@ -59,7 +59,10 @@ struct GNMCommandExecutor {
                 std::copy(p+1,p+n,bank.begin()+first);writes+=n-1;break;
             }
             case 0x2f: if(n!=1)return fail("invalid NUM_INSTANCES");state.instances=p[0];break;
-            case 0x2a: if(n!=1||p[0]>2)return fail("index type/endian mode unsupported");state.indexType=p[0];break;
+            case 0x2a: // Preserve the complete register, including SDK high bits.
+                // DRAW_INDEX_AUTO uses generated indices. Validate fetch modes
+                // only when an indexed draw actually consumes guest indices.
+                if(n!=1)return fail("invalid INDEX_TYPE payload");state.indexType=p[0];break;
             case 0x15:{
                 if(n!=4)return fail("invalid DISPATCH_DIRECT payload");
                 const uint64_t program=(uint64_t(state.shader[0x20c])<<8)|(uint64_t(state.shader[0x20d])<<40);
@@ -143,7 +146,7 @@ struct GNMCommandExecutor {
             case 0x2d: case 0x27:{
                 Draw draw;draw.opcode=packet.opcode;
                 if(packet.opcode==0x2d){if(n!=2)return fail("invalid DRAW_INDEX_AUTO");draw.count=p[0];draw.initiator=p[1];}
-                else{if(n!=5)return fail("invalid DRAW_INDEX_2");draw.indexAddress=uint64_t(p[1])|(uint64_t(p[2])<<32);draw.count=p[3];draw.initiator=p[4];}
+                else{if(n!=5)return fail("invalid DRAW_INDEX_2");if(state.indexType>2)return fail("index type/endian mode unsupported for indexed fetch");draw.indexAddress=uint64_t(p[1])|(uint64_t(p[2])<<32);draw.count=p[3];draw.initiator=p[4];}
                 if(!draw.count||!state.instances)break;
                 std::string detail;
                 if(!render || !render(state,draw,detail)){
