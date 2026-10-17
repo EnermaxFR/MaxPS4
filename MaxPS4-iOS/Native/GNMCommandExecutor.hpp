@@ -32,6 +32,18 @@ struct GNMCommandExecutor {
             case 0x12: if(n!=1||p[0])return fail("unsupported CLEAR_STATE mode");state.context.fill(0);break;
             case 0x28: if(n!=2||p[0]!=0x80000000||p[1]!=0x80000000)return fail("unsupported CONTEXT_CONTROL load/shadow mode");break; // One synchronous context.
             case 0x58: if(n!=6)return fail("invalid ACQUIRE_MEM");std::atomic_thread_fence(std::memory_order_seq_cst);break;
+            case 0x3c:{ // WAIT_REG_MEM: synchronous memory polling, bounded to avoid hangs.
+                if(n!=6 || p[0]!=0x13 || p[4]!=0xffffffffU || !p[5])
+                    return fail("unsupported WAIT_REG_MEM control/mask/interval");
+                const uint64_t at=uint64_t(p[1])|(uint64_t(p[2])<<32);
+                if((at&3)||!memory.permitted(at,4,1))
+                    return fail("WAIT_REG_MEM address invalid");
+                uint32_t observed=0;
+                if(memory.read_data(at,&observed,4))return fail("WAIT_REG_MEM read failed");
+                if(observed!=p[3])return fail("WAIT_REG_MEM condition unsatisfied (no GPU scheduler)");
+                break;
+            }
+
             case 0x69: case 0x76: case 0x79:{
                 if(n<2)return fail("register packet lacks values");uint32_t first=p[0];
                 if(packet.opcode==0x69 && first==0x100002aa)first=0x2aa; // Base-PS4 SDK indexed VGT control.
