@@ -101,6 +101,12 @@ struct OrbisV4GraphicsServices {
             std::fprintf(stderr,"GPU.SUBMIT sequence=%llu kind=%s guest=0x%llx bytes=%zu dump=%s\n",(unsigned long long)submitted,stream.kind.c_str(),(unsigned long long)stream.address,stream.words.size()*4,prefix.c_str());
             std::string error;
             if(!engine.execute(m,stream.address,stream.words,error)){
+                // Replay inputs for the actual failed job, after all preceding
+                // register packets have executed. No memory writes or GPU
+                // completion are synthesized by this diagnostic snapshot.
+                std::ofstream state(prefix+"-registers.bin",std::ios::binary);
+                for(const auto* bank:{&engine.state.context,&engine.state.shader,&engine.state.uconfig})
+                    state.write(reinterpret_cast<const char*>(bank->data()),std::streamsize(bank->size()*4));
                 for(const auto& stage:{std::make_pair("vs",0x48),std::make_pair("ps",8)}){
                     const uint64_t program=uint64_t(engine.state.shader[stage.second])<<8;std::array<uint8_t,256> bytes{};
                     if(program && !m.read_data(program,bytes.data(),bytes.size())){std::ofstream shader(prefix+"-"+stage.first+"-prefix.bin",std::ios::binary);shader.write(reinterpret_cast<const char*>(bytes.data()),bytes.size());}
@@ -112,6 +118,14 @@ struct OrbisV4GraphicsServices {
     }
     static std::shared_ptr<OrbisV4GraphicsServices> install(OrbisV4HostServices& svc,std::function<uint64_t(M&,size_t)> alloc){
         auto g=std::make_shared<OrbisV4GraphicsServices>();g->allocate=std::move(alloc);
+        svc.implement("sceGnmDrawIndex",[](const R& r,M& m){
+            if(!r.rdi || (r.rdi&3) || r.rsi!=10 || !r.rcx || (r.rcx&1) || (uint32_t(r.r8)&0x1ffffffeU))return ok(uint64_t(-1));
+            // Base PS4 DRAW_INDEX_2 followed by a three-DWORD NOP payload.
+            // This is command construction only; the executor must perform
+            // the indexed draw with the bound guest shaders before success.
+            const std::array<uint32_t,10> packet{0xc0042700U,uint32_t(r.rdx),uint32_t(r.rcx),uint32_t(r.rcx>>32),uint32_t(r.rdx),0,0xc0021000U,0,0,0};
+            return m.write_data(r.rdi,packet.data(),sizeof(packet))?trap("GNM indexed draw command destination unwritable"):ok();
+        });
         svc.implement("sceGnmSetEmbeddedVsShader",[g](const R& r,M& m){
             if(r.rdx!=0)return ok(0x8eee00ffU);
             if(!r.rdi || (r.rdi&3) || r.rsi<29)return ok(uint64_t(-1));
@@ -234,21 +248,26 @@ struct OrbisV4GraphicsServices {
             return m.write_data(r.rdi,packet.data(),sizeof(packet))
                 ?trap("GNM dispatch packet write failed"):ok();
         });
-        for(const auto& name:{"sceGnmSetVsShader","sceGnmSetPsShader","sceGnmSetPsShader350"})svc.implement(name,[name=std::string(name)](const R& r,M& m){
-            const bool vs=name=="sceGnmSetVsShader";const size_t count=vs?29:40;
+        for(const auto& name:{"sceGnmSetVsShader","sceGnmSetPsShader","sceGnmSetPsShader350","sceGnmUpdatePsShader","sceGnmUpdatePsShader350","sceGnmUpdateVsShader"})svc.implement(name,[name=std::string(name)](const R& r,M& m){
+            const bool vs=name.find("VsShader")!=std::string::npos,update=name.find("Update")!=std::string::npos;
+            const size_t count=vs?29:40;
             if(!r.rdi || (r.rdi&3) || r.rsi<count || (vs && (!r.rdx || (r.rcx&0xfcfffc3f))))return ok(uint64_t(-1));
             std::array<uint32_t,12> regs{};
             if(r.rdx && m.read_data(r.rdx,regs.data(),(vs?7:12)*4))return trap("GNM shader register array unreadable");
             if(regs[1])return ok(uint64_t(-1));
             std::vector<uint32_t> words;
             auto set=[&](uint32_t opcode,uint32_t offset,std::initializer_list<uint32_t> data){words.push_back(0xc0000000U|(uint32_t(data.size())<<16)|(opcode<<8));words.push_back(offset);words.insert(words.end(),data);};
+            // UPDATE keeps context writes as SDK metadata in NOP payloads;
+            // actual shader register writes still execute. Do not silently
+            // replace this ABI with the different SET context semantics.
+            auto context=[&](uint32_t offset,std::initializer_list<uint32_t> data){set(update?0x10:0x69,update?(0xc01e0000U|offset):offset,data);};
             if(vs){
                 const uint32_t resource=r.rcx?(regs[2]&0xfcfffc3f)|uint32_t(r.rcx):regs[2];
-                set(0x76,0x48,{regs[0],0});set(0x76,0x4a,{resource,regs[3]});set(0x69,0x207,{regs[6]});set(0x69,0x1b1,{regs[4]});set(0x69,0x1c3,{regs[5]});
+                set(0x76,0x48,{regs[0],0});set(0x76,0x4a,{resource,regs[3]});context(0x207,{regs[6]});context(0x1b1,{regs[4]});context(0x1c3,{regs[5]});
             }else if(!r.rdx){
-                set(0x76,8,{0,0});set(0x69,0x203,{0});if(name=="sceGnmSetPsShader350")set(0x69,0x8f,{15});
+                set(0x76,8,{0,0});context(0x203,{0});if(name.find("350")!=std::string::npos)set(0x69,0x8f,{15});
             }else{
-                set(0x76,8,{regs[0],0});set(0x76,10,{regs[2],regs[3]});set(0x69,0x1c4,{regs[4],regs[5]});set(0x69,0x1b3,{regs[6],regs[7]});set(0x69,0x1b6,{regs[8]});set(0x69,0x1b8,{regs[9]});set(0x69,0x203,{regs[10]});set(0x69,0x8f,{regs[11]});
+                set(0x76,8,{regs[0],0});set(0x76,10,{regs[2],regs[3]});context(0x1c4,{regs[4],regs[5]});context(0x1b3,{regs[6],regs[7]});context(0x1b6,{regs[8]});context(0x1b8,{regs[9]});context(0x203,{regs[10]});context(0x8f,{regs[11]});
             }
             if(words.size()+2>count)return trap("GNM shader packet size mismatch");
             words.push_back(0xc0001000U|(uint32_t(count-words.size()-2)<<16));words.resize(count,0);

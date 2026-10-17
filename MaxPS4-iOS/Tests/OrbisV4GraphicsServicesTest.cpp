@@ -70,6 +70,16 @@ int main(){
         assert(!dispatchExecutor.execute(lease,base+0x1700,
             std::vector<uint32_t>(dispatchPacket.begin(),dispatchPacket.end()),dispatchError));
         assert(dispatchError.find("GPU packet semantics not implemented")!=std::string::npos);
+        dispatchExecutor.state.shader[0x20c]=0x1234;
+        dispatchExecutor.state.shader[0x207]=64;
+        dispatchExecutor.state.shader[0x208]=1;
+        dispatchExecutor.state.shader[0x209]=1;
+        dispatchExecutor.remaining=65536;
+        assert(!dispatchExecutor.execute(lease,base+0x1700,
+            std::vector<uint32_t>(dispatchPacket.begin(),dispatchPacket.end()),dispatchError));
+        assert(dispatchError.find("CS=0x123400")!=std::string::npos);
+        assert(dispatchError.find("groups=32640,1,1 local=64,1,1")!=std::string::npos);
+        assert(dispatchExecutor.draws==0&&dispatchExecutor.writes==0);
         // Mission 56: bounded debug marker is a NOP packet, not a GPU draw.
         const char pushMarker[]="hello!";
         assert(!lease.write_data(base+0x1800,pushMarker,sizeof(pushMarker)));
@@ -110,6 +120,29 @@ int main(){
         uint32_t firstInstruction=0;assert(!lease.read_data(embeddedAddress,&firstInstruction,4));
         assert(firstInstruction==0xbeeb03ffU);
         assert(call("sceGnmSetEmbeddedVsShader",base+0x2000,29,0).value==0&&g->embeddedVs==embeddedAddress);
+        const std::array<uint32_t,12> updatedPs{0x4567,0,0x20,0x30,0x40,0x50,0x60,0x70,0x80,0x90,0xa0,0xb0};
+        assert(!lease.write_data(base+0x2200,updatedPs.data(),sizeof(updatedPs)));
+        assert(call("sceGnmUpdatePsShader350",base+0x2300,39,base+0x2200).value==uint64_t(-1));
+        assert(call("sceGnmUpdatePsShader350",base+0x2300,40,base+0x2200).value==0);
+        std::array<uint32_t,40> updatePacket{};assert(!lease.read_data(base+0x2300,updatePacket.data(),sizeof(updatePacket)));
+        gpu::GNMCommandExecutor updateExecutor;std::string updateError;updateExecutor.state.context[0x1c4]=0x777;
+        assert(updateExecutor.execute(lease,base+0x2300,std::vector<uint32_t>(updatePacket.begin(),updatePacket.end()),updateError));
+        assert(updateExecutor.state.shader[8]==updatedPs[0]&&updateExecutor.state.shader[10]==updatedPs[2]);
+        assert(updateExecutor.state.context[0x1c4]==0x777); // UPDATE metadata is a NOP, not a context write.
+        assert(updatePacket[8]==0xc0021000U&&updatePacket[9]==0xc01e01c4U);
+        assert(call("sceGnmUpdatePsShader350",base+0x2300,40,0).value==0);
+        assert(!lease.read_data(base+0x2300,updatePacket.data(),sizeof(updatePacket)));updateExecutor.remaining=65536;
+        assert(updateExecutor.execute(lease,base+0x2300,std::vector<uint32_t>(updatePacket.begin(),updatePacket.end()),updateError));
+        assert(updateExecutor.state.shader[8]==0&&updateExecutor.state.context[0x8f]==15);
+        assert(call("sceGnmDrawIndex",base+0x2500,9,6,base+0x3000,0,1).value==uint64_t(-1));
+        assert(call("sceGnmDrawIndex",base+0x2500,10,6,base+0x3001,0,1).value==uint64_t(-1));
+        assert(call("sceGnmDrawIndex",base+0x2500,10,6,base+0x3000,2,1).value==uint64_t(-1));
+        assert(call("sceGnmDrawIndex",base+0x2500,10,6,base+0x3000,0,1).value==0);
+        std::array<uint32_t,10> indexedPacket{};assert(!lease.read_data(base+0x2500,indexedPacket.data(),sizeof(indexedPacket)));
+        assert(indexedPacket[0]==0xc0042700U&&indexedPacket[1]==6&&indexedPacket[2]==base+0x3000&&indexedPacket[4]==6);
+        gpu::GNMCommandExecutor indexedExecutor;std::string indexedError;
+        assert(!indexedExecutor.execute(lease,base+0x2500,std::vector<uint32_t>(indexedPacket.begin(),indexedPacket.end()),indexedError));
+        assert(indexedError.find("guest GCN draw needs shader execution")!=std::string::npos&&indexedExecutor.draws==0);
         // Real PM4 wait-for-flip packet: seven DWORDs and a valid label.
         assert(call("sceGnmInsertWaitFlipDone",base+0x1800,6,h,0).value==uint64_t(-1));
         assert(call("sceGnmInsertWaitFlipDone",base+0x1800,7,h,0).value==0);

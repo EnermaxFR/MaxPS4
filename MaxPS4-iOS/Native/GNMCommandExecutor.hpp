@@ -53,6 +53,16 @@ struct GNMCommandExecutor {
             }
             case 0x2f: if(n!=1)return fail("invalid NUM_INSTANCES");state.instances=p[0];break;
             case 0x2a: if(n!=1||p[0]>2)return fail("index type/endian mode unsupported");state.indexType=p[0];break;
+            case 0x15:{ // DISPATCH_DIRECT encodes work; binding alone is not execution.
+                if(n!=4)return fail("invalid DISPATCH_DIRECT payload");
+                std::ostringstream reason;
+                reason<<"GPU packet semantics not implemented: GCN compute execution required; CS=0x"<<std::hex
+                      <<((uint64_t(state.shader[0x20c])<<8)|(uint64_t(state.shader[0x20d])<<40))
+                      <<" groups="<<std::dec<<p[0]<<','<<p[1]<<','<<p[2]
+                      <<" local="<<state.shader[0x207]<<','<<state.shader[0x208]<<','<<state.shader[0x209]
+                      <<" initiator=0x"<<std::hex<<p[3];
+                return fail(reason.str());
+            }
             case 0x37:{
                 if(n<4)return fail("WRITE_DATA too short");const uint32_t destination=(p[0]>>8)&15;
                 if(destination!=1&&destination!=2&&destination!=5)return fail("WRITE_DATA destination is not supported memory");
