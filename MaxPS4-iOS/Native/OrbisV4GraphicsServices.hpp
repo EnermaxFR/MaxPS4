@@ -148,6 +148,32 @@ struct OrbisV4GraphicsServices {
                 (unsigned long long)(uint64_t(regs[0])<<8),resource,modifier);
             return ok();
         });
+        // GPU debug marker: PM4 NOP payload with a bounded guest C string.
+        // The marker annotates command streams; it does not execute GPU work.
+        svc.implement("sceGnmInsertPushMarker",[](const R& r,M& m){
+            if(!r.rdi || (r.rdi&3) || !r.rdx || r.rsi<3 || r.rsi>4096)
+                return ok(uint64_t(-1));
+            if(!m.permitted(r.rdi,size_t(r.rsi)*4,2))
+                return trap("GNM push marker destination unwritable");
+            std::string marker;
+            bool terminated=false;
+            for(size_t i=0;i<4096;++i){
+                char c=0;
+                if(m.read_data(r.rdx+i,&c,1))return trap("GNM push marker string unreadable");
+                if(!c){terminated=true;break;}
+                marker.push_back(c);
+            }
+            if(!terminated)return ok(uint64_t(-1));
+            const size_t len=marker.size();
+            const size_t payload=((len+8)>>2)+(((len+12)>>3)*2);
+            if(payload+2!=r.rsi)return ok(uint64_t(-1));
+            std::vector<uint32_t> packet(size_t(r.rsi),0);
+            packet[0]=0xc0001000U|(uint32_t(payload)<<16);
+            packet[1]=0x68750001U;
+            std::memcpy(reinterpret_cast<uint8_t*>(packet.data()+2),marker.c_str(),len+1);
+            return m.write_data(r.rdi,packet.data(),packet.size()*4)
+                ?trap("GNM push marker packet write failed"):ok();
+        });
         // DISPATCH_DIRECT is a 9-DWORD PM4 compute dispatch command.
         // Encoding is not execution: the PM4 executor must reject GCN dispatch
         // until a real compute backend is installed.
