@@ -1,0 +1,39 @@
+{
+  "mission": 58,
+  "branch": "experiment/keroblaster-iphone-m53",
+  "environment": "Ubuntu Intel, FEXCore ARM64 JIT under VIXL, Release",
+  "game": "Kero Blaster CUSA06015",
+  "compute_program": "0x250180900",
+  "compute": {
+    "success": 1,
+    "groups": 32640,
+    "lanes": 2088960,
+    "instructions": 489600,
+    "loads": 2154240,
+    "stores": 2088960,
+    "verified": 2088960,
+    "first": "0x250660000:ff383819",
+    "last": "0x250e57ffc:ff383819"
+  },
+  "output_bytes": 8355840,
+  "run": "run-04",
+  "runner_exit": 4,
+  "elapsed_ms": 226326,
+  "next_blocker": "PM4 0x210170d94 DRAW_INDEX_AUTO: graphics shader execution/rasterizer unavailable",
+  "game_executables_unchanged": true,
+  "first_real_image": false,
+  "ios_device_tested": false,
+  "tests": {
+    "graphics_native": "passed",
+    "graphics_asan_ubsan": "passed",
+    "full_dispatch_native": "passed",
+    "full_dispatch_asan_ubsan": "passed",
+    "leak_sanitizer": "disabled: sandbox environment limitation"
+  },
+  "code_commits": [
+    "2f8f167",
+    "9b9bfd9",
+    "2f18b64",
+    "05ef289"
+  ]
+}

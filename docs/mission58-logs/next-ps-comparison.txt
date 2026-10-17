@@ -1,0 +1,2 @@
+PASS next PS instructions match gfx700 assembly (first MOV canonicalized to inline constant).
+Not executed: S_BUFFER_LOAD_DWORDX4, V_MOV_B32 and EXP require the graphics backend; compute interpreter refuses these opcodes.

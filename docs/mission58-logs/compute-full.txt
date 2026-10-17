@@ -1,0 +1,1 @@
+PASS full dispatch: 32640 groups, 2088960 stores/readbacks, 8355840 output bytes compared, both guards intact

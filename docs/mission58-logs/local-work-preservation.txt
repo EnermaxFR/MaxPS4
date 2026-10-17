@@ -1,0 +1,3 @@
+PASS 40 originally modified tracked files outside the targeted GNM files remain byte-identical.
+The two targeted GNM files retain their original DMA changes in commit 2f8f167, with compute additions in later commits.
+Other pre-existing untracked files were not deleted, renamed or edited by this mission.

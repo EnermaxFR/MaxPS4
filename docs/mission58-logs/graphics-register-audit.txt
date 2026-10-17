@@ -1,0 +1,23 @@
+Snapshot at INDEX_TYPE rejection, after successful compute + EOS + WAIT.
+context[0x318]=0x02506600
+context[0x319]=0x0ef000ef
+context[0x31a]=0x00007f7f
+context[0x31b]=0x00000000
+context[0x31c]=0x00008e28
+context[0x31d]=0x0000014a
+context[0x31e]=0x00000000
+context[0x0]=0x00000001
+context[0x5]=0x02516500
+shader[0x8]=0x0250180a
+shader[0x9]=0x00000000
+shader[0xa]=0x002c0000
+shader[0xb]=0x00000008
+shader[0x48]=0x000109cf
+shader[0x49]=0x00000000
+shader[0x4a]=0x000c0000
+shader[0x4b]=0x00000004
+CB_COLOR0_BASE (shifted by 8): 0x250660000
+Next PS program: 0x250180a00
+Next VS program: 0x109cf00
+vs owned prefix, first 64 bytes: ff03ebbe070000008100023681020234c2000036c102024ac100004a010b027e000b007e8002047ef202067ecf0800f8010002030f0200f803030303000081bf
+ps owned prefix, first 64 bytes: ff03ebbe07000000000180c27f008cbf0002007e0102027e0202047e0302067e0f1800f800010203000081bfcde80100040000000200000002030000ab12f409

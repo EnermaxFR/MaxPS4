@@ -1,0 +1,2 @@
+PASS all 14 instructions after S_MOV_B32 match LLVM gfx700 assembly byte-for-byte.
+First instruction: guest literal encoding beeb03ff + 0000000d; LLVM inline encoding beeb038d. Same scalar value; guest literal length is decoded and tested.
