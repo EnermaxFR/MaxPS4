@@ -1,0 +1,169 @@
+PASS GCN context/shader/uconfig writes, NOP, ordering, boundaries and flags
+PASS actual ELF arena -> owned PM4 snapshot; bounds, alignment, lifetime and rejection
+PASS PM4 Metal preflight: complete validation, no ignored state, auto-index source
+PASS owned linear RGBA8 staging: split guest mappings, pitch/padding, overflow/budget/hole/permissions, lifetime; no GPU submission
+GCN.DISPATCH program=0x400000 groups=3,1,1 local=64,1,1 rsrc=00000040,00000098
+GCN.USER s0=0x00400ff8
+GCN.USER s1=0x00040000
+GCN.USER s2=0x00000004
+GCN.USER s3=0x20024004
+GCN.USER s4=0x00401ff8
+GCN.USER s5=0x00040000
+GCN.USER s6=0x00000046
+GCN.USER s7=0x18024004
+GCN.USER s8=0x00404000
+GCN.USER s9=0x00100000
+GCN.USER s10=0x00000001
+GCN.USER s11=0x20077fac
+GCN.SCALAR address=0x404000 value=0x00000041
+GCN.SCALAR address=0x404004 value=0x00000003
+GCN.RESULT success=1 groups=3 lanes=192 instructions=38 loads=70 stores=65 verified=65 first=0x401ff8:12345678 last=0x4020f8:12345678
+GCN.DISPATCH program=0x400000 groups=3,1,1 local=64,1,1 rsrc=00000040,00000099
+GCN.USER s0=0x00400ff8
+GCN.USER s1=0x00040000
+GCN.USER s2=0x00000004
+GCN.USER s3=0x20024004
+GCN.USER s4=0x00401ff8
+GCN.USER s5=0x00040000
+GCN.USER s6=0x00000046
+GCN.USER s7=0x18024004
+GCN.USER s8=0x00404000
+GCN.USER s9=0x00100000
+GCN.USER s10=0x00000001
+GCN.USER s11=0x20077fac
+GCN.RESULT success=0 groups=0 lanes=0 instructions=0 loads=0 stores=0 verified=0 first=0x0:00000000 last=0x0:00000000
+PASS GCN decode, wave64 scalar/vector/EXEC/branch, patterned buffer output, bounds, dimensions, budgets, undefined registers, unsupported resources/opcodes, readback and PM4 dispatch
+PASS full dispatch: 32640 groups, 2088960 stores/readbacks, 8355840 output bytes compared, both guards intact
+PASS GCN pixel program decoding (no rendering)
+GPU.DRAW n=1 opcode=0x2d count=3 prim=0x11 VS=0x400000 PS=0x400200 cb=0x500000 tile=10 fmt=10/6 swap=1 depth=off blend=00000000
+GPU.VERTEX invocations=3 waves=1 instructions=13 ops=s_mov_b32:1,s_endpgm:1,v_lshlrev_b32:1,v_and_b32:2,v_add_i32:2,v_mov_b32:2,v_cvt_f32_i32:2,exp:2
+GPU.VERTEX first_pos=-1,-1,0,1 params=1
+GPU.RASTER primitives=2 rasterized=2 culled=0 clipped_away=0 quads=2112 scissor=0,0-128,64
+GPU.PIXEL waves=132 instructions=1056 fragments=8192 samples=0 ops=s_endpgm:132,s_waitcnt:132,s_buffer_load_dwordx4:132,v_mov_b32:528,exp:132
+GPU.FRAMEBUFFER base=0x500000 pitch=128 height=64 pixels_written=8192 depth_writes=0 depth_rejected=0 rect=0,0-127,63
+GPU.DRAW n=2 opcode=0x2d count=3 prim=0x11 VS=0x400000 PS=0x400200 cb=0x500000 tile=10 fmt=10/6 swap=1 depth=clear color=off blend=00000000
+GPU.VERTEX invocations=3 waves=1 instructions=13 ops=s_mov_b32:1,s_endpgm:1,v_lshlrev_b32:1,v_and_b32:2,v_add_i32:2,v_mov_b32:2,v_cvt_f32_i32:2,exp:2
+GPU.VERTEX first_pos=-1,-1,0,1 params=1
+GPU.RASTER primitives=2 rasterized=2 culled=0 clipped_away=0 quads=2112 scissor=0,0-128,64
+GPU.PIXEL waves=132 instructions=1056 fragments=8192 samples=0 ops=s_endpgm:132,s_waitcnt:132,s_buffer_load_dwordx4:132,v_mov_b32:528,exp:132
+GPU.FRAMEBUFFER base=0x500000 pitch=128 height=64 pixels_written=0 depth_writes=8192 depth_rejected=0 rect=0,0-0,0
+GPU.DRAW n=3 opcode=0x27 count=9 prim=0x4 VS=0x400400 PS=0x400800 cb=0x500000 tile=10 fmt=10/6 swap=1 depth=off blend=40000504
+GPU.VERTEX invocations=4 waves=1 instructions=31 ops=s_setpc_b64:1,s_swappc_b64:1,s_endpgm:1,s_waitcnt:3,s_load_dwordx4:2,s_buffer_load_dwordx16:1,v_mac_f32:12,v_mov_b32:4,exp:3,buffer_load_format_xyz:1,buffer_load_format_xyzw:1,tbuffer_load_format_xy:1
+GPU.VERTEX first_pos=-0.75,0.75,0.5,1 params=2
+GPU.RASTER primitives=3 rasterized=2 culled=1 clipped_away=0 quads=272 scissor=0,0-128,64
+GPU.PIXEL waves=17 instructions=442 fragments=1024 samples=1088 ops=s_mov_b32:17,s_mov_b64:34,s_wqm_b64:17,s_endpgm:17,s_waitcnt:17,v_mul_f32:68,v_cvt_pkrtz_f16_f32:34,v_interp_p1_f32:102,v_interp_p2_f32:102,exp:17,image_sample:17
+GPU.FRAMEBUFFER base=0x500000 pitch=128 height=64 pixels_written=1024 depth_writes=0 depth_rejected=0 rect=16,8-47,39
+GPU.DRAW n=1 opcode=0x27 count=6 prim=0x4 VS=0x400400 PS=0x400800 cb=0x500000 tile=10 fmt=10/0 swap=1 depth=off blend=00000000
+GPU.VERTEX invocations=4 waves=1 instructions=33 ops=s_mov_b32:1,s_setpc_b64:1,s_swappc_b64:1,s_endpgm:1,s_waitcnt:3,s_load_dwordx4:2,s_buffer_load_dwordx16:1,v_mac_f32:12,v_mov_b32:5,exp:3,buffer_load_format_xyz:1,buffer_load_format_xyzw:1,tbuffer_load_format_xy:1
+GPU.VERTEX first_pos=-0.75,0.75,0.5,1 params=2
+GPU.RASTER primitives=2 rasterized=2 culled=0 clipped_away=0 quads=272 scissor=0,0-128,64
+GPU.PIXEL waves=17 instructions=255 fragments=1024 samples=1088 ops=s_mov_b32:34,s_mov_b64:34,s_wqm_b64:17,s_endpgm:17,s_waitcnt:17,v_cvt_pkrtz_f16_f32:34,v_interp_p1_f32:34,v_interp_p2_f32:34,exp:17,image_sample:17
+GPU.FRAMEBUFFER base=0x500000 pitch=128 height=64 pixels_written=1024 depth_writes=0 depth_rejected=0 rect=16,8-47,39
+pipeline: clear 8192 px, textured 1024 px, worst channel error 1
+title shaders: texture_vv.sb (29 words) + texture_p.sb (18 words) rendered 1024 px; VS ops s_mov_b32:1,s_setpc_b64:1,s_swappc_b64:1,s_endpgm:1,s_waitcnt:3,s_load_dwordx4:2,s_buffer_load_dwordx16:1,v_mac_f32:12,v_mov_b32:5,exp:3,buffer_load_format_xyz:1,buffer_load_format_xyzw:1,tbuffer_load_format_xy:1; PS ops s_mov_b32:34,s_mov_b64:34,s_wqm_b64:17,s_endpgm:17,s_waitcnt:17,v_cvt_pkrtz_f16_f32:34,v_interp_p1_f32:34,v_interp_p2_f32:34,exp:17,image_sample:17
+PASS display 2D-thin tiling bijection, FP16/sRGB conversion, GCN wave interpreter, fetch-shader call, rect/indexed draws, culling, texture sampling, sRGB blending and explicit refusals
+GCN.DISPATCH program=0x567800 groups=1,1,1 local=0,0,0 rsrc=00000000,00000000
+GCN.RESULT success=0 groups=0 lanes=0 instructions=0 loads=0 stores=0 verified=0 first=0x0:00000000 last=0x0:00000000
+PASS PM4 register effects, cross-region WRITE_DATA, EOP store-before-IRQ, bounded label read, invalid-write isolation, owned indirect buffers, recursion bound and explicit shader refusal
+VIDEO.DEVICE 
+VIDEO.OPEN handle=1 (real presenter)
+VIDEO.BUFFERS handle=1 group=0 count=1 width=2 height=2 pitch=3 format=80000000 tiling=1 first_guest=0x100400
+GNM.SHADER stage=CS program=0x123400 resource1=00abc040 modifier=00000040
+GNM.SHADER stage=CS program=0x123400 resource1=00abc000 modifier=00000000
+GCN.DISPATCH program=0x0 groups=32640,1,1 local=0,0,0 rsrc=00000000,00000000
+GCN.RESULT success=0 groups=0 lanes=0 instructions=0 loads=0 stores=0 verified=0 first=0x0:00000000 last=0x0:00000000
+GCN.DISPATCH program=0x123400 groups=32640,1,1 local=64,1,1 rsrc=00000000,00000000
+GCN.RESULT success=0 groups=0 lanes=0 instructions=0 loads=0 stores=0 verified=0 first=0x0:00000000 last=0x0:00000000
+GNM.SHADER stage=PS program=0x456700 resource1=00000020 resource2=00000030
+GNM.SHADER stage=PS program=0x0 resource1=00000000 resource2=00000000
+GPU.PRESENT port=1 buffer=0 guest=0x100400 2x2 pitch=3 tiling=linear format=80000000 flip_arg=42 fnv64=06dd6d5a2b68d25b non_black=4 distinct_colors=4
+VIDEO.OPEN handle=1 (real presenter)
+VIDEO.BUFFERS handle=1 group=0 count=1 width=128 height=64 pitch=128 format=80000000 tiling=0 first_guest=0x208000
+GPU.PRESENT port=1 buffer=0 guest=0x208000 128x64 pitch=128 tiling=display2d-thin format=80000000 flip_arg=7 fnv64=3e5ac854ad3c8983 non_black=8191 distinct_colors=4096+
+VIDEO.BUFFERS handle=1 group=1 count=1 width=128 height=64 pitch=200 format=80000000 tiling=0 first_guest=0x210000
+PASS tiled VideoOut detiling, VideoOut lifecycle, validation, pitch/BGRA snapshot, presentation callback, status, labels, equeue blocking/wakeup/timeout, GNM event add/delete, PNG (synthetic test only)
+PASS GCN context/shader/uconfig writes, NOP, ordering, boundaries and flags
+PASS actual ELF arena -> owned PM4 snapshot; bounds, alignment, lifetime and rejection
+PASS PM4 Metal preflight: complete validation, no ignored state, auto-index source
+PASS owned linear RGBA8 staging: split guest mappings, pitch/padding, overflow/budget/hole/permissions, lifetime; no GPU submission
+GCN.DISPATCH program=0x400000 groups=3,1,1 local=64,1,1 rsrc=00000040,00000098
+GCN.USER s0=0x00400ff8
+GCN.USER s1=0x00040000
+GCN.USER s2=0x00000004
+GCN.USER s3=0x20024004
+GCN.USER s4=0x00401ff8
+GCN.USER s5=0x00040000
+GCN.USER s6=0x00000046
+GCN.USER s7=0x18024004
+GCN.USER s8=0x00404000
+GCN.USER s9=0x00100000
+GCN.USER s10=0x00000001
+GCN.USER s11=0x20077fac
+GCN.SCALAR address=0x404000 value=0x00000041
+GCN.SCALAR address=0x404004 value=0x00000003
+GCN.RESULT success=1 groups=3 lanes=192 instructions=38 loads=70 stores=65 verified=65 first=0x401ff8:12345678 last=0x4020f8:12345678
+GCN.DISPATCH program=0x400000 groups=3,1,1 local=64,1,1 rsrc=00000040,00000099
+GCN.USER s0=0x00400ff8
+GCN.USER s1=0x00040000
+GCN.USER s2=0x00000004
+GCN.USER s3=0x20024004
+GCN.USER s4=0x00401ff8
+GCN.USER s5=0x00040000
+GCN.USER s6=0x00000046
+GCN.USER s7=0x18024004
+GCN.USER s8=0x00404000
+GCN.USER s9=0x00100000
+GCN.USER s10=0x00000001
+GCN.USER s11=0x20077fac
+GCN.RESULT success=0 groups=0 lanes=0 instructions=0 loads=0 stores=0 verified=0 first=0x0:00000000 last=0x0:00000000
+PASS GCN decode, wave64 scalar/vector/EXEC/branch, patterned buffer output, bounds, dimensions, budgets, undefined registers, unsupported resources/opcodes, readback and PM4 dispatch
+PASS full dispatch: 32640 groups, 2088960 stores/readbacks, 8355840 output bytes compared, both guards intact
+PASS GCN pixel program decoding (no rendering)
+GPU.DRAW n=1 opcode=0x2d count=3 prim=0x11 VS=0x400000 PS=0x400200 cb=0x500000 tile=10 fmt=10/6 swap=1 depth=off blend=00000000
+GPU.VERTEX invocations=3 waves=1 instructions=13 ops=s_mov_b32:1,s_endpgm:1,v_lshlrev_b32:1,v_and_b32:2,v_add_i32:2,v_mov_b32:2,v_cvt_f32_i32:2,exp:2
+GPU.VERTEX first_pos=-1,-1,0,1 params=1
+GPU.RASTER primitives=2 rasterized=2 culled=0 clipped_away=0 quads=2112 scissor=0,0-128,64
+GPU.PIXEL waves=132 instructions=1056 fragments=8192 samples=0 ops=s_endpgm:132,s_waitcnt:132,s_buffer_load_dwordx4:132,v_mov_b32:528,exp:132
+GPU.FRAMEBUFFER base=0x500000 pitch=128 height=64 pixels_written=8192 depth_writes=0 depth_rejected=0 rect=0,0-127,63
+GPU.DRAW n=2 opcode=0x2d count=3 prim=0x11 VS=0x400000 PS=0x400200 cb=0x500000 tile=10 fmt=10/6 swap=1 depth=clear color=off blend=00000000
+GPU.VERTEX invocations=3 waves=1 instructions=13 ops=s_mov_b32:1,s_endpgm:1,v_lshlrev_b32:1,v_and_b32:2,v_add_i32:2,v_mov_b32:2,v_cvt_f32_i32:2,exp:2
+GPU.VERTEX first_pos=-1,-1,0,1 params=1
+GPU.RASTER primitives=2 rasterized=2 culled=0 clipped_away=0 quads=2112 scissor=0,0-128,64
+GPU.PIXEL waves=132 instructions=1056 fragments=8192 samples=0 ops=s_endpgm:132,s_waitcnt:132,s_buffer_load_dwordx4:132,v_mov_b32:528,exp:132
+GPU.FRAMEBUFFER base=0x500000 pitch=128 height=64 pixels_written=0 depth_writes=8192 depth_rejected=0 rect=0,0-0,0
+GPU.DRAW n=3 opcode=0x27 count=9 prim=0x4 VS=0x400400 PS=0x400800 cb=0x500000 tile=10 fmt=10/6 swap=1 depth=off blend=40000504
+GPU.VERTEX invocations=4 waves=1 instructions=31 ops=s_setpc_b64:1,s_swappc_b64:1,s_endpgm:1,s_waitcnt:3,s_load_dwordx4:2,s_buffer_load_dwordx16:1,v_mac_f32:12,v_mov_b32:4,exp:3,buffer_load_format_xyz:1,buffer_load_format_xyzw:1,tbuffer_load_format_xy:1
+GPU.VERTEX first_pos=-0.75,0.75,0.5,1 params=2
+GPU.RASTER primitives=3 rasterized=2 culled=1 clipped_away=0 quads=272 scissor=0,0-128,64
+GPU.PIXEL waves=17 instructions=442 fragments=1024 samples=1088 ops=s_mov_b32:17,s_mov_b64:34,s_wqm_b64:17,s_endpgm:17,s_waitcnt:17,v_mul_f32:68,v_cvt_pkrtz_f16_f32:34,v_interp_p1_f32:102,v_interp_p2_f32:102,exp:17,image_sample:17
+GPU.FRAMEBUFFER base=0x500000 pitch=128 height=64 pixels_written=1024 depth_writes=0 depth_rejected=0 rect=16,8-47,39
+GPU.DRAW n=1 opcode=0x27 count=6 prim=0x4 VS=0x400400 PS=0x400800 cb=0x500000 tile=10 fmt=10/0 swap=1 depth=off blend=00000000
+GPU.VERTEX invocations=4 waves=1 instructions=33 ops=s_mov_b32:1,s_setpc_b64:1,s_swappc_b64:1,s_endpgm:1,s_waitcnt:3,s_load_dwordx4:2,s_buffer_load_dwordx16:1,v_mac_f32:12,v_mov_b32:5,exp:3,buffer_load_format_xyz:1,buffer_load_format_xyzw:1,tbuffer_load_format_xy:1
+GPU.VERTEX first_pos=-0.75,0.75,0.5,1 params=2
+GPU.RASTER primitives=2 rasterized=2 culled=0 clipped_away=0 quads=272 scissor=0,0-128,64
+GPU.PIXEL waves=17 instructions=255 fragments=1024 samples=1088 ops=s_mov_b32:34,s_mov_b64:34,s_wqm_b64:17,s_endpgm:17,s_waitcnt:17,v_cvt_pkrtz_f16_f32:34,v_interp_p1_f32:34,v_interp_p2_f32:34,exp:17,image_sample:17
+GPU.FRAMEBUFFER base=0x500000 pitch=128 height=64 pixels_written=1024 depth_writes=0 depth_rejected=0 rect=16,8-47,39
+pipeline: clear 8192 px, textured 1024 px, worst channel error 1
+title shaders: texture_vv.sb (29 words) + texture_p.sb (18 words) rendered 1024 px; VS ops s_mov_b32:1,s_setpc_b64:1,s_swappc_b64:1,s_endpgm:1,s_waitcnt:3,s_load_dwordx4:2,s_buffer_load_dwordx16:1,v_mac_f32:12,v_mov_b32:5,exp:3,buffer_load_format_xyz:1,buffer_load_format_xyzw:1,tbuffer_load_format_xy:1; PS ops s_mov_b32:34,s_mov_b64:34,s_wqm_b64:17,s_endpgm:17,s_waitcnt:17,v_cvt_pkrtz_f16_f32:34,v_interp_p1_f32:34,v_interp_p2_f32:34,exp:17,image_sample:17
+PASS display 2D-thin tiling bijection, FP16/sRGB conversion, GCN wave interpreter, fetch-shader call, rect/indexed draws, culling, texture sampling, sRGB blending and explicit refusals
+GCN.DISPATCH program=0x567800 groups=1,1,1 local=0,0,0 rsrc=00000000,00000000
+GCN.RESULT success=0 groups=0 lanes=0 instructions=0 loads=0 stores=0 verified=0 first=0x0:00000000 last=0x0:00000000
+PASS PM4 register effects, cross-region WRITE_DATA, EOP store-before-IRQ, bounded label read, invalid-write isolation, owned indirect buffers, recursion bound and explicit shader refusal
+VIDEO.DEVICE 
+VIDEO.OPEN handle=1 (real presenter)
+VIDEO.BUFFERS handle=1 group=0 count=1 width=2 height=2 pitch=3 format=80000000 tiling=1 first_guest=0x100400
+GNM.SHADER stage=CS program=0x123400 resource1=00abc040 modifier=00000040
+GNM.SHADER stage=CS program=0x123400 resource1=00abc000 modifier=00000000
+GCN.DISPATCH program=0x0 groups=32640,1,1 local=0,0,0 rsrc=00000000,00000000
+GCN.RESULT success=0 groups=0 lanes=0 instructions=0 loads=0 stores=0 verified=0 first=0x0:00000000 last=0x0:00000000
+GCN.DISPATCH program=0x123400 groups=32640,1,1 local=64,1,1 rsrc=00000000,00000000
+GCN.RESULT success=0 groups=0 lanes=0 instructions=0 loads=0 stores=0 verified=0 first=0x0:00000000 last=0x0:00000000
+GNM.SHADER stage=PS program=0x456700 resource1=00000020 resource2=00000030
+GNM.SHADER stage=PS program=0x0 resource1=00000000 resource2=00000000
+GPU.PRESENT port=1 buffer=0 guest=0x100400 2x2 pitch=3 tiling=linear format=80000000 flip_arg=42 fnv64=06dd6d5a2b68d25b non_black=4 distinct_colors=4
+VIDEO.OPEN handle=1 (real presenter)
+VIDEO.BUFFERS handle=1 group=0 count=1 width=128 height=64 pitch=128 format=80000000 tiling=0 first_guest=0x208000
+GPU.PRESENT port=1 buffer=0 guest=0x208000 128x64 pitch=128 tiling=display2d-thin format=80000000 flip_arg=7 fnv64=3e5ac854ad3c8983 non_black=8191 distinct_colors=4096+
+VIDEO.BUFFERS handle=1 group=1 count=1 width=128 height=64 pitch=200 format=80000000 tiling=0 first_guest=0x210000
+PASS tiled VideoOut detiling, VideoOut lifecycle, validation, pitch/BGRA snapshot, presentation callback, status, labels, equeue blocking/wakeup/timeout, GNM event add/delete, PNG (synthetic test only)
+suite exit=0

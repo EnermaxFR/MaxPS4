@@ -30,7 +30,7 @@ struct GCNRenderer {
   struct Stats {
     uint64_t draws = 0, vertices = 0, vsWaves = 0, vsInstructions = 0, primitives = 0, culled = 0,
              clippedAway = 0, rasterized = 0, quads = 0, psWaves = 0, psInstructions = 0, fragments = 0,
-             pixelsWritten = 0, depthWrites = 0, depthRejected = 0, samples = 0;
+             pixelsWritten = 0, pixelsChanged = 0, sourceAlphaNonZero = 0, depthWrites = 0, depthRejected = 0, samples = 0;
   };
   Stats total, last;
   std::string lastVertexHistogram, lastPixelHistogram;
@@ -344,8 +344,11 @@ struct GCNRenderer {
             src[c] = gcnFloat(color->data[c][lane]);
           }
         }
+        if (src[3] > 0) ++last.sourceAlphaNonZero;
+        bool changed = false;
         if (!writeColor(memory, cbBase, cbTile, cbLayout, cbPitch, cbNumber == 6, cbSwap == 1, f.x, f.y, src,
-                        blending, blend, ctx, targetMask & shaderMask & 15, error)) return false;
+                        blending, blend, ctx, targetMask & shaderMask & 15, changed, error)) return false;
+        if (changed) ++last.pixelsChanged;
         ++last.pixelsWritten;
         writtenMinX = std::min<uint64_t>(writtenMinX, f.x); writtenMaxX = std::max<uint64_t>(writtenMaxX, f.x);
         writtenMinY = std::min<uint64_t>(writtenMinY, f.y); writtenMaxY = std::max<uint64_t>(writtenMaxY, f.y);
@@ -398,9 +401,12 @@ struct GCNRenderer {
         const Screen &a = scr[idx[0]], &b = scr[idx[1]], &c = scr[idx[2]];
         const int64_t area = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
         if (!area) { ++last.culled; continue; }
-        // Positive area in (x right, y down) window space is counter-clockwise
-        // in the hardware convention used by PA_SU_SC_MODE_CNTL.FACE.
-        const bool ccw = area > 0, front = frontCw ? !ccw : ccw;
+        // PA_SU_SC_MODE_CNTL.FACE refers to the winding seen on screen
+        // (window y grows downward): visually counter-clockwise triangles
+        // have a negative determinant here. Kero Blaster's first frame
+        // (FACE=CCW, cull back) submits all 1032 sprite triangles with
+        // negative determinants; the opposite sign culled every one.
+        const bool ccw = area < 0, front = frontCw ? !ccw : ccw;
         if (primitive != 0x11 && ((front && cullFront) || (!front && cullBack))) { ++last.culled; continue; }
         ++last.rasterized;
         Setup s;
@@ -457,7 +463,7 @@ struct GCNRenderer {
     total.draws += 1; total.vertices += last.vertices; total.vsWaves += last.vsWaves; total.vsInstructions += last.vsInstructions;
     total.primitives += last.primitives; total.culled += last.culled; total.clippedAway += last.clippedAway; total.rasterized += last.rasterized;
     total.quads += last.quads; total.psWaves += last.psWaves; total.psInstructions += last.psInstructions; total.fragments += last.fragments;
-    total.pixelsWritten += last.pixelsWritten; total.depthWrites += last.depthWrites; total.depthRejected += last.depthRejected; total.samples += last.samples;
+    total.pixelsWritten += last.pixelsWritten; total.pixelsChanged += last.pixelsChanged; total.sourceAlphaNonZero += last.sourceAlphaNonZero; total.depthWrites += last.depthWrites; total.depthRejected += last.depthRejected; total.samples += last.samples;
     if (verbose) {
       std::fprintf(stderr, "GPU.DRAW n=%llu opcode=0x%x count=%u prim=0x%x VS=0x%llx PS=0x%llx cb=0x%llx tile=%u fmt=%u/%u swap=%u depth=%s%s blend=%08x\n",
                    (unsigned long long)total.draws, call.opcode, call.count, primitive, (unsigned long long)vsProgram, (unsigned long long)psProgram,
@@ -472,8 +478,13 @@ struct GCNRenderer {
                    (unsigned long long)last.clippedAway, (unsigned long long)last.quads, sx0, sy0, sx1, sy1);
       std::fprintf(stderr, "GPU.PIXEL waves=%llu instructions=%llu fragments=%llu samples=%llu ops=%s\n", (unsigned long long)last.psWaves,
                    (unsigned long long)last.psInstructions, (unsigned long long)last.fragments, (unsigned long long)last.samples, lastPixelHistogram.c_str());
-      std::fprintf(stderr, "GPU.FRAMEBUFFER base=0x%llx pitch=%u height=%u pixels_written=%llu depth_writes=%llu depth_rejected=%llu rect=%llu,%llu-%llu,%llu\n",
-                   (unsigned long long)cbBase, cbPitch, cbHeight, (unsigned long long)last.pixelsWritten, (unsigned long long)last.depthWrites,
+      if (ps.stats.texels)
+        std::fprintf(stderr, "GPU.PIXEL texture=0x%llx %llux%llu texels_read=%llu texels_nonzero=%llu\n", (unsigned long long)ps.stats.textureBase,
+                     (unsigned long long)ps.stats.textureWidth, (unsigned long long)ps.stats.textureHeight, (unsigned long long)ps.stats.texels,
+                     (unsigned long long)ps.stats.texelsNonZero);
+      std::fprintf(stderr, "GPU.FRAMEBUFFER base=0x%llx pitch=%u height=%u pixels_written=%llu changed=%llu src_alpha_nonzero=%llu depth_writes=%llu depth_rejected=%llu rect=%llu,%llu-%llu,%llu\n",
+                   (unsigned long long)cbBase, cbPitch, cbHeight, (unsigned long long)last.pixelsWritten, (unsigned long long)last.pixelsChanged,
+                   (unsigned long long)last.sourceAlphaNonZero, (unsigned long long)last.depthWrites,
                    (unsigned long long)last.depthRejected, last.pixelsWritten ? (unsigned long long)writtenMinX : 0ull,
                    last.pixelsWritten ? (unsigned long long)writtenMinY : 0ull, (unsigned long long)writtenMaxX, (unsigned long long)writtenMaxY);
     }
@@ -497,10 +508,12 @@ struct GCNRenderer {
   }
   template <class Memory>
   bool writeColor(Memory& memory, uint64_t base, unsigned tile, const Display2DThin32& layout, unsigned pitch, bool srgb, bool swapAlt,
-                  uint32_t x, uint32_t y, std::array<float, 4> src, bool blending, uint32_t blend, const Bank& ctx, unsigned mask, std::string& error) {
+                  uint32_t x, uint32_t y, std::array<float, 4> src, bool blending, uint32_t blend, const Bank& ctx, unsigned mask, bool& changed, std::string& error) {
     const uint64_t at = base + (tile == 10 ? layout.offset(x, y) : (uint64_t(y) * pitch + x) * 4);
     uint8_t px[4];
     if (memory.read_data(at, px, 4)) { error = "colour buffer unreadable at 0x" + hex(at); return false; }
+    uint32_t before = 0;
+    std::memcpy(&before, px, 4);
     // Memory component order: STD = R,G,B,A; ALT = B,G,R,A (8_8_8_8).
     const unsigned order[4] = {swapAlt ? 2u : 0u, 1u, swapAlt ? 0u : 2u, 3u};
     std::array<float, 4> dst{};
@@ -526,6 +539,9 @@ struct GCNRenderer {
       const float v = srgb && c < 3 ? linearToSrgb(out[c]) : out[c];
       px[order[c]] = uint8_t(std::lround(v * 255.0f));
     }
+    uint32_t after = 0;
+    std::memcpy(&after, px, 4);
+    changed = before != after;
     if (memory.write_data(at, px, 4)) { error = "colour buffer write failed at 0x" + hex(at); return false; }
     return true;
   }

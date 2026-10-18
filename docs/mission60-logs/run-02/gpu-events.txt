@@ -1,0 +1,42 @@
+GPU.SUBMIT sequence=1 kind=dcb guest=0x2101703f8 bytes=3984 dump=docs/mission60-logs/run-02/gpu-submit-1-0
+GPU.DRAW n=1 opcode=0x2d count=3 prim=0x11 VS=0x109cf00 PS=0x250180a00 cb=0x250660000 tile=10 fmt=10/6 swap=1 depth=clear color=off blend=00000000
+GPU.VERTEX invocations=3 waves=1 instructions=13 ops=s_mov_b32:1,s_endpgm:1,v_lshlrev_b32:1,v_and_b32:2,v_add_i32:2,v_mov_b32:2,v_cvt_f32_i32:2,exp:2
+GPU.VERTEX first_pos=-1,-1,0,1 params=1
+GPU.RASTER primitives=2 rasterized=2 culled=0 clipped_away=0 quads=519120 scissor=0,0-1920,1080
+GPU.PIXEL waves=32445 instructions=292005 fragments=2073600 samples=0 ops=s_mov_b32:32445,s_endpgm:32445,s_waitcnt:32445,s_buffer_load_dwordx4:32445,v_mov_b32:129780,exp:32445
+GPU.FRAMEBUFFER base=0x250660000 pitch=1920 height=1088 pixels_written=0 depth_writes=2073600 depth_rejected=0 rect=0,0-0,0
+GPU.DRAW n=2 opcode=0x27 count=24 prim=0x4 VS=0x250181000 PS=0x250181100 cb=0x250660000 tile=10 fmt=10/6 swap=1 depth=off blend=40000504
+GPU.VERTEX invocations=16 waves=1 instructions=34 ops=s_mov_b32:1,s_setpc_b64:1,s_swappc_b64:1,s_endpgm:1,s_waitcnt:3,s_load_dwordx4:3,s_buffer_load_dwordx16:1,v_mac_f32:12,v_mov_b32:5,exp:3,buffer_load_format_xy:1,buffer_load_format_xyz:2
+GPU.VERTEX first_pos=-1,-1.37037,0,1 params=2
+GPU.RASTER primitives=8 rasterized=2 culled=6 clipped_away=0 quads=518940 scissor=0,0-1920,1080
+GPU.PIXEL waves=32434 instructions=486510 fragments=2073600 samples=2075760 ops=s_mov_b32:64868,s_mov_b64:64868,s_wqm_b64:32434,s_endpgm:32434,s_waitcnt:32434,v_cvt_pkrtz_f16_f32:64868,v_interp_p1_f32:64868,v_interp_p2_f32:64868,exp:32434,image_sample:32434
+GPU.FRAMEBUFFER base=0x250660000 pitch=1920 height=1088 pixels_written=2073600 depth_writes=0 depth_rejected=0 rect=0,0-1919,1079
+GPU.DRAW n=3 opcode=0x27 count=3072 prim=0x4 VS=0x250181000 PS=0x250181100 cb=0x250660000 tile=10 fmt=10/6 swap=1 depth=off blend=40000504
+GPU.VERTEX invocations=2048 waves=32 instructions=1088 ops=s_mov_b32:32,s_setpc_b64:32,s_swappc_b64:32,s_endpgm:32,s_waitcnt:96,s_load_dwordx4:96,s_buffer_load_dwordx16:32,v_mac_f32:384,v_mov_b32:160,exp:96,buffer_load_format_xy:32,buffer_load_format_xyz:64
+GPU.VERTEX first_pos=-0.891667,0.733333,0,1 params=2
+GPU.RASTER primitives=1024 rasterized=28 culled=996 clipped_away=0 quads=7800 scissor=0,0-1920,1080
+GPU.PIXEL waves=488 instructions=7320 fragments=29952 samples=31200 ops=s_mov_b32:976,s_mov_b64:976,s_wqm_b64:488,s_endpgm:488,s_waitcnt:488,v_cvt_pkrtz_f16_f32:976,v_interp_p1_f32:976,v_interp_p2_f32:976,exp:488,image_sample:488
+GPU.FRAMEBUFFER base=0x250660000 pitch=1920 height=1088 pixels_written=29952 depth_writes=0 depth_rejected=0 rect=104,96-603,143
+GPU.PRESENT port=1 buffer=0 guest=0x250660000 1920x1080 pitch=1920 tiling=display2d-thin format=80000000 flip_arg=0 fnv64=7886ecd02a2ef383 non_black=2073600 distinct_colors=1
+VIDEO.PRESENT width=1920 height=1080 guest=0x250660000 flip=0
+GPU.SUBMIT sequence=2 kind=dcb guest=0x2103b0404 bytes=3988 dump=docs/mission60-logs/run-02/gpu-submit-2-0
+GPU.DRAW n=4 opcode=0x2d count=3 prim=0x11 VS=0x109cf00 PS=0x250180a00 cb=0x250e58000 tile=10 fmt=10/6 swap=1 depth=clear color=off blend=00000000
+GPU.VERTEX invocations=3 waves=1 instructions=13 ops=s_mov_b32:1,s_endpgm:1,v_lshlrev_b32:1,v_and_b32:2,v_add_i32:2,v_mov_b32:2,v_cvt_f32_i32:2,exp:2
+GPU.VERTEX first_pos=-1,-1,0,1 params=1
+GPU.RASTER primitives=2 rasterized=2 culled=0 clipped_away=0 quads=519120 scissor=0,0-1920,1080
+GPU.PIXEL waves=32445 instructions=292005 fragments=2073600 samples=0 ops=s_mov_b32:32445,s_endpgm:32445,s_waitcnt:32445,s_buffer_load_dwordx4:32445,v_mov_b32:129780,exp:32445
+GPU.FRAMEBUFFER base=0x250e58000 pitch=1920 height=1088 pixels_written=0 depth_writes=2073600 depth_rejected=0 rect=0,0-0,0
+GPU.DRAW n=5 opcode=0x27 count=24 prim=0x4 VS=0x250181000 PS=0x250181100 cb=0x250e58000 tile=10 fmt=10/6 swap=1 depth=off blend=40000504
+GPU.VERTEX invocations=16 waves=1 instructions=34 ops=s_mov_b32:1,s_setpc_b64:1,s_swappc_b64:1,s_endpgm:1,s_waitcnt:3,s_load_dwordx4:3,s_buffer_load_dwordx16:1,v_mac_f32:12,v_mov_b32:5,exp:3,buffer_load_format_xy:1,buffer_load_format_xyz:2
+GPU.VERTEX first_pos=-1,-1.37037,0,1 params=2
+GPU.RASTER primitives=8 rasterized=2 culled=6 clipped_away=0 quads=518940 scissor=0,0-1920,1080
+GPU.PIXEL waves=32434 instructions=486510 fragments=2073600 samples=2075760 ops=s_mov_b32:64868,s_mov_b64:64868,s_wqm_b64:32434,s_endpgm:32434,s_waitcnt:32434,v_cvt_pkrtz_f16_f32:64868,v_interp_p1_f32:64868,v_interp_p2_f32:64868,exp:32434,image_sample:32434
+GPU.FRAMEBUFFER base=0x250e58000 pitch=1920 height=1088 pixels_written=2073600 depth_writes=0 depth_rejected=0 rect=0,0-1919,1079
+GPU.DRAW n=6 opcode=0x27 count=3072 prim=0x4 VS=0x250181000 PS=0x250181100 cb=0x250e58000 tile=10 fmt=10/6 swap=1 depth=off blend=40000504
+GPU.VERTEX invocations=2048 waves=32 instructions=1088 ops=s_mov_b32:32,s_setpc_b64:32,s_swappc_b64:32,s_endpgm:32,s_waitcnt:96,s_load_dwordx4:96,s_buffer_load_dwordx16:32,v_mac_f32:384,v_mov_b32:160,exp:96,buffer_load_format_xy:32,buffer_load_format_xyz:64
+GPU.VERTEX first_pos=-0.891667,0.733333,0,1 params=2
+GPU.RASTER primitives=1024 rasterized=28 culled=996 clipped_away=0 quads=7800 scissor=0,0-1920,1080
+GPU.PIXEL waves=488 instructions=7320 fragments=29952 samples=31200 ops=s_mov_b32:976,s_mov_b64:976,s_wqm_b64:488,s_endpgm:488,s_waitcnt:488,v_cvt_pkrtz_f16_f32:976,v_interp_p1_f32:976,v_interp_p2_f32:976,exp:488,image_sample:488
+GPU.FRAMEBUFFER base=0x250e58000 pitch=1920 height=1088 pixels_written=29952 depth_writes=0 depth_rejected=0 rect=104,96-603,143
+GPU.PRESENT port=1 buffer=1 guest=0x250e58000 1920x1080 pitch=1920 tiling=display2d-thin format=80000000 flip_arg=0 fnv64=7886ecd02a2ef383 non_black=2073600 distinct_colors=1
+VIDEO.PRESENT width=1920 height=1080 guest=0x250e58000 flip=0

@@ -1,0 +1,3 @@
+/home/enermaxfr/Téléchargements/CUSA06015/eboot.bin: OK
+/home/enermaxfr/Téléchargements/CUSA06015/sce_module/libc.prx: OK
+/home/enermaxfr/Téléchargements/CUSA06015/sce_module/libSceFios2.prx: OK

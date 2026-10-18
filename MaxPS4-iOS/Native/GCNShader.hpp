@@ -96,7 +96,8 @@ struct GCNShader {
   };
   struct Stats {
     uint64_t waves = 0, instructions = 0, scalarLoads = 0, bufferLoads = 0,
-             bufferOutOfRange = 0, samples = 0, exports = 0;
+             bufferOutOfRange = 0, samples = 0, exports = 0, texels = 0, texelsNonZero = 0, textureBase = 0,
+             textureWidth = 0, textureHeight = 0;
     std::map<uint32_t, uint64_t> histogram; // (encoding << 16) | opcode
   } stats;
   static constexpr uint64_t maxStepsPerWave = 1u << 20;
@@ -872,6 +873,9 @@ struct GCNShader {
     if (memory.read_data(tex.base + offset, raw.data(), bpp)) {
       std::ostringstream m; m << "texel unreadable at 0x" << std::hex << tex.base + offset; why = m.str(); return false;
     }
+    ++stats.texels;
+    if (std::any_of(raw.begin(), raw.begin() + bpp, [](uint8_t b) { return b != 0; })) ++stats.texelsNonZero;
+    stats.textureBase = tex.base; stats.textureWidth = tex.width; stats.textureHeight = tex.height;
     std::array<float, 4> c{0, 0, 0, 1};
     if (tex.dfmt == 10) {
       for (unsigned k = 0; k < 4; ++k) {

@@ -248,7 +248,8 @@ static void pipelineTests() {
   const uint32_t vsharps[8] = {uint32_t(Scene::vertices), 20u << 16, 4, 0xfac | (7u << 12) | (13u << 15),
                                uint32_t(Scene::colors), 4u << 16, 4, 0xfac | (0u << 12) | (10u << 15)};
   assert(!m.write_data(Scene::table, vsharps, sizeof(vsharps)));
-  const uint16_t idx[9] = {0, 1, 2, 1, 3, 2, 0, 2, 1}; // two front faces + one back face
+  // Visually counter-clockwise on screen (y down) is front: two front faces + one back face.
+  const uint16_t idx[9] = {0, 2, 1, 1, 2, 3, 0, 1, 2};
   assert(!m.write_data(Scene::indices, idx, sizeof(idx)));
   // 4x4 sRGB RGBA texture, linear aligned, pitch 64.
   uint8_t texels[4][4][4];
