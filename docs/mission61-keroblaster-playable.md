@@ -102,3 +102,17 @@ commandes tactiles/manette Bluetooth, intégration du rendu (logiciel multi-thre
    (sauvegardes `sceSaveData*` probablement nécessaires).
 3. Accélérer le chargement (copies agrandies dans le simulateur) ou passer au test iPhone.
 4. Préparer la version iOS (build ARM64, préemption native, audio, entrées).
+
+## Reprise du 19 octobre 2026 (rapport d'étape)
+
+- Préemption corrigée (`0a6fab8`) : les entrées de blocs de threads terminés pouvaient renvoyer le
+  thread principal à un faux RIP ; chaque entrée est validée auprès du cache du thread, et vixl ne
+  consulte le registre qu'après un saut (chargement jusqu'au frame 83 : ~3 min au lieu de 19).
+  `run-keroblaster.sh` coupe le journal des verrous (`MAXPS4_QUIET_LOCKS`, non commité).
+- Le long chargement initial est la synthèse PxTone des 99 effets sonores `.ptnoise` (calcul flottant
+  double, très lent dans le simulateur), puis les images de l'écran titre.
+- **Blocage restant** (run-22, run-24) : après `logo.png` et un appel `sceKernelConvertUtcToLocaltime`,
+  le thread principal exécute indéfiniment la boucle de copie agrandie `eboot+0xc6ec0` (fonction PNG
+  `0xc6c00`, unique appelant `0xc333d`) sans nouveau `scePngDecParseHeader`. Cause non identifiée ;
+  le runner journalise désormais les registres invités à chaque préemption pour la trouver.
+- Écran titre toujours pas affiché ; rien testé sur iPhone.
