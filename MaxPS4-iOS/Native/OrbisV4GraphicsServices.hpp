@@ -4,6 +4,8 @@
 #include "GuestProviders/GnmInitState.hpp"
 #include "GuestProviders/GnmEmbeddedVS.hpp"
 #include "GNMCommandExecutor.hpp"
+#include "GCNTiling.hpp"
+#include <map>
 #include <array>
 #include <chrono>
 #include <deque>
@@ -68,11 +70,28 @@ struct OrbisV4GraphicsServices {
         if(r.rsi>=16 || p->second.buffers[r.rsi].group<0)return video(10);
         if(r.rdx>2)return video(6);
         const auto& b=p->second.buffers[r.rsi];const auto& a=b.attr;
-        if(a[1]!=1)return trap("VideoOut tiled framebuffer requires display-macro detiling; no linear reinterpretation permitted");
         const size_t bytes=size_t(a[3])*a[4]*4;
         std::vector<uint8_t> rgba(bytes);
-        for(uint32_t y=0;y<a[4];++y)if(m.read_data(b.address+uint64_t(y)*a[5]*4,rgba.data()+size_t(y)*a[3]*4,size_t(a[3])*4))return video(19);
+        if(a[1]==1){
+            for(uint32_t y=0;y<a[4];++y)if(m.read_data(b.address+uint64_t(y)*a[5]*4,rgba.data()+size_t(y)*a[3]*4,size_t(a[3])*4))return video(19);
+        }else{
+            // Tiled scan-out (base PS4): display 2D-thin, 32 bpp. The whole
+            // padded surface is read once, then each pixel is addressed with
+            // the same equations the colour-buffer writer uses.
+            gpu::Display2DThin32 layout;std::string why;
+            if(!layout.init(a[5],a[4],why))return trap("VideoOut tiled buffer: "+why);
+            std::vector<uint8_t> tiled(size_t(layout.sizeBytes()));
+            for(size_t at=0;at<tiled.size();){const size_t n=std::min(tiled.size()-at,size_t(M::copy_limit));if(m.read_data(b.address+at,tiled.data()+at,n))return video(19);at+=n;}
+            for(uint32_t y=0;y<a[4];++y)for(uint32_t x=0;x<a[3];++x)std::memcpy(rgba.data()+(size_t(y)*a[3]+x)*4,tiled.data()+layout.offset(x,y),4);
+        }
         if(a[0]==0x80000000U)for(size_t i=0;i<rgba.size();i+=4)std::swap(rgba[i],rgba[i+2]);
+        {   // Content summary of the frame actually presented.
+            uint64_t hash=1469598103934665603ULL,lit=0;std::map<uint32_t,uint64_t> colors;
+            for(size_t i=0;i<rgba.size();i+=4){uint32_t v;std::memcpy(&v,rgba.data()+i,4);hash=(hash^v)*1099511628211ULL;if(v&0xffffffU)++lit;if(colors.size()<4096)++colors[v];}
+            std::fprintf(stderr,"GPU.PRESENT port=%llu buffer=%llu guest=0x%llx %ux%u pitch=%u tiling=%s format=%08x flip_arg=%llu fnv64=%016llx non_black=%llu distinct_colors=%zu%s\n",
+                (unsigned long long)r.rdi,(unsigned long long)r.rsi,(unsigned long long)b.address,a[3],a[4],a[5],a[1]==1?"linear":"display2d-thin",a[0],
+                (unsigned long long)r.rcx,(unsigned long long)hash,(unsigned long long)lit,colors.size(),colors.size()>=4096?"+":"");
+        }
         std::string error;
         if(!present || !present(a[3],a[4],rgba,b.address,r.rcx,error))return trap("VideoOut presentation failed: "+error);
         auto& port=p->second;++port.flips;port.current=int(r.rsi);port.arg=r.rcx;port.last=now();

@@ -142,7 +142,8 @@ int main(){
         assert(indexedPacket[0]==0xc0042700U&&indexedPacket[1]==6&&indexedPacket[2]==base+0x3000&&indexedPacket[4]==6);
         gpu::GNMCommandExecutor indexedExecutor;std::string indexedError;
         assert(!indexedExecutor.execute(lease,base+0x2500,std::vector<uint32_t>(indexedPacket.begin(),indexedPacket.end()),indexedError));
-        assert(indexedError.find("guest GCN draw needs shader execution")!=std::string::npos&&indexedExecutor.draws==0);
+        // No primitive type/shaders bound: the renderer refuses, nothing is drawn.
+        assert(indexedError.find("guest GCN draw rejected")!=std::string::npos&&indexedExecutor.draws==0);
         // Real PM4 wait-for-flip packet: seven DWORDs and a valid label.
         assert(call("sceGnmInsertWaitFlipDone",base+0x1800,6,h,0).value==uint64_t(-1));
         assert(call("sceGnmInsertWaitFlipDone",base+0x1800,7,h,0).value==0);
@@ -190,5 +191,37 @@ int main(){
         assert(call("sceKernelDeleteEqueue",q).value==0);
         assert(LinuxVideoPresenter::png("/tmp/maxps4-mission52-test.png",2,2,captured));
     }
-    memory.close();std::cout<<"PASS VideoOut lifecycle, validation, pitch/BGRA snapshot, presentation callback, status, labels, equeue blocking/wakeup/timeout, GNM event add/delete, PNG (synthetic test only)\n";
+    memory.close();
+    {   // Tiled (display 2D-thin) scan-out buffer: flip detiles guest memory.
+        constexpr uint64_t tbase=0x200000;OrbisV4Translation tiledMemory([]{});
+        assert(!tiledMemory.reserve(tbase,0x20000));assert(!tiledMemory.map(tbase,0x20000,6));
+        auto lease=tiledMemory.lease();
+        OrbisV4ProcessBatch batch;OrbisV4HostServices svc(batch);uint64_t arena=tbase+0x18000;
+        auto g=OrbisV4GraphicsServices::install(svc,[&](auto&,size_t n){auto at=arena;arena+=(n+15)&~size_t(15);return at;});
+        auto call=[&](const std::string& name,uint64_t a=0,uint64_t b=0,uint64_t c=0,uint64_t d=0,uint64_t e=0,uint64_t f=0){
+            size_t i=0;for(;i<batch.services.size();++i)if(batch.services[i].name==name)break;
+            if(i==batch.services.size()){OrbisV4ProcessBatch::Service s;s.name=name;s.id=batch.serviceBase+uint32_t(i);s.stub=0x400000+i*16;batch.services.push_back(s);}
+            OrbisV4HostServices::Registers r;r.rax=batch.services[i].id;r.rip=batch.services[i].stub+8;r.rsp=tbase+0x17000;r.rdi=a;r.rsi=b;r.rdx=c;r.rcx=d;r.r8=e;r.r9=f;
+            return svc.dispatch(r,lease);
+        };
+        std::vector<uint8_t> captured;int presents=0;
+        g->openDevice=[](auto&){return true;};
+        g->present=[&](uint32_t w,uint32_t h,const auto& pixels,uint64_t,uint64_t,auto&){assert(w==128&&h==64);captured=pixels;++presents;return true;};
+        const auto h=call("sceVideoOutOpen").value;assert(h==1);
+        uint32_t pitch=128;assert(!lease.write_data(tbase+0x17008,&pitch,4));
+        assert(call("sceVideoOutSetBufferAttribute",tbase,0x80000000,0,0,128,64).value==0); // tiling mode 0 = tiled
+        const uint64_t surface=tbase+0x8000;assert(!lease.write_data(tbase+0x100,&surface,8));
+        assert(call("sceVideoOutRegisterBuffers",h,0,tbase+0x100,1,tbase).value==0);
+        gpu::Display2DThin32 layout;std::string why;assert(layout.init(128,64,why));
+        for(uint32_t y=0;y<64;++y)for(uint32_t x=0;x<128;++x){const uint8_t bgra[4]={uint8_t(x),uint8_t(y),uint8_t(x+y),255};assert(!lease.write_data(surface+layout.offset(x,y),bgra,4));}
+        assert(call("sceVideoOutSubmitFlip",h,0,1,7).value==0&&presents==1);
+        for(uint32_t y=0;y<64;++y)for(uint32_t x=0;x<128;++x){const uint8_t* p=captured.data()+(size_t(y)*128+x)*4;assert(p[0]==uint8_t(x+y)&&p[1]==y&&p[2]==x&&p[3]==255);}
+        // A pitch that is not a whole number of macro tiles is refused.
+        uint32_t badPitch=200;assert(!lease.write_data(tbase+0x17008,&badPitch,4));
+        assert(call("sceVideoOutSetBufferAttribute",tbase+0x40,0x80000000,0,0,128,64).value==0);
+        const uint64_t surface2=tbase+0x10000;assert(!lease.write_data(tbase+0x108,&surface2,8));
+        assert(call("sceVideoOutRegisterBuffers",h,1,tbase+0x108,1,tbase+0x40).value==1);
+        assert(call("sceVideoOutSubmitFlip",h,1,1,8).outcome==OrbisV4HostServices::Outcome::Trap&&presents==1);
+    }
+    std::cout<<"PASS tiled VideoOut detiling, VideoOut lifecycle, validation, pitch/BGRA snapshot, presentation callback, status, labels, equeue blocking/wakeup/timeout, GNM event add/delete, PNG (synthetic test only)\n";
 }
