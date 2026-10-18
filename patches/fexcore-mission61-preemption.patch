@@ -1,26 +1,68 @@
-FEXCore patch (MaxPS4 mission 61): time-slice preemption for an embedder that
-runs several guest threads on one host thread. Apply after the other
-patches/fexcore-*.patch files. FEXCore::MaxPS4::BlockLinking=false makes every
-block exit return to the dispatcher; there a set FEXCore::MaxPS4::PreemptRequest
-jumps to the thread stop handler (static registers spilled, State.rip current),
-so ExecuteThread returns and the thread can be resumed later.
+FEXCore + vixl patch (MaxPS4 mission 61): time-slice preemption for an
+embedder running several guest threads on one host thread. Apply after the
+other patches/fexcore-*.patch and patches/vixl-*.patch files.
+- FEXCore::MaxPS4::PreemptRequest checked at the dispatcher loop top: jumps to
+  the thread stop handler (static registers spilled, State.rip current).
+- Simulator builds: a registry of compiled block entries (host -> guest RIP)
+  lets vixl stop at the next block entry while a request is pending, so
+  linked loops are interrupted without disabling block linking.
+- FEXCore::MaxPS4::BlockLinking=false (optional) routes every exit through
+  the dispatcher instead (also usable on native ARM64).
 
 diff --git a/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/Core.cpp b/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/Core.cpp
-index 9a6b9489..aa8665c1 100644
+index 9a6b9489..00a7250c 100644
 --- a/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/Core.cpp
 +++ b/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/Core.cpp
-@@ -78,4 +80,9 @@ $end_info$
+@@ -78,4 +80,26 @@ $end_info$
  #include <xxhash.h>
  
 +namespace FEXCore::MaxPS4 {
 +std::atomic<uint8_t> PreemptRequest {0};
 +std::atomic<bool> BlockLinking {true};
++// Simulator builds: host entry -> guest RIP of every compiled block, so a
++// pending preemption can stop at the next block entry even inside linked
++// loops. Cleared with the code cache (entries never outlive their buffer).
++std::shared_mutex BlockEntriesMutex;
++std::unordered_map<uint64_t, uint64_t> BlockEntries;
++uint64_t PreemptTarget(uint64_t pc, uint64_t state) {
++  uint64_t rip = 0;
++  {
++    std::shared_lock lk(BlockEntriesMutex);
++    auto it = BlockEntries.find(pc);
++    if (it == BlockEntries.end()) return 0;
++    rip = it->second;
++  }
++  auto* Frame = reinterpret_cast<FEXCore::Core::CpuStateFrame*>(state);
++  Frame->State.rip = rip;
++  return Frame->Pointers.ThreadStopHandlerSpillSRA;
++}
 +} // namespace FEXCore::MaxPS4
 +
  namespace FEXCore::Context {
  ContextImpl::ContextImpl(const FEXCore::HostFeatures& Features)
+@@ -491,4 +516,8 @@ void ContextImpl::OnCodeBufferAllocated(const fextl::shared_ptr<CPU::CodeBuffer>
+ 
+ void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, bool NewCodeBuffer) {
++  {
++    std::unique_lock lk_entries(MaxPS4::BlockEntriesMutex);
++    MaxPS4::BlockEntries.clear();
++  }
+   FEXCORE_PROFILE_INSTANT("ClearCodeCache");
+ 
+@@ -902,4 +1167,11 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
+ 
+   auto [CompiledCode, DebugData, StartAddr, Length, NeedsAddGuestCodeRanges] = CompileCode(Thread, GuestRIP, MaxInst);
++#ifdef VIXL_SIMULATOR
++  if (DebugData) {
++    std::unique_lock lk_entries(MaxPS4::BlockEntriesMutex);
++    for (const auto& [EntryRIP, EntryHost] : CompiledCode.EntryPoints)
++      if (EntryHost) MaxPS4::BlockEntries[reinterpret_cast<uint64_t>(FEXCore::Allocator::GetExecutableAddress(EntryHost))] = EntryRIP;
++  }
++#endif
+   auto CodePtr = CompiledCode.EntryPoints[GuestRIP];
+   if (CodePtr == nullptr) {
 diff --git a/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp b/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
-index 2ce32af2..7d258a0c 100644
+index 2ce32af2..a690d8e5 100644
 --- a/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
 +++ b/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
 @@ -187,4 +188,11 @@ void Dispatcher::EmitDispatcher() {
@@ -41,6 +83,13 @@ index 2ce32af2..7d258a0c 100644
 +    (void)Bind(&MaxPS4Preempt);
      SpillStaticRegs(TMP1);
  
+@@ -667,4 +681,6 @@ void Dispatcher::EmitDispatcher() {
+ #ifdef VIXL_SIMULATOR
+ void Dispatcher::ExecuteDispatch(FEXCore::Core::CpuStateFrame* Frame) {
++  vixl_maxps4_preempt = reinterpret_cast<const volatile uint8_t*>(&FEXCore::MaxPS4::PreemptRequest);
++  vixl_maxps4_preempt_target = &FEXCore::MaxPS4::PreemptTarget;
+   Simulator.WriteXRegister(0, reinterpret_cast<int64_t>(Frame));
+   Simulator.WriteXRegister(1, 0);
 diff --git a/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/JIT/JIT.cpp
 index cf2f6af9..2811205f 100644
 --- a/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/JIT/JIT.cpp
@@ -55,7 +104,7 @@ index cf2f6af9..2811205f 100644
      Frame->State.rip = GuestRip;
      return Frame->Pointers.DispatcherLoopTop;
 diff --git a/runtime/sources/fexcore-darwin/FEXCore/include/FEXCore/Core/Context.h b/runtime/sources/fexcore-darwin/FEXCore/include/FEXCore/Core/Context.h
-index fdc12ba4..98fdf800 100644
+index fdc12ba4..367f9c5b 100644
 --- a/runtime/sources/fexcore-darwin/FEXCore/include/FEXCore/Core/Context.h
 +++ b/runtime/sources/fexcore-darwin/FEXCore/include/FEXCore/Core/Context.h
 @@ -1,4 +1,5 @@
@@ -64,7 +113,7 @@ index fdc12ba4..98fdf800 100644
 +#include <atomic>
  #include <functional>
  #include <stdint.h>
-@@ -21,4 +22,14 @@ class ThunkHandler;
+@@ -21,4 +22,17 @@ class ThunkHandler;
  } // namespace FEXCore
  
 +// MaxPS4: preemption for an embedder that schedules several guest threads on
@@ -75,8 +124,64 @@ index fdc12ba4..98fdf800 100644
 +namespace FEXCore::MaxPS4 {
 +FEX_DEFAULT_VISIBILITY extern std::atomic<uint8_t> PreemptRequest;
 +FEX_DEFAULT_VISIBILITY extern std::atomic<bool> BlockLinking;
++// Simulator builds: continuation address for a pending preemption at host
++// code 'pc' (a block entry), or 0; 'state' is the guest CpuStateFrame (x28).
++uint64_t PreemptTarget(uint64_t pc, uint64_t state);
 +} // namespace FEXCore::MaxPS4
 +
  namespace FEXCore::Core {
  struct CPUState;
 
+diff --git a/src/aarch64/simulator-aarch64.cc b/src/aarch64/simulator-aarch64.cc
+index c4f87d0..cb001b5 100644
+--- a/src/aarch64/simulator-aarch64.cc
++++ b/src/aarch64/simulator-aarch64.cc
+@@ -814,4 +815,9 @@ Simulator::~Simulator() {
+ 
+ 
++extern "C" {
++const volatile uint8_t* vixl_maxps4_preempt = nullptr;
++uint64_t (*vixl_maxps4_preempt_target)(uint64_t pc, uint64_t state) = nullptr;
++}
++
+ void Simulator::Run() {
+   // Flush any written registers before executing anything, so that
+@@ -831,6 +837,20 @@ void Simulator::Run() {
+     }
+   } else {
++    // Diagnostic samples of instructions actually executed by the simulator.
++    // Keep the normal loop untouched when tracing is disabled.
++    const bool trace = std::getenv("MAXPS4_INSTRUCTION_TRACE") != nullptr;
++    static thread_local uint64_t executed = 0;
+     while (!IsSimulationFinished()) {
++      if (vixl_maxps4_preempt && *vixl_maxps4_preempt && vixl_maxps4_preempt_target) {
++        if (const uint64_t target = vixl_maxps4_preempt_target(reinterpret_cast<uint64_t>(ReadPc()), ReadXRegister(28)))
++          WritePc(reinterpret_cast<const Instruction*>(target));
++      }
++      const auto* instruction = ReadPc();
+       ExecuteInstruction();
++      if (trace && (++executed <= 256 || executed % 1000000 == 0)) {
++        fprintf(stderr, "EXEC.A64 count=%llu pc=%p bits=%08x\n",
++                static_cast<unsigned long long>(executed),
++                static_cast<const void*>(instruction), instruction->GetInstructionBits());
++      }
+     }
+   }
+diff --git a/src/aarch64/simulator-aarch64.h b/src/aarch64/simulator-aarch64.h
+index fd8974e..0a9a551 100644
+--- a/src/aarch64/simulator-aarch64.h
++++ b/src/aarch64/simulator-aarch64.h
+@@ -73,4 +73,13 @@ using uint8x16_t = __attribute__((neon_vector_type(16))) uint8_t;
+ #endif
+ 
++// MaxPS4: preemption at JIT block entries (see FEXCore::MaxPS4). While the
++// byte at vixl_maxps4_preempt is non-zero, the simulator asks
++// vixl_maxps4_preempt_target(pc, x28) before each instruction; a non-zero
++// result is the address to continue at instead.
++extern "C" {
++extern const volatile uint8_t* vixl_maxps4_preempt;
++extern uint64_t (*vixl_maxps4_preempt_target)(uint64_t pc, uint64_t state);
++}
++
+ namespace vixl {
+ namespace aarch64 {
