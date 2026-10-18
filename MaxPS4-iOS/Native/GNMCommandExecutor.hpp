@@ -1,6 +1,7 @@
 #pragma once
 #include "PM4Type3Decoder.hpp"
 #include "GCNCompute.hpp"
+#include "GCNRenderer.hpp"
 #include <cstdio>
 #include <array>
 #include <algorithm>
@@ -10,15 +11,32 @@
 #include <string>
 
 namespace maxps4::gpu {
-// Synchronous bounded PM4 engine. It performs register/memory/fence work;
-// a draw requires a renderer that actually executes the guest shaders.
-// Unsupported packets stop at their exact command address, never succeed.
+// Synchronous bounded PM4 engine. It performs register/memory/fence work and
+// executes draws through GCNRenderer (guest VS/PS, rasteriser, colour/depth).
+// Unsupported packets or draw state stop at their exact command address,
+// never succeed.
 struct GNMCommandExecutor {
     struct State { std::array<uint32_t,1024> context{},shader{},uconfig{};uint32_t instances=1,indexType=0; } state;
     struct Draw { uint8_t opcode=0;uint32_t count=0,initiator=0;uint64_t indexAddress=0; };
     GCNCompute compute;
+    GCNRenderer renderer;
     uint64_t packets=0,draws=0,writes=0;size_t remaining=65536;
+    // Optional override (tests); the built-in renderer runs when unset.
     std::function<bool(const State&,const Draw&,std::string&)> render;
+    // CLEAR_STATE loads the hardware default context, not zeros. Only the
+    // defaults consumed by the renderer are modelled (CIK clear-state values):
+    // scissor rectangles open to 16384 and every colour channel enabled.
+    static void clearContext(std::array<uint32_t,1024>& c){
+        c.fill(0);
+        c[0x0d]=0x40004000;                 // PA_SC_SCREEN_SCISSOR_BR
+        c[0x100]=0xffffffff;                // VGT_MAX_VTX_INDX
+        c[0x81]=0x80000000;c[0x82]=0x40004000; // PA_SC_WINDOW_SCISSOR_TL/BR
+        c[0x83]=0x0000ffff;                 // PA_SC_CLIPRECT_RULE
+        c[0x8e]=0xffffffff;c[0x8f]=0xffffffff; // CB_TARGET_MASK, CB_SHADER_MASK
+        c[0x90]=0x80000000;c[0x91]=0x40004000; // PA_SC_GENERIC_SCISSOR_TL/BR
+        for(unsigned v=0;v<16;++v){c[0x94+v*2]=0x80000000;c[0x95+v*2]=0x40004000;} // PA_SC_VPORT_SCISSOR_n
+        for(unsigned v=0;v<16;++v){c[0xb4+v*2]=0;c[0xb5+v*2]=0x3f800000;}         // PA_SC_VPORT_ZMIN/ZMAX_n
+    }
     std::function<void()> interrupt;
     // Owned uploads to the shader-prefetch register port. A renderer must still
     // execute GCN; recording an upload never completes a dispatch or draw.
@@ -36,7 +54,7 @@ struct GNMCommandExecutor {
             if(words[packet.headerWord]&1)return fail("predication requires a predicate evaluator");
             switch(packet.opcode){
             case 0x10: break; // Explicit NOP, including SDK annotation payloads.
-            case 0x12: if(n!=1||p[0])return fail("unsupported CLEAR_STATE mode");state.context.fill(0);break;
+            case 0x12: if(n!=1||p[0])return fail("unsupported CLEAR_STATE mode");clearContext(state.context);break;
             case 0x28: if(n!=2||p[0]!=0x80000000||p[1]!=0x80000000)return fail("unsupported CONTEXT_CONTROL load/shadow mode");break; // One synchronous context.
             case 0x58: if(n!=6)return fail("invalid ACQUIRE_MEM");std::atomic_thread_fence(std::memory_order_seq_cst);break;
             case 0x3c:{ // WAIT_REG_MEM: synchronous memory polling, bounded to avoid hangs.
@@ -149,8 +167,15 @@ struct GNMCommandExecutor {
                 else{if(n!=5)return fail("invalid DRAW_INDEX_2");if(state.indexType>2)return fail("index type/endian mode unsupported for indexed fetch");draw.indexAddress=uint64_t(p[1])|(uint64_t(p[2])<<32);draw.count=p[3];draw.initiator=p[4];}
                 if(!draw.count||!state.instances)break;
                 std::string detail;
-                if(!render || !render(state,draw,detail)){
-                    std::ostringstream reason;reason<<"guest GCN draw needs shader execution/rasterizer; count="<<std::dec<<draw.count<<" VS=0x"<<std::hex<<(uint64_t(state.shader[0x48])<<8)<<" PS=0x"<<(uint64_t(state.shader[8])<<8)<<" CB_COLOR0_BASE=0x"<<(uint64_t(state.context[0x318])<<8)<<" "<<detail;
+                bool rendered=false;
+                if(render)rendered=render(state,draw,detail);
+                else{
+                    GCNRenderer::DrawCall call;call.opcode=draw.opcode;call.count=draw.count;call.initiator=draw.initiator;
+                    call.indexAddress=draw.indexAddress;call.indexType=state.indexType;call.instances=state.instances;
+                    rendered=renderer.draw(memory,state.context,state.shader,state.uconfig,call,detail);
+                }
+                if(!rendered){
+                    std::ostringstream reason;reason<<"guest GCN draw rejected; count="<<std::dec<<draw.count<<" VS=0x"<<std::hex<<(uint64_t(state.shader[0x48])<<8)<<" PS=0x"<<(uint64_t(state.shader[8])<<8)<<" CB_COLOR0_BASE=0x"<<(uint64_t(state.context[0x318])<<8)<<": "<<detail;
                     return fail(reason.str());
                 }
                 ++draws;break;

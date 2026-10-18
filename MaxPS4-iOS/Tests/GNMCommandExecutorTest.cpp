@@ -71,7 +71,7 @@ int main() {
         // never be silently stripped for a later real indexed fetch.
         assert(run(packet(0x2a,{0x400}),error)&&engine.state.indexType==0x400);
         assert(!run(packet(0x2d,{3,2}),error));
-        assert(error.find("needs shader execution/rasterizer")!=std::string::npos);
+        assert(error.find("guest GCN draw rejected")!=std::string::npos); // no shaders/primitive bound
         assert(!run(packet(0x27,{3,uint32_t(destination),0,3,0}),error));
         assert(error.find("unsupported for indexed fetch")!=std::string::npos);
         assert(!run(packet(0x2a,{0,0}),error));
