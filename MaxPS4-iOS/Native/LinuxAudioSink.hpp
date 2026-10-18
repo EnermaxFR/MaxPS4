@@ -33,7 +33,12 @@ public:
         frequency_ = frequency; return true;
     }
     void write(const int16_t* stereo, size_t frames) {
-        if (wav_) { std::fwrite(stereo, 4, frames, wav_); frames_ += frames; }
+        if (wav_) {
+            std::fwrite(stereo, 4, frames, wav_);
+            // Keep the header valid every second, so an abnormal exit still leaves a playable file.
+            if ((frames_ + frames) / frequency_ != frames_ / frequency_) { frames_ += frames; header(); std::fseek(wav_, 0, SEEK_END); }
+            else frames_ += frames;
+        }
         if (pulse_) { int error = 0; if (writeFn_(pulse_, stereo, frames * 4, &error) < 0) ++pulseErrors_; }
     }
     uint64_t frames() const { return frames_; }
@@ -42,7 +47,11 @@ public:
     void close() {
         if (pulse_) { freeFn_(pulse_); pulse_ = nullptr; }
         if (library_) { dlclose(library_); library_ = nullptr; }
-        if (wav_) {
+        if (wav_) { header(); std::fclose(wav_); wav_ = nullptr; }
+    }
+private:
+    void header() {
+        {
             const uint32_t data = uint32_t(frames_ * 4), riff = 36 + data, fmtSize = 16, rate = frequency_, byteRate = rate * 4;
             const uint16_t pcm = 1, channels = 2, align = 4, bits = 16;
             std::fseek(wav_, 0, SEEK_SET);
@@ -50,10 +59,9 @@ public:
             std::fwrite(&fmtSize, 4, 1, wav_); std::fwrite(&pcm, 2, 1, wav_); std::fwrite(&channels, 2, 1, wav_);
             std::fwrite(&rate, 4, 1, wav_); std::fwrite(&byteRate, 4, 1, wav_); std::fwrite(&align, 2, 1, wav_);
             std::fwrite(&bits, 2, 1, wav_); std::fwrite("data", 1, 4, wav_); std::fwrite(&data, 4, 1, wav_);
-            std::fclose(wav_); wav_ = nullptr;
+            std::fflush(wav_);
         }
     }
-private:
     using New = void* (*)(const char*, const char*, int, const char*, const char*, const void*, const void*, const void*, int*);
     using Write = int (*)(void*, const void*, size_t, int*);
     using Free = void (*)(void*);

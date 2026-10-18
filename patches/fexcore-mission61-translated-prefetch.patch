@@ -1,0 +1,20 @@
+Apply after fexcore-guest-memory.patch (FEXCore/Source/Interface/Core/Core.cpp,
+TranslateGuestOperands). Kero Blaster executes PREFETCH; with translated guest
+memory the pass threw "Unsupported translated guest memory operation: Prefetch".
+A prefetch has no architectural effect, so the node is removed instead of
+reaching a host address derived from an untranslated guest pointer.
+
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@
++      case IR::OP_PREFETCH:
++        // MaxPS4: a prefetch is a hint without architectural effect; never let
++        // it reach a host address computed from an untranslated guest pointer.
++        Emit->Remove(Node);
++        continue;
+       case IR::OP_PUSH:
+       case IR::OP_PUSHTWO:
+@@
+       case IR::OP_CACHELINEZERO:
+-      case IR::OP_PREFETCH:
+       case IR::OP_VALIDATECODE:
