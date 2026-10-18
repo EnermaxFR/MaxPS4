@@ -15,6 +15,7 @@ namespace maxps4 {
 class LinuxVideoPresenter {
     void* library = nullptr; void* display = nullptr; void* visual = nullptr;
     unsigned long window = 0; void* gc = nullptr; int depth = 0;
+    uint32_t keys = 0; // buttons held on the keyboard
     template<class F> F symbol(const char* name) {
 #if defined(__linux__)
         return reinterpret_cast<F>(dlsym(library, name));
@@ -41,6 +42,7 @@ public:
         gc = symbol<void*(*)(void*,unsigned long,unsigned long,void*)>("XCreateGC")(display, window, 0, nullptr);
         if (!window || !gc) { error = "X11 window/GC creation failed"; return false; }
         symbol<int(*)(void*,unsigned long,const char*)>("XStoreName")(display, window, "MaxPS4 - Kero Blaster - awaiting guest frame");
+        symbol<int(*)(void*,unsigned long,long)>("XSelectInput")(display, window, 1L /*KeyPressMask*/ | 2L /*KeyReleaseMask*/);
         symbol<int(*)(void*,unsigned long)>("XMapWindow")(display, window);
         symbol<int(*)(void*,int)>("XSync")(display, 0);
         return true;
@@ -68,6 +70,34 @@ public:
         symbol<int(*)(void*,int)>("XSync")(display,0);
         symbol<int(*)(void*)>("XDestroyImage")(image);
         return true;
+    }
+    // Keyboard -> PS4 pad buttons (SCE_PAD_BUTTON_* bits), from pending X events.
+    // Arrows: D-pad; Z: cross, X: square, C: circle, V: triangle, A/S: L1/R1,
+    // Q/W: L2/R2, Return: options, Tab: touch pad.
+    static uint32_t buttonForKeysym(unsigned long keysym) {
+        switch (keysym) {
+        case 0xff52: return 0x10;   case 0xff53: return 0x20;  case 0xff54: return 0x40;  case 0xff51: return 0x80; // Up Right Down Left
+        case 'z': return 0x4000;    case 'x': return 0x8000;   case 'c': return 0x2000;   case 'v': return 0x1000;
+        case 'a': return 0x400;     case 's': return 0x800;    case 'q': return 0x100;    case 'w': return 0x200;
+        case 0xff0d: return 0x8;    case 0xff09: return 0x100000;
+        default: return 0;
+        }
+    }
+    uint32_t pollButtons() {
+        if (!display) return keys;
+        auto pending = symbol<int(*)(void*)>("XPending");
+        auto next = symbol<int(*)(void*,void*)>("XNextEvent");
+        auto lookup = symbol<unsigned long(*)(void*,int)>("XLookupKeysym");
+        if (!pending || !next || !lookup) return keys;
+        alignas(8) unsigned char event[192];
+        while (pending(display) > 0) {
+            next(display, event);
+            int type; std::memcpy(&type, event, sizeof(type));
+            if (type != 2 && type != 3) continue; // KeyPress, KeyRelease
+            const uint32_t bit = buttonForKeysym(lookup(event, 0));
+            if (type == 2) keys |= bit; else keys &= ~bit;
+        }
+        return keys;
     }
     void close() {
         if (display) {
