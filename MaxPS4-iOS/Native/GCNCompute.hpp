@@ -219,12 +219,15 @@ struct GCNCompute {
     }
     if (!decode(code, instructions, error))
       return fail(error);
+    // VGPR storage is reused across groups: every read is guarded by the
+    // per-lane defined mask (vd), which is reset for each group, so values
+    // left by an earlier group are never observable.
+    std::vector<std::array<uint32_t, 64>> v(256);
     for (uint32_t z = 0; z < groups[2]; ++z)
       for (uint32_t y = 0; y < groups[1]; ++y)
         for (uint32_t x = 0; x < groups[0]; ++x) {
           std::array<uint32_t, 128> s{};
           std::array<bool, 128> defined{};
-          std::array<std::array<uint32_t, 64>, 256> v{};
           std::array<uint64_t, 256> vd{};
           const uint64_t live =
               threads == 64 ? ~uint64_t(0) : (uint64_t(1) << threads) - 1;
