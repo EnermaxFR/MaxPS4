@@ -575,7 +575,7 @@ struct GCNRenderer {
     // Memory component order: STD = R,G,B,A; ALT = B,G,R,A (8_8_8_8).
     const unsigned order[4] = {swapAlt ? 2u : 0u, 1u, swapAlt ? 0u : 2u, 3u};
     std::array<float, 4> dst{};
-    for (unsigned c = 0; c < 4; ++c) { dst[c] = px[order[c]] / 255.0f; if (srgb && c < 3) dst[c] = srgbToLinear(dst[c]); }
+    for (unsigned c = 0; c < 4; ++c) dst[c] = srgb && c < 3 ? srgbByteToLinear(px[order[c]]) : px[order[c]] / 255.0f;
     for (auto& v : src) v = std::min(1.0f, std::max(0.0f, std::isnan(v) ? 0.0f : v));
     std::array<float, 4> out = src;
     if (blending) {
@@ -594,8 +594,7 @@ struct GCNRenderer {
     }
     for (unsigned c = 0; c < 4; ++c) {
       if (!((mask >> c) & 1)) continue;
-      const float v = srgb && c < 3 ? linearToSrgb(out[c]) : out[c];
-      px[order[c]] = uint8_t(std::lround(v * 255.0f));
+      px[order[c]] = srgb && c < 3 ? linearToSrgbByte(out[c]) : uint8_t(std::lround(out[c] * 255.0f));
     }
     uint32_t after = 0;
     std::memcpy(&after, px, 4);

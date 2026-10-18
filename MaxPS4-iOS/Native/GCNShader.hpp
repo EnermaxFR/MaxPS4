@@ -67,6 +67,33 @@ inline float linearToSrgb(float c) {
   return c <= 0.0031308f ? c * 12.92f : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
 }
 
+// Table forms of the conversions above, equal bit for bit to them:
+// srgbByteToLinear(b) == srgbToLinear(b / 255.0f) and
+// linearToSrgbByte(v) == uint8_t(std::lround(linearToSrgb(v) * 255.0f)).
+inline float srgbByteToLinear(uint8_t b) {
+  static const auto table = [] { std::array<float, 256> t{}; for (unsigned i = 0; i < 256; ++i) t[i] = srgbToLinear(i / 255.0f); return t; }();
+  return table[b];
+}
+inline uint8_t linearToSrgbByteDirect(float v) { return uint8_t(std::lround(linearToSrgb(v) * 255.0f)); }
+inline uint8_t linearToSrgbByte(float v) {
+  // thresholds[k] = smallest float in [0, 1] whose direct conversion is >= k
+  // (the quantised curve is non-decreasing; ordered by bit pattern).
+  static const auto thresholds = [] {
+    std::array<float, 256> t{};
+    auto bits = [](float f) { uint32_t b; std::memcpy(&b, &f, 4); return b; };
+    auto value = [](uint32_t b) { float f; std::memcpy(&f, &b, 4); return f; };
+    for (unsigned k = 1; k < 256; ++k) {
+      uint32_t lo = 0, hi = bits(1.0f);
+      while (lo < hi) { const uint32_t mid = lo + (hi - lo) / 2; if (linearToSrgbByteDirect(value(mid)) >= k) hi = mid; else lo = mid + 1; }
+      t[k] = value(lo);
+    }
+    return t;
+  }();
+  if (!(v > 0)) return 0;
+  if (v >= 1) return 255;
+  return uint8_t(std::upper_bound(thresholds.begin() + 1, thresholds.end(), v) - (thresholds.begin() + 1));
+}
+
 struct GCNShader {
   enum class Enc : uint8_t { SOP2, SOPK, SOP1, SOPC, SOPP, SMRD, VOP2, VOP1, VOPC, VOP3, VINTRP, EXP, MUBUF, MTBUF, MIMG };
   struct Inst { uint32_t w0 = 0, w1 = 0; uint8_t length = 1; Enc enc = Enc::SOPP; uint16_t op = 0; };
@@ -881,7 +908,7 @@ struct GCNShader {
     if (tex.dfmt == 10) {
       for (unsigned k = 0; k < 4; ++k) {
         if (tex.nfmt == 4) c[k] = gcnFloat(raw[k]);
-        else { c[k] = raw[k] / 255.0f; if (tex.nfmt == 9 && k < 3) c[k] = srgbToLinear(c[k]); }
+        else c[k] = tex.nfmt == 9 && k < 3 ? srgbByteToLinear(raw[k]) : raw[k] / 255.0f;
       }
     } else if (tex.dfmt == 1) c[0] = tex.nfmt == 4 ? gcnFloat(raw[0]) : raw[0] / 255.0f;
     else if (tex.dfmt == 4) { uint32_t v; std::memcpy(&v, raw.data(), 4); c[0] = tex.nfmt == 7 ? gcnFloat(v) : tex.nfmt == 4 ? gcnFloat(v) : float(v) / 4294967295.0f; }

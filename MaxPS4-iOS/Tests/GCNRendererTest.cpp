@@ -7,6 +7,8 @@
 #include "../Native/GuestProviders/GnmEmbeddedVS.hpp"
 #include "../Native/maxps4_orbis_v4_translation.h"
 #include <cassert>
+#include <chrono>
+#include <cstdio>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -66,7 +68,27 @@ static void tilingTests() {
     }
 }
 
+static void srgbTableTests() {
+  for (unsigned b = 0; b < 256; ++b) assert(f(srgbByteToLinear(uint8_t(b))) == f(srgbToLinear(b / 255.0f)));
+  auto bitsOf = [](float v) { uint32_t b; std::memcpy(&b, &v, 4); return b; };
+  auto floatOf = [](uint32_t b) { float v; std::memcpy(&v, &b, 4); return v; };
+  // Around every quantisation step (+-4096 ulps) and over 20M random floats.
+  for (unsigned k = 1; k < 256; ++k) {
+    uint32_t lo = 0, hi = bitsOf(1.0f);
+    while (lo < hi) { const uint32_t mid = lo + (hi - lo) / 2; if (linearToSrgbByteDirect(floatOf(mid)) >= k) hi = mid; else lo = mid + 1; }
+    for (uint32_t d = lo > 4096 ? lo - 4096 : 0; d < lo + 4096; ++d) assert(linearToSrgbByte(floatOf(d)) == linearToSrgbByteDirect(floatOf(d)));
+  }
+  uint64_t state = 61;
+  for (unsigned n = 0; n < 20000000; ++n) {
+    state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+    const float v = floatOf(uint32_t(state >> 33) % (bitsOf(1.0f) + 1));
+    assert(linearToSrgbByte(v) == linearToSrgbByteDirect(v));
+  }
+  for (float v : {-1.0f, 0.0f, 1.0f, 2.0f, std::nanf("")}) assert(linearToSrgbByte(v) == linearToSrgbByteDirect(v));
+}
+
 static void conversionTests() {
+  srgbTableTests();
   assert(gcnHalf(1.0f, true) == 0x3c00 && gcnHalf(-2.0f, true) == 0xc000 && gcnHalf(0.0f, true) == 0);
   assert(gcnHalf(65504.0f, true) == 0x7bff && gcnHalf(1e9f, true) == 0x7bff && gcnHalf(1e9f, false) == 0x7c00);
   // 1/3 truncates toward zero (0x3555) while round-to-nearest-even gives 0x3555 too; 0.1f differs.
@@ -369,7 +391,78 @@ static void titleShaderTests() {
             << s.engine.renderer.last.pixelsWritten << " px; VS ops " << s.engine.renderer.lastVertexHistogram << "; PS ops " << s.engine.renderer.lastPixelHistogram << "\n";
 }
 
+// Full-screen 1920x1080 textured, alpha-blended quad with the title's own
+// shaders (its draw 2): wall time, and an output hash that every renderer
+// optimisation must reproduce bit for bit.
+static void titleFullscreenBench() {
+  const char* dir = std::getenv("MAXPS4_KERO_DIR");
+  if (!dir) return;
+  const Words vsCode = sbProgram(std::string(dir) + "/texture_vv.sb"), psCode = sbProgram(std::string(dir) + "/texture_p.sb");
+  if (vsCode.empty() || psCode.empty()) return;
+  Fixture fx;
+  auto m = fx.owner.lease();
+  using namespace enc;
+  Scene s;
+  assert(!m.write_data(Scene::vs, vsCode.data(), vsCode.size() * 4));
+  assert(!m.write_data(Scene::ps, psCode.data(), psCode.size() * 4));
+  Words fetchCode;
+  add(fetchCode, {{smrd(2, 8, 2, 0), smrd(2, 12, 2, 4), sopp(12, 0x7f)}, mubuf(2, 0, 4, 8, 128, true), mubuf(3, 0, 8, 12, 128, true),
+                  mtbuf(1, 11, 7, 0, 12, 8, 128, 12), {sopp(12, 0xf70), sop1(32, 0, 0)}});
+  assert(!m.write_data(Scene::fetch, fetchCode.data(), fetchCode.size() * 4));
+  struct VertexData { float x, y, z, u, v; };
+  const VertexData verts[4] = {{0, 0, 0, 0, 0}, {1920, 0, 0, 1, 0}, {0, 1080, 0, 0, 1}, {1920, 1080, 0, 1, 1}};
+  assert(!m.write_data(Scene::vertices, verts, sizeof(verts)));
+  const uint8_t vcolor[4][4] = {{255, 255, 255, 255}, {255, 200, 255, 255}, {255, 255, 100, 255}, {255, 255, 255, 128}};
+  assert(!m.write_data(Scene::colors, vcolor, sizeof(vcolor)));
+  const float mat[16] = {2 / 1920.0f, 0, 0, 0, 0, -2 / 1080.0f, 0, 0, 0, 0, 1, 0, -1, 1, 0.5f, 1};
+  assert(!m.write_data(Scene::matrix, mat, sizeof(mat)));
+  const uint32_t vsharps[8] = {uint32_t(Scene::vertices), 20u << 16, 4, 0xfac | (7u << 12) | (13u << 15), uint32_t(Scene::colors), 4u << 16, 4, 0xfac | (10u << 15)};
+  assert(!m.write_data(Scene::table, vsharps, sizeof(vsharps)));
+  const uint16_t idx[6] = {0, 1, 2, 1, 3, 2};
+  assert(!m.write_data(Scene::indices, idx, sizeof(idx)));
+  std::vector<uint8_t> tex(256 * 256 * 4);
+  for (size_t i = 0; i < tex.size(); ++i) tex[i] = uint8_t((i * 2654435761u) >> 13);
+  assert(!m.write_data(Scene::texture, tex.data(), tex.size()));
+  std::vector<uint8_t> background(1920 * 1088 * 4);
+  for (size_t i = 0; i < background.size(); ++i) background[i] = uint8_t(i * 7 + (i >> 11));
+  for (size_t at = 0; at < background.size(); at += 1 << 20)
+    assert(!m.write_data(Scene::target + at, background.data() + at, std::min<size_t>(1 << 20, background.size() - at)));
+  s.common();
+  auto& c = s.engine.state.context; auto& sh = s.engine.state.shader;
+  c[0x10f] = f(960); c[0x110] = f(960); c[0x111] = f(-540); c[0x112] = f(540);
+  c[0x0d] = (1080u << 16) | 1920u; // screen scissor
+  c[0x319] = (1920 / 8 - 1) | ((1088 / 8 - 1) << 20); c[0x31a] = 1920 * 1088 / 64 - 1;
+  sh[0x48] = uint32_t(Scene::vs >> 8); sh[0x4a] = 0x002c0083; sh[0x4b] = 0x10;
+  sh[0x4c] = uint32_t(Scene::fetch); sh[0x4e] = uint32_t(Scene::table);
+  sh[0x50] = uint32_t(Scene::matrix); sh[0x51] = 16u << 16; sh[0x52] = 4; sh[0x53] = 0x20077fac;
+  sh[0x8] = uint32_t(Scene::ps >> 8); sh[0xa] = 0x002c0041; sh[0xb] = 0x18;
+  // 256x256 RGBA8 sRGB, linear-aligned, bilinear clamp sampler.
+  const uint32_t tsharp[8] = {uint32_t(Scene::texture >> 8), (10u << 20) | (9u << 26), 255 | (255u << 14), 0xfac | (8u << 20) | (9u << 28), 255u << 13, 0, 0, 0};
+  for (unsigned k = 0; k < 8; ++k) sh[0xc + k] = tsharp[k];
+  const uint32_t ssharp[4] = {2 | (2u << 3) | (2u << 6), 0, (1u << 20) | (1u << 22), 0};
+  for (unsigned k = 0; k < 4; ++k) sh[0x14 + k] = ssharp[k];
+  c[0x1b1] = 2; c[0x1c5] = 4; c[0x1b3] = 2; c[0x1b4] = 2; c[0x1b6] = 1; c[0x191] = 1; c[0x205] = 0;
+  c[0x31c] = (10 << 2) | (6 << 8) | (1 << 11); // RGBA8 sRGB tiled target, blending enabled
+  c[0x1e0] = 0x40000504; // SRC_ALPHA / ONE_MINUS_SRC_ALPHA, as the title
+  s.engine.state.uconfig[0x242] = 4;
+  std::string error;
+  Words draw{0xc0042700U, 6, uint32_t(Scene::indices), 0, 6, 0};
+  s.engine.remaining = 65536;
+  const auto started = std::chrono::steady_clock::now();
+  if (!s.engine.execute(m, Scene::base, draw, error)) { std::cerr << error << "\n"; assert(false); }
+  const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+  std::vector<uint8_t> out(background.size());
+  for (size_t at = 0; at < out.size(); at += 1 << 20)
+    assert(!m.read_data(Scene::target + at, out.data() + at, std::min<size_t>(1 << 20, out.size() - at)));
+  uint64_t hash = 1469598103934665603ULL; for (uint8_t b : out) hash = (hash ^ b) * 1099511628211ULL;
+  std::fprintf(stderr, "title full-screen draw: %llu px written, %.1f ms, fnv64=%016llx\n", (unsigned long long)s.engine.renderer.last.pixelsWritten, ms, (unsigned long long)hash);
+  assert(s.engine.renderer.last.pixelsWritten == 1920ull * 1080);
+  if (const char* golden = std::getenv("MAXPS4_BENCH_GOLDEN")) assert(hash == std::strtoull(golden, nullptr, 16));
+}
+
 int main() {
+  titleFullscreenBench();
+  if (std::getenv("MAXPS4_BENCH_ONLY")) return 0;
   tilingTests();
   conversionTests();
   interpreterTests();
