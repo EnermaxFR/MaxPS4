@@ -81,6 +81,24 @@ int main() {
         assert(error.find("GCN compute program=")!=std::string::npos);
         assert(!run(packet(0x15,{1,1,1}),error)&&error.find("invalid DISPATCH_DIRECT")!=std::string::npos);
         assert(!run(packet(0x2d,{3,2}),error)&&engine.draws==0&&interrupts==1);
+        // Gnmx prepareFlip(label, value) as Kero Blaster emits it: a 64-dword
+        // NOP whose label the driver writes at end of pipe (frame-reuse fence).
+        // Annotations stay inert; unknown flip variants are refused.
+        {
+            std::vector<uint32_t> flip(64,0);flip[0]=0xc03e1000U;flip[1]=0x68750778U;
+            flip[2]=uint32_t(fence+24);flip[3]=0;flip[4]=0x00000000U;
+            const uint64_t busy=0x1111111122222222ULL;assert(!memory.write_data(fence+24,&busy,8));
+            assert(run(flip,error)&&engine.flipLabels==1);
+            assert(read64(fence+24)==0x1111111100000000ULL);
+            flip[4]=7;flip[2]=uint32_t(fence+25);
+            assert(!run(flip,error)&&error.find("prepareFlip label destination invalid")!=std::string::npos);
+            flip[2]=0xfffffff0U;flip[3]=0xff;
+            assert(!run(flip,error)&&engine.flipLabels==1);
+            assert(run(packet(0x10,{0x68750001U,0x6c6f6f54U}),error)&&read64(fence+24)==0x1111111100000000ULL);
+            assert(run(packet(0x10,{0x68750777U,0,0}),error));
+            assert(!run(packet(0x10,{0x68750781U,0,0,0}),error)&&error.find("variant not implemented")!=std::string::npos);
+            assert(run(packet(0x10,{0x68750780U,0,0,0,0,0}),error)&&interrupts==2);
+        }
     }
     owner.close();
     std::cout<<"PASS PM4 register effects, cross-region WRITE_DATA, EOP store-before-IRQ, bounded label read, invalid-write isolation, owned indirect buffers, recursion bound and explicit shader refusal\n";

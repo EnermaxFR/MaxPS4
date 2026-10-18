@@ -20,7 +20,7 @@ struct GNMCommandExecutor {
     struct Draw { uint8_t opcode=0;uint32_t count=0,initiator=0;uint64_t indexAddress=0; };
     GCNCompute compute;
     GCNRenderer renderer;
-    uint64_t packets=0,draws=0,writes=0;size_t remaining=65536;
+    uint64_t packets=0,draws=0,writes=0,flipLabels=0;size_t remaining=65536;
     // Optional override (tests); the built-in renderer runs when unset.
     std::function<bool(const State&,const Draw&,std::string&)> render;
     // CLEAR_STATE loads the hardware default context, not zeros. Only the
@@ -53,7 +53,20 @@ struct GNMCommandExecutor {
             ++packets;
             if(words[packet.headerWord]&1)return fail("predication requires a predicate evaluator");
             switch(packet.opcode){
-            case 0x10: break; // Explicit NOP, including SDK annotation payloads.
+            case 0x10:{ // NOP: SDK annotations, except the Gnmx prepareFlip payloads the PS4 driver acts on.
+                if(n<1||p[0]<0x68750777U||p[0]>0x68750781U)break;
+                if(p[0]==0x68750777U)break; // prepareFlip without label.
+                if(p[0]==0x68750778U){ // prepareFlip(label, value): 32-bit label written at end of pipe.
+                    if(n<4)return fail("prepareFlip label payload too short");
+                    const uint64_t dst=uint64_t(p[1])|(uint64_t(p[2])<<32);
+                    if((dst&3)||!memory.permitted(dst,4,2))return fail("prepareFlip label destination invalid");
+                    std::atomic_thread_fence(std::memory_order_seq_cst);
+                    if(memory.write_data(dst,p+3,4))return fail("prepareFlip label write failed");
+                    ++flipLabels;break;
+                }
+                if(p[0]==0x68750780U){if(interrupt)interrupt();break;} // prepareFlip with EOP interrupt, no label.
+                return fail("prepareFlip payload variant not implemented");
+            }
             case 0x12: if(n!=1||p[0])return fail("unsupported CLEAR_STATE mode");clearContext(state.context);break;
             case 0x28: if(n!=2||p[0]!=0x80000000||p[1]!=0x80000000)return fail("unsupported CONTEXT_CONTROL load/shadow mode");break; // One synchronous context.
             case 0x58: if(n!=6)return fail("invalid ACQUIRE_MEM");std::atomic_thread_fence(std::memory_order_seq_cst);break;
