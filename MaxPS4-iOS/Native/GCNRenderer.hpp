@@ -13,6 +13,7 @@
 // (vertex outputs, primitive list, PS program and target description).
 #include "GCNShader.hpp"
 #include <array>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -60,6 +61,7 @@ struct GCNRenderer {
   template <class Memory>
   bool draw(Memory& memory, const Bank& ctx, const Bank& sh, const Bank& uc, const DrawCall& call, std::string& error) {
     last = {};
+    const auto started = std::chrono::steady_clock::now();
     auto fail = [&](const std::string& why) { error = why; return false; };
     const unsigned primitive = uc[0x242];
     if (call.instances != 1) return fail("instanced draw unsupported (NUM_INSTANCES=" + std::to_string(call.instances) + ")");
@@ -486,6 +488,8 @@ struct GCNRenderer {
                      (unsigned long long)ps.stats.texelsNonZero);
       if (ps.stats.texels) scanTexture(memory, ps.stats);
       if (std::getenv("MAXPS4_GPU_MEMSCAN") && !memoryScanned) { memoryScanned = true; scanGuestMemory(memory); }
+      std::fprintf(stderr, "GPU.TIME draw=%llu ms=%.1f\n", (unsigned long long)total.draws,
+                   std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
       std::fprintf(stderr, "GPU.FRAMEBUFFER base=0x%llx pitch=%u height=%u pixels_written=%llu changed=%llu src_alpha_nonzero=%llu depth_writes=%llu depth_rejected=%llu rect=%llu,%llu-%llu,%llu\n",
                    (unsigned long long)cbBase, cbPitch, cbHeight, (unsigned long long)last.pixelsWritten, (unsigned long long)last.pixelsChanged,
                    (unsigned long long)last.sourceAlphaNonZero, (unsigned long long)last.depthWrites,

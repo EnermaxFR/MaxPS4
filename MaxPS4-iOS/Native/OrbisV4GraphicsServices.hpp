@@ -88,9 +88,10 @@ struct OrbisV4GraphicsServices {
         {   // Content summary of the frame actually presented.
             uint64_t hash=1469598103934665603ULL,lit=0;std::map<uint32_t,uint64_t> colors;
             for(size_t i=0;i<rgba.size();i+=4){uint32_t v;std::memcpy(&v,rgba.data()+i,4);hash=(hash^v)*1099511628211ULL;if(v&0xffffffU)++lit;if(colors.size()<4096)++colors[v];}
-            std::fprintf(stderr,"GPU.PRESENT port=%llu buffer=%llu guest=0x%llx %ux%u pitch=%u tiling=%s format=%08x flip_arg=%llu fnv64=%016llx non_black=%llu distinct_colors=%zu%s\n",
+            std::fprintf(stderr,"GPU.PRESENT port=%llu buffer=%llu guest=0x%llx %ux%u pitch=%u tiling=%s format=%08x flip_arg=%llu fnv64=%016llx non_black=%llu distinct_colors=%zu%s t_ms=%llu\n",
                 (unsigned long long)r.rdi,(unsigned long long)r.rsi,(unsigned long long)b.address,a[3],a[4],a[5],a[1]==1?"linear":"display2d-thin",a[0],
-                (unsigned long long)r.rcx,(unsigned long long)hash,(unsigned long long)lit,colors.size(),colors.size()>=4096?"+":"");
+                (unsigned long long)r.rcx,(unsigned long long)hash,(unsigned long long)lit,colors.size(),colors.size()>=4096?"+":"",
+                (unsigned long long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
         }
         std::string error;
         if(!present || !present(a[3],a[4],rgba,b.address,r.rcx,error))return trap("VideoOut presentation failed: "+error);
