@@ -33,6 +33,13 @@ index 9a6b9489..00a7250c 100644
 +    rip = it->second;
 +  }
 +  auto* Frame = reinterpret_cast<FEXCore::Core::CpuStateFrame*>(state);
++  // Entries are global but code buffers are per thread and can be freed and
++  // reused (exited threads): only stop where this thread's own cache maps the
++  // guest RIP to exactly this host entry; otherwise keep running.
++  auto* Thread = Frame->Thread;
++  if (!Thread || !Thread->LookupCache) return 0;
++  const uintptr_t Host = Thread->LookupCache->FindBlock(Thread, rip);
++  if (!Host || reinterpret_cast<uint64_t>(FEXCore::Allocator::GetExecutableAddress(reinterpret_cast<void*>(Host))) != pc) return 0;
 +  Frame->State.rip = rip;
 +  return Frame->Pointers.ThreadStopHandlerSpillSRA;
 +}
@@ -154,7 +161,8 @@ index c4f87d0..cb001b5 100644
 +    const bool trace = std::getenv("MAXPS4_INSTRUCTION_TRACE") != nullptr;
 +    static thread_local uint64_t executed = 0;
      while (!IsSimulationFinished()) {
-+      if (vixl_maxps4_preempt && *vixl_maxps4_preempt && vixl_maxps4_preempt_target) {
++    bool branched = true;  // block entries are only reached by a taken branch
++      if (branched && vixl_maxps4_preempt && *vixl_maxps4_preempt && vixl_maxps4_preempt_target) {
 +        if (const uint64_t target = vixl_maxps4_preempt_target(reinterpret_cast<uint64_t>(ReadPc()), ReadXRegister(28)))
 +          WritePc(reinterpret_cast<const Instruction*>(target));
 +      }
@@ -185,3 +193,8 @@ index fd8974e..0a9a551 100644
 +
  namespace vixl {
  namespace aarch64 {
+
+Note (mission 61, day 2): in Simulator::Run the hook is consulted only after a
+taken branch: the loop sets `branched = pc_modified_;` right after
+ExecuteInstruction(). PreemptTarget validates each entry against the running
+thread's own LookupCache (FindBlock(rip) == pc) before stopping.
