@@ -1,0 +1,48 @@
+diff --git a/src/aarch64/simulator-aarch64.h b/src/aarch64/simulator-aarch64.h
+index fd8974e..fa12475 100644
+--- a/src/aarch64/simulator-aarch64.h
++++ b/src/aarch64/simulator-aarch64.h
+@@ -1434,7 +1434,29 @@ class Simulator : public DecoderVisitor {
+     //  3. The Simulator (`this`).
+     // User can add additional visitors at any point, but the Simulator requires
+     // that the ordering above is preserved.
+-    decoder_->Decode(pc_);
++    // MaxPS4: per-address decode cache. A hit (same address and bits) calls
++    // the form's handler directly, skipping the decode tree, the metadata map
++    // and the CPUFeaturesAuditor (the simulator runs with every feature
++    // enabled, so its availability check cannot fail). Disabled while
++    // disassembly tracing needs the PrintDisassembler visitor.
++    if ((trace_parameters_ & LOG_DISASM) == 0) {
++      if (decode_cache_.empty()) decode_cache_.resize(size_t(1) << 18);
++      const Instruction* at = pc_;
++      const uint32_t bits = at->GetInstructionBits();
++      DecodeCacheEntry& entry = decode_cache_[(reinterpret_cast<uintptr_t>(at) >> 2) & (decode_cache_.size() - 1)];
++      if (entry.pc == at && entry.bits == bits && entry.fn != NULL) {
++        form_hash_ = entry.form;
++        (*entry.fn)(this, at);
++      } else {
++        decoder_->Decode(at);
++        const FormToVisitorFnMap* fv = GetFormToVisitorFnMap();
++        FormToVisitorFnMap::const_iterator it = fv->find(form_hash_);
++        entry.pc = at; entry.bits = bits; entry.form = form_hash_;
++        entry.fn = it == fv->end() ? NULL : &it->second;
++      }
++    } else {
++      decoder_->Decode(pc_);
++    }
+ 
+     if (last_instr_was_movprfx) {
+       VIXL_ASSERT(last_instr_ != NULL);
+@@ -5425,6 +5447,12 @@ class Simulator : public DecoderVisitor {
+   static const FormToVisitorFnMap* GetFormToVisitorFnMap();
+ 
+   uint32_t form_hash_{};
++  struct DecodeCacheEntry {
++    const Instruction* pc = NULL;
++    uint32_t bits = 0, form = 0;
++    const std::function<void(Simulator*, const Instruction*)>* fn = NULL;
++  };
++  std::vector<DecodeCacheEntry> decode_cache_;
+ 
+   static const PACKey kPACKeyIA;
+   static const PACKey kPACKeyIB;
