@@ -6,6 +6,7 @@
 // exact program counter: a result is never invented for an unimplemented
 // instruction.
 #include "GCNTiling.hpp"
+#include "GPUHostSpan.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -134,23 +135,8 @@ struct GCNShader {
       for (const auto& [k, v] : o.histogram) histogram[k] += v;
     }
   } stats;
-  // Host view of one guest span inside a single translated range of the
-  // lease (which pins mappings while the GPU runs), or null: callers then take
-  // the checked copy path. Writable views never alias executable memory.
-  template <class Memory>
-  static auto hostSpanOf(const Memory& m, uint64_t guest, uint64_t bytes, uint32_t permissions, int) -> decltype(m.ranges(), (uint8_t*)nullptr) {
-    if (!bytes) return nullptr;
-    for (const auto& r : m.ranges()) {
-      if (guest < r.guest || guest - r.guest >= r.size) continue;
-      const uint64_t offset = guest - r.guest;
-      if (bytes > r.size - offset || (r.permissions & permissions) != permissions || ((permissions & 2) && (r.permissions & 1))) return nullptr;
-      return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(r.host + offset));
-    }
-    return nullptr;
-  }
-  template <class Memory> static uint8_t* hostSpanOf(const Memory&, uint64_t, uint64_t, uint32_t, long) { return nullptr; }
   template <class Memory> static uint8_t* hostSpan(const Memory& m, uint64_t guest, uint64_t bytes, uint32_t permissions) {
-    return hostSpanOf(m, guest, bytes, permissions, 0);
+    return gpu::hostSpan(m, guest, bytes, permissions);
   }
   static constexpr uint64_t maxStepsPerWave = 1u << 20;
   static constexpr uint64_t addressMask = (uint64_t(1) << 40) - 1; // PS4 GPU VA

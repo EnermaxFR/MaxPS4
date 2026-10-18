@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstring>
+#include "GPUHostSpan.hpp"
 #include <cstdint>
 #include <sstream>
 #include <string>
@@ -397,6 +399,11 @@ struct GCNCompute {
                           "R32_UINT X)");
               if (dataReg >= vgprs)
                 return at("buffer VGPR destination out of range");
+              // Whole resource in one leased range: direct host access with the
+              // same bounds; otherwise the checked copy path below.
+              const uint64_t resource = (uint64_t(hi & 255) << 32) | lo;
+              uint8_t *host = hostSpan(memory, resource, stride ? uint64_t(records) * stride : uint64_t(records),
+                                       i.op == Op::load ? 4u : 6u);
               for (unsigned lane = 0; lane < threads; ++lane)
                 if (exec & (uint64_t(1) << lane)) {
                   const uint64_t index =
@@ -413,7 +420,8 @@ struct GCNCompute {
                   if (address & 3)
                     return at("buffer address alignment unsupported");
                   if (i.op == Op::load) {
-                    if (memory.read_data(address, &v[dataReg][lane], 4))
+                    if (host) std::memcpy(&v[dataReg][lane], host + relative, 4);
+                    else if (memory.read_data(address, &v[dataReg][lane], 4))
                       return at("buffer read inaccessible");
                     vd[dataReg] |= uint64_t(1) << lane;
                     ++stats.loads;
@@ -421,8 +429,9 @@ struct GCNCompute {
                     const auto value = source(256 + dataReg, lane);
                     if (!valid)
                       return at(reason);
-                    if (!memory.permitted(address, 4, 6) ||
-                        memory.write_data(address, &value, 4))
+                    if (host) std::memcpy(host + relative, &value, 4);
+                    else if (!memory.permitted(address, 4, 6) ||
+                             memory.write_data(address, &value, 4))
                       return at("buffer write inaccessible (requires RW/NX)");
                     ++stats.stores;
                     if (stats.stores == 1) {
@@ -432,8 +441,10 @@ struct GCNCompute {
                     stats.lastWrite = address;
                     stats.lastValue = value;
                     uint32_t observed = 0;
-                    if (memory.read_data(address, &observed, 4) ||
-                        observed != value)
+                    if (host) std::memcpy(&observed, host + relative, 4);
+                    else if (memory.read_data(address, &observed, 4))
+                      return at("store readback verification failed");
+                    if (observed != value)
                       return at("store readback verification failed");
                     ++stats.verified;
                   }
