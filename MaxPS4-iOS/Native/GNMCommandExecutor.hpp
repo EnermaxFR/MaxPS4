@@ -122,8 +122,11 @@ struct GNMCommandExecutor {
                 // Keep the real source bytes, never dereference the MMIO port
                 // as guest RAM. Unknown register transfers remain errors.
                 if(p[0]==0x60000000 && dst==0x3022c && (p[5]&~0x1fffffU)==0x28200000){
-                    if(count>65536||shaderUploads.size()>=256||!memory.permitted(src,count,4))
-                        return fail("shader DMA source/budget invalid");
+                    if(count>65536||!memory.permitted(src,count,4))
+                        return fail("shader DMA source invalid");
+                    // Diagnostic record of the latest uploads only: titles upload
+                    // shaders every frame, which must never exhaust a budget.
+                    if(shaderUploads.size()>=256)shaderUploads.erase(shaderUploads.begin());
                     ShaderUpload upload{src,std::vector<uint8_t>(count)};
                     if(memory.read_data(src,upload.bytes.data(),count))return fail("shader DMA read failed");
                     shaderUploads.push_back(std::move(upload));break;

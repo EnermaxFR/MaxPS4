@@ -53,6 +53,11 @@ int main() {
         assert(!run(packet(0x50,{0x60000000,0,0,0x3022c,0,0x28200008}),error));
         assert(!run(packet(0x50,{0x60000000,uint32_t(destination),0,0x30230,0,0x28200008}),error));
         assert(engine.shaderUploads.size()==1&&read64(fence+16)==0x1234567812345678ULL);
+        // Per-frame shader uploads (Kero Blaster: 4 per frame) never exhaust a
+        // budget; only the latest 256 are kept for diagnostics.
+        for(int k=0;k<300;++k)assert(run(packet(0x50,{0x60000000,uint32_t(destination),0,0x3022c,0,0x28200008}),error));
+        assert(engine.shaderUploads.size()==256&&engine.shaderUploads.back().source==destination);
+        engine.shaderUploads.resize(1);
         // End-of-compute fence writes exactly one DWORD; unknown event/GDS,
         // malformed/alignment/unmapped destinations never alter the label.
         assert(run(packet(0x48,{0x62f,uint32_t(fence+16),0x40000000,0x99}),error));
