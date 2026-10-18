@@ -14,8 +14,10 @@
 #include "GCNShader.hpp"
 #include <array>
 #include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -482,6 +484,8 @@ struct GCNRenderer {
         std::fprintf(stderr, "GPU.PIXEL texture=0x%llx %llux%llu texels_read=%llu texels_nonzero=%llu\n", (unsigned long long)ps.stats.textureBase,
                      (unsigned long long)ps.stats.textureWidth, (unsigned long long)ps.stats.textureHeight, (unsigned long long)ps.stats.texels,
                      (unsigned long long)ps.stats.texelsNonZero);
+      if (ps.stats.texels) scanTexture(memory, ps.stats);
+      if (std::getenv("MAXPS4_GPU_MEMSCAN") && !memoryScanned) { memoryScanned = true; scanGuestMemory(memory); }
       std::fprintf(stderr, "GPU.FRAMEBUFFER base=0x%llx pitch=%u height=%u pixels_written=%llu changed=%llu src_alpha_nonzero=%llu depth_writes=%llu depth_rejected=%llu rect=%llu,%llu-%llu,%llu\n",
                    (unsigned long long)cbBase, cbPitch, cbHeight, (unsigned long long)last.pixelsWritten, (unsigned long long)last.pixelsChanged,
                    (unsigned long long)last.sourceAlphaNonZero, (unsigned long long)last.depthWrites,
@@ -489,6 +493,56 @@ struct GCNRenderer {
                    last.pixelsWritten ? (unsigned long long)writtenMinY : 0ull, (unsigned long long)writtenMaxX, (unsigned long long)writtenMaxY);
     }
     return true;
+  }
+
+  // Diagnostics: whole-resource content of each sampled texture (once per
+  // base) and, on request, a coarse map of non-empty guest memory.
+  std::set<uint64_t> scannedTextures;
+  bool memoryScanned = false;
+  template <class Memory, class ShaderStats>
+  void scanTexture(Memory& memory, const ShaderStats& t) {
+    if (!scannedTextures.insert(t.textureBase).second) return;
+    const uint64_t bpp = t.textureDfmt == 1 ? 1 : t.textureDfmt == 14 ? 16 : 4;
+    const uint64_t rows = t.textureTile == 8 ? t.textureHeight : (t.textureHeight + 7) / 8 * 8;
+    const uint64_t size = uint64_t(t.texturePitch) * rows * bpp;
+    std::vector<uint8_t> chunk(1 << 20);
+    uint64_t nonzero = 0, first = ~0ull, lastAt = 0, unreadable = 0;
+    for (uint64_t at = 0; at < size; at += chunk.size()) {
+      const size_t n = size_t(std::min<uint64_t>(chunk.size(), size - at));
+      if (!readGuest(memory, t.textureBase + at, chunk.data(), n)) { unreadable += n; continue; }
+      for (size_t k = 0; k < n; ++k)
+        if (chunk[k]) { ++nonzero; if (first == ~0ull) first = at + k; lastAt = at + k; }
+    }
+    std::fprintf(stderr, "GPU.TEXTURE base=0x%llx %llux%llu pitch=%llu tile=%llu dfmt=%llu nfmt=%llu bytes=0x%llx nonzero_bytes=%llu unreadable=%llu first=0x%llx last=0x%llx\n",
+                 (unsigned long long)t.textureBase, (unsigned long long)t.textureWidth, (unsigned long long)t.textureHeight,
+                 (unsigned long long)t.texturePitch, (unsigned long long)t.textureTile, (unsigned long long)t.textureDfmt,
+                 (unsigned long long)t.textureNfmt, (unsigned long long)size, (unsigned long long)nonzero, (unsigned long long)unreadable,
+                 (unsigned long long)(nonzero ? first : 0), (unsigned long long)lastAt);
+  }
+  template <class Memory>
+  void scanGuestMemory(Memory& memory) {
+    // MAXPS4_GPU_MEMSCAN=start-end (hex); default covers the direct-memory window.
+    uint64_t start = 0x200000000ull, end = 0x290000000ull;
+    if (const char* r = std::getenv("MAXPS4_GPU_MEMSCAN")) {
+      char* rest = nullptr; const uint64_t a = std::strtoull(r, &rest, 16);
+      if (rest && *rest == '-') { const uint64_t b = std::strtoull(rest + 1, nullptr, 16); if (b > a) { start = a; end = b; } }
+    }
+    constexpr uint64_t granule = 1 << 16;
+    std::vector<uint8_t> chunk(granule);
+    uint64_t runStart = 0, runBytes = 0; bool inRun = false; unsigned printed = 0;
+    auto close = [&](uint64_t at) {
+      if (inRun && printed++ < 200)
+        std::fprintf(stderr, "GPU.MEMSCAN range=0x%llx-0x%llx nonzero_bytes=%llu\n", (unsigned long long)runStart, (unsigned long long)at, (unsigned long long)runBytes);
+      inRun = false; runBytes = 0;
+    };
+    for (uint64_t at = start; at < end; at += granule) {
+      uint64_t count = 0;
+      if (readGuest(memory, at, chunk.data(), granule)) for (uint8_t b : chunk) count += b != 0;
+      if (count) { if (!inRun) { inRun = true; runStart = at; } runBytes += count; }
+      else close(at);
+    }
+    close(end);
+    std::fprintf(stderr, "GPU.MEMSCAN done start=0x%llx end=0x%llx ranges=%u\n", (unsigned long long)start, (unsigned long long)end, printed);
   }
 
   static std::string hex(uint64_t v) { std::ostringstream s; s << std::hex << v; return s.str(); }
