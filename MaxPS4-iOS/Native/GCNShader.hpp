@@ -126,7 +126,32 @@ struct GCNShader {
              bufferOutOfRange = 0, samples = 0, exports = 0, texels = 0, texelsNonZero = 0, textureBase = 0,
              textureWidth = 0, textureHeight = 0, texturePitch = 0, textureTile = 0, textureDfmt = 0, textureNfmt = 0;
     std::map<uint32_t, uint64_t> histogram; // (encoding << 16) | opcode
+    void merge(const Stats& o) {
+      waves += o.waves; instructions += o.instructions; scalarLoads += o.scalarLoads; bufferLoads += o.bufferLoads;
+      bufferOutOfRange += o.bufferOutOfRange; samples += o.samples; exports += o.exports; texels += o.texels; texelsNonZero += o.texelsNonZero;
+      if (o.texels) { textureBase = o.textureBase; textureWidth = o.textureWidth; textureHeight = o.textureHeight;
+                      texturePitch = o.texturePitch; textureTile = o.textureTile; textureDfmt = o.textureDfmt; textureNfmt = o.textureNfmt; }
+      for (const auto& [k, v] : o.histogram) histogram[k] += v;
+    }
   } stats;
+  // Host view of one guest span inside a single translated range of the
+  // lease (which pins mappings while the GPU runs), or null: callers then take
+  // the checked copy path. Writable views never alias executable memory.
+  template <class Memory>
+  static auto hostSpanOf(const Memory& m, uint64_t guest, uint64_t bytes, uint32_t permissions, int) -> decltype(m.ranges(), (uint8_t*)nullptr) {
+    if (!bytes) return nullptr;
+    for (const auto& r : m.ranges()) {
+      if (guest < r.guest || guest - r.guest >= r.size) continue;
+      const uint64_t offset = guest - r.guest;
+      if (bytes > r.size - offset || (r.permissions & permissions) != permissions || ((permissions & 2) && (r.permissions & 1))) return nullptr;
+      return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(r.host + offset));
+    }
+    return nullptr;
+  }
+  template <class Memory> static uint8_t* hostSpanOf(const Memory&, uint64_t, uint64_t, uint32_t, long) { return nullptr; }
+  template <class Memory> static uint8_t* hostSpan(const Memory& m, uint64_t guest, uint64_t bytes, uint32_t permissions) {
+    return hostSpanOf(m, guest, bytes, permissions, 0);
+  }
   static constexpr uint64_t maxStepsPerWave = 1u << 20;
   static constexpr uint64_t addressMask = (uint64_t(1) << 40) - 1; // PS4 GPU VA
   std::unordered_map<uint64_t, Inst> cache;
@@ -867,6 +892,8 @@ struct GCNShader {
   struct Texture {
     uint64_t base = 0; unsigned width = 0, height = 0, pitch = 0, dfmt = 0, nfmt = 0, tile = 0;
     std::array<unsigned, 4> select{};
+    const uint8_t* host = nullptr; // whole resource, when it lies in one readable range
+    Display2DThin32 layout;        // tile 10
   };
   static bool decodeTexture(const uint32_t* t, Texture& tex, std::string& why) {
     const unsigned type = t[3] >> 28;
@@ -888,16 +915,10 @@ struct GCNShader {
   template <class Memory>
   bool texel(Memory& memory, const Texture& tex, unsigned x, unsigned y, std::array<float, 4>& out, std::string& why) {
     const unsigned bpp = texelBytes(tex.dfmt);
-    uint64_t offset = 0;
-    if (tex.tile == 8) offset = (uint64_t(y) * tex.pitch + x) * bpp;
-    else {
-      if (bpp != 4) { why = "tiled image requires 32-bit texels"; return false; }
-      Display2DThin32 layout;
-      if (!layout.init(tex.pitch, tex.height, why)) return false;
-      offset = layout.offset(x, y);
-    }
+    const uint64_t offset = tex.tile == 8 ? (uint64_t(y) * tex.pitch + x) * bpp : tex.layout.offset(x, y);
     std::array<uint8_t, 16> raw{};
-    if (memory.read_data(tex.base + offset, raw.data(), bpp)) {
+    if (tex.host) std::memcpy(raw.data(), tex.host + offset, bpp);
+    else if (memory.read_data(tex.base + offset, raw.data(), bpp)) {
       std::ostringstream m; m << "texel unreadable at 0x" << std::hex << tex.base + offset; why = m.str(); return false;
     }
     ++stats.texels;
@@ -944,6 +965,15 @@ struct GCNShader {
     if (!ok) return false;
     Texture tex;
     if (!decodeTexture(t, tex, why)) return false;
+    {
+      uint64_t bytes = uint64_t(tex.pitch) * tex.height * texelBytes(tex.dfmt);
+      if (tex.tile == 10) {
+        if (texelBytes(tex.dfmt) != 4) { why = "tiled image requires 32-bit texels"; return false; }
+        if (!tex.layout.init(tex.pitch, tex.height, why)) return false;
+        bytes = tex.layout.sizeBytes();
+      }
+      tex.host = hostSpan(memory, tex.base, bytes, 4);
+    }
     const unsigned clampX = smp[0] & 7, clampY = (smp[0] >> 3) & 7;
     const unsigned mag = (smp[2] >> 20) & 3, min = (smp[2] >> 22) & 3, mip = (smp[2] >> 26) & 3;
     const bool forceUnnorm = (smp[0] >> 15) & 1;

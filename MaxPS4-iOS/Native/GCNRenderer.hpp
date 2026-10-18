@@ -13,6 +13,8 @@
 // (vertex outputs, primitive list, PS program and target description).
 #include "GCNShader.hpp"
 #include <array>
+#include <atomic>
+#include <thread>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -42,6 +44,7 @@ struct GCNRenderer {
   struct DepthPlane { uint32_t width = 0, height = 0; std::vector<float> z; };
   std::map<uint64_t, DepthPlane> depth;
   bool verbose = true;
+  unsigned maxThreads = 0; // pixel-shading workers; 0 = hardware concurrency
 
   struct Vertex { std::array<float, 4> pos{}; std::vector<std::array<float, 4>> params; };
   struct ClipVertex { std::array<float, 4> pos{}; std::array<float, 3> bary{}; };
@@ -188,6 +191,7 @@ struct GCNRenderer {
     const unsigned cbHeight = cbPitch ? unsigned(cbSlice / cbPitch) : 0;
     const unsigned cbFormat = (cbInfo >> 2) & 31, cbNumber = (cbInfo >> 8) & 7, cbSwap = (cbInfo >> 11) & 3, cbTile = cbAttrib & 31;
     Display2DThin32 cbLayout;
+    uint8_t* cbHost = nullptr; // whole colour buffer in one read/write range
     if (colorEnabled) {
       if (cbFormat != 10) return fail("colour buffer format " + std::to_string(cbFormat) + " unsupported (8_8_8_8 only)");
       if (cbNumber != 0 && cbNumber != 6) return fail("colour buffer number type unsupported (UNORM/SRGB only)");
@@ -203,6 +207,7 @@ struct GCNRenderer {
         if (!memory.permitted(cbBase + at, size_t(n), 6)) return fail("colour buffer 0x" + hex(cbBase) + " not mapped read/write");
       }
       sx1 = std::min(sx1, int(cbPitch)); sy1 = std::min(sy1, int(cbHeight));
+      cbHost = GCNShader::hostSpan(memory, cbBase, span, 6);
     }
     const uint32_t blend = ctx[0x1e0];
     const bool blending = colorEnabled && (blend & (1U << 30)) && !(cbInfo & (1U << 16)); // BLEND_BYPASS
@@ -269,11 +274,23 @@ struct GCNRenderer {
     last.primitives = prims.size();
 
     // ---------------- raster + pixel shading --------------------------------
+    // Setup runs serially in submission order. Shading runs in horizontal
+    // bands of 32 rows (quads never straddle a band): every band visits all
+    // triangles in order and writes only its own rows, so each pixel sees
+    // exactly the serial sequence of fragments. Workers own their interpreter,
+    // wave batch and counters; the result is independent of the thread count.
+    struct Screen { int64_t x, y; double z, invW; };
+    struct Tri { uint32_t setup; Screen a, b, c; int64_t area; };
+    struct Worker {
+      GCNShader ps; std::vector<Fragment> batch; Stats stats; std::string error;
+      uint64_t minX = ~0ull, minY = ~0ull, maxX = 0, maxY = 0;
+    };
     std::vector<Setup> setups;
-    std::vector<Fragment> batch;
-    GCNShader ps;
+    std::vector<Tri> tris;
     uint64_t writtenMinX = ~0ull, writtenMinY = ~0ull, writtenMaxX = 0, writtenMaxY = 0;
-    auto flush = [&]() -> bool {
+    auto flushWorker = [&](Worker& wk) -> bool {
+      auto& batch = wk.batch; auto& ps = wk.ps; auto& last = wk.stats; std::string& error = wk.error;
+      uint64_t &writtenMinX = wk.minX, &writtenMinY = wk.minY, &writtenMaxX = wk.maxX, &writtenMaxY = wk.maxY;
       if (batch.empty()) return true;
       GCNShader::Wave wave;
       wave.configure(std::min(psSgprs, 104u), psVgprs);
@@ -350,7 +367,7 @@ struct GCNRenderer {
         }
         if (src[3] > 0) ++last.sourceAlphaNonZero;
         bool changed = false;
-        if (!writeColor(memory, cbBase, cbTile, cbLayout, cbPitch, cbNumber == 6, cbSwap == 1, f.x, f.y, src,
+        if (!writeColor(memory, cbBase, cbHost, cbTile, cbLayout, cbPitch, cbNumber == 6, cbSwap == 1, f.x, f.y, src,
                         blending, blend, ctx, targetMask & shaderMask & 15, changed, error)) return false;
         if (changed) ++last.pixelsChanged;
         ++last.pixelsWritten;
@@ -391,7 +408,6 @@ struct GCNRenderer {
       }
       if (poly.size() < 3) { ++last.clippedAway; continue; }
       // Viewport transform and 1/256 sub-pixel snapping.
-      struct Screen { int64_t x, y; double z, invW; };
       std::vector<Screen> scr(poly.size());
       for (size_t k = 0; k < poly.size(); ++k) {
         const double w = poly[k].pos[3], inv = 1.0 / w;
@@ -418,9 +434,18 @@ struct GCNRenderer {
         for (unsigned v = 0; v < 3; ++v) { s.bary[v] = poly[idx[v]].bary; s.invW[v] = scr[idx[v]].invW; s.z[v] = scr[idx[v]].z; }
         const uint32_t setupIndex = uint32_t(setups.size());
         setups.push_back(s);
+        tris.push_back({setupIndex, a, b, c, area});
+      }
+    }
+    constexpr int64_t bandRows = 32;
+    const int64_t bandCount = sy1 > sy0 ? (int64_t(sy1) + bandRows - 1) / bandRows : 0;
+    auto rasterBand = [&](Worker& wk, int64_t bandY0, int64_t bandY1) -> bool {
+      for (const auto& t : tris) {
+        const uint32_t setupIndex = t.setup; const Screen &a = t.a, &b = t.b, &c = t.c; const int64_t area = t.area;
         const int64_t minX = std::max<int64_t>(sx0, (std::min({a.x, b.x, c.x}) >> 8) - 1), maxX = std::min<int64_t>(sx1 - 1, (std::max({a.x, b.x, c.x}) >> 8) + 1);
-        const int64_t minY = std::max<int64_t>(sy0, (std::min({a.y, b.y, c.y}) >> 8) - 1), maxY = std::min<int64_t>(sy1 - 1, (std::max({a.y, b.y, c.y}) >> 8) + 1);
+        const int64_t minY = std::max<int64_t>(std::max<int64_t>(sy0, bandY0), (std::min({a.y, b.y, c.y}) >> 8) - 1), maxY = std::min<int64_t>(std::min<int64_t>(sy1, bandY1) - 1, (std::max({a.y, b.y, c.y}) >> 8) + 1);
         if (minX > maxX || minY > maxY) continue;
+        const auto& s = setups[setupIndex];
         // Edge functions oriented so that the interior is positive; top-left fill rule.
         const Screen* v[3] = {&a, &b, &c};
         const double sign = area > 0 ? 1.0 : -1.0;
@@ -451,15 +476,46 @@ struct GCNRenderer {
               any |= cov;
             }
             if (!any) continue;
-            ++last.quads;
-            for (auto& f : quad) batch.push_back(f);
-            if (batch.size() == 64 && !flush()) return false;
+            ++wk.stats.quads;
+            for (auto& f : quad) wk.batch.push_back(f);
+            if (wk.batch.size() == 64 && !flushWorker(wk)) return false;
           }
       }
-      // Waves never hold fragments of more than 4096 setups; keep memory bounded.
-      if (batch.empty() && setups.size() > 4096) setups.clear();
+      return flushWorker(wk);
+    };
+    uint64_t pixelArea = 0;
+    for (const auto& t : tris) {
+      const int64_t w = (std::max({t.a.x, t.b.x, t.c.x}) - std::min({t.a.x, t.b.x, t.c.x})) >> 8, h = (std::max({t.a.y, t.b.y, t.c.y}) - std::min({t.a.y, t.b.y, t.c.y})) >> 8;
+      pixelArea += uint64_t(std::max<int64_t>(w, 1)) * uint64_t(std::max<int64_t>(h, 1));
     }
-    if (!flush()) return false;
+    const unsigned hardware = [] { // MAXPS4_GPU_THREADS overrides the hardware concurrency
+      if (const char* e = std::getenv("MAXPS4_GPU_THREADS")) if (const unsigned long n = std::strtoul(e, nullptr, 10)) return unsigned(std::min(n, 256ul));
+      return std::max(1u, std::thread::hardware_concurrency()); }();
+    const unsigned threads = unsigned(std::min<uint64_t>({uint64_t(maxThreads ? maxThreads : hardware), uint64_t(std::max<int64_t>(bandCount, 1)), pixelArea / 16384 + 1}));
+    std::vector<Worker> workers(threads);
+    std::vector<std::string> bandErrors(size_t(std::max<int64_t>(bandCount, 0)));
+    std::atomic<int64_t> nextBand{0}; std::atomic<bool> failed{false};
+    auto work = [&](Worker& wk) {
+      for (int64_t band; !failed && (band = nextBand.fetch_add(1)) < bandCount;)
+        if (!rasterBand(wk, band * bandRows, (band + 1) * bandRows)) { bandErrors[size_t(band)] = wk.error; failed = true; }
+    };
+    if (threads <= 1) work(workers[0]);
+    else {
+      std::vector<std::thread> pool;
+      for (unsigned k = 1; k < threads; ++k) pool.emplace_back(work, std::ref(workers[k]));
+      work(workers[0]);
+      for (auto& t : pool) t.join();
+    }
+    if (failed) { for (const auto& e : bandErrors) if (!e.empty()) { error = e; break; } return false; }
+    GCNShader ps;
+    for (auto& wk : workers) {
+      last.quads += wk.stats.quads; last.psWaves += wk.stats.psWaves; last.fragments += wk.stats.fragments;
+      last.pixelsWritten += wk.stats.pixelsWritten; last.pixelsChanged += wk.stats.pixelsChanged; last.sourceAlphaNonZero += wk.stats.sourceAlphaNonZero;
+      last.depthWrites += wk.stats.depthWrites; last.depthRejected += wk.stats.depthRejected;
+      writtenMinX = std::min(writtenMinX, wk.minX); writtenMinY = std::min(writtenMinY, wk.minY);
+      writtenMaxX = std::max(writtenMaxX, wk.maxX); writtenMaxY = std::max(writtenMaxY, wk.maxY);
+      ps.stats.merge(wk.ps.stats);
+    }
     last.psInstructions = ps.stats.instructions;
     last.samples = ps.stats.samples;
     lastPixelHistogram = ps.histogramText();
@@ -565,11 +621,12 @@ struct GCNRenderer {
     }
   }
   template <class Memory>
-  bool writeColor(Memory& memory, uint64_t base, unsigned tile, const Display2DThin32& layout, unsigned pitch, bool srgb, bool swapAlt,
+  bool writeColor(Memory& memory, uint64_t base, uint8_t* host, unsigned tile, const Display2DThin32& layout, unsigned pitch, bool srgb, bool swapAlt,
                   uint32_t x, uint32_t y, std::array<float, 4> src, bool blending, uint32_t blend, const Bank& ctx, unsigned mask, bool& changed, std::string& error) {
-    const uint64_t at = base + (tile == 10 ? layout.offset(x, y) : (uint64_t(y) * pitch + x) * 4);
+    const uint64_t offset = tile == 10 ? layout.offset(x, y) : (uint64_t(y) * pitch + x) * 4, at = base + offset;
     uint8_t px[4];
-    if (memory.read_data(at, px, 4)) { error = "colour buffer unreadable at 0x" + hex(at); return false; }
+    if (host) std::memcpy(px, host + offset, 4);
+    else if (memory.read_data(at, px, 4)) { error = "colour buffer unreadable at 0x" + hex(at); return false; }
     uint32_t before = 0;
     std::memcpy(&before, px, 4);
     // Memory component order: STD = R,G,B,A; ALT = B,G,R,A (8_8_8_8).
@@ -599,7 +656,8 @@ struct GCNRenderer {
     uint32_t after = 0;
     std::memcpy(&after, px, 4);
     changed = before != after;
-    if (memory.write_data(at, px, 4)) { error = "colour buffer write failed at 0x" + hex(at); return false; }
+    if (host) std::memcpy(host + offset, px, 4);
+    else if (memory.write_data(at, px, 4)) { error = "colour buffer write failed at 0x" + hex(at); return false; }
     return true;
   }
 };
