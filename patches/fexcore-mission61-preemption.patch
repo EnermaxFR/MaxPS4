@@ -1,0 +1,82 @@
+FEXCore patch (MaxPS4 mission 61): time-slice preemption for an embedder that
+runs several guest threads on one host thread. Apply after the other
+patches/fexcore-*.patch files. FEXCore::MaxPS4::BlockLinking=false makes every
+block exit return to the dispatcher; there a set FEXCore::MaxPS4::PreemptRequest
+jumps to the thread stop handler (static registers spilled, State.rip current),
+so ExecuteThread returns and the thread can be resumed later.
+
+diff --git a/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/Core.cpp b/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/Core.cpp
+index 9a6b9489..aa8665c1 100644
+--- a/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/Core.cpp
++++ b/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/Core.cpp
+@@ -78,4 +80,9 @@ $end_info$
+ #include <xxhash.h>
+ 
++namespace FEXCore::MaxPS4 {
++std::atomic<uint8_t> PreemptRequest {0};
++std::atomic<bool> BlockLinking {true};
++} // namespace FEXCore::MaxPS4
++
+ namespace FEXCore::Context {
+ ContextImpl::ContextImpl(const FEXCore::HostFeatures& Features)
+diff --git a/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp b/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
+index 2ce32af2..7d258a0c 100644
+--- a/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
++++ b/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
+@@ -187,4 +188,11 @@ void Dispatcher::EmitDispatcher() {
+   (void)cbnz(ARMEmitter::Size::i32Bit, TMP1, &CompileSingleStep);
+ 
++  // MaxPS4 preemption point: State.rip is current and static registers hold
++  // the guest state, so the stop handler can spill them and return.
++  ARMEmitter::ForwardLabel MaxPS4Preempt;
++  LoadConstant(ARMEmitter::Size::i64Bit, TMP1, reinterpret_cast<uint64_t>(&FEXCore::MaxPS4::PreemptRequest));
++  ldrb(TMP1, TMP1, 0);
++  (void)cbnz(ARMEmitter::Size::i32Bit, TMP1, &MaxPS4Preempt);
++
+   ARMEmitter::ForwardLabel NoBlock;
+ 
+@@ -253,4 +261,5 @@ void Dispatcher::EmitDispatcher() {
+   {
+     ThreadStopHandlerAddressSpillSRA = GetCursorAddress<uint64_t>();
++    (void)Bind(&MaxPS4Preempt);
+     SpillStaticRegs(TMP1);
+ 
+diff --git a/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+index cf2f6af9..2811205f 100644
+--- a/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/JIT/JIT.cpp
++++ b/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+@@ -559,6 +560,7 @@ uint64_t Arm64JITCore::ExitFunctionLink(FEXCore::Core::CpuStateFrame* Frame, FEX
+   auto GuestRip = Record->GuestRIP;
+ 
+-  if (TFSet) {
++  if (TFSet || !FEXCore::MaxPS4::BlockLinking.load(std::memory_order_relaxed)) {
+     // If TF is set, the cache must be skipped as different code needs to be generated.
++    // MaxPS4: without block linking every exit returns to the dispatcher (preemption point).
+     Frame->State.rip = GuestRip;
+     return Frame->Pointers.DispatcherLoopTop;
+diff --git a/runtime/sources/fexcore-darwin/FEXCore/include/FEXCore/Core/Context.h b/runtime/sources/fexcore-darwin/FEXCore/include/FEXCore/Core/Context.h
+index fdc12ba4..98fdf800 100644
+--- a/runtime/sources/fexcore-darwin/FEXCore/include/FEXCore/Core/Context.h
++++ b/runtime/sources/fexcore-darwin/FEXCore/include/FEXCore/Core/Context.h
+@@ -1,4 +1,5 @@
+ // SPDX-License-Identifier: MIT
+ #pragma once
++#include <atomic>
+ #include <functional>
+ #include <stdint.h>
+@@ -21,4 +22,14 @@ class ThunkHandler;
+ } // namespace FEXCore
+ 
++// MaxPS4: preemption for an embedder that schedules several guest threads on
++// one host thread. With BlockLinking false, every block exit returns to the
++// dispatcher loop top, where a set PreemptRequest makes ExecuteThread return
++// (static registers spilled, State.rip = next guest instruction). The
++// embedder clears the request and resumes the thread later at State.rip.
++namespace FEXCore::MaxPS4 {
++FEX_DEFAULT_VISIBILITY extern std::atomic<uint8_t> PreemptRequest;
++FEX_DEFAULT_VISIBILITY extern std::atomic<bool> BlockLinking;
++} // namespace FEXCore::MaxPS4
++
+ namespace FEXCore::Core {
+ struct CPUState;
+
