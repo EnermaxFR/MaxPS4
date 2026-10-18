@@ -79,7 +79,8 @@ struct OrbisV4PngDecService {
             if (!createParam(m, r.rdi, d, error)) return refuse(error, "invalid create parameters");
             if (!r.rsi || !r.rcx) return refuse(invalidAddr, "null memory/handle");
             if (uint32_t(r.rdx) < workSize(d) || !m.permitted(r.rsi, uint32_t(r.rdx), 2)) return refuse(invalidWorkMemory, "work memory too small or unwritable");
-            if (st->decoders.count(r.rsi)) return refuse(invalidWorkMemory, "work memory already holds a decoder");
+            // Create (re)initialises the title's work memory: titles that free it
+            // without scePngDecDelete (Kero Blaster imports none) reuse the address.
             const uint64_t handle = r.rsi;
             if (m.write_data(r.rcx, &handle, 8)) return refuse(invalidAddr, "handle unwritable");
             st->decoders[handle] = d; return value(0); });

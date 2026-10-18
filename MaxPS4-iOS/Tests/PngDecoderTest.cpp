@@ -92,6 +92,10 @@ int main(int argc, char** argv) {
         assert(std::equal(ref.rgba.begin(), ref.rgba.end(), back.begin()));
         assert(std::all_of(back.begin() + ref.rgba.size(), back.end(), [](uint8_t b) { return b == 0xcd; })); // no overrun
         assert(st->decoded == 1 && call("scePngDecDelete", decoder) == 0 && call("scePngDecDelete", decoder) == OrbisV4PngDecService::invalidHandle);
+        // The title frees work memory without Delete and creates again at the same address.
+        assert(!memory.write_data(param + 0x40, create, 12));
+        assert(call("scePngDecCreate", param + 0x40, work, need, handle) == 0 && call("scePngDecCreate", param + 0x40, work, need, handle) == 0);
+        assert(call("scePngDecDecode", work, param, 0) == 0);
         create[2] = w - 1; assert(!memory.write_data(param, create, 12) && call("scePngDecCreate", param, work, need, handle) == 0);
         assert(!memory.write_data(param + 0x80, &decode, 32) && call("scePngDecDecode", work, param + 0x80, 0) == OrbisV4PngDecService::unsupportedData);
     }
