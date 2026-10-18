@@ -117,10 +117,14 @@ struct OrbisV4GraphicsServices {
         size_t index=0;
         for(const auto& stream:streams){
             const std::string prefix=dir+"/gpu-submit-"+std::to_string(submitted)+"-"+std::to_string(index++);
-            std::ofstream dump(prefix+"-"+stream.kind+".bin",std::ios::binary);dump.write(reinterpret_cast<const char*>(stream.words.data()),std::streamsize(stream.words.size()*4));dump.close();
+            if(submitted<=8){std::ofstream dump(prefix+"-"+stream.kind+".bin",std::ios::binary);dump.write(reinterpret_cast<const char*>(stream.words.data()),std::streamsize(stream.words.size()*4));} // first submissions only
             std::fprintf(stderr,"GPU.SUBMIT sequence=%llu kind=%s guest=0x%llx bytes=%zu dump=%s\n",(unsigned long long)submitted,stream.kind.c_str(),(unsigned long long)stream.address,stream.words.size()*4,prefix.c_str());
             std::string error;
-            if(!engine.execute(m,stream.address,stream.words,error)){
+            const auto started=std::chrono::steady_clock::now();
+            const bool executed=engine.execute(m,stream.address,stream.words,error);
+            std::fprintf(stderr,"GPU.SUBMIT_TIME sequence=%llu ms=%.1f\n",(unsigned long long)submitted,
+                         std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count());
+            if(!executed){
                 // Replay inputs for the actual failed job, after all preceding
                 // register packets have executed. No memory writes or GPU
                 // completion are synthesized by this diagnostic snapshot.
