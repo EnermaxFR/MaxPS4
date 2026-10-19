@@ -10,11 +10,21 @@ namespace maxps4 {
 struct PadInputScript {
     struct Step { uint64_t first = 0, last = 0; uint32_t buttons = 0; };
     std::vector<Step> steps;
+    static constexpr uint32_t stickBase = 0x1000000, stickMask = 0xff000000;
+    // Stick bytes (0 = up/left, 0x80 = centre, 0xff = down/right) for a combined mask.
+    static void stickAxes(uint32_t bits, uint8_t& lx, uint8_t& ly, uint8_t& rx, uint8_t& ry) {
+        auto axis = [&](unsigned negative, unsigned positive) -> uint8_t {
+            return (bits & (stickBase << negative)) ? 0x00 : (bits & (stickBase << positive)) ? 0xff : 0x80; };
+        ly = axis(0, 1); lx = axis(2, 3); ry = axis(4, 5); rx = axis(6, 7);
+    }
     static uint32_t button(const std::string& name) {
         static const struct { const char* name; uint32_t bit; } table[] = {
             {"L3", 0x2}, {"R3", 0x4}, {"OPTIONS", 0x8}, {"UP", 0x10}, {"RIGHT", 0x20}, {"DOWN", 0x40}, {"LEFT", 0x80},
             {"L2", 0x100}, {"R2", 0x200}, {"L1", 0x400}, {"R1", 0x800}, {"TRIANGLE", 0x1000}, {"CIRCLE", 0x2000},
-            {"CROSS", 0x4000}, {"SQUARE", 0x8000}, {"TOUCHPAD", 0x100000}};
+            {"CROSS", 0x4000}, {"SQUARE", 0x8000}, {"TOUCHPAD", 0x100000},
+            // Analog stick extremes (not SCE button bits; see stickAxes()).
+            {"LS_UP", stickBase << 0}, {"LS_DOWN", stickBase << 1}, {"LS_LEFT", stickBase << 2}, {"LS_RIGHT", stickBase << 3},
+            {"RS_UP", stickBase << 4}, {"RS_DOWN", stickBase << 5}, {"RS_LEFT", stickBase << 6}, {"RS_RIGHT", stickBase << 7}};
         for (const auto& b : table) if (name == b.name) return b.bit;
         return 0;
     }
