@@ -6,7 +6,6 @@
 // instruction for one lane, so only the translation itself is under test.
 #include "../Native/GCNShader.hpp"
 #include "../Native/GCNKernel.h"
-#include "../Native/maxps4_orbis_v4_translation.h"
 #include "GCNTranslatorFixtures.hpp"
 #include <cassert>
 #include <cstdio>
@@ -15,6 +14,19 @@
 
 using namespace maxps4;
 using namespace maxps4::gpu;
+
+// Self-contained guest memory (the interpreter only needs read_data).
+struct TestMemory {
+  uint64_t base; std::vector<uint8_t> bytes;
+  int read_data(uint64_t at, void* out, size_t n, bool = false) const {
+    if (at < base || at - base + n > bytes.size()) return -1;
+    std::memcpy(out, bytes.data() + (at - base), n); return 0;
+  }
+  int write_data(uint64_t at, const void* in, size_t n) {
+    if (at < base || at - base + n > bytes.size()) return -1;
+    std::memcpy(bytes.data() + (at - base), in, n); return 0;
+  }
+};
 
 struct Export { unsigned target, enable, compressed, done; gcn_u32 data[4]; };
 struct Env {
@@ -40,11 +52,9 @@ static float attribute(unsigned attr, unsigned chan, unsigned lane, unsigned k) 
 int main() {
   constexpr uint64_t base = 0x400000, size = 4 * 1024 * 1024;
   constexpr uint64_t program = base, constants = base + 0x10000, texture = base + 0x20000, scratch = base + 0x80000;
-  OrbisV4Translation owner([] {});
-  assert(!owner.reserve(base, size) && !owner.map(base, size, 6));
   unsigned shaders = 0, lanes = 0, values = 0;
   {
-  auto m = owner.lease();
+  TestMemory m{base, std::vector<uint8_t>(size)};
   const float consts[8] = {0.25f, -1.5f, 3.0f, 0.75f, 2.0f, 0.5f, 7.0f, 0.0f};
   uint32_t cbits[8]; std::memcpy(cbits, consts, sizeof(cbits)); cbits[6] = 0xfffffff0u; // s6 as a large integer (carry)
   assert(!m.write_data(constants, cbits, sizeof(cbits)));
@@ -124,8 +134,7 @@ int main() {
     }
     ++shaders;
   }
-  } // the lease must end before the owner closes
-  owner.close();
+  }
   std::printf("PASS translator stage 2: %u translated pixel shaders, %u live lanes, %u exported values equal to the interpreter\n",
               shaders, lanes, values);
 }

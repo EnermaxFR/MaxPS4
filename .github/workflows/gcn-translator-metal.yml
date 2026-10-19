@@ -1,0 +1,50 @@
+name: GCN translator (C++ and Metal)
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'MaxPS4-iOS/Native/GCNKernel.h'
+      - 'MaxPS4-iOS/Native/GCNShader.hpp'
+      - 'MaxPS4-iOS/Native/GCNShaderTranslator.hpp'
+      - 'MaxPS4-iOS/Native/GCNTiling.hpp'
+      - 'MaxPS4-iOS/Native/GPUHostSpan.hpp'
+      - 'MaxPS4-iOS/Tests/GCNKernelOpsTest.cpp'
+      - 'MaxPS4-iOS/Tests/GCNTranslator*'
+      - 'scripts/test-gcn-translator.sh'
+      - '.github/workflows/gcn-translator-metal.yml'
+  push:
+    branches: ['experiment/keroblaster-iphone-m53']
+    paths:
+      - 'MaxPS4-iOS/Native/GCNKernel.h'
+      - 'MaxPS4-iOS/Native/GCNShader.hpp'
+      - 'MaxPS4-iOS/Native/GCNShaderTranslator.hpp'
+      - 'MaxPS4-iOS/Native/GCNTiling.hpp'
+      - 'MaxPS4-iOS/Native/GPUHostSpan.hpp'
+      - 'MaxPS4-iOS/Tests/GCNKernelOpsTest.cpp'
+      - 'MaxPS4-iOS/Tests/GCNTranslator*'
+      - 'scripts/test-gcn-translator.sh'
+      - '.github/workflows/gcn-translator-metal.yml'
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prelude equivalence and translated shaders vs interpreter (native + ASan/UBSan)
+        run: bash scripts/test-gcn-translator.sh build/gcn-translator
+  metal:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Translate the fixtures
+        run: |
+          mkdir -p build/gcn-metal
+          xcrun clang++ -std=c++17 -O1 -Wall -Wextra -I MaxPS4-iOS/Native \
+            MaxPS4-iOS/Tests/GCNTranslatorTool.cpp -o build/gcn-metal/tool
+          build/gcn-metal/tool build/gcn-metal/translated.inc
+      - name: Compile the translated shaders as MSL and compare GPU results with the C++ twin
+        run: |
+          xcrun clang++ -std=c++17 -O1 -fobjc-arc -I MaxPS4-iOS/Native \
+            -DGCN_TRANSLATED="\"$PWD/build/gcn-metal/translated.inc\"" \
+            MaxPS4-iOS/Tests/GCNTranslatorMetal.mm -framework Foundation -framework Metal \
+            -o build/gcn-metal/metal-test
+          build/gcn-metal/metal-test MaxPS4-iOS/Native/GCNKernel.h build/gcn-metal/translated.inc
