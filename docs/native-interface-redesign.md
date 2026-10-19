@@ -55,18 +55,26 @@ non vides pour Bash 3 sur macOS, avec les mêmes options de compilation.
 
 ### Résultats vérifiés
 
-- Workflow interface : succès, révision Swift `3219a0c`,
-  https://github.com/EnermaxFR/MaxPS4/actions/runs/39272042180.
+- Workflow interface : tests et deux compilations vérifiés dans les journaux, révision Swift `43e536d`,
+  https://github.com/EnermaxFR/MaxPS4/actions/runs/39280651847.
 - Tests de présentation sur macOS : succès.
 - Compilation des sources Swift iPhone ARM64 : succès.
 - Compilation des sources Swift simulateur ARM64 : succès.
 - Fixtures boot, SELF et eboot corrigées : succès local ASan/UBSan.
 - Suite FEX de traduction corrigée : succès dans un exécutable isolé sous
   simulateur ARM64 VIXL sur Linux, avec les bibliothèques existantes inchangées.
-- Construction IPA complète : suivi séparé,
-  https://github.com/EnermaxFR/MaxPS4/actions/runs/39277105299.
-  Un succès de compilation Swift ne prouve ni le lien complet, ni la génération
-  d’une IPA, ni son installation ou sa jouabilité sur iPhone.
+- Construction IPA complète : `BUILD SUCCEEDED`, révision `43e536d`,
+  https://github.com/EnermaxFR/MaxPS4/actions/runs/39281472787.
+- IPA téléchargée et vérifiée : application ARM64, runtime FEX embarqué, imports
+  ABI opaques, dépendances SDK et démo présents ; révision source confirmée dans Info.plist.
+- Téléchargement : https://github.com/EnermaxFR/MaxPS4/actions/runs/39281472787/artifacts/12201381781
+- SHA-256 IPA : `dd53734ecd291b629d44446df455dcdfc5e9343f8f3ff59bf61d40cfe3a6f09e`.
+
+Les statuts de l’API GitHub ont parfois affiché « queued » ou « in_progress »
+après la fin réelle des jobs. Les résultats ci-dessus sont confirmés par les
+journaux des jobs, les objets compilés et l’IPA, pas par ces seuls statuts.
+L’IPA doit être re-signée pour l’installation. Installation et exécution sur iPhone
+physique, jouabilité et recette visuelle restent à vérifier.
 
 Recette visuelle sur appareil : navigation compacte et large, modes clair/sombre/système,
 texte agrandi, recherche vide/sans résultats, tri, grille/liste, imports, fiches,
