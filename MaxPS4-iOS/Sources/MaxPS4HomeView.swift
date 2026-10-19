@@ -62,6 +62,31 @@ struct MaxPS4HomeView: View {
     }
 
     var body: some View {
+        analysisAlerts
+            .sheet(isPresented: $showingFEXDiagnostic) { MaxPS4FEXDiagnosticView() }
+            .sheet(isPresented: $showingMetalDiagnostic) { MaxPS4MetalDiagnosticView() }
+            .sheet(isPresented: $showingGameDirectory) { MaxPS4GameDirectoryView() }
+            .sheet(isPresented: $showingDuplicates) { duplicatesPanel }
+            .sheet(item: $selectedGameDetails, onDismiss: { detailsReport = nil; detailsLaunchSummary = nil }) { game in
+                gameDetails(game)
+            }
+        .fileImporter(
+            isPresented: $importingGame,
+            allowedContentTypes: [.data, .item],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                emulator.importGame(from: url)
+
+            case .failure(let error):
+                emulator.status = "Import impossible : \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private var navigationShell: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebar
                 .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
@@ -94,13 +119,21 @@ struct MaxPS4HomeView: View {
         .navigationSplitViewStyle(.balanced)
         .tint(.accentColor)
         .preferredColorScheme(appearance.colorScheme)
+    }
+
+    private var clearLibraryAlert: some View {
+        navigationShell
         .alert("Vider la bibliothèque ?", isPresented: $confirmingLibraryRemoval) {
             Button("Annuler", role: .cancel) {}
             Button("Supprimer toutes les copies locales", role: .destructive) { emulator.removeAll() }
         } message: {
             Text("Tous les fichiers importés dans MaxPS4 seront supprimés. Cette action est irréversible.")
         }
-        .alert("Supprimer ce fichier ?", isPresented: Binding(
+    }
+
+    private var deleteGameAlert: some View {
+        clearLibraryAlert
+        .alert("Supprimer ce fichier ?", isPresented: Binding<Bool>(
             get: { gameToDelete != nil },
             set: { if !$0 { gameToDelete = nil } }
         )) {
@@ -112,7 +145,11 @@ struct MaxPS4HomeView: View {
         } message: {
             Text("La copie locale sera supprimée : " + (gameToDelete?.fileName ?? "") + ". Action irréversible.")
         }
-        .alert("Renommer le jeu", isPresented: Binding(
+    }
+
+    private var renameGameAlert: some View {
+        deleteGameAlert
+        .alert("Renommer le jeu", isPresented: Binding<Bool>(
             get: { gameToRename != nil },
             set: { if !$0 { gameToRename = nil } }
         )) {
@@ -127,7 +164,11 @@ struct MaxPS4HomeView: View {
         } message: {
             Text("Le fichier original ne sera pas renommé.")
         }
-        .alert("Résultat de l’analyse", isPresented: Binding(
+    }
+
+    private var analysisAlerts: some View {
+        renameGameAlert
+        .alert("Résultat de l’analyse", isPresented: Binding<Bool>(
             get: { inspectionReport != nil },
             set: { if !$0 { inspectionReport = nil } }
         )) {
@@ -135,10 +176,9 @@ struct MaxPS4HomeView: View {
         } message: {
             Text(inspectionReport ?? "")
         }
-        .sheet(isPresented: $showingFEXDiagnostic) { MaxPS4FEXDiagnosticView() }
-        .sheet(isPresented: $showingMetalDiagnostic) { MaxPS4MetalDiagnosticView() }
-        .sheet(isPresented: $showingGameDirectory) { MaxPS4GameDirectoryView() }
-        .sheet(isPresented: $showingDuplicates) {
+    }
+
+    private var duplicatesPanel: some View {
             NavigationStack {
                 List {
                     Section {
@@ -237,116 +277,15 @@ struct MaxPS4HomeView: View {
                     }
                 }
             }
-        }
-        .sheet(item: $selectedGameDetails, onDismiss: { detailsReport = nil; detailsLaunchSummary = nil }) { game in
+    }
+
+    private func gameDetails(_ game: MaxPS4Game) -> some View {
             NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        Text(game.name)
-                            .font(.title2.bold())
-                            .lineLimit(2)
-                            .minimumScaleFactor(0.75)
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 20)
-                                .fill(LinearGradient(colors: [.blue, .purple, .black], startPoint: .topLeading, endPoint: .bottomTrailing))
-                            if game.fileName.lowercased().hasSuffix(".pkg") {
-                                MaxPS4PKGArtworkView(path: game.localPath, entryID: 0x1006)
-                                    .scaledToFill()
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                    .clipped()
-                            } else {
-                                VStack(spacing: 12) {
-                                    Image(systemName: "gamecontroller.fill").font(.system(size: 48))
-                                    Text(game.name.uppercased())
-                                        .font(.title2.bold())
-                                        .lineLimit(2)
-                                }
-                                .foregroundStyle(.white)
-                            }
-                        }
-                        .frame(height: 180)
-                        .clipShape(RoundedRectangle(cornerRadius: 20))
-                        Text(game.fileName)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                        Text(game.fileName.lowercased().hasSuffix(".pkg") ? "Format : PKG PS4" : "Format : ELF / SELF")
-                        if let attributes = try? FileManager.default.attributesOfItem(atPath: game.localPath),
-                           let value = attributes[.size] as? NSNumber {
-                            Text("Taille locale : " + ByteCountFormatter.string(fromByteCount: value.int64Value, countStyle: .file))
-                        }
-                        Text("Date d’import : " + game.importedAt.formatted(date: .abbreviated, time: .shortened))
-                        Text(detailsLaunchSummary ?? emulator.launchReadinessReport(for: game))
-                            .textSelection(.enabled)
-                            .foregroundStyle(.orange)
-                        Button("Lancer", systemImage: "play.fill") { emulator.launch(game) }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(!MaxPS4LibraryPresentation.canRequestLaunch(fileName: game.fileName, backendReady: emulator.backendReady))
-                        if !MaxPS4LibraryPresentation.canRequestLaunch(fileName: game.fileName, backendReady: emulator.backendReady) {
-                            Text("Lancement indisponible : consultez le diagnostic ci-dessous.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Button("Essayer le moteur (diagnostic)") {
-                            emulator.tryGameEngine(game)
-                            detailsReport = emulator.status
-                        }
-                        .buttonStyle(.borderedProminent)
-                        Button(game.fileName.lowercased().hasSuffix(".pkg") ? "Analyser PKG/PFS" : "Analyser l’exécutable") {
-                            if game.fileName.lowercased().hasSuffix(".pkg") {
-                                detailsReport = "Analyse du PKG en cours…"
-                                Task { detailsReport = await emulator.analyzePKG(game) }
-                            } else {
-                                emulator.inspect(game)
-                                detailsReport = emulator.status
-                            }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        if game.fileName.lowercased().hasSuffix(".elf") || game.fileName.lowercased() == "eboot.bin" {
-                            Button("Diagnostiquer le premier lancement PS4") {
-                                emulator.diagnoseFirstPS4Launch(game)
-                                detailsReport = emulator.status
-                            }
-                            .buttonStyle(.borderedProminent)
-                            Button("Inspecter les imports ELF64") {
-                                emulator.inspectELFImports(game)
-                                detailsReport = emulator.status
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                        if game.fileName.lowercased().hasSuffix(".pkg") {
-                            Button("Calculer SHA-256 du PKG") {
-                                detailsReport = "Calcul de l’empreinte SHA-256 en cours…"
-                                Task {
-                                    detailsReport = await MaxPS4PKGHash.sha256(
-                                        url: URL(fileURLWithPath: game.localPath)
-                                    )
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                        if game.fileName.lowercased().hasSuffix(".pkg"),
-                           detailsReport?.contains("Diagnostic PKG/PFS : PFS non chiffré accessible") == true {
-                            NavigationLink("Extraire eboot.bin / fichier PFS accessible…") {
-                                MaxPS4PFSExportView(source: URL(fileURLWithPath: game.localPath))
-                            }
-                        }
-                        if game.fileName.lowercased().hasSuffix(".pkg"),
-                           detailsReport?.contains("Extraction eboot.bin : impossible depuis ce PKG") == true {
-                            Label("eboot.bin inaccessible : PFS chiffré ou opaque. Aucun fichier exécutable ne peut être exporté depuis ce PKG.", systemImage: "lock.fill")
-                                .font(.footnote)
-                                .foregroundStyle(.orange)
-                        }
-                        if let report = detailsReport {
-                            ShareLink(item: report) {
-                                Label("Exporter le rapport texte", systemImage: "square.and.arrow.up")
-                            }
-                            Text(report)
-                                .font(.subheadline)
-                                .textSelection(.enabled)
-                                .padding(16)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(MaxPS4Design.surface, in: RoundedRectangle(cornerRadius: 14))
-                        }
+                        gameMetadata(game)
+                        gameDetailActions(game)
+                        gameDetailReportContent()
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
@@ -374,19 +313,124 @@ struct MaxPS4HomeView: View {
                 }
             }
             .preferredColorScheme(appearance.colorScheme)
-        }
-        .fileImporter(
-            isPresented: $importingGame,
-            allowedContentTypes: [.data, .item],
-            allowsMultipleSelection: false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else { return }
-                emulator.importGame(from: url)
+    }
 
-            case .failure(let error):
-                emulator.status = "Import impossible : \(error.localizedDescription)"
+    private func gameMetadata(_ game: MaxPS4Game) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(game.name)
+                .font(.title2.bold())
+                .lineLimit(2)
+                .minimumScaleFactor(0.75)
+            ZStack {
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(LinearGradient(colors: [.blue, .purple, .black], startPoint: .topLeading, endPoint: .bottomTrailing))
+                if game.fileName.lowercased().hasSuffix(".pkg") {
+                    MaxPS4PKGArtworkView(path: game.localPath, entryID: 0x1006)
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
+                } else {
+                    VStack(spacing: 12) {
+                        Image(systemName: "gamecontroller.fill").font(.system(size: 48))
+                        Text(game.name.uppercased())
+                            .font(.title2.bold())
+                            .lineLimit(2)
+                    }
+                    .foregroundStyle(.white)
+                }
+            }
+            .frame(height: 180)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            Text(game.fileName)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            Text(game.fileName.lowercased().hasSuffix(".pkg") ? "Format : PKG PS4" : "Format : ELF / SELF")
+            if let attributes = try? FileManager.default.attributesOfItem(atPath: game.localPath),
+               let value = attributes[.size] as? NSNumber {
+                Text("Taille locale : " + ByteCountFormatter.string(fromByteCount: value.int64Value, countStyle: .file))
+            }
+            Text("Date d’import : " + game.importedAt.formatted(date: .abbreviated, time: .shortened))
+            Text(detailsLaunchSummary ?? emulator.launchReadinessReport(for: game))
+                .textSelection(.enabled)
+                .foregroundStyle(.orange)
+        }
+    }
+
+    private func gameDetailActions(_ game: MaxPS4Game) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Button("Lancer", systemImage: "play.fill") { emulator.launch(game) }
+                .buttonStyle(.borderedProminent)
+                .disabled(!MaxPS4LibraryPresentation.canRequestLaunch(fileName: game.fileName, backendReady: emulator.backendReady))
+            if !MaxPS4LibraryPresentation.canRequestLaunch(fileName: game.fileName, backendReady: emulator.backendReady) {
+                Text("Lancement indisponible : consultez le diagnostic ci-dessous.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Button("Essayer le moteur (diagnostic)") {
+                emulator.tryGameEngine(game)
+                detailsReport = emulator.status
+            }
+            .buttonStyle(.borderedProminent)
+            Button(game.fileName.lowercased().hasSuffix(".pkg") ? "Analyser PKG/PFS" : "Analyser l’exécutable") {
+                if game.fileName.lowercased().hasSuffix(".pkg") {
+                    detailsReport = "Analyse du PKG en cours…"
+                    Task { detailsReport = await emulator.analyzePKG(game) }
+                } else {
+                    emulator.inspect(game)
+                    detailsReport = emulator.status
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            if game.fileName.lowercased().hasSuffix(".elf") || game.fileName.lowercased() == "eboot.bin" {
+                Button("Diagnostiquer le premier lancement PS4") {
+                    emulator.diagnoseFirstPS4Launch(game)
+                    detailsReport = emulator.status
+                }
+                .buttonStyle(.borderedProminent)
+                Button("Inspecter les imports ELF64") {
+                    emulator.inspectELFImports(game)
+                    detailsReport = emulator.status
+                }
+                .buttonStyle(.bordered)
+            }
+            if game.fileName.lowercased().hasSuffix(".pkg") {
+                Button("Calculer SHA-256 du PKG") {
+                    detailsReport = "Calcul de l’empreinte SHA-256 en cours…"
+                    Task {
+                        detailsReport = await MaxPS4PKGHash.sha256(
+                            url: URL(fileURLWithPath: game.localPath)
+                        )
+                    }
+                }
+                .buttonStyle(.bordered)
+            }
+            if game.fileName.lowercased().hasSuffix(".pkg"),
+               detailsReport?.contains("Diagnostic PKG/PFS : PFS non chiffré accessible") == true {
+                NavigationLink("Extraire eboot.bin / fichier PFS accessible…") {
+                    MaxPS4PFSExportView(source: URL(fileURLWithPath: game.localPath))
+                }
+            }
+            if game.fileName.lowercased().hasSuffix(".pkg"),
+               detailsReport?.contains("Extraction eboot.bin : impossible depuis ce PKG") == true {
+                Label("eboot.bin inaccessible : PFS chiffré ou opaque. Aucun fichier exécutable ne peut être exporté depuis ce PKG.", systemImage: "lock.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private func gameDetailReportContent() -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if let report = detailsReport {
+                ShareLink(item: report) {
+                    Label("Exporter le rapport texte", systemImage: "square.and.arrow.up")
+                }
+                Text(report)
+                    .font(.subheadline)
+                    .textSelection(.enabled)
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(MaxPS4Design.surface, in: RoundedRectangle(cornerRadius: 14))
             }
         }
     }
