@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# GCN -> C++/MSL pixel shader translator: kernel prelude equivalence, stage 1
+# GCN -> C++/MSL pixel shader translator: kernel prelude and image sampling
+# equivalence, stage 1
 # (translation and refusals) and stage 2 (translated code compiled as C++ and
 # compared with the interpreter), natively and under ASan/UBSan.
 set -euo pipefail
@@ -12,6 +13,8 @@ for mode in native sanitized; do
   [[ "$mode" == sanitized ]] && flags+=(-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
   "${CXX:-c++}" "${flags[@]}" MaxPS4-iOS/Tests/GCNKernelOpsTest.cpp -o "$OUT/GCNKernelOpsTest-$mode"
   python3 scripts/run-bounded.py 600 "$OUT/GCNKernelOpsTest-$mode.txt" "$OUT/GCNKernelOpsTest-$mode"
+  "${CXX:-c++}" "${flags[@]}" MaxPS4-iOS/Tests/GCNKernelImageTest.cpp -o "$OUT/GCNKernelImageTest-$mode"
+  python3 scripts/run-bounded.py 600 "$OUT/GCNKernelImageTest-$mode.txt" "$OUT/GCNKernelImageTest-$mode"
   "${CXX:-c++}" "${flags[@]}" MaxPS4-iOS/Tests/GCNTranslatorTool.cpp -o "$OUT/GCNTranslatorTool-$mode"
   python3 scripts/run-bounded.py 60 "$OUT/GCNTranslatorTool-$mode.txt" "$OUT/GCNTranslatorTool-$mode" "$OUT/translated-$mode.inc"
   "${CXX:-c++}" "${flags[@]}" -DGCN_TRANSLATED="\"$ROOT/$OUT/translated-$mode.inc\"" \

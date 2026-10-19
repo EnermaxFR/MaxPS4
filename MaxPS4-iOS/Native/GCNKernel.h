@@ -32,6 +32,7 @@ inline gcn_u32 gcn_b(float f) { return as_type<uint>(f); }
 #define gcn_sin sin
 #define gcn_cos cos
 #define gcn_isnan isnan
+#define gcn_isfinite isfinite
 inline gcn_u32 gcn_popcount(gcn_u32 v) { return popcount(v); }
 inline gcn_u32 gcn_clz(gcn_u32 v) { return clz(v); }
 inline gcn_u32 gcn_ctz(gcn_u32 v) { return ctz(v); }
@@ -60,6 +61,7 @@ GCN_INLINE gcn_u32 gcn_b(float f) { gcn_u32 v; std::memcpy(&v, &f, 4); return v;
 #define gcn_sin std::sin
 #define gcn_cos std::cos
 #define gcn_isnan std::isnan
+#define gcn_isfinite std::isfinite
 GCN_INLINE gcn_u32 gcn_popcount(gcn_u32 v) { return gcn_u32(__builtin_popcount(v)); }
 GCN_INLINE gcn_u32 gcn_clz(gcn_u32 v) { return gcn_u32(__builtin_clz(v)); }
 GCN_INLINE gcn_u32 gcn_ctz(gcn_u32 v) { return gcn_u32(__builtin_ctz(v)); }
