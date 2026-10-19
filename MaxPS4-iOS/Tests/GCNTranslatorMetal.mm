@@ -33,9 +33,9 @@ static std::string slurp(const char* path) { std::ifstream f(path); std::strings
 
 int main(int argc, char** argv) {
   @autoreleasepool {
-    if (argc != 3) { std::fprintf(stderr, "usage: GCNTranslatorMetal GCNKernel.h translated.inc\n"); return 2; }
-    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-    if (!device) { std::fprintf(stderr, "no Metal device\n"); return 1; }
+    if (argc != 3 && argc != 4) {
+      std::fprintf(stderr, "usage: GCNTranslatorMetal GCNKernel.h translated.inc [EMIT.metal]\n"); return 2;
+    }
     constexpr unsigned lanes = 4096, vgprs = 16, attrs = 8 * 4 * 3, outs = 5 * 4;
     const std::string kernels = R"MSL(
 struct GcnEnv { device const float* attr; device gcn_u32* out; uint count; };
@@ -55,6 +55,20 @@ struct GcnEnv { device const float* attr; device gcn_u32* out; uint count; };
                 "  GcnEnv env; env.attr = attr + lane * " + std::to_string(attrs) + "; env.out = out + lane * " + std::to_string(outs) + "; env.count = 0;\n"
                 "  " + n + "(s, v, env);\n}\n";
     }
+    if (argc == 4) {   // the exact source, for the offline compiler (xcrun metal), which needs no GPU
+      std::ofstream(argv[3]) << source;
+      std::printf("MSL source written: %zu bytes\n", source.size());
+      return 0;
+    }
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    if (!device) { NSArray<id<MTLDevice>>* all = MTLCopyAllDevices(); if (all.count) device = all[0]; }
+    if (!device) {
+      // Hosted macOS runners are virtual machines without a Metal device: nothing is
+      // executed, and this is reported as a skip, never as a pass.
+      std::printf("SKIP translator Metal execution: no Metal device on this machine (GPU results NOT compared)\n");
+      return 0;
+    }
+    std::printf("Metal device: %s\n", device.name.UTF8String);
     MTLCompileOptions* options = [MTLCompileOptions new];
     // fastMathEnabled is deprecated on newer SDKs in favour of mathMode, which the
     // macos-14 runner SDK lacks; both select IEEE-conformant math here.

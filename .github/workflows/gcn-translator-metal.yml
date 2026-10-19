@@ -41,10 +41,17 @@ jobs:
           xcrun clang++ -std=c++17 -O1 -Wall -Wextra -I MaxPS4-iOS/Native \
             MaxPS4-iOS/Tests/GCNTranslatorTool.cpp -o build/gcn-metal/tool
           build/gcn-metal/tool build/gcn-metal/translated.inc
-      - name: Compile the translated shaders as MSL and compare GPU results with the C++ twin
+      - name: Compile the translated shaders offline with the Metal compiler (no GPU needed)
         run: |
           xcrun clang++ -std=c++17 -O1 -fobjc-arc -I MaxPS4-iOS/Native \
             -DGCN_TRANSLATED="\"$PWD/build/gcn-metal/translated.inc\"" \
             MaxPS4-iOS/Tests/GCNTranslatorMetal.mm -framework Foundation -framework Metal \
             -o build/gcn-metal/metal-test
+          build/gcn-metal/metal-test MaxPS4-iOS/Native/GCNKernel.h build/gcn-metal/translated.inc build/gcn-metal/translated.metal
+          xcrun -sdk macosx metal -std=metal3.0 -fno-fast-math -Wall -c build/gcn-metal/translated.metal -o build/gcn-metal/translated.air
+          xcrun -sdk iphoneos metal -std=ios-metal2.4 -fno-fast-math -Wall -c build/gcn-metal/translated.metal -o build/gcn-metal/translated-ios.air
+          xcrun -sdk macosx metallib build/gcn-metal/translated.air -o build/gcn-metal/translated.metallib
+          ls -l build/gcn-metal/translated.metallib
+      - name: Compile the translated shaders as MSL and compare GPU results with the C++ twin (skipped without a Metal device)
+        run: |
           build/gcn-metal/metal-test MaxPS4-iOS/Native/GCNKernel.h build/gcn-metal/translated.inc
