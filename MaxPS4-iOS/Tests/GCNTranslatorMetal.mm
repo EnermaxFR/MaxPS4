@@ -1,6 +1,9 @@
 // Metal stage of the translator test (macOS CI). The very same generated text
 // as the C++ twin (itself proven equal to the GCNShader interpreter) is
 // compiled as Metal Shading Language and executed on the GPU:
+// * every vector ALU opcode of the prelude on special and random operands
+//   (denormals included), GPU against C++: differences are classified as
+//   denormal-related, within 4 ulp, or other; only "other" fails;
 // * the image sampling cases of GCNImageCases.hpp through gcn_image, one
 //   thread per (case, lane), compared bit for bit with the C++ gcn_image;
 // * the translated pixel shaders, one thread per fragment, compared with the
@@ -74,6 +77,11 @@ struct GcnEnv { device const float* attr; device gcn_u32* out; uint count; const
 #define GCN_ENV_SAMPLE(k, w0, w1, c, t) ((void)(w1), gcn_image(env.images[k], env.texels, w0, c, t))
 #define GCN_ENV_EXPORT(tg, en, cp, dn, e) \
   do { env.out[env.count++] = (tg); for (int q = 0; q < 4; ++q) env.out[env.count++] = (e)[q]; } while (0)
+kernel void run_valu_cases(device const gcn_u32* in [[buffer(0)]], device gcn_u32* out [[buffer(1)]], uint id [[thread_position_in_grid]]) {
+  bool carry = in[id * 5u + 4u] != 0u;
+  out[id * 2u] = gcn_valu(in[id * 5u], in[id * 5u + 1u], in[id * 5u + 2u], in[id * 5u + 3u], carry);
+  out[id * 2u + 1u] = carry ? 1u : 0u;
+}
 kernel void run_image_cases(device const GcnImage* images [[buffer(0)]], device const unsigned char* texels [[buffer(1)]],
                             device const gcn_u32* w0 [[buffer(2)]], device const gcn_u32* coords [[buffer(3)]],
                             device gcn_u32* out [[buffer(4)]], uint id [[thread_position_in_grid]]) {
@@ -119,6 +127,64 @@ kernel void run_image_cases(device const GcnImage* images [[buffer(0)]], device 
     id<MTLLibrary> library = [device newLibraryWithSource:[NSString stringWithUTF8String:source.c_str()] options:options error:&error];
     if (!library) { std::fprintf(stderr, "MSL compilation failed:\n%s\n", error.localizedDescription.UTF8String); return 1; }
     std::printf("MSL: %zu bytes compiled (image sampler, 3 translated pixel shaders)\n", source.size());
+
+    // 0. Vector ALU opcodes: GPU gcn_valu against C++ gcn_valu.
+    {
+      const std::vector<gcn_u32> specials = {0u, 0x80000000u, 0x3f800000u, 0xbf800000u, 0x7f800000u, 0xff800000u, 0x7fc00000u,
+                                             0xffc00001u, 0x00000001u, 0x807fffffu, 0x00800000u, 0x7f7fffffu, 0x4f800000u, 0xcf000000u,
+                                             0x3effffffu, 0x3f000000u, 0x477fe000u, 0x477ff000u, 0x33800000u, 0x387fc000u, 1u, 31u, 32u,
+                                             0xffffffffu, 0x7fffffffu, 0x12345678u, 255u, 256u, 0x00400000u, 0x80000123u};
+      uint64_t st = 0x6d61787073343231ull;
+      auto rnd = [&] { st = st * 6364136223846793005ull + 1442695040888963407ull; return gcn_u32(st >> 32); };
+      auto operand = [&]() -> gcn_u32 {
+        const gcn_u32 kind = rnd() % 8;
+        if (kind == 0) return specials[rnd() % specials.size()];
+        if (kind == 1) return gcn_b(float(gcn_i32(rnd() % 2001) - 1000) / 8.0f);
+        if (kind == 2) return rnd() % 64;
+        if (kind == 3) return (rnd() & 0x807fffffu) | ((rnd() % 3u) << 23);   // denormals and the smallest normals
+        return rnd();
+      };
+      std::vector<gcn_u32> in;
+      constexpr unsigned perOp = 16384;
+      for (gcn_u32 op = 256; op < 512; ++op) {
+        if (!gcn_valu_supported(op)) continue;
+        for (unsigned n = 0; n < perOp; ++n) { in.push_back(op); in.push_back(operand()); in.push_back(operand()); in.push_back(operand()); in.push_back(rnd() & 1); }
+      }
+      const unsigned threads = unsigned(in.size() / 5);
+      id<MTLBuffer> out = [device newBufferWithLength:size_t(threads) * 8 options:MTLResourceStorageModeShared];
+      if (!dispatch(device, library, "run_valu_cases", @[buffer(device, in), out], threads)) return 1;
+      const gcn_u32* gpu = static_cast<const gcn_u32*>(out.contents);
+      auto denormal = [](gcn_u32 v) { return (v & 0x7f800000u) == 0 && (v & 0x007fffffu) != 0; };
+      struct Count { unsigned exact = 0, denorm = 0, ulp = 0, other = 0, worst = 0; gcn_u32 sample[4] = {}; };
+      std::map<gcn_u32, Count> perOpCount;
+      unsigned other = 0;
+      for (unsigned k = 0; k < threads; ++k) {
+        const gcn_u32 op = in[k * 5], a = in[k * 5 + 1], b = in[k * 5 + 2], c = in[k * 5 + 3];
+        bool carry = in[k * 5 + 4] != 0;
+        const gcn_u32 want = gcn_valu(op, a, b, c, carry), got = gpu[k * 2];
+        Count& n = perOpCount[op];
+        const bool fout = GCNShader::isFloatOutput(op);
+        const bool minMax = op == 271 || op == 272 || op == 337 || op == 340 || op == 343;
+        if ((want == got || (fout && gcn_isnan(gcn_f(want)) && gcn_isnan(gcn_f(got))) || (minMax && ((got | want) & 0x7fffffffu) == 0))
+            && (gpu[k * 2 + 1] != 0) == carry) { ++n.exact; continue; }
+        if (denormal(a) || denormal(b) || denormal(c) || denormal(want) || denormal(got)) { ++n.denorm; continue; }
+        const unsigned ulp = unsigned(std::abs(int64_t(int32_t(want)) - int64_t(int32_t(got))));
+        if (fout && ulp <= 4 && ((want ^ got) & 0x80000000u) == 0 && (gpu[k * 2 + 1] != 0) == carry) { ++n.ulp; n.worst = std::max(n.worst, ulp); continue; }
+        if (!n.other) { n.sample[0] = a; n.sample[1] = b; n.sample[2] = c; n.sample[3] = got; }
+        ++n.other; ++other;
+        if (other <= 12) std::fprintf(stderr, "valu op %u a=%08x b=%08x c=%08x: GPU %08x/%u, C++ %08x/%d\n", op, a, b, c, got, gpu[k * 2 + 1], want, int(carry));
+      }
+      unsigned exact = 0, denorm = 0, close = 0;
+      for (const auto& [op, n] : perOpCount) {
+        exact += n.exact; denorm += n.denorm; close += n.ulp;
+        if (n.denorm || n.ulp || n.other)
+          std::printf("  valu op %u: %u identical, %u differ with denormal operands/results, %u within %u ulp, %u other\n",
+                      op, n.exact, n.denorm, n.ulp, n.worst, n.other);
+      }
+      if (other) { std::fprintf(stderr, "FAIL vector ALU on the GPU: %u results differ beyond denormals and 4 ulp\n", other); return 1; }
+      std::printf("PASS vector ALU on the GPU: %zu ops x %u cases, %u identical, %u denormal-related, %u within 4 ulp\n",
+                  perOpCount.size(), perOp, exact, denorm, close);
+    }
 
     // 1. Image sampling cases: GPU gcn_image against C++ gcn_image.
     {
