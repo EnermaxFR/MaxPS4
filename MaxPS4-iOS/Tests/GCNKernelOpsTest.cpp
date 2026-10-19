@@ -1,6 +1,7 @@
 // GCNKernel.h (C++ side of the dual C++/MSL prelude) against the GCNShader
-// interpreter: every supported vector ALU opcode, VOPC compare and output
-// modifier, bit for bit, on special values and random operands.
+// interpreter in fp32 denormal mode 0 (the translated form): every supported
+// vector ALU opcode, VOPC compare and output modifier, bit for bit, on special
+// values, denormals and random operands.
 #include "../Native/GCNKernel.h"
 #include "../Native/GCNShader.hpp"
 #include <cassert>
@@ -22,8 +23,25 @@ int main() {
     if (kind == 0) return specials[next() % specials.size()];
     if (kind == 1) return gcn_b(float(gcn_i32(next() % 2001) - 1000) / 8.0f);  // small floats
     if (kind == 2) return next() % 64;                                            // small integers / shifts
+    if (kind == 3) return (next() & 0x807fffffu) | ((next() % 3u) << 23);         // denormals and the smallest normals
     return next();
   };
+  { // The four FLOAT_MODE fp32 denormal modes of the interpreter (v_mul_f32).
+    auto mul = [](uint32_t x, uint32_t y, unsigned mode) { uint32_t r = 0; bool c = false; GCNShader::computeMode(264, x, y, 0, r, c, mode); return r; };
+    // denormal input 2^-127 times 2: normal result 2^-126 unless inputs are flushed.
+    assert(mul(0x00400000u, 0x40000000u, 3) == 0x00800000u && mul(0x00400000u, 0x40000000u, 1) == 0x00800000u);
+    assert(mul(0x00400000u, 0x40000000u, 2) == 0u && mul(0x00400000u, 0x40000000u, 0) == 0u);
+    // normal input 2^-126 times 0.5: denormal result unless outputs are flushed (sign kept).
+    assert(mul(0x80800000u, 0x3f000000u, 3) == 0x80400000u && mul(0x80800000u, 0x3f000000u, 2) == 0x80400000u);
+    assert(mul(0x80800000u, 0x3f000000u, 1) == 0x80000000u && mul(0x80800000u, 0x3f000000u, 0) == 0x80000000u);
+    bool r = false;  // compares flush their inputs in modes 0 and 2
+    assert(GCNShader::compareMode(2, 0x00000001u, 0u, r, 0) && r);
+    assert(GCNShader::compareMode(2, 0x00000001u, 0u, r, 3) && !r);
+    // v_mac_f32: a denormal product is dropped when outputs are flushed.
+    uint32_t m = 0; bool c = false;
+    GCNShader::computeMode(287, 0x1f800000u, 0x1f800000u, 0x00800000u, m, c, 1); assert(m == 0x00800000u);
+    GCNShader::computeMode(287, 0x1f800000u, 0x1f800000u, 0x00800000u, m, c, 3); assert(m != 0x00800000u);
+  }
   unsigned ops = 0; uint64_t cases = 0;
   for (gcn_u32 op = 256; op < 512; ++op) {
     if (!gcn_valu_supported(op)) continue;
@@ -34,7 +52,7 @@ int main() {
       const bool carryIn = next() & 1;
       bool kernelCarry = carryIn, refCarry = carryIn;
       uint32_t expected = 0;
-      assert(GCNShader::compute(op, a, b, c, expected, refCarry));
+      assert(GCNShader::computeMode(op, a, b, c, expected, refCarry, 0));
       const gcn_u32 got = gcn_valu(op, a, b, c, kernelCarry);
       // NaN payloads are not specified by C++ or by GPUs (operand order chosen
       // by the compiler): two NaN results of a float operation are equivalent.
@@ -59,17 +77,15 @@ int main() {
     for (int n = 0; n < 50000; ++n) {
       const gcn_u32 a = operand(), b = operand();
       bool expected = false;
-      GCNShader::compare(op, a, b, expected);
+      GCNShader::compareMode(op, a, b, expected, 0);
       if (gcn_compare(op, a, b) != expected) { std::fprintf(stderr, "compare %u %08x %08x\n", op, a, b); return 1; }
       ++cases;
     }
   }
   for (int n = 0; n < 200000; ++n) {  // omod/clamp as GCNShader::vectorAlu's finish()
     const gcn_u32 v = operand(), omod = next() & 3; const bool clamp = next() & 1;
-    float f = gcn_f(v);
-    if (omod == 1) f *= 2; else if (omod == 2) f *= 4; else if (omod == 3) f *= 0.5f;
-    if (clamp) f = std::min(1.0f, std::max(0.0f, f));
-    if (gcn_omod(v, omod, clamp) != gcn_b(f) && !(gcn_isnan(f) && gcn_isnan(gcn_f(gcn_omod(v, omod, clamp))))) { std::fprintf(stderr, "omod %08x %u %d\n", v, omod, int(clamp)); return 1; }
+    const gcn_u32 want = GCNShader::outputModifiers(v, omod, clamp, 0);
+    if (gcn_omod(v, omod, clamp) != want && !(gcn_isnan(gcn_f(want)) && gcn_isnan(gcn_f(gcn_omod(v, omod, clamp))))) { std::fprintf(stderr, "omod %08x %u %d\n", v, omod, int(clamp)); return 1; }
     ++cases;
   }
   for (gcn_u32 h = 0; h < 65536; ++h)

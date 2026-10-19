@@ -13,6 +13,8 @@
 //   into SGPRs and restoring it). Branches, V_CMPX and other EXEC writes are
 //   refused: per-lane divergence is not modelled.
 // * VCC is a per-fragment boolean (compares, carries, v_cndmask).
+// * fp32 denormals are flushed as FLOAT_MODE denormal mode 0 (inputs and
+//   outputs, multiply-add products, interpolation): see floatModeSupported.
 // * Interpolation, image sampling and exports call macros the including
 //   backend defines (GCN_ENV_INTERP, GCN_ENV_SAMPLE, GCN_ENV_EXPORT).
 //   GCN_ENV_SAMPLE(slot, w0, w1, c, t) names the image by its slot in
@@ -190,10 +192,10 @@ struct GCNShaderTranslator {
           body << "  v[" << vdst << "] = gcn_b(GCN_ENV_INTERP(" << attr << "u, " << chan << "u, " << (s == 0 ? 1 : s == 1 ? 2 : 0) << "u));\n";
         } else if (i.op <= 1) {
           if (s >= vgprs) return fail(i, "interpolation VGPR beyond the allocation");
-          if (i.op == 0) body << "  v[" << vdst << "] = gcn_b(GCN_ENV_INTERP(" << attr << "u, " << chan << "u, 1u) * gcn_f(v[" << s
-                              << "]) + GCN_ENV_INTERP(" << attr << "u, " << chan << "u, 0u));\n";
-          else body << "  v[" << vdst << "] = gcn_b(GCN_ENV_INTERP(" << attr << "u, " << chan << "u, 2u) * gcn_f(v[" << s
-                    << "]) + gcn_f(v[" << vdst << "]));\n";
+          if (i.op == 0) body << "  v[" << vdst << "] = gcn_interp(GCN_ENV_INTERP(" << attr << "u, " << chan << "u, 1u), v[" << s
+                              << "], GCN_ENV_INTERP(" << attr << "u, " << chan << "u, 0u));\n";
+          else body << "  v[" << vdst << "] = gcn_interp(GCN_ENV_INTERP(" << attr << "u, " << chan << "u, 2u), v[" << s
+                    << "], gcn_f(v[" << vdst << "]));\n";
         } else return fail(i, "VINTRP opcode not translated");
         break;
       }
@@ -237,6 +239,11 @@ struct GCNShaderTranslator {
     }
     out.error = "program longer than 4096 instructions or missing s_endpgm"; return out;
   }
+
+  // Translated code computes in fp32 denormal mode 0 (GCNKernel.h). A backend
+  // may run it for a draw only when the shader's SPI_SHADER_PGM_RSRC1 selects
+  // that mode; other modes stay on the interpreter.
+  static bool floatModeSupported(uint32_t rsrc1) { return ((rsrc1 >> 16) & 3) == 0; }
 
   // Complete function text: `name(s, v, env)` shading one fragment.
   static std::string function(const std::string& name, const Result& r) {

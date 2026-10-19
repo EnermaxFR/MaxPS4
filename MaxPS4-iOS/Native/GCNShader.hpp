@@ -113,6 +113,10 @@ struct GCNShader {
     std::vector<std::array<uint32_t, 64>> v;
     std::vector<Export> exports;
     Interpolant interpolate;
+    // fp32 denormal mode, FLOAT_MODE[5:4] of SPI_SHADER_PGM_RSRC1 (bits 17:16)
+    // as MODE.FP_DENORM: 0 flush inputs and outputs, 1 flush outputs only,
+    // 2 flush inputs only, 3 keep both. Callers that do not set it keep them.
+    unsigned fp32Denorm = 3;
     uint64_t exec() const { return uint64_t(s[126]) | (uint64_t(s[127]) << 32); }
     void setExec(uint64_t m) { s[126] = uint32_t(m); s[127] = uint32_t(m >> 32); }
     uint64_t vcc() const { return uint64_t(s[106]) | (uint64_t(s[107]) << 32); }
@@ -468,9 +472,13 @@ struct GCNShader {
           }
           if (i.op == 3) return fail("VINTRP opcode not implemented");
           if (src >= wave.vgprs) return fail("interpolation VGPR beyond allocation");
-          const float coord = gcnFloat(wave.v[src][lane]);
-          if (i.op == 0) wave.v[vdst][lane] = gcnBits(p[1] * coord + p[0]);
-          else wave.v[vdst][lane] = gcnBits(p[2] * coord + gcnFloat(wave.v[vdst][lane]));
+          // p * coord + base, under the wave's fp32 denormal mode (as v_mad).
+          const bool flushIn = wave.fp32Denorm == 0 || wave.fp32Denorm == 2, flushOut = wave.fp32Denorm == 0 || wave.fp32Denorm == 1;
+          auto in = [&](float f) { return flushIn ? gcnFloat(flushDenormal(gcnBits(f))) : f; };
+          auto out = [&](float f) { return flushOut ? gcnFloat(flushDenormal(gcnBits(f))) : f; };
+          const float coord = in(gcnFloat(wave.v[src][lane]));
+          if (i.op == 0) wave.v[vdst][lane] = gcnBits(out(out(in(p[1]) * coord) + in(p[0])));
+          else wave.v[vdst][lane] = gcnBits(out(out(in(p[2]) * coord) + in(gcnFloat(wave.v[vdst][lane]))));
         }
         break;
       }
@@ -524,17 +532,44 @@ struct GCNShader {
     if (op < 320) { const unsigned o = op - 256; return (o >= 3 && o <= 8) || (o >= 13 && o <= 16) || o == 31 || o == 32 || o == 33 || o == 43; }
     return op == 320 || op == 321 || op == 331 || op == 337 || op == 340 || op == 343;
   }
+  static uint32_t flushDenormal(uint32_t v) { return (v & 0x7f800000U) ? v : (v & 0x80000000U); }
+  // compute() under an fp32 denormal mode (Wave::fp32Denorm): float inputs
+  // (all but ldexp's exponent) and float results are flushed to signed zero
+  // as the mode says; with output flushing, the rounded product of the
+  // multiply-add forms is flushed too (GCN's v_mad/v_mac never keep
+  // denormals). Mode 3 is compute() itself.
+  static bool computeMode(unsigned op, uint32_t a, uint32_t b, uint32_t c, uint32_t& r, bool& carry, unsigned mode) {
+    const bool in = mode == 0 || mode == 2, out = mode == 0 || mode == 1;
+    if (in && isFloatInput(op)) { a = flushDenormal(a); if (op != 299) b = flushDenormal(b); c = flushDenormal(c); }
+    if (!compute(op, a, b, c, r, carry, out)) return false;
+    if (out && isFloatOutput(op)) r = flushDenormal(r);
+    return true;
+  }
+  static bool compareMode(unsigned op, uint32_t a, uint32_t b, bool& result, unsigned mode) {
+    if ((mode == 0 || mode == 2) && (op & 0xe0) == 0) { a = flushDenormal(a); b = flushDenormal(b); }
+    return compare(op, a, b, result);
+  }
+  // VOP3 output modifiers of a float result (omod, then clamp; NaN clamps to 0).
+  static uint32_t outputModifiers(uint32_t v, unsigned omod, bool clamp, unsigned mode) {
+    float f = gcnFloat(v);
+    if (omod == 1) f *= 2; else if (omod == 2) f *= 4; else if (omod == 3) f *= 0.5f;
+    if (clamp) f = std::min(1.0f, std::max(0.0f, f));
+    const uint32_t r = gcnBits(f);
+    return (mode == 0 || mode == 1) ? flushDenormal(r) : r;
+  }
   // Returns false for an unimplemented opcode. carry: in/out lane bit.
-  static bool compute(unsigned op, uint32_t a, uint32_t b, uint32_t c, uint32_t& r, bool& carry) {
+  // flushProduct: the multiply-add forms flush their rounded product.
+  static bool compute(unsigned op, uint32_t a, uint32_t b, uint32_t c, uint32_t& r, bool& carry, bool flushProduct = false) {
     const float fa = gcnFloat(a), fb = gcnFloat(b), fc = gcnFloat(c);
     auto F = [&](float v) { r = gcnBits(v); return true; };
     auto legacyMul = [](float x, float y) { return (x == 0 || y == 0) ? 0.0f : x * y; };
+    auto P = [&](float p) { return flushProduct ? gcnFloat(flushDenormal(gcnBits(p))) : p; };
     switch (op) {
     case 256: r = carry ? b : a; return true;                  // v_cndmask_b32
     case 259: return F(fa + fb);
     case 260: return F(fa - fb);
     case 261: return F(fb - fa);
-    case 262: return F(legacyMul(fa, fb) + fc);               // v_mac_legacy_f32 (c = dst)
+    case 262: return F(P(legacyMul(fa, fb)) + fc);               // v_mac_legacy_f32 (c = dst)
     case 263: return F(legacyMul(fa, fb));
     case 264: return F(fa * fb);
     case 265: r = uint32_t(int32_t(int64_t(int32_t(a << 8) >> 8) * int64_t(int32_t(b << 8) >> 8))); return true;
@@ -557,9 +592,9 @@ struct GCNShader {
     case 284: r = a | b; return true;
     case 285: r = a ^ b; return true;
     case 286: r = (a & 31) ? ((1U << (a & 31)) - 1) << (b & 31) : 0; return true;
-    case 287: return F(fa * fb + fc);                         // v_mac_f32 (c = dst)
-    case 288: return F(fa * fc + fb);                         // v_madmk_f32 (c = K)
-    case 289: return F(fa * fb + fc);                         // v_madak_f32 (c = K)
+    case 287: return F(P(fa * fb) + fc);                         // v_mac_f32 (c = dst)
+    case 288: return F(P(fa * fc) + fb);                         // v_madmk_f32 (c = K)
+    case 289: return F(P(fa * fb) + fc);                         // v_madak_f32 (c = K)
     case 290: r = uint32_t(__builtin_popcount(a)) + b; return true;
     case 293: { const uint64_t t = uint64_t(a) + b; r = uint32_t(t); carry = t >> 32; return true; }
     case 294: r = a - b; carry = b > a; return true;
@@ -570,8 +605,8 @@ struct GCNShader {
     case 299: return F(std::ldexp(fa, int32_t(b)));
     case 303: r = uint32_t(gcnHalf(fa, true)) | (uint32_t(gcnHalf(fb, true)) << 16); return true;
     case 304: r = (a & 0xffff) | (b << 16); return true;
-    case 320: return F(legacyMul(fa, fb) + fc);
-    case 321: return F(fa * fb + fc);
+    case 320: return F(P(legacyMul(fa, fb)) + fc);
+    case 321: return F(P(fa * fb) + fc);
     case 322: r = uint32_t(int32_t(int64_t(int32_t(a << 8) >> 8) * int64_t(int32_t(b << 8) >> 8)) + int32_t(c)); return true;
     case 323: r = (a & 0xffffff) * (b & 0xffffff) + c; return true;
     case 328: { const unsigned off = b & 31, width = c & 31; r = width ? (a >> off) & ((1U << width) - 1) : 0; return true; }
@@ -698,10 +733,7 @@ struct GCNShader {
     };
     auto finish = [&](uint32_t v) {
       if (!isFloatOutput(op) || (!omod && !clamp)) return v;
-      float f = gcnFloat(v);
-      if (omod == 1) f *= 2; else if (omod == 2) f *= 4; else if (omod == 3) f *= 0.5f;
-      if (clamp) f = std::min(1.0f, std::max(0.0f, f));
-      return gcnBits(f);
+      return outputModifiers(v, omod, clamp, wave.fp32Denorm);
     };
     // Lane-wide special forms.
     if (op == 386) { // v_readfirstlane_b32: vdst is an SGPR
@@ -732,7 +764,7 @@ struct GCNShader {
       uint64_t mask = 0;
       for (unsigned lane = 0; lane < 64; ++lane) if ((exec >> lane) & 1) {
         bool r = false;
-        compare(op, mod(0, vsrc(src0, lane)), mod(1, vsrc(src1, lane)), r);
+        compareMode(op, mod(0, vsrc(src0, lane)), mod(1, vsrc(src1, lane)), r, wave.fp32Denorm);
         if (r) mask |= uint64_t(1) << lane;
       }
       if (!ok) return false;
@@ -758,7 +790,7 @@ struct GCNShader {
       if (!ok) return false;
       bool carry = (carryIn >> lane) & 1;
       uint32_t r = 0;
-      compute(op, a, b, c, r, carry);
+      computeMode(op, a, b, c, r, carry, wave.fp32Denorm);
       wave.v[vdst][lane] = finish(r);
       if (carry) carryOut |= uint64_t(1) << lane;
     }

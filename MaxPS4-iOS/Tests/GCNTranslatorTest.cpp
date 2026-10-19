@@ -77,6 +77,7 @@ int main() {
     assert(!m.write_data(program, f.code.data(), f.code.size() * 4));
     for (unsigned trial = 0; trial < 8; ++trial) {
       GCNShader ref; GCNShader::Wave wave; wave.configure(32, f.vgprs);
+      wave.fp32Denorm = 0;   // translated shaders run in fp32 denormal mode 0
       for (unsigned k = 0; k < 4; ++k) wave.s[k] = vsharp[k];
       for (unsigned k = 0; k < 8; ++k) wave.s[8 + k] = tsharp[k];
       for (unsigned k = 0; k < 4; ++k) wave.s[16 + k] = ssharp[k];

@@ -99,7 +99,7 @@ GCN_TABLE gcn_u32 gcn_unorm8[256] = {
   0x3f78f8f9u, 0x3f79f9fau, 0x3f7afafbu, 0x3f7bfbfcu, 0x3f7cfcfdu, 0x3f7dfdfeu, 0x3f7efeffu, 0x3f800000u
 };
 
-GCN_INLINE float gcn_ftz(float x) { const gcn_u32 b = gcn_b(x); return (b & 0x7f800000u) == 0u ? gcn_f(b & 0x80000000u) : x; }
+#define gcn_ftz gcn_ftzf
 GCN_INLINE gcn_u32 gcn_bitof(gcn_u32 v, gcn_u32 n) { return (v >> n) & 1u; }
 // Display2DThin32::offset (GCNTiling.hpp) with 32-bit arithmetic (surfaces <= 1 GiB).
 GCN_INLINE gcn_u32 gcn_tile10_offset(gcn_u32 pitch, gcn_u32 x, gcn_u32 y) {

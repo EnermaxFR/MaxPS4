@@ -125,15 +125,40 @@ GCN_INLINE bool gcn_valu_supported(gcn_u32 op) {
   }
 }
 
-// r = op(a, b, c); carry is the lane's carry/condition bit (in and out).
-GCN_INLINE gcn_u32 gcn_valu(gcn_u32 op, gcn_u32 a, gcn_u32 b, gcn_u32 c, GCN_THREAD bool& carry) {
+// fp32 denormals: translated shaders run in FLOAT_MODE fp32 denormal mode 0
+// (flush inputs and outputs, the PS4 default and what Apple GPUs do). The
+// flushes are explicit on bit patterns, so C++ and GPU agree whatever the
+// hardware does; this is GCNShader::computeMode(..., 0).
+GCN_INLINE gcn_u32 gcn_ftz_bits(gcn_u32 v) { return (v & 0x7f800000u) != 0u ? v : (v & 0x80000000u); }
+GCN_INLINE float gcn_ftzf(float x) { return gcn_f(gcn_ftz_bits(gcn_b(x))); }
+// GCNShader::isFloatInput / isFloatOutput.
+GCN_INLINE bool gcn_float_input(gcn_u32 op) {
+  if (op < 256u) return op < 0x20u;
+  if (op < 320u) { const gcn_u32 o = op - 256u;
+    return (o >= 3u && o <= 8u) || (o >= 13u && o <= 16u) || o == 31u || o == 32u || o == 33u || o == 43u || (o >= 45u && o <= 47u); }
+  if (op >= 384u) { const gcn_u32 o = op - 384u;
+    return o == 7u || o == 8u || o == 10u || o == 12u || o == 13u || (o >= 32u && o <= 46u) || o == 51u || o == 53u || o == 54u; }
+  return op == 320u || op == 321u || op == 331u || op == 337u || op == 340u || op == 343u;
+}
+GCN_INLINE bool gcn_float_output(gcn_u32 op) {
+  if (op < 256u) return false;
+  if (op >= 384u) { const gcn_u32 o = op - 384u;
+    return o == 5u || o == 6u || o == 11u || (o >= 17u && o <= 20u) || (o >= 32u && o <= 46u) || o == 51u || o == 53u || o == 54u; }
+  if (op < 320u) { const gcn_u32 o = op - 256u;
+    return (o >= 3u && o <= 8u) || (o >= 13u && o <= 16u) || o == 31u || o == 32u || o == 33u || o == 43u; }
+  return op == 320u || op == 321u || op == 331u || op == 337u || op == 340u || op == 343u;
+}
+
+// r = op(a, b, c) without input/output flushing (GCNShader::compute with
+// flushProduct); carry is the lane's carry/condition bit (in and out).
+GCN_INLINE gcn_u32 gcn_valu_core(gcn_u32 op, gcn_u32 a, gcn_u32 b, gcn_u32 c, GCN_THREAD bool& carry) {
   const float fa = gcn_f(a), fb = gcn_f(b), fc = gcn_f(c);
   switch (op) {
   case 256: return carry ? b : a;                                   // v_cndmask_b32
   case 259: return gcn_b(fa + fb);
   case 260: return gcn_b(fa - fb);
   case 261: return gcn_b(fb - fa);
-  case 262: return gcn_b(gcn_legacy_mul(fa, fb) + fc);
+  case 262: return gcn_b(gcn_ftzf(gcn_legacy_mul(fa, fb)) + fc);
   case 263: return gcn_b(gcn_legacy_mul(fa, fb));
   case 264: return gcn_b(fa * fb);
   case 269: return gcn_b(fa < fb ? fa : fb);
@@ -153,17 +178,17 @@ GCN_INLINE gcn_u32 gcn_valu(gcn_u32 op, gcn_u32 a, gcn_u32 b, gcn_u32 c, GCN_THR
   case 283: return a & b;
   case 284: return a | b;
   case 285: return a ^ b;
-  case 287: return gcn_b(fa * fb + fc);                            // v_mac_f32 (c = dst)
-  case 288: return gcn_b(fa * fc + fb);                            // v_madmk_f32 (c = K)
-  case 289: return gcn_b(fa * fb + fc);                            // v_madak_f32 (c = K)
+  case 287: return gcn_b(gcn_ftzf(fa * fb) + fc);                  // v_mac_f32 (c = dst)
+  case 288: return gcn_b(gcn_ftzf(fa * fc) + fb);                  // v_madmk_f32 (c = K)
+  case 289: return gcn_b(gcn_ftzf(fa * fb) + fc);                  // v_madak_f32 (c = K)
   case 293: { const gcn_u64 t = gcn_u64(a) + b; carry = (t >> 32) != 0; return gcn_u32(t); }
   case 294: carry = b > a; return a - b;
   case 295: carry = a > b; return b - a;
   case 299: return gcn_b(gcn_ldexp(fa, gcn_i32(b)));
   case 303: return gcn_half(fa, true) | (gcn_half(fb, true) << 16);
   case 304: return (a & 0xffffu) | (b << 16);
-  case 320: return gcn_b(gcn_legacy_mul(fa, fb) + fc);
-  case 321: return gcn_b(fa * fb + fc);
+  case 320: return gcn_b(gcn_ftzf(gcn_legacy_mul(fa, fb)) + fc);
+  case 321: return gcn_b(gcn_ftzf(fa * fb) + fc);
   case 328: { const gcn_u32 off = b & 31u, width = c & 31u; return width ? (a >> off) & ((1u << width) - 1u) : 0u; }
   case 330: return (a & b) | (~a & c);
   case 331: return gcn_b(gcn_fma(fa, fb, fc));
@@ -199,6 +224,16 @@ GCN_INLINE gcn_u32 gcn_valu(gcn_u32 op, gcn_u32 a, gcn_u32 b, gcn_u32 c, GCN_THR
   default: return 0u;  // never emitted: the translator refuses unsupported opcodes
   }
 }
+// v_interp_p1/p2: p * coord + base, as a v_mad in denormal mode 0.
+GCN_INLINE gcn_u32 gcn_interp(float p, gcn_u32 coord, float base) {
+  return gcn_ftz_bits(gcn_b(gcn_ftzf(gcn_ftzf(p) * gcn_f(gcn_ftz_bits(coord))) + gcn_ftzf(base)));
+}
+// The translated form: denormal mode 0 around gcn_valu_core.
+GCN_INLINE gcn_u32 gcn_valu(gcn_u32 op, gcn_u32 a, gcn_u32 b, gcn_u32 c, GCN_THREAD bool& carry) {
+  if (gcn_float_input(op)) { a = gcn_ftz_bits(a); if (op != 299u) b = gcn_ftz_bits(b); c = gcn_ftz_bits(c); }
+  const gcn_u32 r = gcn_valu_core(op, a, b, c, carry);
+  return gcn_float_output(op) ? gcn_ftz_bits(r) : r;
+}
 
 // VOPC compares (op < 256), as GCNShader::compare; F32, I32 and U32 families.
 GCN_INLINE bool gcn_compare_supported(gcn_u32 op) {
@@ -208,7 +243,7 @@ GCN_INLINE bool gcn_compare_supported(gcn_u32 op) {
 GCN_INLINE bool gcn_compare(gcn_u32 op, gcn_u32 a, gcn_u32 b) {
   const gcn_u32 kind = op & 15u, family = op & 0xf0u;
   if (family == 0x00u) {
-    const float x = gcn_f(a), y = gcn_f(b);
+    const float x = gcn_f(gcn_ftz_bits(a)), y = gcn_f(gcn_ftz_bits(b));   // denormal mode 0
     const bool unordered = gcn_isnan(x) || gcn_isnan(y);
     switch (kind) {
     case 0: return false; case 1: return x < y; case 2: return x == y; case 3: return x <= y;
@@ -226,7 +261,8 @@ GCN_INLINE bool gcn_compare(gcn_u32 op, gcn_u32 a, gcn_u32 b) {
     case 5: return a != b; case 6: return a >= b; case 7: return true; default: return false; }
 }
 
-// Output modifiers of float results (VOP3 omod/clamp), as GCNShader.
+// Output modifiers of float results (VOP3 omod/clamp), as
+// GCNShader::outputModifiers(..., 0).
 GCN_INLINE gcn_u32 gcn_omod(gcn_u32 v, gcn_u32 omod, bool clamp) {
   float f = gcn_f(v);
   if (omod == 1u) f *= 2.0f; else if (omod == 2u) f *= 4.0f; else if (omod == 3u) f *= 0.5f;
@@ -234,6 +270,6 @@ GCN_INLINE gcn_u32 gcn_omod(gcn_u32 v, gcn_u32 omod, bool clamp) {
     f = (0.0f < f) ? f : 0.0f;
     f = (f < 1.0f) ? f : 1.0f;
   }
-  return gcn_b(f);
+  return gcn_ftz_bits(gcn_b(f));   // denormal mode 0
 }
 #endif

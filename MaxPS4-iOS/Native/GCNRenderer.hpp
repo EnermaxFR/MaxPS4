@@ -115,6 +115,7 @@ struct GCNRenderer {
       const unsigned lanes = unsigned(std::min<size_t>(64, unique.size() - first));
       GCNShader::Wave wave;
       wave.configure(std::min(vsSgprs, 104u), vsVgprs);
+      wave.fp32Denorm = (vsRsrc1 >> 16) & 3;   // FLOAT_MODE fp32 denormals
       for (unsigned k = 0; k < vsUser; ++k) wave.s[k] = sh[0x4c + k];
       wave.setExec(lanes == 64 ? ~uint64_t(0) : (uint64_t(1) << lanes) - 1);
       for (unsigned lane = 0; lane < lanes; ++lane) wave.v[0][lane] = unique[first + lane];
@@ -294,6 +295,7 @@ struct GCNRenderer {
       if (batch.empty()) return true;
       GCNShader::Wave wave;
       wave.configure(std::min(psSgprs, 104u), psVgprs);
+      wave.fp32Denorm = (psRsrc1 >> 16) & 3;   // FLOAT_MODE fp32 denormals
       for (unsigned k = 0; k < psUser; ++k) wave.s[k] = sh[0xc + k];
       if (psUser < wave.sgprs) wave.s[psUser] = 0; // PRIM_MASK: interpolation uses per-lane setups
       uint64_t covered = 0;
