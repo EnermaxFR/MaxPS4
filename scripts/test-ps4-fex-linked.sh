@@ -39,6 +39,44 @@ cmake -S "$FEX" -B "$OUT" -G Ninja \
   "${options[@]}" > "$OUT/configure.log" 2>&1
 cmake --build "$OUT" --target maxps4-ps4-linked-test maxps4-fex-translation-test maxps4-v4-c-abi-smoke --parallel "${MAXPS4_BUILD_JOBS:-3}" > "$OUT/build.log" 2>&1 || { tail -100 "$OUT/build.log"; exit 1; }
 "$OUT/Bin/maxps4-v4-c-abi-smoke" | tee "$OUT/v4-c-abi-smoke.txt"
+bash "$ROOT/scripts/build-orbis-v4-homebrew.sh" "$OUT/global-boot" homebrew/orbis-v4-global-startup/start.c
+python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/v4-global-boot-tests.txt" \
+  "$OUT/Bin/maxps4-ps4-linked-test" --v4-global-boot "$OUT/global-boot/homebrew.elf"
+bash "$ROOT/scripts/build-orbis-v4-homebrew.sh" "$OUT/c-boot" homebrew/orbis-v4-c-startup/start.c
+python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/v4-c-boot-tests.txt" \
+  "$OUT/Bin/maxps4-ps4-linked-test" --v4-c-boot "$OUT/c-boot/homebrew.elf"
+# Separate plaintext eboot filename, byte-for-byte source-built homebrew.
+cp "$OUT/global-boot/homebrew.elf" "$OUT/global-boot/eboot.bin"
+python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/v4-eboot-tests.txt" \
+  "$OUT/Bin/maxps4-ps4-linked-test" --v4-eboot-test "$OUT/global-boot/eboot.bin"
+python3 "$ROOT/scripts/build-orbis-v4-self.py" "$OUT/global-boot/homebrew.elf" "$OUT/global-boot/homebrew.self"
+python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/v4-self-tests.txt" \
+  "$OUT/Bin/maxps4-ps4-linked-test" --v4-eboot-test "$OUT/global-boot/homebrew.self"
+python3 - "$OUT/global-boot/homebrew.self" "$OUT/global-boot/signed.self" <<'PYSIGNED'
+import pathlib,struct,sys
+b=bytearray(pathlib.Path(sys.argv[1]).read_bytes())
+for i in range(struct.unpack_from('<H',b,24)[0]):
+    p=32+i*32
+    struct.pack_into('<Q',b,p,struct.unpack_from('<Q',b,p)[0]|4)
+pathlib.Path(sys.argv[2]).write_bytes(b)
+PYSIGNED
+python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/v4-experimental-self-tests.txt" \
+  "$OUT/Bin/maxps4-ps4-linked-test" --v4-experimental-self-test "$OUT/global-boot/signed.self"
+MAXPS4_HOMEBREW_C_OPT_LEVEL=0 bash "$ROOT/scripts/build-orbis-v4-homebrew.sh" "$OUT/c-boot-o0" homebrew/orbis-v4-c-startup/start.c
+if python3 "$ROOT/scripts/run-bounded.py" 30 "$OUT/v4-c-boot-o0-tests.txt" \
+  "$OUT/Bin/maxps4-ps4-linked-test" --v4-c-boot "$OUT/c-boot-o0/homebrew.elf"; then
+  echo 'Expected unoptimized C prologue to be refused' >&2; exit 1
+fi
+python3 - "$OUT/v4-c-boot-o0-tests.txt" <<'PYREFUSAL'
+import errno,pathlib,sys
+assert f'preflight={-errno.ENOTSUP} diagnostic=V4.INSTRUCTION' in pathlib.Path(sys.argv[1]).read_text()
+PYREFUSAL
+bash "$ROOT/scripts/build-orbis-v4-homebrew.sh" "$OUT/startup" homebrew/orbis-v4-startup/start.S
+python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/v4-startup-tests.txt" \
+  "$OUT/Bin/maxps4-ps4-linked-test" --v4-startup "$OUT/startup/homebrew.elf"
+bash "$ROOT/scripts/build-orbis-v4-homebrew.sh" "$OUT/homebrew"
+python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/v4-homebrew-tests.txt" \
+  "$OUT/Bin/maxps4-ps4-linked-test" --v4-homebrew "$OUT/homebrew/homebrew.elf"
 python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/translation-tests.txt" "$OUT/Bin/maxps4-fex-translation-test" || {
   # Preserve native PC/backtrace when a JIT check dies before its assertions.
   if command -v gdb >/dev/null 2>&1; then

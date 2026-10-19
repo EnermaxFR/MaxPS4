@@ -13,7 +13,8 @@ on:
       - 'MaxPS4-iOS/Native/**'
       - 'MaxPS4-iOS/Tests/*FEX*'
       - 'MaxPS4-iOS/Tests/V4PRX*'
-      - 'MaxPS4-iOS/Tests/OrbisV4PRX*'
+      - 'MaxPS4-iOS/Tests/M1*'
+      - 'MaxPS4-iOS/Tests/OrbisV4*'
       - 'MaxPS4-iOS/Tests/PS4LinkedELFFixture.h'
   pull_request:
     paths:
@@ -27,7 +28,8 @@ on:
       - 'MaxPS4-iOS/Tests/FEXRuntimeIntegrationTest.cpp'
       - 'MaxPS4-iOS/Tests/PS4FEXLinkedExecutionTest.cpp'
       - 'MaxPS4-iOS/Tests/V4PRX*'
-      - 'MaxPS4-iOS/Tests/OrbisV4PRX*'
+      - 'MaxPS4-iOS/Tests/M1*'
+      - 'MaxPS4-iOS/Tests/OrbisV4*'
       - 'MaxPS4-iOS/Tests/PS4LinkedELFFixture.h'
       - 'MaxPS4-iOS/Tests/FEXDispatcherInitPatchTest.py'
 concurrency:
@@ -77,5 +79,6 @@ jobs:
             build/fexcore-darwin-ios/Bin/maxps4-ps4-linked-test
             build/fexcore-darwin-ios/Bin/maxps4-v4-c-abi-smoke
             build/fexcore-darwin-ios/v4-swift-abi-smoke
+            build/fexcore-darwin-ios/m1-ios-abi-smoke
             build/fexcore-darwin-ios/ps4-libkernel-demo.elf
             build/fexcore-darwin-ios/ps4-libkernel-combined.elf

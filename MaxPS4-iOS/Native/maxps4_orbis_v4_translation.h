@@ -43,6 +43,10 @@ public:
     }
     class Lease {
     public:
+        Lease(const Lease&)=delete;
+        Lease& operator=(const Lease&)=delete;
+        Lease(Lease&&)=delete;
+        Lease& operator=(Lease&&)=delete;
         explicit Lease(OrbisV4Translation& owner) : owner_(owner), lock_(owner.mutex_) {
             if (owner_.closed_) throw std::logic_error("Guest memory owner is closed");
             for (const auto& r : owner_.memory_.regions()) {
@@ -56,6 +60,35 @@ public:
         }
         const std::vector<Range>& ranges() const { return ranges_; }
         const GuestAddressSpace& memory() const { return owner_.memory_; }
+        static constexpr size_t copy_limit=1024*1024;
+        // Data copies during dispatch must not reacquire the owner mutex or
+        // invalidate code executing on this thread. Only RW/NX data is writable.
+        // The lease pins all mappings/permissions until these copies complete.
+        bool permitted(uint64_t guest,size_t bytes,uint32_t permissions) const {
+            if (!guest || !bytes || bytes>copy_limit || guest>UINT64_MAX-bytes ||
+                !permissions || (permissions&~7U) || (permissions&3U)==3U) return false;
+            while (bytes) {
+                size_t chunk=0;
+                for (const auto& r:ranges_) if (guest>=r.guest && guest-r.guest<r.size) {
+                    if ((r.permissions&permissions)!=permissions || ((permissions&2) && (r.permissions&1))) return false;
+                    chunk=std::min(bytes,static_cast<size_t>(r.size-(guest-r.guest)));
+                    break;
+                }
+                if (!chunk) return false;
+                guest+=chunk; bytes-=chunk;
+            }
+            return true;
+        }
+        int read_data(uint64_t guest,void* output,size_t bytes,bool instruction=false) const {
+            if (!output || !bytes || bytes>copy_limit || guest>UINT64_MAX-bytes) return -EINVAL;
+            if (!permitted(guest,bytes,instruction ? 5 : 4)) return -EFAULT;
+            return owner_.memory_.read(guest,output,bytes,instruction);
+        }
+        int write_data(uint64_t guest,const void* input,size_t bytes) {
+            if (!input || !bytes || bytes>copy_limit || guest>UINT64_MAX-bytes) return -EINVAL;
+            if (!permitted(guest,bytes,2)) return -EFAULT;
+            return owner_.memory_.write(guest,input,bytes);
+        }
         // Resolve only complete operands in one contiguous translated mapping.
         // The lease keeps host storage and permissions stable for the caller.
         // A split operand must take an explicit slow path, never a raw JIT load.
@@ -97,6 +130,11 @@ public:
         return memory_.write(guest,source,bytes);
     }
     Lease lease() { return Lease(*this); }
+    int set_limit(size_t bytes) {
+        std::lock_guard lock(mutex_);
+        if (closed_) return -ESHUTDOWN;
+        return memory_.set_limit(bytes);
+    }
     size_t page_size() const { return memory_.page_size(); }
     int reserve(uint64_t guest, size_t bytes) {
         std::lock_guard lock(mutex_);

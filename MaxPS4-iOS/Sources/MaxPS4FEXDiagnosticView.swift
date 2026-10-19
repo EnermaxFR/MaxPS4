@@ -12,6 +12,9 @@ struct MaxPS4FEXDiagnosticView: View {
     @State private var importingPKG = false
     @State private var pkgReport: String?
     @State private var importingOrbisDirectory = false
+    @State private var importingM1Diagnostic = false
+    @State private var importingEboot = false
+    @State private var experimentalEboot = false
     @State private var importedReport: String?
     @State private var ps4LibkernelReport: String?
     @State private var m2Report: String?
@@ -23,7 +26,57 @@ struct MaxPS4FEXDiagnosticView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     NavigationLink("Première image jouable", destination: MaxPS4PlayableView())
+                    Button("Diagnostic M1 — collisions / deux threads") { importingM1Diagnostic = true }
+                        .disabled(running)
+                        .accessibilityIdentifier("maxps4.m1Collision.imported")
+                    Button("Diagnostic M1 — fixtures intégrées") {
+                        running = true
+                        Task {
+                            importedReport = await withCheckedContinuation { continuation in
+                                MaxPS4FEXMetalExecution.queue.async {
+                                    continuation.resume(returning: MaxPS4FEXDiagnostic.testBundledM1Collision())
+                                }
+                            }
+                            running = false
+                        }
+                    }
+                    .disabled(running)
+                    .accessibilityIdentifier("maxps4.m1Collision.bundled")
+                    Button("Tester SELF clair — signature non vérifiée") {
+                        experimentalEboot = true; importingEboot = true
+                    }
+                    .disabled(running)
+                    .accessibilityIdentifier("maxps4.experimentalSELF")
+                    Button("Tester eboot.bin — mode strict") { experimentalEboot = false; importingEboot = true }
+                        .disabled(running)
+                        .accessibilityIdentifier("maxps4.separateEboot")
                     Text("État du JIT FEXCore").font(.headline)
+                    Button("Tester homebrew C — démarrage V4") {
+                        running = true
+                        Task {
+                            importedReport = await withCheckedContinuation { continuation in
+                                MaxPS4FEXMetalExecution.queue.async {
+                                    continuation.resume(returning: MaxPS4FEXDiagnostic.testCGameBoot())
+                                }
+                            }
+                            running = false
+                        }
+                    }
+                    .disabled(running)
+                    .accessibilityIdentifier("maxps4.cGameBootProbe")
+                    Button("Tester homebrew C — données globales V4") {
+                        running = true
+                        Task {
+                            importedReport = await withCheckedContinuation { continuation in
+                                MaxPS4FEXMetalExecution.queue.async {
+                                    continuation.resume(returning: MaxPS4FEXDiagnostic.testCGameBoot(globals: true))
+                                }
+                            }
+                            running = false
+                        }
+                    }
+                    .disabled(running)
+                    .accessibilityIdentifier("maxps4.globalGameBootProbe")
                     if let report {
                         let jitActive = report.succeeded && report.backend == "FEXCore JIT ARM64"
                         Label(
@@ -221,6 +274,39 @@ struct MaxPS4FEXDiagnosticView: View {
                         importedReport = await withCheckedContinuation { continuation in
                             MaxPS4FEXMetalExecution.queue.async {
                                 continuation.resume(returning: MaxPS4FEXDiagnostic.executeOrbisDirectory(url: url))
+                            }
+                        }
+                    }
+                case .failure(let error): importedReport = error.localizedDescription
+                }
+            }
+            .fileImporter(isPresented: $importingM1Diagnostic, allowedContentTypes: [.folder]) { selection in
+                switch selection {
+                case .success(let url):
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    running = true
+                    Task {
+                        defer { if scoped { url.stopAccessingSecurityScopedResource() }; running = false }
+                        importedReport = await withCheckedContinuation { continuation in
+                            MaxPS4FEXMetalExecution.queue.async {
+                                continuation.resume(returning: MaxPS4FEXDiagnostic.testM1Collision(directory: url))
+                            }
+                        }
+                    }
+                case .failure(let error): importedReport = error.localizedDescription
+                }
+            }
+            .fileImporter(isPresented: $importingEboot, allowedContentTypes: [.data]) { selection in
+                switch selection {
+                case .success(let url):
+                    let chosenExperimental = experimentalEboot
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    running = true
+                    Task {
+                        defer { if scoped { url.stopAccessingSecurityScopedResource() }; running = false }
+                        importedReport = await withCheckedContinuation { continuation in
+                            MaxPS4FEXMetalExecution.queue.async {
+                                continuation.resume(returning: MaxPS4FEXDiagnostic.testEboot(url: url, experimental: chosenExperimental))
                             }
                         }
                     }

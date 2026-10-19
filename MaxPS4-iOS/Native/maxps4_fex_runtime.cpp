@@ -6,6 +6,10 @@
 #include "maxps4_orbis_v4_execution_gate.h"
 #include "maxps4_orbis_v4_synthetic_stage.h"
 #include "OrbisV4PRXLaunch.hpp"
+#include "M1CollisionDiagnostic.hpp"
+#include "OrbisV4TLSMulti.hpp"
+#include "OrbisV4Eboot.hpp"
+#include "OrbisV4ExperimentalSELF.hpp"
 #include <algorithm>
 #include <iterator>
 #include "maxps4_jit_memory.h"
@@ -64,6 +68,21 @@ public:
     std::span<const FEXCore::HLE::GuestMemoryRange> GuestMemoryRanges() const override { return ranges; }
     uint32_t calls = 0;
     int callback_error = 0;
+    struct V4ImportCall {
+        maxps4::OrbisV4Translation::Lease& lease;
+        maxps4::PS4GuestMemory memory;
+        maxps4::PS4Libkernel translated_kernel;
+        maxps4::PS4Libkernel& kernel;
+        uint64_t entry, initial_rsp;
+        bool clock;
+        uint32_t calls=0;
+        int failure=0;
+        V4ImportCall(maxps4::OrbisV4Translation::Lease& l,maxps4::PS4Libkernel& old,
+                     uint64_t pc,uint64_t sp,bool use_clock)
+            : lease(l),memory(l),translated_kernel(memory),kernel(use_clock ? translated_kernel : old),
+              entry(pc),initial_rsp(sp),clock(use_clock) {}
+    };
+    V4ImportCall* v4_import=nullptr; // Scoped to dispatch; lease/context outlive this pointer.
     uint64_t HandleSyscall(FEXCore::Core::CpuStateFrame* frame, FEXCore::HLE::SyscallArguments*) override {
         namespace x86 = FEXCore::X86State;
         auto& state = frame->State;
@@ -71,6 +90,22 @@ public:
         maxps4::PS4KernelService service{};
         const uint64_t rsp = r[x86::REG_RSP];
         int64_t result = maxps4::ps4::kernel_error(maxps4::ps4::nosys);
+        if (v4_import) {
+            auto& call=*v4_import;
+            if (call.calls || !maxps4::OrbisV4Imports::gate(call.lease,call.entry,call.initial_rsp,
+                    state.rip,r[x86::REG_RAX],rsp,call.clock,r[x86::REG_RDI],r[x86::REG_RSI])) call.failure=-EPERM;
+            else {
+                const maxps4::PS4KernelCall args{r[x86::REG_RDI],r[x86::REG_RSI],r[x86::REG_RDX],
+                                               r[x86::REG_RCX],r[x86::REG_R8],r[x86::REG_R9],rsp};
+                result=call.kernel.invoke(call.clock ? maxps4::PS4KernelService::clock_getres :
+                                                     maxps4::PS4KernelService::thread_self,args,1);
+                if (call.clock && result) call.failure=-EIO;
+                ++call.calls;
+            }
+            r[x86::REG_RAX]=static_cast<uint64_t>(result);
+            state.rip+=2;
+            return static_cast<uint64_t>(result);
+        }
         if (!image || !linker || !kernel || !memory || r[x86::REG_RAX] > UINT32_MAX ||
             !linker->gate(*image,m1 ? reinterpret_cast<uintptr_t>(image->translate(state.rip,2,5)) : state.rip,
                 static_cast<uint32_t>(r[x86::REG_RAX]),service)) {
@@ -346,6 +381,9 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     engine->cpu_report = {};
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
     const bool translated = m1 && !m1->space.fex_direct();
+    // Production M1 must never reintroduce guest==host reservations. Direct
+    // spaces remain available for reservation-only collision diagnostics.
+    if (m1 && !translated) return -ENOTSUP;
     // Translated M1 requires a logical stack and the immutable snapshot below.
     // Arbitrary ELF/PKG dispatch still passes its existing admission gate.
     if (translated && !guest_thread) return -ENOTSUP;
@@ -712,7 +750,7 @@ extern "C" int32_t maxps4_fex_test_m2_low_va(maxps4_m2_low_va_report* report) {
         std::lock_guard lock(runtime_lock);
         try {
             status = [&]() -> int {
-                maxps4::OrbisM1 process(maxps4::GuestAddressSpace::Backend::translated);
+                maxps4::OrbisM1 process;
                 const size_t page = process.space.page_size();
                 if (!page) return -ENOTSUP;
                 // A real occupied host mapping is also used as a guest logical
@@ -928,6 +966,78 @@ extern "C" int32_t maxps4_fex_engine_v4_preflight(maxps4_fex_engine* engine,
     return engine->v4_execution_gate.preflight(entry,stack,stack_bytes,
                                                executable,writable_stack);
 }
+extern "C" int32_t maxps4_fex_eboot_experimental_preflight(const uint8_t* bytes,size_t size,char* output,size_t capacity) {
+    if (!output || !capacity) return -EINVAL;
+    output[0]=0;
+    try {
+        std::vector<uint8_t> canonical; maxps4_v4_prx_request request{}; std::string report;
+        const int status=maxps4::OrbisV4ExperimentalSELF::admit(bytes,size,canonical,request,report);
+        const size_t count=std::min(report.size(),capacity-1);
+        std::memcpy(output,report.data(),count); output[count]=0;
+        return count<report.size() ? -ENOSPC : status;
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
+      catch (const std::exception&) { return -ENOTSUP; }
+}
+extern "C" int32_t maxps4_fex_engine_run_eboot_experimental(maxps4_fex_engine* engine,
+    const uint8_t* bytes,size_t size,uint64_t* result,uint32_t* backend) {
+    if (result) *result=0;
+    if (backend) *backend=0;
+    if (!engine || !result || !backend) return -EINVAL;
+    try {
+        std::vector<uint8_t> canonical; maxps4_v4_prx_request request{}; std::string report;
+        const int status=maxps4::OrbisV4ExperimentalSELF::admit(bytes,size,canonical,request,report);
+        if (status) return status;
+        return maxps4_fex_engine_run_v4_prx(engine,&request,result,backend);
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
+      catch (const std::exception&) { return -ENOTSUP; }
+}
+extern "C" int32_t maxps4_fex_eboot_preflight(const uint8_t* bytes,size_t length,
+                                             char* output,size_t capacity) {
+    if (!output || !capacity) return -EINVAL;
+    output[0]=0;
+    try {
+        std::string report;
+        const int status=maxps4::OrbisV4Eboot::preflight(bytes,length,report);
+        const size_t count=std::min(report.size(),capacity-1);
+        std::memcpy(output,report.data(),count); output[count]=0;
+        return count<report.size() ? -ENOSPC : status;
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
+      catch (const std::exception&) { return -ENOTSUP; }
+}
+extern "C" int32_t maxps4_fex_engine_run_eboot(maxps4_fex_engine* engine,
+    const uint8_t* bytes,size_t length,uint64_t* result,uint32_t* backend) {
+    if (result) *result=0;
+    if (backend) *backend=0;
+    if (!engine || !result || !backend) return -EINVAL;
+    try {
+        maxps4_v4_prx_request request{}; std::string report;
+        const int status=maxps4::OrbisV4Eboot::request(bytes,length,request,report);
+        if (status) return status;
+        return maxps4_fex_engine_run_v4_prx(engine,&request,result,backend);
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
+      catch (const std::exception&) { return -ENOTSUP; }
+}
+extern "C" int32_t maxps4_fex_v4_preflight(const maxps4_v4_prx_request* request,
+                                          char* diagnostic, size_t capacity) {
+    if (!diagnostic || !capacity) return -EINVAL;
+    diagnostic[0]=0;
+    std::string reason;
+    const char* fallback=nullptr;
+    int status=-EINVAL;
+    try {
+        if (!request) reason="V4.REQUEST: null request";
+        else {
+            std::unique_ptr<maxps4::OrbisV4Translation> owner;
+            status=maxps4::OrbisV4PRXLaunch::prepare(*request,[] {},owner,&reason);
+            if (owner) owner->close();
+        }
+    } catch (const std::bad_alloc&) { status=-ENOMEM; fallback="V4.MEMORY: allocation failed"; }
+      catch (const std::exception&) { status=-ENOTSUP; fallback="V4.PREFLIGHT: translation preparation failed"; }
+    const char* text=fallback ? fallback : reason.c_str();
+    const size_t count=std::min(std::strlen(text),capacity-1);
+    std::memcpy(diagnostic,text,count); diagnostic[count]=0;
+    return status;
+}
 extern "C" int32_t maxps4_fex_engine_run_v4_prx(maxps4_fex_engine* engine,
     const maxps4_v4_prx_request* request, uint64_t* result, uint32_t* backend) {
     if (result) *result=0;
@@ -963,14 +1073,29 @@ extern "C" int32_t maxps4_fex_engine_run_v4_prx(maxps4_fex_engine* engine,
             if (thread) engine->context->ClearCodeCache(thread,false);
         },owner);
         if (prepared) return prepared;
-        const uint64_t rsp=maxps4::OrbisV4PRXLaunch::stack+owner->page_size()-16;
+        maxps4::OrbisV4TLSMulti::Thread tls_thread;
+        if (request->abi==MAXPS4_V4_ABI_STARTUP_RETURN) {
+            const std::vector<maxps4::OrbisV4TLSModule> modules{
+                {1, 32, 16, {42, 0, 0, 0}},
+                {2, 64, 64, {0x33, 0x44, 0x55}}
+            };
+            const int tls_status=maxps4::OrbisV4TLSMulti::initialize(
+                *owner,modules,tls_thread);
+            if (tls_status) return tls_status;
+        }
+        const bool clock=request->abi==MAXPS4_V4_ABI_IMPORT_CLOCK_GETRES;
+        const bool imports=request->abi==MAXPS4_V4_ABI_IMPORT_THREAD_SELF || clock;
+        const bool startup=request->abi==MAXPS4_V4_ABI_STARTUP_RETURN || imports;
+        const uint64_t rsp=startup ? maxps4::OrbisV4Startup::rsp(owner->page_size()) :
+                                    maxps4::OrbisV4PRXLaunch::stack+owner->page_size()-16;
         thread=engine->context->CreateThread(request->entry,rsp);
         if (!thread) return -ENOMEM;
         thread->CallRetStackBase=static_cast<uint8_t*>(callret.address);
         auto& state=thread->CurrentFrame->State;
         std::fill(std::begin(state.gregs),std::end(state.gregs),0);
         state.rip=request->entry; state.gregs[FEXCore::X86State::REG_RSP]=rsp;
-        state.fs_cached=0; state.gs_cached=0;
+        if (startup) state.gregs[FEXCore::X86State::REG_RDI]=maxps4::OrbisV4Startup::arguments;
+        state.fs_cached=tls_thread.storage.fs_base; state.gs_cached=0;
         state.callret_sp=reinterpret_cast<uintptr_t>(callret.address)+callret.size/4;
         state.segment_arrays[FEXCore::Core::CPUState::SEGMENT_ARRAY_INDEX_GDT]=gdt.data();
         state.segment_arrays[FEXCore::Core::CPUState::SEGMENT_ARRAY_INDEX_LDT]=gdt.data();
@@ -989,6 +1114,12 @@ extern "C" int32_t maxps4_fex_engine_run_v4_prx(maxps4_fex_engine* engine,
             for (const auto& r:lease.ranges())
                 engine->probe.ranges.push_back({r.guest,r.host,r.size,r.permissions});
             if (!engine->probe.ValidateGuestMemoryRanges()) return -ENOTSUP;
+            ProbeAddressSpace::V4ImportCall import_call{lease,engine->libkernel,request->entry,rsp,clock};
+            struct RestoreV4Import {
+                ProbeAddressSpace& probe;
+                ~RestoreV4Import() { probe.v4_import=nullptr; }
+            } restore_import{engine->probe};
+            if (imports) engine->probe.v4_import=&import_call;
             FEXCore::Core::GuestMemoryFaultData fault{};
             state.GuestMemoryFaultRecord=&fault;
             struct ClearV4Fault {
@@ -998,6 +1129,9 @@ extern "C" int32_t maxps4_fex_engine_run_v4_prx(maxps4_fex_engine* engine,
             engine->context->ExecuteThread(thread);
             state.GuestMemoryFaultRecord=nullptr;
             if (fault.Bytes) return -EFAULT;
+            if (imports && (import_call.failure || import_call.calls!=1))
+                return import_call.failure ? import_call.failure : -EFAULT;
+            if (startup && state.gregs[FEXCore::X86State::REG_RSP]!=rsp+8) return -EFAULT;
             value=state.gregs[FEXCore::X86State::REG_RAX];
             engine->probe.ranges.clear();
         }
@@ -1223,6 +1357,11 @@ extern "C" int32_t maxps4_fex_engine_interpret_elf(maxps4_fex_engine* engine,
     } catch (const std::bad_alloc&) { return -ENOMEM; }
 }
 
+extern "C" int32_t maxps4_fex_m1_collision_diagnostic(maxps4_m1_collision_report* report) {
+    if (!report) return -EINVAL;
+    try { return maxps4::m1_collision_diagnostic(*report); }
+    catch (const std::bad_alloc&) { return -ENOMEM; }
+}
 extern "C" int32_t maxps4_fex_engine_run_m1_threads(maxps4_fex_engine* engine,
     const uint8_t* file, size_t length, uint32_t budget, uint64_t snapshot,
     const maxps4_m1_tls_input* inputs, size_t module_count, size_t thread_count,
@@ -1235,7 +1374,7 @@ extern "C" int32_t maxps4_fex_engine_run_m1_threads(maxps4_fex_engine* engine,
     std::lock_guard lock(runtime_lock);
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
     try {
-        maxps4::OrbisM1 process(maxps4::GuestAddressSpace::Backend::translated);
+        maxps4::OrbisM1 process;
         int status = process.load(file,length,budget);
         if (status) return status;
         auto mapping_error = [&](const char* phase, uint64_t id, int error) {
@@ -1365,7 +1504,7 @@ extern "C" int32_t maxps4_fex_engine_run_m1(maxps4_fex_engine* engine,
     std::lock_guard lock(runtime_lock);
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
     try {
-        maxps4::OrbisM1 process(maxps4::GuestAddressSpace::Backend::translated);
+        maxps4::OrbisM1 process;
         int status = process.load(file,length,budget);
         if (status) { std::fprintf(stderr,"M1 image mapping failed: %d\n",status); return status; }
         maxps4::GuestThreadMemory thread(process.space);

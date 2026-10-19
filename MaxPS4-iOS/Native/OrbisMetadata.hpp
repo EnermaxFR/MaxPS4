@@ -1,6 +1,8 @@
 #pragma once
 // Plain ELF64 Orbis metadata, independent of the restricted executable FEX path.
 // SCE tag/layout constants follow shadPS4 elf.h (see PS4ExecutableImage.hpp).
+#include "OrbisV4SELF.hpp"
+#include "OrbisClearImage.hpp"
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -37,12 +39,27 @@ public:
     std::vector<Relocation> relocations;
     std::string error;
     bool sce = false;
+    bool clearSelf = false, inspectedClearSelf = false;
+    enum class SelfInspection { StrictStatic, ClearUnauthenticated };
 
-    bool parse(const uint8_t* bytes, size_t size, Resolver resolver = {}) {
+    bool parse(const uint8_t* bytes, size_t size, Resolver resolver = {},
+               SelfInspection inspection = SelfInspection::StrictStatic) {
         *this = OrbisMetadata{};
         OrbisMetadata pending;
         try {
-            pending.decode(bytes, size, resolver);
+            if (bytes && size >= 4 && read(bytes,4) == 0x1d3d154f) {
+                std::vector<uint8_t> canonical;
+                std::string reason;
+                const bool inspectClear = inspection==SelfInspection::ClearUnauthenticated;
+                const int status=inspectClear ? OrbisClearImage::normalize(bytes,size,canonical,reason,OrbisClearImage::Purpose::Inspection) :
+                    OrbisV4SELF::adapt(bytes,size,canonical,reason);
+                if (status)
+                    throw std::runtime_error(std::string("Conteneur SELF non pris en charge ; politique=")+
+                        (inspectClear ? "inspection claire non authentifiée" : "profil strict")+" ; aucun déchiffrement ; " + reason);
+                pending.inspectedClearSelf = inspectClear;
+                pending.decode(canonical.data(),canonical.size(),resolver);
+                pending.clearSelf = !inspectClear;
+            } else pending.decode(bytes, size, resolver);
             *this = std::move(pending);
             return true;
         } catch (const std::exception& e) { error = e.what(); return false; }
@@ -79,6 +96,8 @@ public:
         std::ostringstream out;
         out << "Analyse Orbis — lecture seule, aucune exécution\n";
         if (!error.empty()) { out << "Rejet : " << error << '\n'; return out.str(); }
+        if (inspectedClearSelf) out << "SELF en clair : inspection non authentifiée ; signature non vérifiée ; aucune admission CPU\n";
+        if (clearSelf) out << "SELF en clair : profil statique strict validé ; signature non authentifiée ; aucune exécution\n";
         out << "Type : " << typeName(type) << " (0x" << std::hex << type << ")\n"
             << "Architecture : x86-64 ; entrée : 0x" << entry << std::dec << '\n';
         for (const auto& s : segments) {
@@ -138,6 +157,8 @@ private:
         require(read(f,4) != 0x1d3d154f, "Conteneur SELF non pris en charge ; aucun déchiffrement");
         require(!std::memcmp(f,"\177ELF\2\1\1",7), "ELF64 little-endian requis");
         require((f[7] == 0 || f[7] == 9) && f[8] == 0, "OSABI/version ABI non pris en charge");
+        for (size_t i=9;i<16;++i) require(f[i]==0,"Octets réservés ELF non nuls");
+        require(read(f+48,4)==0,"Flags processeur ELF non pris en charge");
         require(read(f+18,2) == 62 && read(f+20,4) == 1, "Architecture/version ELF non prise en charge");
         require(read(f+52,2) == 64 && read(f+54,2) == 56, "Tailles d'en-tête ELF invalides");
         type = uint16_t(read(f+16,2));
@@ -150,6 +171,8 @@ private:
         uint64_t sh = read(f+40,8), sc = read(f+60,2);
         require(sc != 0xffff && read(f+62,2) != 0xffff, "Index ELF étendus non pris en charge");
         if (sc) require(sh >= 64 && read(f+58,2) == 64 && sc <= recordLimit && range(sh,sc*64,size), "Table de sections invalide");
+        require(sc ? read(f+62,2)<sc : (!sh && !read(f+62,2) &&
+            (read(f+58,2)==0 || read(f+58,2)==64)), "Métadonnées de sections ELF incohérentes");
         const Segment* dynamic = nullptr;
         const Segment* dynlib = nullptr;
         uint64_t planned = 0;
@@ -179,7 +202,8 @@ private:
             if (s.type == 2) { require(!dynamic, "Plusieurs PT_DYNAMIC"); dynamic = &segments.back(); }
             if (s.type == 0x61000000) { require(!dynlib, "Plusieurs PT_SCE_DYNLIBDATA"); dynlib = &segments.back(); }
             if (s.type == 7) { require(!tls, "Plusieurs PT_TLS"); tls = true; block("TLS Orbis par thread non implémenté"); }
-            if (s.type == 0x61000001 || s.type == 0x61000002) block("Paramètres processus/module SCE inventoriés mais non interprétés");
+            if (s.type == 0x61000001) block("Paramètres processus SCE inventoriés mais non interprétés");
+            if (s.type == 0x61000002) block("Paramètres module SCE : profil borné du linker expérimental uniquement (vue 24 octets), admission non accordée");
             if (s.type == 3) block("PT_INTERP non pris en charge");
             if (s.type != 0 && s.type != 1 && s.type != 2 && s.type != 3 && s.type != 4 && s.type != 6 &&
                 s.type != 7 && s.type != 0x61000000 && s.type != 0x61000010 && s.type != 0x61000001 &&
@@ -229,7 +253,8 @@ private:
             require(tags.emplace(tag,value).second, "Tag dynamique singleton dupliqué");
             switch (tag) {
             case 2: case 3: case 4: case 5: case 6: case 7: case 8: case 9: case 10: case 11:
-            case 12: case 13: case 14: case 15: case 20: case 21: case 23: case 24: case 30:
+            case 12: case 13: case 14: case 15: case 20: case 21: case 22: case 23: case 24: case 25:
+            case 26: case 27: case 28: case 30: case 32: case 33:
             case 0x61000005: case 0x61000007: case 0x61000009: case 0x61000011:
             case 0x61000017: case 0x61000019: case 0x61000025: case 0x61000027:
             case 0x61000029: case 0x6100002b: case 0x6100002d: case 0x6100002f:
@@ -270,7 +295,9 @@ private:
         if (tags.count(14)) (void)stringAt(get(14));
         if (tags.count(15)) { (void)stringAt(get(15)); block("DT_RPATH ignoré ; aucune recherche automatique de fichiers"); }
         if (tags.count(0x61000011)) block("Attribut module SCE non appliqué");
-        if (tags.count(24) || (get(30)&4)) block("DT_TEXTREL/DF_TEXTREL non pris en charge");
+        // DT_TEXTREL is 22 (24 is DT_BIND_NOW). The linker refuses any text relocation (W^X).
+        if (tags.count(22) || (get(30)&4)) block("DT_TEXTREL/DF_TEXTREL déclaré ; relocations du code refusées (W^X)");
+        if (get(27) || get(28) || get(33)) block("Tableaux init/fini déclarés mais non exécutés");
         if (tags.count(0x61000025) || tags.count(0x6100003d)) {
             require(tags.count(0x61000025) && tags.count(0x6100003d), "Paire HASH/HASHSZ SCE incomplète");
             uint64_t bytes = get(0x6100003d);
@@ -371,7 +398,16 @@ private:
                 bool supported = kind == 0 || kind == 1 || kind == 6 || kind == 7 || kind == 8;
                 Relocation r{read(p,8),sym,addend,kind,supported};
                 if (kind == 8) require(sym == 0, "R_RELATIVE avec symbole");
-                if (kind != 0) require(covered(r.target,8,2), "Cible RELA hors segment writable");
+                if (kind != 0) {
+                    // Inspection preserves final source RELRO permissions. Only
+                    // the separate preparation normalizer makes offline copies
+                    // writable; this exception never changes linker admission.
+                    const bool sourceRelro=inspectedClearSelf && std::any_of(segments.begin(),segments.end(),[&](const auto& s) {
+                        return s.type==0x61000010 && (s.flags&5)==4 && r.target>=s.address &&
+                            range(r.target-s.address,8,s.memsz);
+                    });
+                    require(covered(r.target,8,2) || sourceRelro, "Cible RELA hors segment writable");
+                }
                 for (const auto& old : relocations) if (kind && old.type)
                     require(r.target >= old.target+8 || old.target >= r.target+8, "Cibles RELA se chevauchant");
                 if (!supported) block("Relocations non prises en charge");

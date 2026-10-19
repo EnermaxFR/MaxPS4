@@ -7,6 +7,23 @@
 #include <string>
 
 #include "PS4ExecutableFixture.h"
+// Original fixture: clear SELF with an explicitly described version trailer.
+static std::vector<uint8_t> selfWithVersions() {
+    auto b=plainSELF();
+    b.insert(b.begin()+288,64,0); // Space for the third ELF program header.
+    guest_test::put(b,352,12,2);
+    guest_test::put(b,363,40,8); guest_test::put(b,352,72,8);
+    guest_test::put(b,3,96+56,2);
+    const size_t ph=96+64+2*56;
+    std::fill(b.begin()+ph,b.begin()+ph+56,0);
+    guest_test::put(b,0x6fffff01,ph,4);
+    guest_test::put(b,0x20000,ph+8,8);
+    guest_test::put(b,17,ph+32,8); guest_test::put(b,1,ph+48,8);
+    guest_test::put(b,b.size(),16,4);
+    const uint8_t version[]={16,'t','e','s','t','_','m','o','d','u','l','e',':',4,0,0x80,0x61};
+    b.insert(b.end(),std::begin(version),std::end(version));
+    return b;
+}
 int main() {
     maxps4::PS4ExecutableImage image;
     auto elf = ps4ELF();
@@ -66,7 +83,41 @@ int main() {
     bad = elf; guest_test::put(bad,2,16,2); stagedReject(bad,"ELF.TYPE",-ENOEXEC);
     bad = elf; guest_test::put(bad,UINT64_MAX,32,8); stagedReject(bad,"ELF.PROGRAM_TABLE",-ENOEXEC);
     bad = elf; guest_test::put(bad,0x10000,24,8); stagedReject(bad,"ELF.ENTRY",-ENOEXEC);
-    bad = self; guest_test::put(bad,0x100802,32,8); stagedReject(bad,"SELF.BLOCK",-ENOTSUP);
+    bad = self; guest_test::put(bad,0x100802,32,8); stagedReject(bad,"SELF.ENCRYPTED",-ENOTSUP);
+    auto versioned=selfWithVersions();
+    const size_t extent=375;
+    assert(image.load(versioned.data(),versioned.size())==0 && image.isSelf);
+    assert(image.segments.size()==2 && image.headers.size()==3);
+    assert(image.translate(0x1000,11,5)[0]==0xb8);
+    assert(!image.translate(0x20000,1,4)); // Trailer is never guest memory.
+    const auto trailerReject=[&](std::vector<uint8_t> bytes) {
+        stagedReject(std::move(bytes),"SELF.TRAILER",-ENOEXEC);
+    };
+    bad=versioned; bad.push_back(0); trailerReject(bad); // Undescribed extra byte.
+    bad=versioned; bad[extent]=0; trailerReject(bad); // Zero record length.
+    bad=versioned; bad[extent]=255; trailerReject(bad); // Record extends past EOF.
+    bad=versioned; bad[extent+12]='!'; trailerReject(bad); // Missing name separator.
+    bad=versioned; bad[extent+1]=1; trailerReject(bad); // Nonprintable name.
+    bad=versioned; guest_test::put(bad,0,272+8,8); trailerReject(bad); // Logical version offset overlaps prior data.
+    bad=versioned; guest_test::put(bad,UINT64_MAX,272+8,8); trailerReject(bad);
+    bad=versioned; guest_test::put(bad,16,272+32,8); trailerReject(bad);
+    bad=versioned; guest_test::put(bad,1,272+40,8); trailerReject(bad); // Trailer cannot be loadable memory.
+    bad=versioned; guest_test::put(bad,1,272+4,4); trailerReject(bad);
+    bad=versioned; guest_test::put(bad,0,272,4); trailerReject(bad); // No descriptor.
+    bad=versioned; std::copy(bad.begin()+272,bad.begin()+328,bad.begin()+216); trailerReject(bad); // Duplicate.
+    for (size_t size=extent+1;size<versioned.size();++size) {
+        bad=versioned; bad.resize(size); trailerReject(bad);
+    }
+    bad=versioned; guest_test::put(bad,extent,40,8);
+    stagedReject(bad,"SELF.BLOCK",-ENOEXEC); // Source fits host file but crosses declared SELF extent.
+    bad=versioned; guest_test::put(bad,200,12,2);
+    stagedReject(bad,"SELF.TRAILER",-ENOEXEC); // Program table must stay inside header, not metadata.
+    bad=versioned; guest_test::put(bad,0x100802,32,8);
+    stagedReject(bad,"SELF.ENCRYPTED",-ENOTSUP); // Encrypted still refused after a valid trailer.
+    bad=versioned; guest_test::put(bad,0x100804,32,8);
+    stagedReject(bad,"SELF.BLOCK",-ENOTSUP); // Signature policy stays explicit.
+    bad=versioned; guest_test::put(bad,0x100808,32,8);
+    stagedReject(bad,"SELF.COMPRESSED_UNSUPPORTED",-ENOTSUP); // Compression policy unchanged.
     // A PS4 library has no required entry. Dynamic/TLS metadata is retained,
     // explicitly marked as unresolved, and never passed to FEX by this class.
     guest_test::put(elf, 0xfe18, 16, 2); guest_test::put(elf, 0, 24, 8);

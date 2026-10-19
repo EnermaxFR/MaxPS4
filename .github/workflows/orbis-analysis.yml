@@ -4,12 +4,16 @@ on:
     paths:
       - 'MaxPS4-iOS/**'
       - 'scripts/test-orbis-analysis.sh'
+      - 'scripts/build-orbis-v4-homebrew.sh'
+      - 'homebrew/**'
       - '.github/workflows/orbis-analysis.yml'
   push:
     branches: ['codex/ps4-memory-translation-contract']
     paths:
       - 'MaxPS4-iOS/**'
       - 'scripts/test-orbis-analysis.sh'
+      - 'scripts/build-orbis-v4-homebrew.sh'
+      - 'homebrew/**'
       - '.github/workflows/orbis-analysis.yml'
   workflow_dispatch:
 permissions:
@@ -32,6 +36,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install ELF linker for source-built homebrew
+        run: brew list lld >/dev/null 2>&1 || HOMEBREW_NO_AUTO_UPDATE=1 brew install lld
       - run: bash scripts/test-orbis-analysis.sh
       - name: Test actual Swift report bridge
         run: |
@@ -52,7 +58,39 @@ jobs:
             -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Native/OrbisAnalysisBridge.cpp -o build/orbis/bridge-ios.o
           xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
             -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/OrbisMetadataTest.cpp -o build/orbis/prx-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/OrbisV4EbootTest.cpp -o build/orbis/eboot-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/OrbisV4SELFTest.cpp -o build/orbis/self-v4-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/OrbisV4ExperimentalSELFTest.cpp -o build/orbis/experimental-self-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/OrbisLoaderMission42Test.cpp -o build/orbis/mission42-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/OrbisBootMission43Test.cpp -o build/orbis/mission43-boot-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/OrbisV4TLSRelocationsTest.cpp -o build/orbis/mission44-tls-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/OrbisV4TLSRuntimeTest.cpp -o build/orbis/mission45-tls-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/OrbisModuleParamTest.cpp -o build/orbis/mission46-module-param-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/OrbisELFHeadersTest.cpp -o build/orbis/mission47-elf-headers-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/OrbisDynamicTagsTest.cpp -o build/orbis/mission48-dynamic-tags-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/OrbisSymbolsTest.cpp -o build/orbis/mission49-symbols-ios.o
           xcrun lipo -archs build/orbis/bridge-ios.o | grep -w arm64
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/OrbisV4HomebrewTest.cpp -o build/orbis/homebrew-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/OrbisV4StartupTest.cpp -o build/orbis/startup-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/OrbisV4ImportsTest.cpp -o build/orbis/imports-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/OrbisV4GuestMemoryServiceTest.cpp -o build/orbis/guest-memory-service-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/M1CollisionDiagnosticTest.cpp -o build/orbis/m1-collision-ios.o
           xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic \
             -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/OrbisPRXFEXBridgeTest.cpp -o build/orbis/prx-fex-ios.o
           xcrun --sdk iphoneos swiftc -parse-as-library -target arm64-apple-ios18.0 -sdk "$SDK" \
@@ -65,3 +103,5 @@ jobs:
           path: |
             build/orbis/*.txt
             build/orbis/synthetic-sce.prx
+            build/orbis/homebrew/homebrew.elf
+            build/orbis/startup/homebrew.elf

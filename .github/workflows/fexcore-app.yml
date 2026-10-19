@@ -8,6 +8,8 @@ on:
       - 'MaxPS4-iOS/Tests/FEXGuestTranslationTest.cpp'
       - 'MaxPS4-iOS/**'
       - 'scripts/*fexcore*'
+      - 'scripts/build-m1-device-fixtures.sh'
+      - 'scripts/write-build-provenance.py'
       - 'scripts/run-bounded.py'
       - 'cmake/FEXCoreIOSLinkage.cmake'
       - '.github/workflows/fexcore-app.yml'
@@ -17,6 +19,8 @@ on:
       - 'MaxPS4-iOS/Tests/FEXGuestTranslationTest.cpp'
       - 'MaxPS4-iOS/**'
       - 'scripts/*fexcore*'
+      - 'scripts/build-m1-device-fixtures.sh'
+      - 'scripts/write-build-provenance.py'
       - 'scripts/run-bounded.py'
       - 'cmake/FEXCoreIOSLinkage.cmake'
       - '.github/workflows/fexcore-app.yml'
@@ -35,6 +39,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install ELF linker for source-built homebrew
+        run: brew list lld >/dev/null 2>&1 || HOMEBREW_NO_AUTO_UPDATE=1 brew install lld
       - name: Validate PKG metadata and runtime preparation before packaging
         shell: bash
         run: |
@@ -65,6 +71,20 @@ jobs:
             MaxPS4-iOS/Sources/MaxPS4CPUPrototype.swift \
             MaxPS4-iOS/Tests/ELFLibraryRegressionTest.swift -o "$RUNNER_TEMP/elf-library-test"
           "$RUNNER_TEMP/elf-library-test" | tee build/diagnostics/elf-library-tests.txt
+      - name: Test mission 43 loader through the production Swift diagnostic bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic -dynamiclib \
+            MaxPS4-iOS/Native/OrbisAnalysisBridge.cpp MaxPS4-iOS/Native/maxps4_guest_elf.cpp \
+            MaxPS4-iOS/Native/maxps4_ps4_libkernel.cpp MaxPS4-iOS/Native/maxps4_ps4_virtual_memory.cpp \
+            MaxPS4-iOS/Native/maxps4_ps4_threads.cpp -o build/diagnostics/libOrbisAnalysis.dylib
+          swiftc -parse-as-library -import-objc-header MaxPS4-iOS/Native/OrbisAnalysisBridge.h \
+            MaxPS4-iOS/Sources/MaxPS4OrbisAnalyzer.swift MaxPS4-iOS/Tests/OrbisAnalysisSwiftTest.swift \
+            -L build/diagnostics -lOrbisAnalysis -Xlinker -rpath -Xlinker "$PWD/build/diagnostics" \
+            -o build/diagnostics/swift-loader-test
+          python3 scripts/run-bounded.py 30 build/diagnostics/swift-loader-tests.txt \
+            build/diagnostics/swift-loader-test build/diagnostics/game-preflight/synthetic-sce.prx
       - name: Test native Metal triangle and compile iPhone shaders
         timeout-minutes: 3
         shell: bash
@@ -135,7 +155,9 @@ jobs:
             MaxPS4-iOS/Sources/MaxPS4ELFLoader.swift \
             MaxPS4-iOS/Sources/MaxPS4CPUPrototype.swift \
             MaxPS4-iOS/Sources/MaxPS4SyntheticELFFEXBridge.swift \
-            MaxPS4-iOS/Sources/MaxPS4FEXDiagnostic.swift MaxPS4-iOS/Tests/FEXSwiftDiagnosticTest.swift \
+            MaxPS4-iOS/Sources/MaxPS4FEXDiagnostic.swift \
+            MaxPS4-iOS/Sources/MaxPS4M1CollisionDiagnostic.swift \
+            MaxPS4-iOS/Sources/MaxPS4CGameBootDiagnostic.swift MaxPS4-iOS/Sources/MaxPS4EbootDiagnostic.swift MaxPS4-iOS/Tests/FEXSwiftDiagnosticTest.swift \
             -L build/fex-app-host -lMaxPS4FEXRuntime \
             -Xlinker -rpath -Xlinker "$PWD/build/fex-app-host" \
             -o build/fex-app-host/swift-fex-test

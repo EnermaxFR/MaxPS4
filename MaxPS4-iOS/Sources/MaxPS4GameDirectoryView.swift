@@ -7,6 +7,7 @@ struct MaxPS4GameDirectoryView: View {
     @State private var directory: URL?
     @State private var busy = false
     @State private var inspectionCompleted = false
+    @State private var clearSelfInspectionCompleted = false
     @State private var report = "Sélectionnez un dossier contenant eboot.bin, les PRX et les données déjà accessibles par des moyens autorisés."
     @State private var launchReport = ""
 
@@ -23,6 +24,11 @@ struct MaxPS4GameDirectoryView: View {
                         Text(directory.lastPathComponent).font(.headline)
                         Button("Actualiser le précontrôle") { inspect(directory) }
                             .buttonStyle(.bordered).disabled(busy)
+                        Button("Inspecter les SELF clairs (lecture seule)") { inspect(directory, inspectClearSelf: true) }
+                            .buttonStyle(.bordered).disabled(busy)
+                            .accessibilityIdentifier("maxps4.orbisDirectory.clearSelfInspection")
+                        Text("Cette inspection affiche les dépendances des SELF clairs, sans vérifier leur signature ni autoriser leur lancement. Les contenus chiffrés ou compressés restent refusés.")
+                            .font(.caption).foregroundStyle(.secondary)
                         Button("Vérifier et tenter l’exécution bornée") { launch(directory) }
                             .buttonStyle(.bordered).disabled(busy || !inspectionCompleted)
                             .accessibilityIdentifier("maxps4.orbisDirectory.attempt")
@@ -31,7 +37,9 @@ struct MaxPS4GameDirectoryView: View {
                             .accessibilityIdentifier("maxps4.orbisDirectory.v4PRX")
                         Text(inspectionCompleted
                              ? "Inventaire terminé ; admission CPU non établie. La tentative relit les fichiers et doit réussir la préparation native puis l’initialisation JIT avant toute exécution."
-                             : "Tentative indisponible tant que l’inventaire n’est pas terminé.")
+                             : clearSelfInspectionCompleted
+                                ? "Inspection SELF en lecture seule terminée. Actualisez le précontrôle strict pour accéder aux tentatives bornées ; cette inspection ne les autorise pas."
+                                : "Tentative indisponible tant que l’inventaire n’est pas terminé.")
                             .font(.caption).foregroundStyle(.secondary)
                         Text("Le runtime exige maxps4.json avec un graphe PRX et des biais explicites. Les formats ou instructions non pris en charge sont refusés avant le dispatch. Un succès CPU ne prouve pas le démarrage du jeu.")
                             .font(.caption).foregroundStyle(.secondary)
@@ -64,18 +72,20 @@ struct MaxPS4GameDirectoryView: View {
         }
     }
 
-    private func inspect(_ url: URL) {
+    private func inspect(_ url: URL, inspectClearSelf: Bool = false) {
         busy = true
         inspectionCompleted = false
+        clearSelfInspectionCompleted = false
         launchReport = ""
         Task {
             let result = await Task.detached(priority: .utility) {
                 let scoped = url.startAccessingSecurityScopedResource()
                 defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                return MaxPS4OrbisAnalyzer.inspectDirectory(url: url)
+                return MaxPS4OrbisAnalyzer.inspectDirectory(url: url, inspectClearSelf: inspectClearSelf)
             }.value
             report = result.text
-            inspectionCompleted = result.inspectionCompleted
+            inspectionCompleted = result.inspectionCompleted && !inspectClearSelf
+            clearSelfInspectionCompleted = result.inspectionCompleted && inspectClearSelf
             busy = false
         }
     }

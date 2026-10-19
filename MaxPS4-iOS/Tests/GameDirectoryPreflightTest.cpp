@@ -1,6 +1,8 @@
 #include "../Native/OrbisAnalysisBridge.h"
 #include "OrbisLinkerFixture.h"
 #include "OrbisFixture.h"
+#include "OrbisLoaderMission42Fixture.h"
+#include "OrbisBootMission43Fixture.h"
 #include "PS4PFSFixture.hpp"
 #include "../Native/PS4PKGBridge.h"
 #include <cassert>
@@ -39,6 +41,68 @@ int main() {
     auto text = inspect(root);
     assert(text.find("Premier blocage du précontrôle : eboot.bin manquant")!=std::string::npos);
     assert(text.find("maxps4.json absent")!=std::string::npos);
+    const auto clearSELF=mission42::self();
+    write(root/"eboot.bin",clearSELF);
+    text=inspect(root);
+    assert(text.find("SELF en clair : profil statique strict validé")!=std::string::npos);
+    assert(text.find("Proposition temporaire en mémoire")!=std::string::npos);
+    assert(!fs::exists(root/"maxps4.json") && read(root/"eboot.bin")==clearSELF);
+    // Mission 43: exercise the exact standalone C ABI imported by Swift too.
+    std::vector<char> standalone(2*1024*1024);
+    assert(maxps4_orbis_analysis_report((root/"eboot.bin").c_str(),
+        standalone.data(),standalone.size())==0);
+    assert(std::strstr(standalone.data(),"SELF en clair : profil statique strict validé"));
+    char truncated[8]{};
+    assert(maxps4_orbis_analysis_report((root/"eboot.bin").c_str(),
+        truncated,sizeof truncated)==-ENOSPC && truncated[7]==0);
+    assert(read(root/"eboot.bin")==clearSELF && !fs::exists(root/"maxps4.json"));
+    auto protectedSELF=clearSELF; mission42::put(protectedSELF,32,0x802);
+    write(root/"eboot.bin",protectedSELF);
+    text=inspect(root);
+    assert(text.find("SELF.ENCRYPTED")!=std::string::npos);
+    assert(text.find("Proposition temporaire en mémoire")==std::string::npos);
+    assert(maxps4_orbis_analysis_report((root/"eboot.bin").c_str(),
+        standalone.data(),standalone.size())==-ENOEXEC);
+    assert(std::strstr(standalone.data(),"SELF.ENCRYPTED"));
+    assert(read(root/"eboot.bin")==protectedSELF);
+    fs::remove(root/"eboot.bin");
+    // Explicit iOS read-only ABI sees dynamic signed-clear layouts; strict
+    // launch inspection is unaffected and the source folder remains unchanged.
+    auto dynamicELF=orbis_fixture::make(false);
+    const std::string dependency="libc.prx";
+    std::copy(dependency.begin(),dependency.end(),dynamicELF.begin()+0x6a0);
+    orbis_fixture::setTag(dynamicELF,0x61000037,0xb0);
+    orbis_fixture::appendTag(dynamicELF,1,0xa0);
+    fs::create_directory(root/"sce_module");
+    write(root/"sce_module"/dependency,mission43_fixture::wrap(orbis_fixture::make(true)));
+    const auto signedDynamic=mission43_fixture::wrap(dynamicELF);
+    write(root/"eboot.bin",signedDynamic);
+    std::vector<char> clearReport(2*1024*1024);
+    assert(maxps4_game_directory_clear_self_report(root.c_str(),clearReport.data(),clearReport.size())==0);
+    assert(std::strstr(clearReport.data(),"inspection non authentifiée"));
+    assert(std::strstr(clearReport.data(),"ET_SCE_DYNEXEC"));
+    assert(std::strstr(clearReport.data(),"candidat inventorié=sce_module/libc.prx"));
+    fs::create_directory(root/"other_modules");
+    write(root/"other_modules"/dependency,mission43_fixture::wrap(orbis_fixture::make(true)));
+    assert(maxps4_game_directory_clear_self_report(root.c_str(),clearReport.data(),clearReport.size())==0);
+    assert(std::strstr(clearReport.data(),"candidats ambigus, aucun chemin choisi"));
+    fs::remove_all(root/"other_modules");
+    assert(std::strstr(clearReport.data(),"execution_admitted=0"));
+    assert(!std::strstr(clearReport.data(),"Proposition temporaire en mémoire"));
+    assert(inspect(root).find("Conteneur SELF non pris en charge")!=std::string::npos);
+    assert(read(root/"eboot.bin")==signedDynamic && !fs::exists(root/"maxps4.json"));
+    assert(maxps4_game_directory_clear_self_report(root.c_str(),truncated,sizeof truncated)==-ENOSPC && truncated[7]==0);
+    assert(maxps4_game_directory_clear_self_report(root.c_str(),nullptr,0)==-EINVAL);
+    assert(maxps4_game_directory_clear_self_report(nullptr,clearReport.data(),clearReport.size())==-EINVAL);
+    for(uint8_t flags:{uint8_t(2),uint8_t(8)}) {
+        auto opaque=signedDynamic;opaque[32]|=flags;write(root/"eboot.bin",opaque);
+        assert(maxps4_game_directory_clear_self_report(root.c_str(),clearReport.data(),clearReport.size())==0);
+        assert(std::strstr(clearReport.data(),flags==2 ? "SELF.ENCRYPTED" : "SELF.COMPRESSED_UNSUPPORTED"));
+        assert(!std::strstr(clearReport.data(),"ET_SCE_DYNEXEC"));
+        assert(read(root/"eboot.bin")==opaque);
+    }
+    fs::remove(root/"eboot.bin");
+    fs::remove_all(root/"sce_module");
     // These fabricated fixtures are not game data and never enter a CPU.
     const auto app = orbis_fixture::make(false), provider = orbis_fixture::make(true);
     // End-to-end: readable synthetic PFS -> explicitly selected memory bytes ->
@@ -78,6 +142,16 @@ int main() {
     assert(inspect(root)==text);
     fs::remove(root/"sce_module/provider.prx");
     assert(inspect(root).find("fournisseurs PRX déclarés=0 ; service/import absent")!=std::string::npos);
+    // A synthetically declared DT_NEEDED must be an explicit blocker too.
+    auto needed=orbis_test::fixture();
+    const size_t dynamicHeader=64+2*56;
+    const size_t terminator=0x800+10*16;
+    orbis_test::put(needed,1,terminator); orbis_test::put(needed,1,terminator+8);
+    orbis_test::put(needed,0,terminator+16); orbis_test::put(needed,0,terminator+24);
+    orbis_test::put(needed,12*16,dynamicHeader+32);
+    orbis_test::put(needed,12*16,dynamicHeader+40);
+    write(root/"eboot.bin",needed);
+    assert(inspect(root).find("DT_NEEDED modA ; fichier adjacent absent")!=std::string::npos);
     // SELF/encrypted content is diagnosed, never decrypted or dispatched.
     auto self = app; orbis_fixture::put(self,0,0x1d3d154f,4); write(root/"eboot.bin",self);
     assert(inspect(root).find("Premier blocage du précontrôle : eboot.bin: Conteneur SELF non pris en charge")!=std::string::npos);

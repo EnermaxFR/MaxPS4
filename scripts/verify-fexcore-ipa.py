@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Inspect real Mach-O files and their loader contracts inside the actual IPA."""
 import hashlib
+import json
 import plistlib
 import re
 from pathlib import Path
@@ -65,6 +66,31 @@ def verify(path):
         main = ipa.read(prefix + 'MaxPS4')
         assert b'maxps4.testFEXCore' in main, 'Diagnostic FEXCore button not present in compiled app'
         assert b'maxps4.orbisDirectory.v4PRX' in main, 'Distinct V4 PRX action missing from compiled app'
+        assert b'maxps4.m1Collision.bundled' in main and b'maxps4.m1Collision.imported' in main, 'M1 diagnostic actions absent'
+        assert b'maxps4.cGameBootProbe' in main, 'C homebrew diagnostic action absent'
+        assert b'maxps4.experimentalSELF' in main, 'Experimental SELF action absent'
+        assert b'maxps4.separateEboot' in main, 'Separate eboot diagnostic action absent'
+        c_probe=ipa.read(prefix+'GameBootProbe/homebrew.elf')
+        assert c_probe[:9]==b'\x7fELF\x02\x01\x01\x09\x00' and struct.unpack_from('<Q',c_probe,24)[0]==0x400000
+        assert struct.unpack_from('<H',c_probe,16)[0]==0xfe00
+        assert b'maxps4.globalGameBootProbe' in main, 'Global data homebrew action absent'
+        global_probe=ipa.read(prefix+'GlobalBootProbe/homebrew.elf')
+        assert global_probe[:9]==b'\x7fELF\x02\x01\x01\x09\x00'
+        assert struct.unpack_from('<H',global_probe,16)[0]==0xfe00
+        assert struct.unpack_from('<Q',global_probe,24)[0]==0x400000
+        provenance=json.loads(ipa.read(prefix+'BuildProvenance.json'))
+        fingerprint=hashlib.sha256(json.dumps(provenance['files'],sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        assert fingerprint==provenance['fingerprint']==metadata['MaxPS4SourceFingerprint']
+        assert provenance['head']==metadata['MaxPS4SourceRevision'] and provenance['dirty']==metadata['MaxPS4SourceDirty']
+        fixture_root=prefix+'M1CollisionFixtures/'
+        fixture_manifest=json.loads(ipa.read(fixture_root+'manifest.json'))
+        assert fixture_manifest['profile']=='iphone-low-m1' and fixture_manifest['entry']==0x400004000
+        assert fixture_manifest['snapshot']==0x400010100
+        expected_fixtures={'m1-two-threads-three-tls-modules.elf','tls-83.prx','tls-129.prx'}
+        assert set(fixture_manifest['files'])==expected_fixtures
+        for name,digest in fixture_manifest['files'].items():
+            data=ipa.read(fixture_root+name)
+            assert hashlib.sha256(data).hexdigest()==digest and struct.unpack_from('<Q',data,24)[0]==0x400004000
         runtime = ipa.read(framework + 'MaxPS4FEXRuntime')
         kind, libraries, _, imports, _ = macho(main)
         rkind, dependencies, exports, unresolved, identifiers = macho(runtime)
@@ -75,7 +101,11 @@ def verify(path):
         assert not any('FEXCore' in n or 'LogMan' in n or 'maxps4_' in n for n in unresolved)
         required = {'_maxps4_fex_engine_' + n for n in ('open', 'initialize', 'cpuid', 'interpret_elf', 'run_elf', 'run_v4_prx', 'close', 'stage')}
         required |= {'_maxps4_jit_' + n for n in ('begin', 'cancel', 'state', 'error', 'leases', 'confirmation', 'launch_failed')}
+        required |= {'_maxps4_fex_m1_collision_diagnostic','_maxps4_fex_engine_run_m1_threads'}
+        required |= {'_maxps4_fex_eboot_experimental_preflight','_maxps4_fex_engine_run_eboot_experimental'}
+        required |= {'_maxps4_fex_eboot_preflight','_maxps4_fex_engine_run_eboot'}
         assert required <= exports and required <= imports, 'App must actually import the FEX/session ABI'
+        assert '_maxps4_fex_v4_preflight' in exports, 'V4 diagnostic preflight export absent'
         assert any('CreateNewContext' in name for name in exports), 'Real FEX C++ runtime absent'
         fmeta = plistlib.loads(ipa.read(framework + 'Info.plist'))
         assert fmeta['CFBundleExecutable'] == 'MaxPS4FEXRuntime'

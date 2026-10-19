@@ -114,6 +114,10 @@ if [[ "$RUNTIME" == ON ]]; then
   test "$(xcrun lipo -archs "$NATIVE")" = arm64
   xcrun nm -gU "$NATIVE" > "$OUT/native-defined.txt"
   grep -Eq '(^|[[:space:]])_maxps4_fex_engine_run_v4_prx$' "$OUT/native-defined.txt"
+  grep -Eq '(^|[[:space:]])_maxps4_fex_v4_preflight$' "$OUT/native-defined.txt"
+  for symbol in maxps4_fex_m1_collision_diagnostic maxps4_fex_engine_run_m1_threads maxps4_fex_eboot_experimental_preflight maxps4_fex_engine_run_eboot_experimental maxps4_fex_eboot_preflight maxps4_fex_engine_run_eboot; do
+    grep -Eq "(^|[[:space:]])_${symbol}$" "$OUT/native-defined.txt"
+  done
   xcrun nm -u "$NATIVE" > "$OUT/native-undefined.txt"
   xcrun otool -L "$NATIVE" > "$OUT/native-libraries.txt"
   if xcrun nm -u "$NATIVE" | grep -E 'FEXCore|LogMan|maxps4_'; then
@@ -131,8 +135,22 @@ if [[ "$RUNTIME" == ON ]]; then
     -o "$OUT/v4-swift-abi-smoke" 2>&1 | tee "$OUT/v4-swift-abi-build.log"
   xcrun nm -u "$OUT/v4-swift-abi-smoke" > "$OUT/v4-swift-abi-imports.txt"
   grep -Eq '(^|[[:space:]])_maxps4_fex_engine_run_v4_prx$' "$OUT/v4-swift-abi-imports.txt"
+  grep -Eq '(^|[[:space:]])_maxps4_fex_v4_preflight$' "$OUT/v4-swift-abi-imports.txt"
+  for symbol in maxps4_fex_eboot_experimental_preflight maxps4_fex_engine_run_eboot_experimental maxps4_fex_eboot_preflight maxps4_fex_engine_run_eboot; do
+    grep -Eq "(^|[[:space:]])_${symbol}$" "$OUT/v4-swift-abi-imports.txt"
+  done
   echo "PASS $SYSTEM ARM64 C and Swift V4 ABI compiled/linked; no device execution" > "$OUT/v4-abi-link-status.txt"
+  xcrun swiftc -parse-as-library -target "$SWIFT_TARGET" -sdk "$SDK" \
+    -import-objc-header "$ROOT/MaxPS4-iOS/Native/maxps4_fex_runtime.h" \
+    "$ROOT/MaxPS4-iOS/Tests/M1IOSLinkSmoke.swift" \
+    -L "$OUT" -lMaxPS4FEXRuntime -Xlinker -rpath -Xlinker "$OUT" \
+    -o "$OUT/m1-ios-abi-smoke" 2>&1 | tee "$OUT/m1-ios-abi-build.log"
+  xcrun nm -u "$OUT/m1-ios-abi-smoke" > "$OUT/m1-ios-abi-imports.txt"
+  for symbol in maxps4_fex_m1_collision_diagnostic maxps4_fex_engine_run_m1_threads; do
+    grep -Eq "(^|[[:space:]])_${symbol}$" "$OUT/m1-ios-abi-imports.txt"
+  done
   if [[ "$SYSTEM" == Darwin ]]; then
+    "$OUT/m1-ios-abi-smoke" | tee "$OUT/m1-ios-abi-tests.txt"
     "$OUT/Bin/maxps4-v4-c-abi-smoke" | tee "$OUT/v4-c-abi-smoke.txt"
     "$OUT/v4-swift-abi-smoke" | tee "$OUT/v4-swift-abi-smoke.txt"
     python3 "$ROOT/scripts/run-bounded.py" 60 "$OUT/ps4-linked-tests.txt" "$OUT/Bin/maxps4-ps4-linked-test"

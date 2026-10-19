@@ -16,6 +16,8 @@ on:
       - 'cmake/FEXCoreIOSLinkage.cmake'
       - 'scripts/test-ps4-system-services.sh'
       - 'scripts/test-ps4-fex-linked.sh'
+      - 'scripts/build-orbis-v4-homebrew.sh'
+      - 'homebrew/**'
       - 'scripts/run-bounded.py'
       - 'cmake/FEXCoreLinkedTests.cmake'
       - '.github/workflows/ps4-system-services.yml'
@@ -36,6 +38,8 @@ on:
       - 'cmake/FEXCoreIOSLinkage.cmake'
       - 'scripts/test-ps4-system-services.sh'
       - 'scripts/test-ps4-fex-linked.sh'
+      - 'scripts/build-orbis-v4-homebrew.sh'
+      - 'homebrew/**'
       - 'scripts/run-bounded.py'
       - 'cmake/FEXCoreLinkedTests.cmake'
       - '.github/workflows/ps4-system-services.yml'
@@ -80,6 +84,8 @@ jobs:
             build/ps4-linked/*.txt
             build/ps4-linked/ps4-libkernel-demo.elf
             build/ps4-linked/ps4-libkernel-combined.elf
+            build/ps4-linked/homebrew/homebrew.elf
+            build/ps4-linked/startup/homebrew.elf
             build/ps4-linked/Bin/maxps4-ps4-linked-test
             build/ps4-linked/orbis-bundle/**
             build/ps4-linked/playable-bundle/**

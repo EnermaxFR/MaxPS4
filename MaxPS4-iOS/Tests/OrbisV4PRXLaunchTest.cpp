@@ -16,6 +16,16 @@ int main() {
         assert(!lease.memory().translate(0x44000,1,2));
     }
     owner->close(); owner.reset();
+    // Clang's C probe folds the load into ADD EAX,[RDI]. Both instructions
+    // require the same complete readable operand; other ModRM forms stay refused.
+    bytes[0x40a]=0x03;
+    assert(prepare()==0 && owner); owner->close(); owner.reset();
+    bytes[0x40b]=0x17;
+    assert(prepare()==-ENOTSUP && !owner);
+    bytes[0x40b]=0x07;
+    bytes[0x402]=0; bytes[0x403]=0x50;
+    assert(prepare()==-ENOTSUP && !owner);
+    bytes=v4_prx_fixture::make(); request.file=bytes.data();
     request.instruction_budget=2; assert(prepare()==-ENOTSUP && !owner);
     request.instruction_budget=0; assert(prepare()==-EINVAL && !owner);
     request.instruction_budget=3;

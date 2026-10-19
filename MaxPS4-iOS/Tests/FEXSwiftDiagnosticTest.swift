@@ -15,6 +15,16 @@ struct FEXSwiftDiagnosticTest {
             try writer.close()
         } catch { fatalError("Could not create synthetic CNT: \(error)") }
         let previousJIT = maxps4_jit_state()
+        let missingM1 = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let m1Refusal = MaxPS4FEXDiagnostic.testM1Collision(directory: missingM1)
+        precondition(m1Refusal.contains("fixture_error="), m1Refusal)
+        let experimentalRefusal = MaxPS4FEXDiagnostic.testEboot(url: missingM1, experimental: true)
+        precondition(experimentalRefusal.contains("EBOOT.FILE") || experimentalRefusal.contains("unavailable"))
+        let ebootRefusal = MaxPS4FEXDiagnostic.testEboot(url: missingM1)
+        precondition(ebootRefusal.contains("EBOOT.FILE") || ebootRefusal.contains("unavailable"))
+        let cRefusal = MaxPS4FEXDiagnostic.testCGameBoot(url: missingM1)
+        precondition(cRefusal.contains("fixture_error="), cRefusal)
+        precondition(maxps4_jit_state() == previousJIT)
         for report in [MaxPS4FEXDiagnostic.executeTestELF(url: container),
                        MaxPS4FEXDiagnostic.stagePS4(url: container)] {
             precondition(report.contains("[ELF.CONTAINER]") && report.contains("PKG/CNT détecté"), report)

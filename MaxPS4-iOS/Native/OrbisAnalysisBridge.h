@@ -13,6 +13,10 @@ int maxps4_orbis_analysis_report(const char* path, char* output, size_t capacity
 // means inspection completed, NOT launch readiness; blockers are in the report.
 // Negative errno means incomplete/rejected inspection (including truncation).
 int maxps4_game_directory_report(const char* path, char* output, size_t capacity);
+// Explicit read-only SELF inspection, including structurally clear dynamic
+// signed layouts. Signature remains unverified; encrypted/compressed data and
+// unknown layouts are refused. Does not relax the strict launch/preflight API.
+int maxps4_game_directory_clear_self_report(const char* path, char* output, size_t capacity);
 #ifdef __cplusplus
 }
 #endif

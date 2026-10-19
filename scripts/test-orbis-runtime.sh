@@ -13,3 +13,8 @@ python3 scripts/run-bounded.py 30 "$OUT/linker-tests.txt" "$OUT/orbis-linker-tes
   -fsanitize=address,undefined -fno-omit-frame-pointer \
   MaxPS4-iOS/Tests/PS4ExecutableImageTest.cpp -o "$OUT/segments-test"
 python3 scripts/run-bounded.py 30 "$OUT/segments-tests.txt" "$OUT/segments-test"
+
+"${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror -pedantic -pthread \
+  -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer \
+  MaxPS4-iOS/Tests/PS4SignedSELFTest.cpp -o "$OUT/signed-self-test"
+python3 scripts/run-bounded.py 30 "$OUT/signed-self-tests.txt" "$OUT/signed-self-test"

@@ -8,11 +8,13 @@ enum MaxPS4OrbisAnalyzer {
         let text: String
     }
 
-    static func inspectDirectory(url: URL) -> DirectoryReport {
+    static func inspectDirectory(url: URL, inspectClearSelf: Bool = false) -> DirectoryReport {
         var output = [CChar](repeating: 0, count: 2 * 1_048_576)
         let status = url.path.withCString { path in
             output.withUnsafeMutableBufferPointer { buffer in
-                maxps4_game_directory_report(path, buffer.baseAddress, buffer.count)
+                inspectClearSelf
+                    ? maxps4_game_directory_clear_self_report(path, buffer.baseAddress, buffer.count)
+                    : maxps4_game_directory_report(path, buffer.baseAddress, buffer.count)
             }
         }
         let report = output.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }

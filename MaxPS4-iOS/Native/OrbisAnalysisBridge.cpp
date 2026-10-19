@@ -18,6 +18,16 @@ int maxps4_game_directory_report(const char* path, char* output, size_t capacity
     return count == report.size() ? status : -ENOSPC;
 }
 
+int maxps4_game_directory_clear_self_report(const char* path, char* output, size_t capacity) {
+    if (!output || !capacity) return -EINVAL;
+    output[0] = 0;
+    std::string report;
+    const int status = maxps4::GameDirectoryPreflight::report(path,report,true);
+    const auto count = std::min(report.size(),capacity-1);
+    std::memcpy(output,report.data(),count); output[count] = 0;
+    return count == report.size() ? status : -ENOSPC;
+}
+
 int maxps4_orbis_analysis_report(const char* path, char* output, size_t capacity) {
     if (!output || !capacity) return -EINVAL;
     output[0] = 0;

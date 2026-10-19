@@ -13,7 +13,8 @@ class OrbisM1 final {
 public:
     // Host-only suites may need the high profile: Linux ASan owns the low
     // shadow range, and macOS VM reservations can collide with thread 2.
-    // Device builds retain the low profile and must report collisions honestly.
+    // Device builds retain these logical VAs; translated host storage avoids
+    // imposing them on the host. Direct diagnostics still report collisions.
 #if defined(MAXPS4_M1_HIGH_VA_SANITIZER) || defined(MAXPS4_M1_HIGH_VA_HOST_TEST)
     static constexpr uint64_t thread_base = 0x300000400000ULL, heap_base = 0x300000800000ULL;
 #else
@@ -24,7 +25,7 @@ public:
     PS4DynamicLinker linker;
     GuestTLSTemplate tls;
     uint64_t entry = 0;
-    explicit OrbisM1(GuestAddressSpace::Backend backend) : space(backend) {}
+    explicit OrbisM1(GuestAddressSpace::Backend backend=GuestAddressSpace::Backend::translated) : space(backend) {}
     int load(const uint8_t* file, size_t length, uint32_t budget) {
         space.clear(); source.clear(); linker.reset(); entry = 0;
         PS4ExecutableImage parsed;

@@ -6,6 +6,8 @@
 #include "PS4OrbisExecutionFixture.h"
 #include "PS4PlayableFixture.h"
 #include "OrbisV4PRXFixture.h"
+#include "OrbisV4ImportFixture.h"
+#include "../Native/OrbisMetadata.hpp"
 #include <future>
 #include <cerrno>
 #include <cstdio>
@@ -15,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <unistd.h>
+#include <time.h>
 
 #if defined(__linux__)
 #include <signal.h>
@@ -245,12 +248,17 @@ static int m1Test() {
         maxps4::GuestAddressSpace blocker(maxps4::GuestAddressSpace::Backend::fex_direct);
         const uint64_t address = maxps4::OrbisM1::thread_base+0x4000000;
         const uint64_t marker = 0xcafebabe;
-        CHECK(blocker.reserve(address,0x10000) == 0 && blocker.map(address,0x10000,6,&marker,8) == 0);
+        const int occupied=blocker.reserve(address,0x10000);
+        CHECK(occupied==0 || occupied==-EADDRINUSE);
+        if (!occupied) CHECK(blocker.map(address,0x10000,6,&marker,8)==0);
+        else std::puts("M1 candidate VA already occupied: translated threads must run; unknown owner left untouched");
         CHECK(maxps4_fex_engine_run_m1_threads(engine,file.data(),file.size(),200,snapshot,modules,2,2,rejected,2) == 0);
         CHECK(rejected[0].joined && rejected[1].joined && rejected[1].cpu.kernel_return == 2);
         uint64_t preserved=0;
-        CHECK(blocker.read(address,&preserved,8) == 0 && preserved == marker);
-        CHECK(blocker.release(address) == 0);
+        if (!occupied) {
+            CHECK(blocker.read(address,&preserved,8) == 0 && preserved == marker);
+            CHECK(blocker.release(address) == 0);
+        }
         // Translated storage leaves occupied host VAs intact; repeat after cleanup.
         CHECK(maxps4_fex_engine_run_m1_threads(engine,file.data(),file.size(),200,snapshot,modules,2,2,rejected,2) == 0);
         CHECK(rejected[0].joined && rejected[1].joined && rejected[1].cpu.kernel_return == 2);
@@ -304,6 +312,220 @@ static int v4PRXTest() {
     std::printf("PASS public V4 PRX API: real FEX backend=%u, translated guest load returns 42/99/7, failure outputs zero, repeat/concurrent callers, old launcher preserved\n",backend);
     return 0;
 }
+static int v4HomebrewTest(const char* path) {
+    std::ifstream file(path,std::ios::binary);
+    CHECK(bool(file));
+    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)),{});
+    maxps4_fex_engine* engine=nullptr;
+    CHECK(maxps4_fex_engine_open(&engine)==0 && engine);
+    struct Close { maxps4_fex_engine* e; ~Close() { maxps4_fex_engine_close(e); } } close{engine};
+    CHECK(maxps4_fex_engine_initialize(engine)==0);
+    maxps4_v4_prx_request r{bytes.data(),bytes.size(),0,0x400000,MAXPS4_V4_ABI_STATIC_EXEC_HLT,4};
+    uint64_t value=123; uint32_t backend=123;
+    r.instruction_budget=3;
+    CHECK(maxps4_fex_engine_run_v4_prx(engine,&r,&value,&backend)==-ENOTSUP && !value && !backend);
+    r.instruction_budget=4;
+    for (unsigned i=0;i<3;++i) {
+        const uint32_t input=i==0 ? 40 : i==1 ? 99 : 0;
+        CHECK(bytes.size()>0x8003);
+        for (unsigned j=0;j<4;++j) bytes[0x8000+j]=static_cast<uint8_t>(input>>(8*j));
+        CHECK(maxps4_fex_engine_run_v4_prx(engine,&r,&value,&backend)==0);
+        CHECK(value==input+256 && (backend==2 || backend==3));
+        std::printf("PASS source-built static Orbis homebrew: real FEX backend=%u RAX=%llu\n",backend,
+                    static_cast<unsigned long long>(value));
+    }
+    CHECK(maxps4_fex_engine_probe(engine,&value,&backend)==0 && value==42);
+    return 0;
+}
+static int v4StartupTest(const char* path) {
+    std::ifstream file(path,std::ios::binary);
+    CHECK(bool(file));
+    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)),{});
+    maxps4_v4_prx_request r{bytes.data(),bytes.size(),0,0x400000,MAXPS4_V4_ABI_STARTUP_RETURN,3};
+    char diagnostic[256];
+    CHECK(maxps4_fex_v4_preflight(&r,diagnostic,sizeof(diagnostic))==0);
+    CHECK(std::strstr(diagnostic,"V4.READY"));
+    maxps4_fex_engine* engine=nullptr;
+    CHECK(maxps4_fex_engine_open(&engine)==0 && engine);
+    struct Close { maxps4_fex_engine* e; ~Close() { maxps4_fex_engine_close(e); } } close{engine};
+    CHECK(maxps4_fex_engine_initialize(engine)==0);
+    uint64_t value=123; uint32_t backend=123;
+    for (unsigned i=0;i<3;++i) {
+        CHECK(maxps4_fex_engine_run_v4_prx(engine,&r,&value,&backend)==0);
+        CHECK(value==257 && (backend==2 || backend==3));
+    }
+    const uint8_t argvProgram[]={0x48,0x8b,0x7f,8,0x8b,7,0xc3};
+    CHECK(bytes.size()>0x4007);
+    std::copy(std::begin(argvProgram),std::end(argvProgram),bytes.begin()+0x4000);
+    CHECK(maxps4_fex_engine_run_v4_prx(engine,&r,&value,&backend)==0);
+    CHECK(value==0x656d6f68 && (backend==2 || backend==3)); // "home", little endian.
+    auto call=[&] {
+        uint64_t result=0; uint32_t cpu=0;
+        return maxps4_fex_engine_run_v4_prx(engine,&r,&result,&cpu)==0 &&
+               result==0x656d6f68 && (cpu==2 || cpu==3);
+    };
+    auto first=std::async(std::launch::async,call);
+    auto second=std::async(std::launch::async,call);
+    CHECK(first.get() && second.get());
+    std::printf("PASS V4 startup real FEX backend=%u: argc+256=257, argv[0] bytes=0x%llx, controlled RET, repeated context cleanup\n",
+                backend,static_cast<unsigned long long>(value));
+    // Mission 19: real FEXCore read through FS from translated TLS.
+    const uint8_t tlsProgram[] = {
+        0x64,0x8b,0x04,0x25,0x80,0xff,0xff,0xff,0xc3
+    };
+    std::copy(std::begin(tlsProgram),std::end(tlsProgram),
+              bytes.begin()+0x4000);
+    std::fprintf(stderr,"MISSION19 ELF BYTES:");
+    for (size_t i=0;i<sizeof(tlsProgram);++i)
+        std::fprintf(stderr," %02x",bytes[0x4000+i]);
+    std::fprintf(stderr,"\\n");
+
+    const int tls_preflight = maxps4_fex_v4_preflight(
+        &r,diagnostic,sizeof(diagnostic));
+    std::fprintf(stderr,
+                 "MISSION19 PREFLIGHT: status=%d diagnostic=%s\n",
+                 tls_preflight,diagnostic);
+    CHECK(tls_preflight==0);
+
+    CHECK(maxps4_fex_engine_run_v4_prx(
+        engine,&r,&value,&backend)==0);
+
+    CHECK(value==42 && (backend==2 || backend==3));
+
+    std::printf("PASS Mission 19: real FEXCore FS TLS read = 42\\n");
+
+    bytes[0x4000]=0x0f; bytes[0x4001]=5;
+    CHECK(maxps4_fex_v4_preflight(&r,diagnostic,sizeof(diagnostic))==-ENOTSUP);
+    CHECK(std::strstr(diagnostic,"V4.INSTRUCTION"));
+    CHECK(maxps4_fex_engine_run_v4_prx(engine,&r,&value,&backend)==-ENOTSUP && !value && !backend);
+    char tiny[1]={'x'};
+    CHECK(maxps4_fex_v4_preflight(&r,tiny,1)==-ENOTSUP && !tiny[0]);
+    CHECK(maxps4_fex_v4_preflight(nullptr,diagnostic,sizeof(diagnostic))==-EINVAL);
+    CHECK(maxps4_fex_v4_preflight(&r,nullptr,0)==-EINVAL);
+    CHECK(maxps4_fex_engine_probe(engine,&value,&backend)==0 && value==42);
+    return 0;
+}
+static int v4ImportsTest() {
+    maxps4_fex_engine* engine=nullptr;
+    CHECK(maxps4_fex_engine_open(&engine)==0 && engine);
+    struct Close { maxps4_fex_engine* e; ~Close() { maxps4_fex_engine_close(e); } } close{engine};
+    CHECK(maxps4_fex_engine_initialize(engine)==0);
+    auto bytes=v4_import_fixture::make();
+    maxps4_v4_prx_request r{bytes.data(),bytes.size(),orbis_execution::app_bias,
+                          orbis_execution::entry,MAXPS4_V4_ABI_IMPORT_THREAD_SELF,5};
+    char diagnostic[256];
+    uint64_t result=123; uint32_t backend=123;
+    CHECK(maxps4_fex_v4_preflight(&r,diagnostic,sizeof(diagnostic))==0);
+    for (uint32_t addend:{41U,7U,99U}) {
+        bytes=v4_import_fixture::make(addend); r.file=bytes.data();
+        CHECK(maxps4_fex_engine_run_v4_prx(engine,&r,&result,&backend)==0);
+        CHECK(result==1+addend && (backend==2 || backend==3));
+        std::printf("PASS V4 import real FEX backend=%u: scePthreadSelf through guest GOT/thunk, verified one callback, RAX=%llu\n",
+                    backend,static_cast<unsigned long long>(result));
+    }
+    const std::string nid="aI+OeCz8xrQ";
+    auto at=std::search(bytes.begin(),bytes.end(),nid.begin(),nid.end()); CHECK(at!=bytes.end()); *at='Z';
+    CHECK(maxps4_fex_v4_preflight(&r,diagnostic,sizeof(diagnostic))==-ENOTSUP);
+    CHECK(std::strstr(diagnostic,"unresolved NID ZI+OeCz8xrQ"));
+    CHECK(maxps4_fex_engine_run_v4_prx(engine,&r,&result,&backend)==-ENOTSUP && !result && !backend);
+    bytes=v4_import_fixture::make(); r.file=bytes.data();
+    auto call=[&] { uint64_t value=0; uint32_t cpu=0;
+        return maxps4_fex_engine_run_v4_prx(engine,&r,&value,&cpu)==0 && value==42 && (cpu==2 || cpu==3); };
+    auto first=std::async(std::launch::async,call), second=std::async(std::launch::async,call);
+    CHECK(first.get() && second.get());
+    CHECK(maxps4_fex_engine_probe(engine,&result,&backend)==0 && result==42);
+    return 0;
+}
+static int v4GuestMemoryServiceTest() {
+    timespec expected{}; CHECK(::clock_getres(CLOCK_MONOTONIC,&expected)==0);
+    maxps4_fex_engine* engine=nullptr;
+    CHECK(maxps4_fex_engine_open(&engine)==0 && engine);
+    struct Close { maxps4_fex_engine* e; ~Close() {maxps4_fex_engine_close(e);} } close{engine};
+    CHECK(maxps4_fex_engine_initialize(engine)==0);
+    auto bytes=v4_import_fixture::make_clock();
+    maxps4_v4_prx_request r{bytes.data(),bytes.size(),orbis_execution::app_bias,orbis_execution::entry,
+                          MAXPS4_V4_ABI_IMPORT_CLOCK_GETRES,7};
+    char diagnostic[256]; uint64_t value=123; uint32_t backend=123;
+    CHECK(maxps4_fex_v4_preflight(&r,diagnostic,sizeof(diagnostic))==0);
+    for (uint64_t offset:{0x20U,0x40U}) {
+        bytes=v4_import_fixture::make_clock(orbis_execution::data+offset); r.file=bytes.data();
+        CHECK(maxps4_fex_engine_run_v4_prx(engine,&r,&value,&backend)==0);
+        CHECK(value==uint64_t(expected.tv_nsec) && (backend==2 || backend==3));
+        std::printf("PASS V4 clock_getres real FEX backend=%u: service writes guest timespec; guest MOV reads nanoseconds=%llu at output+0x%llx\n",
+                    backend,static_cast<unsigned long long>(value),static_cast<unsigned long long>(offset));
+    }
+    auto call=[&] {uint64_t result=0; uint32_t cpu=0;
+        return maxps4_fex_engine_run_v4_prx(engine,&r,&result,&cpu)==0 && result==uint64_t(expected.tv_nsec) && (cpu==2 || cpu==3);};
+    auto first=std::async(std::launch::async,call),second=std::async(std::launch::async,call);
+    CHECK(first.get() && second.get());
+    for (uint64_t bad:{uint64_t{0},UINT64_MAX-7,orbis_execution::data,orbis_execution::data+4,
+                      orbis_execution::data+0x1000,orbis_execution::entry,orbis_execution::data+0x1f8}) {
+        bytes=v4_import_fixture::make_clock(bad); r.file=bytes.data();
+        CHECK(maxps4_fex_v4_preflight(&r,diagnostic,sizeof(diagnostic))==-ENOTSUP);
+        CHECK(std::strstr(diagnostic,"clock output"));
+        CHECK(maxps4_fex_engine_run_v4_prx(engine,&r,&value,&backend)==-ENOTSUP && !value && !backend);
+    }
+    bytes=v4_import_fixture::make_clock(); r.file=bytes.data();
+    CHECK(maxps4_fex_engine_run_v4_prx(engine,&r,&value,&backend)==0 && value==uint64_t(expected.tv_nsec));
+    CHECK(maxps4_fex_engine_probe(engine,&value,&backend)==0 && value==42);
+    return 0;
+}
+static int v4CGameBootTest(const char* path, bool globals=false, bool eboot=false, bool experimental=false) {
+    std::ifstream file(path,std::ios::binary|std::ios::ate);
+    CHECK(bool(file));
+    const auto size=file.tellg(); CHECK(size>=64 && size<=1024*1024);
+    file.seekg(0);
+    std::vector<uint8_t> bytes(static_cast<size_t>(size));
+    CHECK(bool(file.read(reinterpret_cast<char*>(bytes.data()),size)));
+    maxps4_v4_prx_request request{bytes.data(),bytes.size(),0,0x400000,MAXPS4_V4_ABI_STARTUP_RETURN,globals ? 4U : 3U};
+    char diagnostic[128*1024];
+    const int preflight=experimental ? maxps4_fex_eboot_experimental_preflight(bytes.data(),bytes.size(),diagnostic,sizeof(diagnostic)) : eboot ? maxps4_fex_eboot_preflight(bytes.data(),bytes.size(),diagnostic,sizeof(diagnostic)) :
+        maxps4_fex_v4_preflight(&request,diagnostic,sizeof(diagnostic));
+    std::printf("C homebrew preflight=%d diagnostic=%s\n",preflight,diagnostic);
+    if (preflight) return 1;
+    if (eboot && !experimental) {
+        char tiny[2]={'x','x'};
+        CHECK(maxps4_fex_eboot_preflight(bytes.data(),bytes.size(),tiny,sizeof(tiny))==-ENOSPC && tiny[1]==0);
+        CHECK(maxps4_fex_eboot_preflight(nullptr,0,diagnostic,sizeof(diagnostic))==-EINVAL);
+        CHECK(maxps4_fex_eboot_preflight(bytes.data(),bytes.size(),nullptr,0)==-EINVAL);
+    }
+    maxps4_fex_engine* engine=nullptr;
+    CHECK(maxps4_fex_engine_open(&engine)==0 && engine);
+    struct Close {maxps4_fex_engine* e; ~Close(){maxps4_fex_engine_close(e);}} close{engine};
+    CHECK(maxps4_fex_engine_initialize(engine)==0);
+    for (unsigned run=0;run<3;++run) {
+        uint64_t result=0; uint32_t backend=0;
+        CHECK((experimental ? maxps4_fex_engine_run_eboot_experimental(engine,bytes.data(),bytes.size(),&result,&backend) : eboot ? maxps4_fex_engine_run_eboot(engine,bytes.data(),bytes.size(),&result,&backend) :
+            maxps4_fex_engine_run_v4_prx(engine,&request,&result,&backend))==0);
+        CHECK(result==(globals ? 4661U : 257U) && (backend==2 || backend==3));
+        std::printf("PASS source-built C homebrew exact-file run=%u FEX backend=%u RAX=%llu; no input byte patching\n",
+                    run,backend,static_cast<unsigned long long>(result));
+    }
+    if (eboot) {
+        if (bytes[0]==0x4f) {
+            for (uint8_t protectedFlag : {uint8_t{2},uint8_t{4},uint8_t{8}}) {
+                if (experimental && protectedFlag==4) continue;
+                const auto saved=bytes[32]; bytes[32]|=protectedFlag;
+                uint64_t value=123; uint32_t backend=123;
+                CHECK((experimental ? maxps4_fex_engine_run_eboot_experimental(engine,bytes.data(),bytes.size(),&value,&backend) :
+                    maxps4_fex_engine_run_eboot(engine,bytes.data(),bytes.size(),&value,&backend))==-ENOTSUP);
+                CHECK(!value && !backend);
+                bytes[32]=saved;
+            }
+            std::puts(experimental ? "PASS experimental FEX refuses encrypted/compressed SELF; signed clear execution allowed; zero failure outputs" :
+                "PASS initialized FEX engine refuses encrypted/signed/compressed SELF before dispatch; zero failure outputs");
+        }
+        // Revalidation must refuse mutations after a previous successful preflight.
+        bytes[(bytes[0]==0x4f) ? maxps4::OrbisMetadata::read(bytes.data()+40,8) : 0x4000]=0xeb;
+        uint64_t result=123; uint32_t backend=123;
+        CHECK((experimental ? maxps4_fex_engine_run_eboot_experimental(engine,bytes.data(),bytes.size(),&result,&backend) :
+            maxps4_fex_engine_run_eboot(engine,bytes.data(),bytes.size(),&result,&backend))==-ENOTSUP);
+        CHECK(!result && !backend);
+        CHECK(maxps4_fex_engine_run_eboot(engine,nullptr,0,&result,&backend)==-EINVAL);
+        CHECK(!result && !backend);
+    }
+    return 0;
+}
 int main(int argc, char** argv) {
     std::setvbuf(stdout,nullptr,_IONBF,0);
 #if defined(__linux__)
@@ -320,7 +542,17 @@ int main(int argc, char** argv) {
         if (level<=LogMan::ERROR) std::fprintf(stderr,"FEX error: %s\n",text);
     });
     if (argc==1) { const int status=v4PRXTest(); if (status) return status; }
+    if (argc==1) { const int status=v4ImportsTest(); if (status) return status; }
+    if (argc==1) { const int status=v4GuestMemoryServiceTest(); if (status) return status; }
+    if (argc==2 && !std::strcmp(argv[1],"--v4-guest-memory")) return v4GuestMemoryServiceTest();
+    if (argc==2 && !std::strcmp(argv[1],"--v4-imports")) return v4ImportsTest();
     if (argc==2 && !std::strcmp(argv[1],"--v4-prx")) return v4PRXTest();
+    if (argc==3 && !std::strcmp(argv[1],"--v4-homebrew")) return v4HomebrewTest(argv[2]);
+    if (argc==3 && !std::strcmp(argv[1],"--v4-startup")) return v4StartupTest(argv[2]);
+    if (argc==3 && !std::strcmp(argv[1],"--v4-experimental-self-test")) return v4CGameBootTest(argv[2],true,true,true);
+    if (argc==3 && !std::strcmp(argv[1],"--v4-eboot-test")) return v4CGameBootTest(argv[2],true,true);
+    if (argc==3 && !std::strcmp(argv[1],"--v4-global-boot")) return v4CGameBootTest(argv[2],true);
+    if (argc==3 && !std::strcmp(argv[1],"--v4-c-boot")) return v4CGameBootTest(argv[2]);
 
     if (argc == 2 && !std::strcmp(argv[1],"--m2")) {
         CHECK(maxps4_fex_test_m2_low_va(nullptr)==-EINVAL);

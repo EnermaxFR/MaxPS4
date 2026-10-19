@@ -22,6 +22,14 @@ public:
     const ReservationFailure& reservation_failure() const { return failure_; }
     struct Region { uint64_t address; size_t size; uint32_t permissions; };
     static constexpr size_t budget = 32 * 1024 * 1024;
+    // Mission 50: a process owner may raise its own reservation limit (never
+    // below current usage, never above 4 GiB). Default stays at `budget`.
+    static constexpr size_t process_limit_max = size_t(4) * 1024 * 1024 * 1024;
+    int set_limit(size_t bytes) {
+        if (bytes < allocated_ || bytes > process_limit_max) return -EINVAL;
+        limit_ = bytes; return 0;
+    }
+    size_t limit() const { return limit_; }
     explicit GuestAddressSpace(Backend backend = Backend::translated) : backend_(backend) {
         const long p = ::sysconf(_SC_PAGESIZE);
         if (p == 4096 || p == 16384) page_ = static_cast<size_t>(p);
@@ -65,7 +73,7 @@ public:
         if (!size || address % page_ || size % page_ || address < page_ ||
             address > (uint64_t{1} << 47) - page_ || size > (uint64_t{1} << 47) - address - page_)
             return -EINVAL;
-        if (size > budget - allocated_) return -E2BIG;
+        if (size > limit_ - allocated_) return -E2BIG;
         const uint64_t low = address - page_, high = address + size + page_;
         const size_t bytes = size + 2 * page_;
         for (const auto& r : reservations_)
@@ -204,7 +212,7 @@ private:
     struct Reservation { uint64_t address; size_t size; void* host; };
     ReservationFailure failure_{};
     Backend backend_;
-    size_t page_ = 0, allocated_ = 0;
+    size_t page_ = 0, allocated_ = 0, limit_ = budget;
     std::vector<Reservation> reservations_;
     std::vector<Region> regions_;
     int check_span(uint64_t address, size_t size, uint32_t permission) const {

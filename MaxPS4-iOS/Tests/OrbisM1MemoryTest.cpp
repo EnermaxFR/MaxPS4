@@ -61,7 +61,8 @@ int main() {
         CHECK(direct_process.space.translate(OrbisM1::heap_base,0x10000,6));
         direct_thread.clear(); direct_process.space.clear(); CHECK(direct_process.space.allocated() == 0);
     }
-    OrbisM1 process(GuestAddressSpace::Backend::translated);
+    OrbisM1 process;
+    CHECK(!process.space.fex_direct());
     CHECK(process.load(file.data(),file.size(),100) == 0);
     const size_t baseline = process.space.allocated();
     {

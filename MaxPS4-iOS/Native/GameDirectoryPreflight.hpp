@@ -30,6 +30,7 @@ class GameDirectoryPreflight {
     std::vector<Module> modules;
     std::vector<std::string> blockers;
     size_t entries = 0, bytesRead = 0, records = 0;
+    bool inspectClearSelf = false;
     static constexpr size_t reportLimit = 2 * 1024 * 1024 - 1;
     std::string output;
     void append(const std::string& text) {
@@ -80,7 +81,8 @@ class GameDirectoryPreflight {
             else module.metadata.parse(bytes.data(),bytes.size(),[](const auto& s) {
                 return s.moduleVersion == 0x0100 && s.kind == 2 &&
                     maxps4_ps4_resolve_libkernel(s.nid.c_str(),s.library.c_str(),s.module.c_str(),s.libraryVersion) != 0;
-            });
+            },inspectClearSelf ? OrbisMetadata::SelfInspection::ClearUnauthenticated :
+                                OrbisMetadata::SelfInspection::StrictStatic);
         }
         const auto count = module.metadata.symbols.size()+module.metadata.relocations.size();
         if (count > 65536-records) throw Failure(-E2BIG,"Budget cumulé de 65536 symboles/relocations dépassé ; inventaire incomplet");
@@ -132,6 +134,8 @@ class GameDirectoryPreflight {
         std::sort(modules.begin(),modules.end(),[](const auto& a,const auto& b){ return a.path < b.path; });
         append("MaxPS4 pré-démarrage dossier v1\nLecture seule ; aucun fichier copié ou modifié ; aucune exécution\n"
                "Limites : 4096 entrées, profondeur 16, 128 ELF/PRX, 65536 symboles/relocations, lecture cumulée 64 Mio, rapport 2 Mio\n");
+        if (inspectClearSelf)
+            append("SELF : inspection claire non authentifiée explicite ; signature non vérifiée ; politique de lancement strict inchangée\n");
         bool eboot = false, sfo = false, manifest = false;
         for (const auto& file : files) {
             append("Fichier "+display(file.path)+" ; octets="+std::to_string(file.size)+(file.regular ? "\n" : " ; REFUSÉ\n"));
@@ -178,7 +182,22 @@ class GameDirectoryPreflight {
             for (const auto& needed : metadata.needed) {
                 const auto parent = module.path.substr(0,module.path.find_last_of('/') == std::string::npos ? 0 : module.path.find_last_of('/')+1);
                 const bool found = std::any_of(files.begin(),files.end(),[&](const auto& f){ return f.regular && f.path == parent+needed; });
-                append(display(module.path)+": DT_NEEDED "+needed+(found ? " ; fichier présent, non lié\n" : " ; fichier adjacent absent (aucun chemin deviné)\n"));
+                std::vector<std::string> candidates;
+                if (!found) for (const auto& candidate : modules) {
+                    const auto slash=candidate.path.find_last_of('/');
+                    const auto base=candidate.path.substr(slash==std::string::npos ? 0 : slash+1);
+                    if (candidate.metadata.error.empty() && base==needed) candidates.push_back(candidate.path);
+                }
+                if (!found && candidates.size()==1) {
+                    append(display(module.path)+": DT_NEEDED "+display(needed)+" ; candidat inventorié="+
+                        display(candidates.front())+" ; non lié, chemin à déclarer dans le graphe\n");
+                    block(display(module.path)+": DT_NEEDED "+display(needed)+" ; candidat non lié, graphe explicite requis");
+                } else {
+                    if (!found) block(display(module.path)+": DT_NEEDED "+display(needed)+
+                        (candidates.empty() ? " ; fichier adjacent absent" : " ; candidats ambigus, aucun chemin choisi"));
+                    append(display(module.path)+": DT_NEEDED "+display(needed)+(found ? " ; fichier présent, non lié\n" :
+                        candidates.empty() ? " ; fichier adjacent absent (aucun chemin deviné)\n" : " ; candidats ambigus, aucun chemin choisi\n"));
+                }
             }
             for (const auto& symbol : metadata.symbols) {
                 if (symbol.defined || symbol.encoded.empty()) continue;
@@ -190,6 +209,18 @@ class GameDirectoryPreflight {
         }
         append(manifest ? "\nmaxps4.json présent : validation du graphe, biais et instructions réservée au lancement expérimental\n" :
             "\nmaxps4.json absent : graphe PRX et biais explicites requis par le runtime actuel ; aucun manifeste généré\n");
+        // A memory-only proposal is safe only for a single fixed-address static
+        // image. Dynamic graphs/biases cannot be inferred from filenames.
+        if (!inspectClearSelf && !manifest && eboot && modules.size()==1) {
+            const auto& m=modules.front().metadata;
+            const bool staticImage=m.error.empty() && m.type==0xfe00 && m.entry &&
+                m.needed.empty() && m.symbols.empty() && m.relocations.empty() &&
+                std::all_of(m.segments.begin(),m.segments.end(),[](const auto& s) {
+                    return s.type==1 && (s.flags&3)!=3;
+                });
+            if (staticImage)
+                append("Proposition temporaire en mémoire (diagnostic uniquement) : {\"root\":\"eboot.bin\",\"modules\":[{\"path\":\"eboot.bin\",\"loadBias\":0,\"dependencies\":[]}]} ; ABI/instructions à valider ; non transmise au runtime ; aucune preuve de démarrage\n");
+        }
         block("Préparation réelle non effectuée : graphe explicite, biais, relocations et admission CPU à valider");
         append("[ORBIS.PREFLIGHT] execution_admitted=0 ; inventaire uniquement, aucun dispatch\n");
         block("TLS par thread et ABI de démarrage d'un jeu non raccordés ; rendu/audio PS4 général non connecté");
@@ -199,12 +230,13 @@ class GameDirectoryPreflight {
                "FEXCore JIT ARM64 : non tenté par le précontrôle ; aucun résultat Kero Blaster ou écran titre validé.\n");
     }
 public:
-    static int report(const char* path, std::string& text) {
+    static int report(const char* path, std::string& text, bool inspectClearSelf = false) {
         try {
             if (!path) throw Failure(-EINVAL,"Chemin du dossier absent");
             FD root(open(path,O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC));
             if (root.value < 0) throw Failure(-EACCES,"Dossier inaccessible ou lien symbolique refusé");
             GameDirectoryPreflight pending;
+            pending.inspectClearSelf = inspectClearSelf;
             pending.walk(root.value,"",0);
             pending.describe();
             text = std::move(pending.output); return 0;

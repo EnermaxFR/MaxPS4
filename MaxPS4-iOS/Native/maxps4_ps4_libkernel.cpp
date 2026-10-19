@@ -2,6 +2,8 @@
 #include "maxps4_fex_runtime.h"
 #include "maxps4_ps4_kernel_path.h"
 #include <cerrno>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <new>
@@ -166,11 +168,18 @@ int64_t PS4Libkernel::open(const PS4KernelCall& c) {
     if (flags & ~0x20000U) return kernel_error(notsup); // Only RDONLY and DIRECTORY.
     char path[PS4KernelPath::max_path];
     Error e = pathname(c.rdi, path);
+    if (std::getenv("MAXPS4_FILE_TRACE")) {
+        char raw[PS4KernelPath::max_path] = {};
+        if (!memory_.read_cstring(c.rdi, raw, sizeof(raw))) std::strcpy(raw, "<fault>");
+        std::fprintf(stderr, "FILE.OPEN path=%s flags=0x%x error=%d\n", raw, flags, int(e));
+    }
     if (e) return kernel_error(e);
     size_t slot = 3; // Standard streams are not host stdin/stdout/stderr aliases.
     while (slot < files_.size() && files_[slot] >= 0) ++slot;
     if (slot == files_.size()) return kernel_error(mfile);
     const int fd = open_path(path, (flags & 0x20000U) != 0, e);
+    if (fd < 0 && std::getenv("MAXPS4_FILE_TRACE"))
+        std::fprintf(stderr, "FILE.OPEN host_path=%s error=%d\n", path, int(e));
     if (fd < 0) return kernel_error(e);
     files_[slot] = fd;
     return int64_t(slot);

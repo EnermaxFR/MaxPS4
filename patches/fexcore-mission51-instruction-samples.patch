@@ -1,0 +1,31 @@
+diff --git a/src/aarch64/simulator-aarch64.cc b/src/aarch64/simulator-aarch64.cc
+index c4f87d0..a67e925 100644
+--- a/src/aarch64/simulator-aarch64.cc
++++ b/src/aarch64/simulator-aarch64.cc
+@@ -29,6 +29,7 @@
+ #include "simulator-aarch64.h"
+ 
+ #include <cmath>
++#include <cstdlib>
+ #include <cstring>
+ #include <errno.h>
+ #include <limits>
+@@ -830,8 +831,18 @@ void Simulator::Run() {
+       }
+     }
+   } else {
++    // Diagnostic samples of instructions actually executed by the simulator.
++    // Keep the normal loop untouched when tracing is disabled.
++    const bool trace = std::getenv("MAXPS4_INSTRUCTION_TRACE") != nullptr;
++    static thread_local uint64_t executed = 0;
+     while (!IsSimulationFinished()) {
++      const auto* instruction = ReadPc();
+       ExecuteInstruction();
++      if (trace && (++executed <= 256 || executed % 1000000 == 0)) {
++        fprintf(stderr, "EXEC.A64 count=%llu pc=%p bits=%08x\n",
++                static_cast<unsigned long long>(executed),
++                static_cast<const void*>(instruction), instruction->GetInstructionBits());
++      }
+     }
+   }
+ }
