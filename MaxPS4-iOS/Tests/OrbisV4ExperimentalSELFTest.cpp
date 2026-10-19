@@ -6,10 +6,15 @@
 using mission43_fixture::wrap;
 int main() {
     auto elf=orbis_fixture::make(true);
+    // Distinct 16 KiB RX/RELRO pages also work on 4 KiB Linux hosts.
+    orbis_fixture::put(elf,24,0x4000);
+    orbis_fixture::put(elf,64+16,0x4000);
+    orbis_fixture::put(elf,64+56+16,0x8000);
+    orbis_fixture::put(elf,0x820,0x4000);
     orbis_fixture::put(elf,64+56,0x61000010,4);orbis_fixture::put(elf,64+56+4,4,4);
     orbis_fixture::appendTag(elf,0x6100002f,0x300);
     orbis_fixture::appendTag(elf,0x61000031,24);orbis_fixture::appendTag(elf,0x61000033,24);
-    orbis_fixture::put(elf,0x900,0x2000);orbis_fixture::put(elf,0x908,8);orbis_fixture::put(elf,0x910,0x123);
+    orbis_fixture::put(elf,0x900,0x8000);orbis_fixture::put(elf,0x908,8);orbis_fixture::put(elf,0x910,0x123);
     const auto original=wrap(elf);auto bytes=original;
     maxps4::OrbisMetadata inspection;
     assert(inspection.parse(bytes.data(),bytes.size(),{},maxps4::OrbisMetadata::SelfInspection::ClearUnauthenticated));
@@ -25,8 +30,8 @@ int main() {
     std::unique_ptr<maxps4::OrbisV4Translation> owner;std::string report;
     auto prepare=[&] {return maxps4::OrbisV4ExperimentalSELF::prepare({{"probe.prx",bytes.data(),bytes.size(),0x400000}},[]{},owner,report);};
     assert(prepare()==0 && owner);
-    uint64_t relocated=0;assert(owner->read(0x402000,&relocated,8)==0 && relocated==0x400123);
-    {auto lease=owner->lease();assert(!lease.permitted(0x402000,8,2));assert(!lease.permitted(0x402000,8,1));
+    uint64_t relocated=0;assert(owner->read(0x408000,&relocated,8)==0 && relocated==0x400123);
+    {auto lease=owner->lease();assert(!lease.permitted(0x408000,8,2));assert(!lease.permitted(0x408000,8,1));
      for (const auto& r:lease.ranges()) assert(r.host!=r.guest);}
     owner->close();owner.reset();
     std::vector<uint8_t> canonical;maxps4_v4_prx_request request{};
@@ -81,8 +86,8 @@ int main() {
     for(const auto& module:maxps4::OrbisV4LocalServices::modules()){
         assert(maxps4::OrbisV4ExperimentalSELF::prepare({{module.path(),bytes.data(),bytes.size(),0x400000}},[]{},owner,report,false,{},false,false,false,false,false,false,false,false,true)==-EINVAL && !owner);
     }
-    assert(maxps4::OrbisV4ExperimentalSELF::prepare({{"probe.prx",bytes.data(),bytes.size(),maxps4::OrbisV4ErrorDialog::bias+0x3000}},[]{},owner,report,false,{},false,false,true)==-ENOTSUP && !owner);
-    assert(maxps4::OrbisV4ExperimentalSELF::prepare({{"probe.prx",bytes.data(),bytes.size(),maxps4::OrbisV4GnmDriver::bias+0x3000}},[]{},owner,report,false,{},false,false,false,true)==-ENOTSUP && !owner);
+    assert(maxps4::OrbisV4ExperimentalSELF::prepare({{"probe.prx",bytes.data(),bytes.size(),maxps4::OrbisV4ErrorDialog::bias}},[]{},owner,report,false,{},false,false,true)==-ENOTSUP && !owner);
+    assert(maxps4::OrbisV4ExperimentalSELF::prepare({{"probe.prx",bytes.data(),bytes.size(),maxps4::OrbisV4GnmDriver::bias}},[]{},owner,report,false,{},false,false,false,true)==-ENOTSUP && !owner);
     std::vector<maxps4::OrbisV4ExperimentalSELF::Input> tooMany(120,{"probe.prx",bytes.data(),bytes.size(),0x400000});
     assert(maxps4::OrbisV4ExperimentalSELF::prepare(tooMany,[]{},owner,report,true,{},true,true,true,true,true,true,true,true)==-EINVAL && !owner);
     std::cout<<"PASS experimental signed clear SELF: actual RELATIVE relocation, final read-only NX RELRO, guest/host separation, no signature gate, missing-provider/crypto/malformed refusals and no dynamic CPU ABI\n";
