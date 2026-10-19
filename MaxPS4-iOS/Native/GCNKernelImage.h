@@ -6,7 +6,10 @@
 // The texels are read from a byte buffer (the guest resource as is, no
 // conversion upload): `img.base` is the byte offset of the resource in it.
 // Requires GCNKernel.h. Conversions use exact host tables (sRGB, unorm8) so
-// that no GPU division or pow is involved.
+// that no GPU division or pow is involved. Coordinate and filter arithmetic
+// flushes fp32 denormals to signed zero at every step (gcn_ftz), as Apple
+// GPUs do in hardware; GCNShader::imageAccess follows the same rule, so the
+// CPU and GPU paths agree bit for bit.
 #ifndef MAXPS4_GCN_KERNEL_IMAGE_H
 #define MAXPS4_GCN_KERNEL_IMAGE_H
 
@@ -96,6 +99,7 @@ GCN_TABLE gcn_u32 gcn_unorm8[256] = {
   0x3f78f8f9u, 0x3f79f9fau, 0x3f7afafbu, 0x3f7bfbfcu, 0x3f7cfcfdu, 0x3f7dfdfeu, 0x3f7efeffu, 0x3f800000u
 };
 
+GCN_INLINE float gcn_ftz(float x) { const gcn_u32 b = gcn_b(x); return (b & 0x7f800000u) == 0u ? gcn_f(b & 0x80000000u) : x; }
 GCN_INLINE gcn_u32 gcn_bitof(gcn_u32 v, gcn_u32 n) { return (v >> n) & 1u; }
 // Display2DThin32::offset (GCNTiling.hpp) with 32-bit arithmetic (surfaces <= 1 GiB).
 GCN_INLINE gcn_u32 gcn_tile10_offset(gcn_u32 pitch, gcn_u32 x, gcn_u32 y) {
@@ -158,8 +162,8 @@ GCN_INLINE void gcn_image(const GcnImage img, GCN_DEVICE const unsigned char* te
     if (c[0] < img.width && c[1] < img.height) gcn_texel(img, texels, c[0], c[1], t);
     return;
   }
-  float u = gcn_f(c[0]), v = gcn_f(c[1]);
-  if (!(((w0 >> 12) & 1u) != 0u || img.forceUnnorm != 0u)) { u = u * float(img.width); v = v * float(img.height); }
+  float u = gcn_ftz(gcn_f(c[0])), v = gcn_ftz(gcn_f(c[1]));
+  if (!(((w0 >> 12) & 1u) != 0u || img.forceUnnorm != 0u)) { u = gcn_ftz(u * float(img.width)); v = gcn_ftz(v * float(img.height)); }
   if (!(gcn_isfinite(u) && gcn_isfinite(v))) { u = 0.0f; v = 0.0f; }
   u = u < -1.0e8f ? -1.0e8f : u; u = 1.0e8f < u ? 1.0e8f : u;   // std::min(std::max(u, -1e8f), 1e8f)
   v = v < -1.0e8f ? -1.0e8f : v; v = 1.0e8f < v ? 1.0e8f : v;
@@ -170,17 +174,20 @@ GCN_INLINE void gcn_image(const GcnImage img, GCN_DEVICE const unsigned char* te
     if (!(bx || by)) gcn_texel(img, texels, gcn_u32(cx), gcn_u32(cy), t);
     return;
   }
-  const float fu = u - 0.5f, fv = v - 0.5f;
+  const float fu = gcn_ftz(u - 0.5f), fv = gcn_ftz(v - 0.5f);
   const int x0 = int(gcn_floor(fu)), y0 = int(gcn_floor(fv));
-  const float ax = fu - float(x0), ay = fv - float(y0);
+  const float ax = gcn_ftz(fu - float(x0)), ay = gcn_ftz(fv - float(y0));
   float color[4] = {0.0f, 0.0f, 0.0f, 0.0f};
   for (int dy = 0; dy < 2; ++dy) for (int dx = 0; dx < 2; ++dx) {
     bool bx, by;
     const int cx = gcn_wrap(x0 + dx, w, img.clampX, bx), cy = gcn_wrap(y0 + dy, h, img.clampY, by);
     gcn_u32 texel[4] = {0u, 0u, 0u, 0u};
     if (!(bx || by)) gcn_texel(img, texels, gcn_u32(cx), gcn_u32(cy), texel);
-    const float weight = (dx ? ax : 1.0f - ax) * (dy ? ay : 1.0f - ay);
-    for (gcn_u32 k = 0; k < 4u; ++k) { const float term = gcn_f(texel[k]) * weight; color[k] = color[k] + term; }
+    const float weight = gcn_ftz((dx ? ax : gcn_ftz(1.0f - ax)) * (dy ? ay : gcn_ftz(1.0f - ay)));
+    for (gcn_u32 k = 0; k < 4u; ++k) {
+      const float term = gcn_ftz(gcn_ftz(gcn_f(texel[k])) * weight);
+      color[k] = gcn_ftz(color[k] + term);
+    }
   }
   for (gcn_u32 k = 0; k < 4u; ++k) t[k] = gcn_b(color[k]);
 }

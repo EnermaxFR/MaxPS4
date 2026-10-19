@@ -2,8 +2,8 @@
 // Image sampling cases shared by GCNKernelImageTest (C++ vs the GCNShader
 // interpreter) and GCNTranslatorMetal (GPU vs C++): random T#/S# within what
 // GCNImageBinding accepts, over a pool of random guest resources, each with
-// 64 lane coordinates (edges, out of range, NaN/inf, huge values; no
-// denormal coordinates, see GCNKernelImage.h).
+// 64 lane coordinates (edges, out of range, NaN/inf, huge values, denormals:
+// both sides flush them, see GCNKernelImage.h).
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -35,6 +35,7 @@ inline Suite make(unsigned count, uint64_t seed, uint64_t base = 0x10000000) {
     case 1: w = 0xffffffffu; break;
     case 2: w = bits(float(int(next() % 20001) - 10000) / 997.0f); break;
     case 3: w = (w & 0x807fffffu) | ((96u + next() % 64u) << 23); break;   // normal floats of varied magnitude
+    case 4: w = (w & 0x807fffffu) | ((next() % 3u) << 23); break;          // denormals and the smallest normals
     default: break;
     }
     std::memcpy(s.bytes.data() + k, &w, 4);
@@ -79,7 +80,7 @@ inline Suite make(unsigned count, uint64_t seed, uint64_t base = 0x10000000) {
         } else {
           const unsigned kind = next() % 16;
           float f;
-          if (kind == 0) { static const uint32_t special[6] = {0x7fc00000u, 0x7f800000u, 0xff800000u, 0x80000000u, 0x4e6e6b28u, 0xce6e6b28u}; value = special[next() % 6]; c.coords[lane][axis] = value; continue; }
+          if (kind == 0) { static const uint32_t special[8] = {0x7fc00000u, 0x7f800000u, 0xff800000u, 0x80000000u, 0x4e6e6b28u, 0xce6e6b28u, 0x00012345u, 0x80400001u}; value = special[next() % 8]; c.coords[lane][axis] = value; continue; }
           if (kind == 1) f = unnormalized ? float(next() % (size + 1)) + 0.5f * float(next() % 2) : (float(next() % (size + 1)) + 0.5f) / float(size);
           else if (unnormalized) f = float(int(next() % (5 * size * 64 + 1)) - int(2 * size * 64)) / 64.0f;
           else f = float(int(next() % 40001) - 15000) / 10000.0f;

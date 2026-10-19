@@ -975,8 +975,12 @@ struct GCNShader {
         const uint32_t px = wave.v[vaddr][lane], py = wave.v[vaddr + 1][lane];
         if (px < tex.width && py < tex.height) { if (!texel(memory, tex, px, py, color, why)) return false; }
       } else {
-        float u = gcnFloat(wave.v[vaddr][lane]), v = gcnFloat(wave.v[vaddr + 1][lane]);
-        if (!(unorm || forceUnnorm)) { u *= float(tex.width); v *= float(tex.height); }
+        // Coordinate and filter arithmetic flushes fp32 denormals to signed zero
+        // at every step (GCN's default single-precision mode; Apple GPUs do the
+        // same), so GCNKernelImage.h on the GPU agrees bit for bit.
+        auto ftz = [](float f) { const uint32_t b = gcnBits(f); return (b & 0x7f800000u) ? f : gcnFloat(b & 0x80000000u); };
+        float u = ftz(gcnFloat(wave.v[vaddr][lane])), v = ftz(gcnFloat(wave.v[vaddr + 1][lane]));
+        if (!(unorm || forceUnnorm)) { u = ftz(u * float(tex.width)); v = ftz(v * float(tex.height)); }
         if (!std::isfinite(u) || !std::isfinite(v)) { u = 0; v = 0; }
         u = std::min(std::max(u, -1.0e8f), 1.0e8f); v = std::min(std::max(v, -1.0e8f), 1.0e8f);
         if (mag == 0) {
@@ -987,17 +991,17 @@ struct GCNShader {
           if (bx || by) color = {0, 0, 0, 0};
           else if (!texel(memory, tex, unsigned(cx), unsigned(cy), color, why)) return false;
         } else {
-          const float fu = u - 0.5f, fv = v - 0.5f;
+          const float fu = ftz(u - 0.5f), fv = ftz(v - 0.5f);
           const int x0 = int(std::floor(fu)), y0 = int(std::floor(fv));
-          const float ax = fu - float(x0), ay = fv - float(y0);
+          const float ax = ftz(fu - float(x0)), ay = ftz(fv - float(y0));
           for (int dy = 0; dy < 2; ++dy) for (int dx = 0; dx < 2; ++dx) {
             bool bx, by;
             const int cx = wrapCoordinate(x0 + dx, int(tex.width), clampX, bx), cy = wrapCoordinate(y0 + dy, int(tex.height), clampY, by);
             if (cx < 0 || cy < 0) { why = "sampler clamp mode unsupported"; return false; }
             std::array<float, 4> c{0, 0, 0, 0};
             if (!(bx || by) && !texel(memory, tex, unsigned(cx), unsigned(cy), c, why)) return false;
-            const float weight = (dx ? ax : 1 - ax) * (dy ? ay : 1 - ay);
-            for (unsigned k = 0; k < 4; ++k) color[k] += c[k] * weight;
+            const float weight = ftz((dx ? ax : ftz(1 - ax)) * (dy ? ay : ftz(1 - ay)));
+            for (unsigned k = 0; k < 4; ++k) color[k] = ftz(color[k] + ftz(ftz(c[k]) * weight));
           }
         }
         ++stats.samples;
