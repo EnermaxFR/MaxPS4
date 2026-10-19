@@ -9,7 +9,9 @@ if [[ $(uname -s) == Darwin && -z ${ELF_LD:-} ]]; then
   # Apple ld cannot emit ELF. CI installs the open-source lld formula.
   LINKER="$(brew --prefix lld)/bin/ld.lld"
 fi
-flags=()
+# Keep the argument array nonempty: macOS Bash 3 treats an empty array
+# as unset under set -u.
+flags=(-target x86_64-unknown-none)
 if [[ "$SOURCE" == *.c ]]; then
   level=${MAXPS4_HOMEBREW_C_OPT_LEVEL:-1}
   [[ "$level" == 0 || "$level" == 1 ]] || { echo 'C optimization level must be 0 or 1' >&2; exit 2; }
@@ -19,7 +21,7 @@ if [[ "$SOURCE" == *.c ]]; then
     -fomit-frame-pointer -fno-asynchronous-unwind-tables -fno-unwind-tables
     -fno-pic -fno-pie -mno-red-zone -Wall -Wextra -Werror)
 fi
-"${CLANG:-clang}" -target x86_64-unknown-none "${flags[@]}" -c "$SOURCE" -o "$OUT/start.o"
+"${CLANG:-clang}" "${flags[@]}" -c "$SOURCE" -o "$OUT/start.o"
 "$LINKER" -m elf_x86_64 -z max-page-size=0x4000 -T homebrew/orbis-v4-minimal/layout.ld \
   "$OUT/start.o" -o "$OUT/homebrew.elf"
 # Brand our own linked plaintext ELF for the existing Orbis loader. This only

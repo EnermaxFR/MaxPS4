@@ -11,7 +11,8 @@ test "$(git -C "$SOURCE" rev-parse HEAD)" = 3347fc13f19860855ce91b66356940989ea6
 FEX="$SOURCE/runtime/sources/fexcore-darwin"
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
-options=()
+# Nonempty on native ARM64 too (macOS Bash 3 + set -u).
+options=(-DCMAKE_BUILD_TYPE=Debug)
 case "$(uname -m)" in
   x86_64)
     test "$(git -C "$FEX/External/vixl" rev-parse HEAD)" = 5f418449c48f6ca3ad37c47ec632f17a561c0580
@@ -28,7 +29,7 @@ python3 -B "$ROOT/MaxPS4-iOS/Tests/FEXGuestTranslationPatchTest.py" "$FEX"
 python3 -B "$ROOT/scripts/patch-fexcore-memory-translation.py" "$FEX"
 cmake -S "$FEX" -B "$OUT" -G Ninja \
   -DCMAKE_C_COMPILER="${CC:-clang}" -DCMAKE_CXX_COMPILER="${CXX:-clang++}" \
-  -DCMAKE_BUILD_TYPE=Debug -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
   -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES="$ROOT/cmake/FEXCoreLinkedTests.cmake" \
   -DMAXPS4_ROOT="$ROOT" -DTUNE_CPU=none -DTUNE_ARCH=generic \
   -DBUILD_FEXCORE_ONLY=ON -DBUILD_FEXCORE_SMOKE=OFF -DBUILD_TESTING=OFF \
