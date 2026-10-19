@@ -576,7 +576,10 @@ struct MaxPS4HomeView: View {
                 }
                 Button("Ouvrir le diagnostic FEXCore") { showingFEXDiagnostic = true }
                 Button("Ouvrir le diagnostic Metal") { showingMetalDiagnostic = true }
-                Button("Tester l’intégration") { emulator.testBackend() }
+                Button("Tester l’intégration") {
+                    emulator.testBackend()
+                    inspectionReport = emulator.status
+                }
             }
             Section {
                 Button("Gérer les doublons") { showingDuplicates = true }
