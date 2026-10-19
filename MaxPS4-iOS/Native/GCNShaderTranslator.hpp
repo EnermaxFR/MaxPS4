@@ -15,6 +15,8 @@
 // * VCC is a per-fragment boolean (compares, carries, v_cndmask).
 // * Interpolation, image sampling and exports call macros the including
 //   backend defines (GCN_ENV_INTERP, GCN_ENV_SAMPLE, GCN_ENV_EXPORT).
+//   GCN_ENV_SAMPLE(slot, w0, w1, c, t) names the image by its slot in
+//   Result::images; GCNKernelImage.h's gcn_image implements it.
 // Anything else fails with the exact program counter; nothing is guessed.
 #include "GCNShader.hpp"
 #include "GCNKernel.h"
@@ -31,6 +33,10 @@ struct GCNShaderTranslator {
     unsigned instructions = 0, vgprs = 0;
     bool usesInterpolation = false, usesImages = false, needsScalarPrepass = false;
     std::set<unsigned> exportTargets;
+    // Images the host binds (GCNImageBinding) from the scalar prepass, by slot:
+    // T# at s[rsrc..rsrc+7], S# at s[ssamp..ssamp+3] when sampled.
+    struct Image { unsigned rsrc = 0, ssamp = 0; bool sampled = false; };
+    std::vector<Image> images;
   };
 
   // Memory adapter over the program words for GCNShader::fetch (same decoder).
@@ -214,8 +220,12 @@ struct GCNShaderTranslator {
         for (unsigned r = rsrc; r < rsrc + 8; ++r) if (!written.count(r)) readBeforeWrite.insert(r);
         if (op) for (unsigned r = ssamp; r < ssamp + 4; ++r) if (!written.count(r)) readBeforeWrite.insert(r);
         out.usesImages = true;
+        unsigned slot = 0;
+        while (slot < out.images.size() && !(out.images[slot].rsrc == rsrc && out.images[slot].sampled == (op != 0) &&
+                                             (op == 0 || out.images[slot].ssamp == ssamp))) ++slot;
+        if (slot == out.images.size()) out.images.push_back({rsrc, op != 0 ? ssamp : 0u, op != 0});
         body << "  { gcn_u32 c[4] = {v[" << vaddr << "], v[" << vaddr + 1 << "], " << (coords > 2 ? "v[" + std::to_string(vaddr + 2) + "]" : std::string("0u"))
-             << ", 0u}; gcn_u32 t[4] = {0u, 0u, 0u, 0u}; GCN_ENV_SAMPLE(" << hex(w) << ", " << hex(i.w1) << ", c, t);";
+             << ", 0u}; gcn_u32 t[4] = {0u, 0u, 0u, 0u}; GCN_ENV_SAMPLE(" << slot << "u, " << hex(w) << ", " << hex(i.w1) << ", c, t);";
         for (unsigned c = 0, n = 0; c < 4; ++c) if ((dmask >> c) & 1) body << " v[" << vdata + n++ << "] = t[" << c << "];";
         body << " }\n";
         break;

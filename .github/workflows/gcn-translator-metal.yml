@@ -4,11 +4,15 @@ on:
   pull_request:
     paths:
       - 'MaxPS4-iOS/Native/GCNKernel.h'
+      - 'MaxPS4-iOS/Native/GCNKernelImage.h'
+      - 'MaxPS4-iOS/Native/GCNImageBinding.hpp'
       - 'MaxPS4-iOS/Native/GCNShader.hpp'
       - 'MaxPS4-iOS/Native/GCNShaderTranslator.hpp'
       - 'MaxPS4-iOS/Native/GCNTiling.hpp'
       - 'MaxPS4-iOS/Native/GPUHostSpan.hpp'
       - 'MaxPS4-iOS/Tests/GCNKernelOpsTest.cpp'
+      - 'MaxPS4-iOS/Tests/GCNKernelImageTest.cpp'
+      - 'MaxPS4-iOS/Tests/GCNImageCases.hpp'
       - 'MaxPS4-iOS/Tests/GCNTranslator*'
       - 'scripts/test-gcn-translator.sh'
       - '.github/workflows/gcn-translator-metal.yml'
@@ -16,11 +20,15 @@ on:
     branches: ['experiment/keroblaster-iphone-m53']
     paths:
       - 'MaxPS4-iOS/Native/GCNKernel.h'
+      - 'MaxPS4-iOS/Native/GCNKernelImage.h'
+      - 'MaxPS4-iOS/Native/GCNImageBinding.hpp'
       - 'MaxPS4-iOS/Native/GCNShader.hpp'
       - 'MaxPS4-iOS/Native/GCNShaderTranslator.hpp'
       - 'MaxPS4-iOS/Native/GCNTiling.hpp'
       - 'MaxPS4-iOS/Native/GPUHostSpan.hpp'
       - 'MaxPS4-iOS/Tests/GCNKernelOpsTest.cpp'
+      - 'MaxPS4-iOS/Tests/GCNKernelImageTest.cpp'
+      - 'MaxPS4-iOS/Tests/GCNImageCases.hpp'
       - 'MaxPS4-iOS/Tests/GCNTranslator*'
       - 'scripts/test-gcn-translator.sh'
       - '.github/workflows/gcn-translator-metal.yml'
@@ -29,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Prelude equivalence and translated shaders vs interpreter (native + ASan/UBSan)
+      - name: Prelude and image sampling equivalence, translated shaders vs interpreter (native + ASan/UBSan)
         run: bash scripts/test-gcn-translator.sh build/gcn-translator
   metal:
     runs-on: macos-14
@@ -47,11 +55,11 @@ jobs:
             -DGCN_TRANSLATED="\"$PWD/build/gcn-metal/translated.inc\"" \
             MaxPS4-iOS/Tests/GCNTranslatorMetal.mm -framework Foundation -framework Metal \
             -o build/gcn-metal/metal-test
-          build/gcn-metal/metal-test MaxPS4-iOS/Native/GCNKernel.h build/gcn-metal/translated.inc build/gcn-metal/translated.metal
+          build/gcn-metal/metal-test MaxPS4-iOS/Native/GCNKernel.h MaxPS4-iOS/Native/GCNKernelImage.h build/gcn-metal/translated.inc build/gcn-metal/translated.metal
           xcrun -sdk macosx metal -std=metal3.0 -fno-fast-math -Wall -c build/gcn-metal/translated.metal -o build/gcn-metal/translated.air
           xcrun -sdk iphoneos metal -std=ios-metal2.4 -fno-fast-math -Wall -c build/gcn-metal/translated.metal -o build/gcn-metal/translated-ios.air
           xcrun -sdk macosx metallib build/gcn-metal/translated.air -o build/gcn-metal/translated.metallib
           ls -l build/gcn-metal/translated.metallib
       - name: Compile the translated shaders as MSL and compare GPU results with the C++ twin (skipped without a Metal device)
         run: |
-          build/gcn-metal/metal-test MaxPS4-iOS/Native/GCNKernel.h build/gcn-metal/translated.inc
+          build/gcn-metal/metal-test MaxPS4-iOS/Native/GCNKernel.h MaxPS4-iOS/Native/GCNKernelImage.h build/gcn-metal/translated.inc

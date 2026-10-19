@@ -2,10 +2,12 @@
 // C++ with GCNKernel.h, must export exactly what the GCNShader interpreter
 // exports for every live lane, with the same inputs (barycentrics,
 // attributes, user SGPRs, constants and texture). Image sampling inside the
-// translated code is delegated to the interpreter executing the same MIMG
-// instruction for one lane, so only the translation itself is under test.
+// translated code is GCNKernelImage.h's gcn_image over descriptors that
+// GCNImageBinding builds from the scalar prepass, as a GPU backend does.
 #include "../Native/GCNShader.hpp"
 #include "../Native/GCNKernel.h"
+#include "../Native/GCNImageBinding.hpp"
+#include "../Native/GCNShaderTranslator.hpp"
 #include "GCNTranslatorFixtures.hpp"
 #include <cassert>
 #include <cstdio>
@@ -32,13 +34,14 @@ struct Export { unsigned target, enable, compressed, done; gcn_u32 data[4]; };
 struct Env {
   unsigned lane = 0;
   std::function<float(unsigned, unsigned, unsigned)> interp;
-  std::function<void(uint32_t, uint32_t, const gcn_u32*, gcn_u32*)> sample;
+  std::vector<GcnImage> images;
+  const unsigned char* texels = nullptr;
   std::vector<Export> exports;
 };
 #define GCN_UNIFORM
 #define GCN_ENV_PARAM Env& env
 #define GCN_ENV_INTERP(attr, chan, k) env.interp(attr, chan, k)
-#define GCN_ENV_SAMPLE(w0, w1, c, t) env.sample(w0, w1, c, t)
+#define GCN_ENV_SAMPLE(k, w0, w1, c, t) ((void)(w1), gcn_image(env.images[k], env.texels, w0, c, t))
 #define GCN_ENV_EXPORT(target, enable, compressed, done, e) \
   env.exports.push_back(Export{target, enable, compressed, done, {e[0], e[1], e[2], e[3]}})
 #include GCN_TRANSLATED
@@ -51,7 +54,7 @@ static float attribute(unsigned attr, unsigned chan, unsigned lane, unsigned k) 
 
 int main() {
   constexpr uint64_t base = 0x400000, size = 4 * 1024 * 1024;
-  constexpr uint64_t program = base, constants = base + 0x10000, texture = base + 0x20000, scratch = base + 0x80000;
+  constexpr uint64_t program = base, constants = base + 0x10000, texture = base + 0x20000;
   unsigned shaders = 0, lanes = 0, values = 0;
   {
   TestMemory m{base, std::vector<uint8_t>(size)};
@@ -69,6 +72,8 @@ int main() {
   const std::map<std::string, Fn> functions{{"ps_clear", ps_clear}, {"ps_textured", ps_textured}, {"ps_alu", ps_alu}};
   for (const auto& f : gcnfix::all()) {
     if (!f.translatable) continue;
+    const auto translation = GCNShaderTranslator::translate(f.code, f.vgprs);
+    if (!translation.ok) { std::fprintf(stderr, "%s: %s\n", f.name.c_str(), translation.error.c_str()); return 1; }
     assert(!m.write_data(program, f.code.data(), f.code.size() * 4));
     for (unsigned trial = 0; trial < 8; ++trial) {
       GCNShader ref; GCNShader::Wave wave; wave.configure(32, f.vgprs);
@@ -91,21 +96,16 @@ int main() {
       if (!ref.run(m, program, wave, error)) { std::fprintf(stderr, "%s: interpreter: %s\n", f.name.c_str(), error.c_str()); return 1; }
       // Scalar prepass: write-once SGPRs (enforced by the translator) make the final file exact.
       std::vector<gcn_u32> s(wave.s.begin(), wave.s.end());
+      std::vector<GcnImage> images;
+      for (const auto& image : translation.images) {
+        GCNImageBinding binding;
+        if (!binding.describe(&s[image.rsrc], &s[image.ssamp], image.sampled, error)) { std::fprintf(stderr, "%s: binding: %s\n", f.name.c_str(), error.c_str()); return 1; }
+        binding.image.base = uint32_t(binding.guestBase - m.base);
+        images.push_back(binding.image);
+      }
       for (unsigned lane = 0; lane < 64; ++lane) {
-        Env env; env.lane = lane;
+        Env env; env.lane = lane; env.images = images; env.texels = m.bytes.data();
         env.interp = [&](unsigned attr, unsigned chan, unsigned k) { return attribute(attr, chan + 4 * trial, lane, k); };
-        env.sample = [&](uint32_t w0, uint32_t w1, const gcn_u32* c, gcn_u32* t) {
-          // The same MIMG instruction, one lane, through the interpreter.
-          const uint32_t code[3] = {w0, w1, 0xbf810000u};
-          assert(!m.write_data(scratch, code, sizeof(code)));
-          GCNShader one; GCNShader::Wave w1v; w1v.configure(32, f.vgprs);
-          for (unsigned k = 0; k < 32; ++k) w1v.s[k] = s[k];
-          w1v.setExec(1);
-          const unsigned vaddr = w1 & 255, vdata = (w1 >> 8) & 255, dmask = (w0 >> 8) & 15;
-          for (unsigned k = 0; k < 3 && vaddr + k < f.vgprs; ++k) w1v.v[vaddr + k][0] = c[k];
-          std::string e; assert(one.run(m, scratch, w1v, e));
-          for (unsigned comp = 0, n = 0; comp < 4; ++comp) if ((dmask >> comp) & 1) t[comp] = w1v.v[vdata + n++][0];
-        };
         std::vector<gcn_u32> v(f.vgprs, 0);
         for (unsigned r = 0; r < f.vgprs; ++r) v[r] = initial[r][lane];
         functions.at(f.name)(s.data(), v.data(), env);
