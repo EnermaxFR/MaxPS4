@@ -44,7 +44,12 @@ int main(int argc,char** argv) {
     put(64+32,65); put(64+40,65);
     std::fill(bad.begin()+0x4000,bad.begin()+0x4040,0x90); bad[0x4040]=0xc3;
     reject(bad,"V4.BUDGET");
-    auto self=plainSELF(); reject(self,"V4.INSTRUCTION");
+    auto self=plainSELF();
+    // Reach the intended unsupported-instruction check on 16 KiB Apple hosts:
+    // the generic staging fixture's 0x1000 entry is below one host page.
+    guest_test::put(self,0x4000,96+24,8);
+    guest_test::put(self,0x4000,96+64+16,8);
+    reject(self,"V4.INSTRUCTION");
     self.push_back(0); reject(self,"SELF.TRAILER"); self=plainSELF();
     guest_test::put(self,0x100802,32,8); reject(self,"encrypted SELF block refused");
     self=plainSELF(); guest_test::put(self,0x100808,32,8); reject(self,"compressed SELF block unsupported");
