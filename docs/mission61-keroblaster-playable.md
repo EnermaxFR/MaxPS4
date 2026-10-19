@@ -116,3 +116,18 @@ commandes tactiles/manette Bluetooth, intégration du rendu (logiciel multi-thre
   `0xc6c00`, unique appelant `0xc333d`) sans nouveau `scePngDecParseHeader`. Cause non identifiée ;
   le runner journalise désormais les registres invités à chaque préemption pour la trouver.
 - Écran titre toujours pas affiché ; rien testé sur iPhone.
+
+### Suite du 19 octobre : écran titre et commandes dans le jeu
+
+- **Cause du blocage au frame 110** : interblocage hôte. `__tls_get_addr` (appelé par `localtime` de la
+  libc) appelait `OrbisV4TLSRuntime::module_size()`, qui reprenait le mutex déjà tenu par la Lease
+  TLS active pendant l'exécution invitée (processus en sommeil, `Sl`). La liste des modules étant
+  fixe après création, la lecture se fait sans verrou (fichier local non suivi, non commité).
+- **Écran titre affiché** (run-27, `mission61-logs/title-screen-run27.png`), ~1 s par image.
+- **Commandes vérifiées dans le jeu** (script `MAXPS4_INPUT_SCRIPT`) : Options ouvre le menu du jeu
+  (`menu-run28.png`), Droite/Croix font marcher et sauter Kero (`title-jump-run28.png`), Carré tire et
+  la balle inflige des dégâts à un ennemi (« −1 », `title-shot-run30.png`).
+- **Audio vérifié** : effets sonores réels capturés pendant ces actions (`run-28/audio.wav`, 104 882
+  échantillons non nuls, crête 2 012 à −12 dB). Aucune musique `.ptcop` n'est chargée sur l'écran titre.
+- Démarrage d'une partie : d'après `rsc_k/text/00title.pxeve`, il faut tirer sur le logo (événement
+  `TitleLogo`, qui active le téléphone) puis toucher le téléphone (`Phone1` → `<home>`). En cours (run-31).
