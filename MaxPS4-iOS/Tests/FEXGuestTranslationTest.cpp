@@ -345,7 +345,7 @@ int main() {
             const auto provider=errorDialog ? Dialog::provider() : common ? maxps4::OrbisV4CommonDialog::provider() : Audio::provider();
             const std::string path=errorDialog ? Dialog::path : common ? maxps4::OrbisV4CommonDialog::path : Audio::path;
             const uint64_t bias=errorDialog ? Dialog::bias : common ? maxps4::OrbisV4CommonDialog::bias : Audio::bias;
-            const auto app=compat_fixture::consumer(errorDialog ? "libSceErrorDialog" : common ? "libSceCommonDialog" : "libSceAudioOut",path,
+            const auto app=compat_fixture::pagedConsumer(errorDialog ? "libSceErrorDialog" : common ? "libSceCommonDialog" : "libSceAudioOut",path,
                 errorDialog ? std::vector<std::string>{Dialog::nids.begin(),Dialog::nids.end()} : common ? std::vector<std::string>{"uoUpLGNkygk"} : std::vector<std::string>{Audio::nids.begin(),Audio::nids.end()});
             maxps4::OrbisLinker::Image image;maxps4::OrbisLinker::Report linked;std::string error;
             CHECK(maxps4::OrbisLinker::link({
@@ -368,7 +368,7 @@ int main() {
                 const unsigned registers[]={FEXCore::X86State::REG_RDI,FEXCore::X86State::REG_RSI,FEXCore::X86State::REG_RDX,
                     FEXCore::X86State::REG_RCX,FEXCore::X86State::REG_R8,FEXCore::X86State::REG_R9};
                 for(size_t i=0;i<6;++i)cpu.gregs[registers[i]]=args[i];
-                cpu.rip=0x401000+function*32;cpu.gregs[FEXCore::X86State::REG_RSP]=stack+page-16;
+                cpu.rip=0x404000+function*32;cpu.gregs[FEXCore::X86State::REG_RSP]=stack+page-16;
                 cpu.callret_sp=reinterpret_cast<uintptr_t>(callret.data())+callret.size()/4;
                 fault={};cpu.GuestMemoryFaultRecord=&fault;ctx->ExecuteThread(current);cpu.GuestMemoryFaultRecord=nullptr;
                 space.ranges.clear();return cpu.gregs[FEXCore::X86State::REG_RAX];
@@ -456,7 +456,7 @@ int main() {
             const uint64_t bias=libc ? Libc::bias : Manager::bias;
             const std::vector<std::string> nids=libc ? std::vector<std::string>{Libc::nids.begin(),Libc::nids.end()} :
                 std::vector<std::string>{Manager::nids.begin(),Manager::nids.end()};
-            const auto app=compat_fixture::consumer(libc ? "libSceLibcInternal" : "libSceNpManager",path,nids);
+            const auto app=compat_fixture::pagedConsumer(libc ? "libSceLibcInternal" : "libSceNpManager",path,nids);
             maxps4::OrbisLinker::Image image;maxps4::OrbisLinker::Report linked;std::string error;
             CHECK(maxps4::OrbisLinker::link({
                 {{{"np-app.prx",{path}},app.data(),app.size()},0x400000},
@@ -476,7 +476,7 @@ int main() {
                 const unsigned regs[]={FEXCore::X86State::REG_RDI,FEXCore::X86State::REG_RSI,FEXCore::X86State::REG_RDX,
                     FEXCore::X86State::REG_RCX,FEXCore::X86State::REG_R8,FEXCore::X86State::REG_R9};
                 for(size_t i=0;i<6;++i)cpu.gregs[regs[i]]=args[i];
-                cpu.rip=0x401000+fn*32;cpu.gregs[FEXCore::X86State::REG_RSP]=stack+page-16;
+                cpu.rip=0x404000+fn*32;cpu.gregs[FEXCore::X86State::REG_RSP]=stack+page-16;
                 cpu.callret_sp=reinterpret_cast<uintptr_t>(callret.data())+callret.size()/4;
                 fault={};cpu.GuestMemoryFaultRecord=&fault;ctx->ExecuteThread(current);cpu.GuestMemoryFaultRecord=nullptr;
                 space.ranges.clear();return cpu.gregs[FEXCore::X86State::REG_RAX];
@@ -556,7 +556,7 @@ int main() {
                 const size_t count=std::min(size_t(4),module.functions.size()-first);
                 std::vector<std::string> nids;
                 for(size_t j=0;j<count;++j)nids.push_back(module.functions[first+j].nid);
-                auto app=compat_fixture::consumer(module.name,module.path(),nids);
+                auto app=compat_fixture::pagedConsumer(module.name,module.path(),nids);
                 // VideoOut's actual imported module ABI version is zero.
                 if(!module.version){
                     maxps4::OrbisMetadata m;CHECK(m.parse(app.data(),app.size()));
@@ -581,7 +581,7 @@ int main() {
                     const unsigned regs[]={FEXCore::X86State::REG_RDI,FEXCore::X86State::REG_RSI,FEXCore::X86State::REG_RDX,
                         FEXCore::X86State::REG_RCX,FEXCore::X86State::REG_R8,FEXCore::X86State::REG_R9};
                     for(size_t j=0;j<6;++j)cpu.gregs[regs[j]]=args[j];
-                    cpu.rip=0x401000+fn*32;cpu.gregs[FEXCore::X86State::REG_RSP]=stack+page-16;
+                    cpu.rip=0x404000+fn*32;cpu.gregs[FEXCore::X86State::REG_RSP]=stack+page-16;
                     cpu.callret_sp=reinterpret_cast<uintptr_t>(callret.data())+callret.size()/4;
                     fault={};cpu.GuestMemoryFaultRecord=&fault;ctx->ExecuteThread(thread);cpu.GuestMemoryFaultRecord=nullptr;
                     space.ranges.clear();return cpu.gregs[FEXCore::X86State::REG_RAX];
@@ -660,7 +660,7 @@ int main() {
         for(size_t first=0;first<8;first+=4){
             using T=maxps4::OrbisV4NpTrophy;
             const auto provider=T::provider();
-            const auto app=compat_fixture::consumer("libSceNpTrophy",T::path,{T::nids.begin()+first,T::nids.begin()+first+4});
+            const auto app=compat_fixture::pagedConsumer("libSceNpTrophy",T::path,{T::nids.begin()+first,T::nids.begin()+first+4});
             maxps4::OrbisLinker::Image image;maxps4::OrbisLinker::Report linked;std::string error;
             CHECK(maxps4::OrbisLinker::link({
                 {{{"trophy-app.prx",{T::path}},app.data(),app.size()},0x400000},
@@ -680,7 +680,7 @@ int main() {
                 const unsigned regs[]={FEXCore::X86State::REG_RDI,FEXCore::X86State::REG_RSI,FEXCore::X86State::REG_RDX,
                     FEXCore::X86State::REG_RCX,FEXCore::X86State::REG_R8,FEXCore::X86State::REG_R9};
                 for(size_t i=0;i<6;++i)cpu.gregs[regs[i]]=args[i];
-                cpu.rip=0x401000+fn*32;cpu.gregs[FEXCore::X86State::REG_RSP]=stack+page-16;
+                cpu.rip=0x404000+fn*32;cpu.gregs[FEXCore::X86State::REG_RSP]=stack+page-16;
                 cpu.callret_sp=reinterpret_cast<uintptr_t>(callret.data())+callret.size()/4;
                 fault={};cpu.GuestMemoryFaultRecord=&fault;ctx->ExecuteThread(current);cpu.GuestMemoryFaultRecord=nullptr;
                 space.ranges.clear();return cpu.gregs[FEXCore::X86State::REG_RAX];
@@ -742,7 +742,7 @@ int main() {
         {
             using NP=maxps4::OrbisV4NpCommon;
             const auto provider=NP::provider();
-            const auto app=compat_fixture::consumer("libSceNpCommon",NP::path,
+            const auto app=compat_fixture::pagedConsumer("libSceNpCommon",NP::path,
                 {NP::nids.begin(),NP::nids.end()});
             maxps4::OrbisLinker::Image image;maxps4::OrbisLinker::Report linked;std::string error;
             CHECK(maxps4::OrbisLinker::link({
@@ -763,7 +763,7 @@ int main() {
                 const unsigned regs[]={FEXCore::X86State::REG_RDI,FEXCore::X86State::REG_RSI,FEXCore::X86State::REG_RDX,
                     FEXCore::X86State::REG_RCX,FEXCore::X86State::REG_R8,FEXCore::X86State::REG_R9};
                 for(size_t i=0;i<6;++i)cpu.gregs[regs[i]]=args[i];
-                cpu.rip=0x401000+fn*32;cpu.gregs[FEXCore::X86State::REG_RSP]=stack+page-16;
+                cpu.rip=0x404000+fn*32;cpu.gregs[FEXCore::X86State::REG_RSP]=stack+page-16;
                 cpu.callret_sp=reinterpret_cast<uintptr_t>(callret.data())+callret.size()/4;
                 fault={};cpu.GuestMemoryFaultRecord=&fault;ctx->ExecuteThread(current);cpu.GuestMemoryFaultRecord=nullptr;
                 space.ranges.clear();return cpu.gregs[FEXCore::X86State::REG_RAX];
@@ -816,7 +816,7 @@ int main() {
         for(size_t first=0;first<16;first+=4){
             using Gnm=maxps4::OrbisV4GnmDriver;
             const auto provider=Gnm::provider();
-            const auto app=compat_fixture::consumer("libSceGnmDriver",Gnm::path,
+            const auto app=compat_fixture::pagedConsumer("libSceGnmDriver",Gnm::path,
                 {Gnm::nids.begin()+first,Gnm::nids.begin()+first+4});
             maxps4::OrbisLinker::Image image;maxps4::OrbisLinker::Report linked;std::string error;
             CHECK(maxps4::OrbisLinker::link({
@@ -837,7 +837,7 @@ int main() {
                 const unsigned regs[]={FEXCore::X86State::REG_RDI,FEXCore::X86State::REG_RSI,FEXCore::X86State::REG_RDX,
                     FEXCore::X86State::REG_RCX,FEXCore::X86State::REG_R8,FEXCore::X86State::REG_R9};
                 for(size_t i=0;i<6;++i)cpu.gregs[regs[i]]=args[i];
-                cpu.rip=0x401000+fn*32;cpu.gregs[FEXCore::X86State::REG_RSP]=stack+page-16;
+                cpu.rip=0x404000+fn*32;cpu.gregs[FEXCore::X86State::REG_RSP]=stack+page-16;
                 cpu.callret_sp=reinterpret_cast<uintptr_t>(callret.data())+callret.size()/4;
                 fault={};cpu.GuestMemoryFaultRecord=&fault;ctx->ExecuteThread(current);cpu.GuestMemoryFaultRecord=nullptr;
                 space.ranges.clear();return cpu.gregs[FEXCore::X86State::REG_RAX];

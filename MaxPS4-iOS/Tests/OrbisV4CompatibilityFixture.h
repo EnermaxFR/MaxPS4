@@ -30,4 +30,18 @@ inline std::vector<uint8_t> consumer(const std::string& module,const std::string
     orbis_fixture::appendTag(app,1,needed);
     return app;
 }
+// Runtime-mapped variant: RX and RW must occupy distinct 16 KiB host pages.
+// Keep consumer() unchanged for metadata/linker tests using its 4 KiB addresses.
+inline std::vector<uint8_t> pagedConsumer(const std::string& module,const std::string& dependency,
+                                        const std::vector<std::string>& nids) {
+    auto app=consumer(module,dependency,nids);
+    orbis_fixture::put(app,24,0x4000);
+    orbis_fixture::put(app,64+16,0x4000);
+    orbis_fixture::put(app,64+56+16,0x8000);
+    for(size_t i=0;i<nids.size();++i) {
+        orbis_fixture::put(app,0x900+i*24,0x8000+i*8);
+        orbis_fixture::put(app,0x202+i*32,0x8000+i*8-(0x4000+i*32+6),4);
+    }
+    return app;
+}
 }
