@@ -76,19 +76,19 @@ GCN_INLINE gcn_u32 gcn_half(float value, bool rtz) {
     if (exponent < -10) return sign;
     mantissa |= 0x800000u;
     const gcn_u32 shift = gcn_u32(14 - exponent);
-    gcn_u32 half = mantissa >> shift;
+    gcn_u32 h16 = mantissa >> shift;
     if (!rtz) {
       const gcn_u32 rest = mantissa & ((1u << shift) - 1u), mid = 1u << (shift - 1u);
-      if (rest > mid || (rest == mid && (half & 1u))) ++half;
+      if (rest > mid || (rest == mid && (h16 & 1u))) ++h16;
     }
-    return sign | half;
+    return sign | h16;
   }
-  gcn_u32 half = (gcn_u32(exponent) << 10) | (mantissa >> 13);
+  gcn_u32 h16 = (gcn_u32(exponent) << 10) | (mantissa >> 13);
   if (!rtz) {
     const gcn_u32 rest = mantissa & 0x1fffu;
-    if (rest > 0x1000u || (rest == 0x1000u && (half & 1u))) ++half;
+    if (rest > 0x1000u || (rest == 0x1000u && (h16 & 1u))) ++h16;
   }
-  return sign | half;
+  return sign | h16;
 }
 GCN_INLINE float gcn_half_to_float(gcn_u32 h) {
   const gcn_u32 sign = (h & 0x8000u) << 16, exponent = (h >> 10) & 31u, mantissa = h & 1023u;
