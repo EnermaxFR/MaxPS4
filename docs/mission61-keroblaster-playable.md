@@ -131,3 +131,18 @@ commandes tactiles/manette Bluetooth, intégration du rendu (logiciel multi-thre
   échantillons non nuls, crête 2 012 à −12 dB). Aucune musique `.ptcop` n'est chargée sur l'écran titre.
 - Démarrage d'une partie : d'après `rsc_k/text/00title.pxeve`, il faut tirer sur le logo (événement
   `TitleLogo`, qui active le téléphone) puis toucher le téléphone (`Phone1` → `<home>`). En cours (run-31).
+
+### Arrêt du 19 octobre (après-midi) : démarrage d'une partie non atteint
+
+- Le Negativus posé sur le « o » du logo est éliminé de façon reproductible (run-39 à 42, frame 200 :
+  saut puis tir vers le haut, Haut maintenu avant Carré ; `negativus-hit-run39.png`, `logo-freed-run39.png`).
+- **Mais l'événement `TitleLogo` ne se déclenche pas** : le logo reste gris, le téléphone ne change pas
+  d'état, et aucune nouvelle carte n'est chargée (vérifié par `scripts/analyze-kero-run.py`). Ni le tir
+  au centre du logo ni les appuis Haut/Bas devant le téléphone n'ont lancé la partie ; Kero n'a pas encore
+  pu se poser exactement sur le bureau du téléphone (inertie).
+- Analyse de l'eboot : `TitleLogo` est une classe de sprite (comportement `eboot+0x5ee70`) rattachée à un
+  parent (`+0x80`), probablement l'objet de type 4 en (15, 5) de `00title.pxpack`. Le vrai déclencheur
+  reste à identifier dans ce code.
+- Nouveau : `MAXPS4_INPUT_FILE` (runner, non commité) permet de piloter une session déjà démarrée,
+  sans relancer 8 minutes de chargement à chaque essai.
+- **Kero Blaster n'est pas jouable** : aucune partie démarrée, rien testé sur iPhone.
