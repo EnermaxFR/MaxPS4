@@ -44,3 +44,16 @@ déclarée fonctionnelle avec les seuls providers actuels.
 ## Résultats
 
 Session en cours. Les résultats seront renseignés après observation.
+
+## Reprise par Claude (19 octobre, après l'échec de la session Codex)
+
+- Les 1 145 fichiers du jeu correspondent à `game-before.json` (aucun fichier ajouté ni modifié).
+- run-02 (Codex) et run-03 se sont arrêtés sur « X connection to :0 broken » : perte de la
+  connexion à l'affichage du bureau, pas un plantage du jeu.
+- Ajout de `MAXPS4_HEADLESS=1` au runner (fichier local non suivi) : pas de fenêtre X11, présentation
+  VideoOut, empreintes et captures PNG inchangées. Effet secondaire mesuré : 67 images en 60 s
+  au lieu de ~50 en 200 s, car l'affichage X11 écrit pixel par pixel (`XPutPixel`).
+- run-03 : l'appui Options du frame 1940 est retiré et des appuis Croix sont ajoutés tous les
+  40 frames jusqu'au frame 4000 (`run-03/input.txt`). run-04 (sans affichage) a été arrêté à la
+  demande de l'utilisateur au début du chargement.
+- Le premier niveau contrôlable n'est toujours pas validé.
