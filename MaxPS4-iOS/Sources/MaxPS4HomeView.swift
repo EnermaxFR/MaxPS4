@@ -2,21 +2,42 @@ import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
 
-private enum MaxPS4Tab: Hashable {
-    case home
-    case games
-    case tools
-    case developer
-    case settings
+private enum MaxPS4Tab: String, CaseIterable, Identifiable, Hashable {
+    case home, games, tools, developer, controllers, settings
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .home: return "Accueil"
+        case .games: return "Bibliothèque"
+        case .tools: return "Import et outils"
+        case .developer: return "Diagnostics"
+        case .controllers: return "Manettes"
+        case .settings: return "Paramètres"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .home: return "house"
+        case .games: return "square.grid.2x2"
+        case .tools: return "square.and.arrow.down"
+        case .developer: return "waveform.path.ecg"
+        case .controllers: return "gamecontroller"
+        case .settings: return "gearshape"
+        }
+    }
 }
 
 struct MaxPS4HomeView: View {
     @EnvironmentObject private var emulator: MaxPS4Emulator
 
-    @State private var selectedTab: MaxPS4Tab = .home
+    @State private var selectedTab: MaxPS4Tab? = .games
+    @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+    @State private var confirmingLibraryRemoval = false
     @State private var importingGame = false
     @State private var gameSearch = ""
-    @State private var gameFilter = 0
+    @AppStorage("maxps4.library.layout") private var libraryLayout: MaxPS4LibraryLayout = .grid
+    @AppStorage("maxps4.library.sort") private var librarySort: MaxPS4LibrarySort = .name
+    @AppStorage("maxps4.appearance") private var appearance: MaxPS4Appearance = .system
     @State private var gameToRename: MaxPS4Game?
     @State private var gameToDelete: MaxPS4Game?
     @State private var showingDuplicates = false
@@ -36,33 +57,48 @@ struct MaxPS4HomeView: View {
     @AppStorage("networkEnabled") private var networkEnabled = false
 
     private var filteredGames: [MaxPS4Game] {
-        let query = gameSearch.trimmingCharacters(in: .whitespacesAndNewlines)
-        let matching = emulator.games.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }
-        return gameFilter == 1 ? matching.sorted { $0.importedAt > $1.importedAt } : matching
+        MaxPS4LibraryPresentation.results(emulator.games, query: gameSearch, sort: librarySort,
+                                         title: \.name, fileName: \.fileName, importedAt: \.importedAt)
     }
 
     var body: some View {
-        ZStack {
-            MaxPS4Background()
-
-            Group {
-                switch selectedTab {
-                case .home:
-                    home
-                case .games:
-                    library
-                case .tools:
-                    toolsPage
-                case .developer:
-                    developerPage
-                case .settings:
-                    settings
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebar
+                .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
+        } detail: {
+            NavigationStack {
+                Group {
+                    switch selectedTab ?? .games {
+                    case .home: home
+                    case .games: library
+                    case .tools: toolsPage
+                    case .developer: developerPage
+                    case .controllers: MaxPS4ControllerView()
+                    case .settings: settings
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(MaxPS4Design.background)
+                .navigationTitle((selectedTab ?? .games).title)
+                .navigationBarTitleDisplayMode(.large)
+                .toolbar {
+                    if selectedTab != .settings && selectedTab != .controllers {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Importer un fichier", systemImage: "plus") { importingGame = true }
+                                .accessibilityIdentifier("maxps4.import")
+                        }
+                    }
                 }
             }
         }
-        .preferredColorScheme(.dark)
-        .safeAreaInset(edge: .bottom) {
-            tabBar
+        .navigationSplitViewStyle(.balanced)
+        .tint(.accentColor)
+        .preferredColorScheme(appearance.colorScheme)
+        .alert("Vider la bibliothèque ?", isPresented: $confirmingLibraryRemoval) {
+            Button("Annuler", role: .cancel) {}
+            Button("Supprimer toutes les copies locales", role: .destructive) { emulator.removeAll() }
+        } message: {
+            Text("Tous les fichiers importés dans MaxPS4 seront supprimés. Cette action est irréversible.")
         }
         .alert("Supprimer ce fichier ?", isPresented: Binding(
             get: { gameToDelete != nil },
@@ -206,7 +242,7 @@ struct MaxPS4HomeView: View {
             NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        Text(game.fileName.uppercased().contains("KEROBLASTER") ? "Kero Blaster" : (game.fileName.uppercased().contains("SONICMANIA") ? "Sonic Mania" : game.name))
+                        Text(game.name)
                             .font(.title2.bold())
                             .lineLimit(2)
                             .minimumScaleFactor(0.75)
@@ -243,6 +279,13 @@ struct MaxPS4HomeView: View {
                         Text(detailsLaunchSummary ?? emulator.launchReadinessReport(for: game))
                             .textSelection(.enabled)
                             .foregroundStyle(.orange)
+                        Button("Lancer", systemImage: "play.fill") { emulator.launch(game) }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(!MaxPS4LibraryPresentation.canRequestLaunch(fileName: game.fileName, backendReady: emulator.backendReady))
+                        if !MaxPS4LibraryPresentation.canRequestLaunch(fileName: game.fileName, backendReady: emulator.backendReady) {
+                            Text("Lancement indisponible : consultez le diagnostic ci-dessous.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         Button("Essayer le moteur (diagnostic)") {
                             emulator.tryGameEngine(game)
                             detailsReport = emulator.status
@@ -302,7 +345,7 @@ struct MaxPS4HomeView: View {
                                 .textSelection(.enabled)
                                 .padding(16)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                                .background(MaxPS4Design.surface, in: RoundedRectangle(cornerRadius: 14))
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -319,7 +362,7 @@ struct MaxPS4HomeView: View {
                         detailsLaunchSummary = summary
                     }
                 }
-                .navigationTitle("Fiche du jeu")
+                .navigationTitle(game.name)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -330,7 +373,7 @@ struct MaxPS4HomeView: View {
                     }
                 }
             }
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(appearance.colorScheme)
         }
         .fileImporter(
             isPresented: $importingGame,
@@ -349,574 +392,350 @@ struct MaxPS4HomeView: View {
     }
 
     private var home: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 20) {
-                header
-
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
                 heroPanel
-
-                homeQuickActions
-
-                jitActivationCard
-
-                backendCard
-                systemOverview
-
-                primaryAction(
-                    icon: "square.and.arrow.down.fill",
-                    title: "Importer un PKG / eboot.bin / SELF",
-                    subtitle: "PKG PS4 : identification uniquement, sans lancement"
-                ) {
-                    importingGame = true
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 16) { backendCard; jitActivationCard }
+                    VStack(spacing: 16) { backendCard; jitActivationCard }
                 }
-
-                secondaryAction(
-                    icon: "cpu",
-                    title: "État du moteur PS4",
-                    subtitle: "Diagnostic du moteur natif"
-                ) {
-                    emulator.testBackend()
-                }
-
                 libraryHeader
-
-                if emulator.games.isEmpty {
-                    emptyLibrary
-                } else {
+                if emulator.games.isEmpty { emptyLibrary }
+                else {
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 14) {
-                            ForEach(emulator.games.prefix(6)) { game in
-                                gameCard(game, fixedWidth: 158)
+                        LazyHStack(alignment: .top, spacing: 16) {
+                            ForEach(emulator.games.sorted { $0.importedAt > $1.importedAt }.prefix(6)) { game in
+                                gameCard(game, fixedWidth: 180)
                             }
-                        }
-                        .padding(.vertical, 4)
+                        }.padding(.vertical, 4)
                     }
                 }
-
+                MaxPS4SectionHeading(title: "Votre espace de travail", subtitle: "Importez vos fichiers et consultez les outils disponibles.")
+                secondaryAction(icon: "square.and.arrow.down", title: "Importer un fichier", subtitle: "PKG, ELF, SELF ou eboot.bin") { importingGame = true }
+                secondaryAction(icon: "folder", title: "Ouvrir un dossier Orbis", subtitle: "Précontrôle et diagnostic du dossier existant") { showingGameDirectory = true }
+                secondaryAction(icon: "gamecontroller", title: "Manettes", subtitle: "Consulter les manettes connectées et les commandes") { selectedTab = .controllers }
                 statusCard
                 legalNotice
-                Spacer(minLength: 90)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 12)
+            .frame(maxWidth: 1100)
+            .padding(24)
+            .frame(maxWidth: .infinity)
         }
     }
 
     private var library: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                HStack(alignment: .center) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("BIBLIOTHÈQUE")
-                            .font(.system(size: 36, weight: .black, design: .rounded))
-
-                        Text("Votre bibliothèque locale")
-                            .foregroundStyle(.white.opacity(0.58))
+                        Text("Vos jeux, à portée de main.").font(.title2.weight(.semibold))
+                        Text("\(filteredGames.count) sur \(emulator.games.count) fichiers importés")
+                            .font(.subheadline).foregroundStyle(.secondary)
                     }
-
-                    Spacer()
-
-                    Button {
-                        importingGame = true
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.headline)
-                            .frame(width: 44, height: 44)
-                            .background(.blue)
-                            .clipShape(Circle())
-                            .foregroundStyle(.white)
-                    }
-                }
-
-                secondaryAction(
-                    icon: "folder",
-                    title: "Dossier Orbis accessible",
-                    subtitle: "Précontrôle puis tentative bornée si le runtime admet les fichiers"
-                ) {
-                    showingGameDirectory = true
-                }
-                .accessibilityIdentifier("maxps4.library.orbisDirectory")
-                Text("Sélection distincte du PKG importé : eboot.bin, PRX et maxps4.json déjà accessibles. Aucun déchiffrement ni installation automatique.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                    TextField("Rechercher un jeu", text: $gameSearch)
-                        .autocorrectionDisabled()
-                }
-                .padding(14)
-                .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 16))
-                Picker("Tri", selection: $gameFilter) {
-                    Text("Tous").tag(0)
-                    Text("Récents").tag(1)
-                }
-                .pickerStyle(.segmented)
-                .tint(.cyan)
-
-                Button {
-                    showingDuplicates = true
-                } label: {
-                    Label("Gérer les doublons", systemImage: "square.on.square")
-                        .font(.subheadline.weight(.medium))
-                }
-                .tint(.cyan)
-
-                if emulator.games.isEmpty {
-                    emptyLibrary.padding(.top, 24)
-                } else if filteredGames.isEmpty {
-                    Text("Aucun jeu correspondant")
-                        .foregroundStyle(.white.opacity(0.65))
-                        .padding(.vertical, 24)
-                } else {
-                    LazyVGrid(
-                        columns: [
-                            GridItem(.flexible(), spacing: 14),
-                            GridItem(.flexible(), spacing: 14)
-                        ],
-                        spacing: 18
-                    ) {
-                        ForEach(filteredGames) { game in
-                            gameCard(game, fixedWidth: nil)
+                    Spacer(minLength: 12)
+                    Picker("Présentation", selection: $libraryLayout) {
+                        ForEach(MaxPS4LibraryLayout.allCases) { layout in
+                            Label(layout.title, systemImage: layout.symbol).labelStyle(.iconOnly).tag(layout)
                         }
                     }
+                    .pickerStyle(.segmented)
+                    .frame(width: 112)
+                    .accessibilityIdentifier("maxps4.library.layout")
                 }
-
+                ViewThatFits(in: .horizontal) {
+                    HStack { librarySortMenu; Spacer(); libraryActions }
+                    VStack(alignment: .leading, spacing: 12) { librarySortMenu; libraryActions }
+                }
+                if emulator.games.isEmpty { emptyLibrary }
+                else if filteredGames.isEmpty {
+                    ContentUnavailableView.search(text: gameSearch)
+                        .accessibilityIdentifier("maxps4.library.noResults")
+                } else if libraryLayout == .grid {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 152, maximum: 240), spacing: 20)], alignment: .leading, spacing: 24) {
+                        ForEach(filteredGames) { game in gameCard(game, fixedWidth: nil) }
+                    }
+                } else {
+                    LazyVStack(spacing: 0) {
+                        ForEach(filteredGames) { game in
+                            gameRow(game)
+                            if game.id != filteredGames.last?.id { Divider().padding(.leading, 84) }
+                        }
+                    }
+                    .maxPS4Surface()
+                }
+                Label("Un fichier importé n’est pas nécessairement exécutable. Consultez sa fiche pour connaître son état.", systemImage: "info.circle")
+                    .font(.footnote).foregroundStyle(.secondary)
                 statusCard
-                Spacer(minLength: 90)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 12)
+            .frame(maxWidth: 1280)
+            .padding(24)
+            .frame(maxWidth: .infinity)
         }
+        .searchable(text: $gameSearch, prompt: "Rechercher un titre ou un fichier")
+    }
+
+    private var librarySortMenu: some View {
+        Menu {
+            Picker("Trier par", selection: $librarySort) {
+                ForEach(MaxPS4LibrarySort.allCases) { sort in Text(sort.title).tag(sort) }
+            }
+        } label: {
+            Label(librarySort.title, systemImage: "arrow.up.arrow.down")
+        }
+        .accessibilityIdentifier("maxps4.library.sort")
+    }
+
+    private var libraryActions: some View {
+        HStack(spacing: 16) {
+            Button("Dossier Orbis", systemImage: "folder") { showingGameDirectory = true }
+                .accessibilityIdentifier("maxps4.library.orbisDirectory")
+            Button("Doublons", systemImage: "square.on.square") { showingDuplicates = true }
+                .accessibilityIdentifier("maxps4.library.duplicates")
+        }
+        .font(.subheadline)
     }
 
     private var settings: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 18) {
-                Text("PARAMÈTRES")
-                    .font(.system(size: 36, weight: .black, design: .rounded))
-                    .padding(.top, 12)
-
-                settingsCard {
-                    settingInfoRow(
-                        icon: "cpu",
-                        title: "Backend",
-                        value: emulator.backendReady ? "Prêt" : "À connecter",
-                        color: emulator.backendReady ? .green : .orange
-                    )
-
-                    Divider().overlay(.white.opacity(0.08))
-
-                    Toggle(isOn: $showFPS) {
-                        settingLabel(icon: "speedometer", title: "Préférence FPS (préparation)")
-                    }
-                    .tint(.blue)
-                    .padding(.vertical, 14)
-
-                    Divider().overlay(.white.opacity(0.08))
-
-                    Toggle(isOn: $networkEnabled) {
-                        settingLabel(icon: "network", title: "Préférence réseau (préparation)")
-                    }
-                    .tint(.blue)
-                    .padding(.vertical, 14)
+        Form {
+            Section("Apparence") {
+                Picker("Thème", selection: $appearance) {
+                    ForEach(MaxPS4Appearance.allCases) { theme in Text(theme.title).tag(theme) }
                 }
-
-                settingsCard {
-                    settingInfoRow(
-                        icon: "cpu",
-                        title: "JIT ARM64",
-                        value: MaxPS4NativeLinkCheck.isARM64JITReady ? "Prêt" : "Inactif",
-                        color: MaxPS4NativeLinkCheck.isARM64JITReady ? .green : .orange
-                    )
-                    Divider().overlay(.white.opacity(0.08))
-                    settingInfoRow(
-                        icon: "ant.fill",
-                        title: "Protocole StikDebug",
-                        value: MaxPS4NativeLinkCheck.isStikDebugProtocolPresent ? "Intégré" : "Absent",
-                        color: MaxPS4NativeLinkCheck.isStikDebugProtocolPresent ? .cyan : .orange
-                    )
-                    Divider().overlay(.white.opacity(0.08))
-                    Button {
-                        jitStatusReport = MaxPS4NativeLinkCheck.jitStatusReport
-                    } label: {
-                        settingButton(icon: "checkmark.shield.fill", title: "Vérifier l’état du JIT")
-                    }
-                    Divider().overlay(.white.opacity(0.08))
-                    Button {
-                        jitStatusReport = MaxPS4NativeLinkCheck.stikDebugSafePreflightReport
-                    } label: {
-                        settingButton(icon: "shield.lefthalf.filled", title: "Tester StikDebug sans risque")
-                    }
-                    Divider().overlay(.white.opacity(0.08))
-                    Button {
-                        jitStatusReport = MaxPS4NativeLinkCheck.arm64PipelineSelfTestReport
-                    } label: {
-                        settingButton(icon: "cpu.fill", title: "Tester le pipeline ARM64")
-                    }
-                    Divider().overlay(.white.opacity(0.08))
-                    Button {
-                        jitStatusReport = MaxPS4NativeLinkCheck.jitSafetyGateReport
-                    } label: {
-                        settingButton(icon: "lock.shield", title: "Contrôler la sécurité du JIT")
-                    }
-                    Divider().overlay(.white.opacity(0.08))
-                    Button {
-                        jitStatusReport = MaxPS4NativeLinkCheck.arm64VerifierAdversarialReport
-                    } label: {
-                        settingButton(icon: "checkmark.shield", title: "Tester les limites du code ARM64")
-                    }
-                    Divider().overlay(.white.opacity(0.08))
-                    Button {
-                        jitStatusReport = MaxPS4NativeLinkCheck.jitMemoryPreparationReport
-                    } label: {
-                        settingButton(icon: "memorychip", title: "Tester la mémoire du futur JIT")
-                    }
-                    Divider().overlay(.white.opacity(0.08))
-                    Button {
-                        jitStatusReport = MaxPS4NativeLinkCheck.jitARM64StagingReport
-                    } label: {
-                        settingButton(icon: "memorychip.fill", title: "Préparer un bloc ARM64 en mémoire")
-                    }
-                    Divider().overlay(.white.opacity(0.08))
-                    Button {
-                        jitStatusReport = MaxPS4NativeLinkCheck.jitBlockIntegrityReport
-                    } label: {
-                        settingButton(icon: "checkmark.seal", title: "Vérifier l’intégrité des blocs ARM64")
-                    }
-                    Divider().overlay(.white.opacity(0.08))
-                    Button {
-                        guard let bundleID = Bundle.main.bundleIdentifier,
-                              let escaped = bundleID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-                              let url = URL(string: "stikjit://enable-jit?bundle-id=" + escaped) else {
-                            jitStatusReport = "Impossible de préparer le lien StikDebug : identifiant d’application absent."
-                            return
-                        }
-                        UIApplication.shared.open(url, options: [:]) { opened in
-                            if !opened {
-                                jitStatusReport = "StikDebug n’a pas accepté le lien. Ouvre StikDebug manuellement et sélectionne MaxPS4."
-                            }
-                        }
-                    } label: {
-                        settingButton(icon: "arrow.up.right.square", title: "Demander le JIT dans StikDebug")
-                    }
-                    Text("Ouvre StikDebug pour MaxPS4. Le retour dans l’application ne prouve pas que le JIT natif fonctionne.")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.56))
-                    Divider().overlay(.white.opacity(0.08))
-                    Button {
-                        jitStatusReport = MaxPS4NativeLinkCheck.jitDualMappingReport
-                    } label: {
-                        settingButton(icon: "square.on.square", title: "Tester la double mémoire JIT (RW)")
-                    }
-                    Divider().overlay(.white.opacity(0.08))
-                    Button {
-                        jitStatusReport = MaxPS4NativeLinkCheck.aetherGuestBackendReport
-                    } label: {
-                        settingButton(icon: "cpu", title: "Tester le backend CPU natif")
-                    }
-                    Divider().overlay(.white.opacity(0.08))
-                    Button {
-                        jitStatusReport = MaxPS4NativeLinkCheck.aetherJITABIReport
-                    } label: {
-                        settingButton(icon: "memorychip", title: "Vérifier l’interface JIT native")
-                    }
-                    Divider().overlay(.white.opacity(0.08))
-                    Button {
-                        jitStatusReport = MaxPS4NativeLinkCheck.arm64ExecutionBaselineReport
-                    } label: {
-                        settingButton(icon: "cpu.fill", title: "Tester l’exécution ARM64 native")
-                    }
-                    if let jitStatusReport {
-                        Button {
-                            UIPasteboard.general.string = jitStatusReport
-                        } label: {
-                            settingButton(icon: "doc.on.doc", title: "Copier le diagnostic JIT")
-                        }
-                        Divider().overlay(.white.opacity(0.08))
-                        Text(jitStatusReport)
-                            .font(.footnote.monospaced())
-                            .foregroundStyle(.white.opacity(0.85))
-                            .textSelection(.enabled)
-                            .padding(.vertical, 10)
-                    }
+                .accessibilityIdentifier("maxps4.settings.appearance")
+                Picker("Présentation de la bibliothèque", selection: $libraryLayout) {
+                    ForEach(MaxPS4LibraryLayout.allCases) { layout in Text(layout.title).tag(layout) }
                 }
-
-                settingsCard {
-                    Button {
-                        emulator.testBackend()
-                    } label: {
-                        settingButton(icon: "checkmark.circle.fill", title: "Tester l’intégration")
-                    }
-
-                    Divider().overlay(.white.opacity(0.08))
-
-                    Button(role: .destructive) {
-                        emulator.removeAll()
-                    } label: {
-                        settingButton(icon: "trash.fill", title: "Vider la bibliothèque", color: .red)
-                    }
+                Picker("Tri de la bibliothèque", selection: $librarySort) {
+                    ForEach(MaxPS4LibrarySort.allCases) { sort in Text(sort.title).tag(sort) }
                 }
-
-                Text("MaxPS4 n’inclut aucun jeu, firmware, clé ou contenu PlayStation. Utilisez uniquement des fichiers que vous êtes autorisé à utiliser.")
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.48))
-                    .fixedSize(horizontal: false, vertical: true)
-
-                statusCard
-                Spacer(minLength: 100)
             }
-            .padding(.horizontal, 20)
+            Section {
+                LabeledContent("Moteur natif", value: emulator.backendReady ? "Connecté" : "Non connecté")
+                Toggle("Afficher les FPS — indisponible", isOn: $showFPS).disabled(true)
+                Toggle("Réseau invité — indisponible", isOn: $networkEnabled).disabled(true)
+            } header: { Text("Émulation") } footer: {
+                Text("L’affichage des FPS et le réseau invité ne sont pas encore reliés au moteur. Leurs anciennes préférences sont conservées.")
+            }
+            Section("Contrôles") {
+                NavigationLink { MaxPS4ControllerView().navigationTitle("Manettes") } label: {
+                    Label("Manettes et commandes", systemImage: "gamecontroller")
+                }
+            }
+            Section("Moteur et diagnostics") {
+                NavigationLink("Diagnostics avancés du JIT") {
+                    ScrollView {
+                        jitSettings.padding(24).frame(maxWidth: 900)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .background(MaxPS4Design.background)
+                    .navigationTitle("JIT et outils natifs")
+                }
+                Button("Ouvrir le diagnostic FEXCore") { showingFEXDiagnostic = true }
+                Button("Ouvrir le diagnostic Metal") { showingMetalDiagnostic = true }
+                Button("Tester l’intégration") { emulator.testBackend() }
+            }
+            Section {
+                Button("Gérer les doublons") { showingDuplicates = true }
+                Button("Vider la bibliothèque…", role: .destructive) { confirmingLibraryRemoval = true }
+                    .disabled(emulator.games.isEmpty)
+                    .accessibilityIdentifier("maxps4.settings.clearLibrary")
+            } header: { Text("Stockage local") } footer: {
+                Text("MaxPS4 conserve une copie locale de vos imports. Les fichiers sources restent à leur emplacement d’origine.")
+            }
+            Section("À propos") {
+                LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Développement")
+                Text("MaxPS4 n’inclut aucun jeu, firmware, clé ou contenu PlayStation.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                ShareLink(item: emulator.nativeDiagnosticReport) { Label("Partager le rapport de diagnostic", systemImage: "square.and.arrow.up") }
+            }
         }
+        .formStyle(.grouped)
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 0) {
-                Text("Max")
-                    .foregroundStyle(.white)
-                Text("PS4")
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.cyan, .purple, .blue],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+    private var jitSettings: some View {
+        settingsCard {
+            settingInfoRow(
+                icon: "cpu",
+                title: "JIT ARM64",
+                value: MaxPS4NativeLinkCheck.isARM64JITReady ? "Prêt" : "Inactif",
+                color: MaxPS4NativeLinkCheck.isARM64JITReady ? .green : .orange
+            )
+            Divider()
+            settingInfoRow(
+                icon: "ant.fill",
+                title: "Protocole StikDebug",
+                value: MaxPS4NativeLinkCheck.isStikDebugProtocolPresent ? "Intégré" : "Absent",
+                color: MaxPS4NativeLinkCheck.isStikDebugProtocolPresent ? .cyan : .orange
+            )
+            Divider()
+            Button {
+                jitStatusReport = MaxPS4NativeLinkCheck.jitStatusReport
+            } label: {
+                settingButton(icon: "checkmark.shield.fill", title: "Vérifier l’état du JIT")
             }
-            .font(.system(size: 42, weight: .black, design: .rounded))
-
-            Text("AU-DESSUS DES NUAGES • MAXPS4")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.white.opacity(0.60))
+            Divider()
+            Button {
+                jitStatusReport = MaxPS4NativeLinkCheck.stikDebugSafePreflightReport
+            } label: {
+                settingButton(icon: "shield.lefthalf.filled", title: "Tester StikDebug sans risque")
+            }
+            Divider()
+            Button {
+                jitStatusReport = MaxPS4NativeLinkCheck.arm64PipelineSelfTestReport
+            } label: {
+                settingButton(icon: "cpu.fill", title: "Tester le pipeline ARM64")
+            }
+            Divider()
+            Button {
+                jitStatusReport = MaxPS4NativeLinkCheck.jitSafetyGateReport
+            } label: {
+                settingButton(icon: "lock.shield", title: "Contrôler la sécurité du JIT")
+            }
+            Divider()
+            Button {
+                jitStatusReport = MaxPS4NativeLinkCheck.arm64VerifierAdversarialReport
+            } label: {
+                settingButton(icon: "checkmark.shield", title: "Tester les limites du code ARM64")
+            }
+            Divider()
+            Button {
+                jitStatusReport = MaxPS4NativeLinkCheck.jitMemoryPreparationReport
+            } label: {
+                settingButton(icon: "memorychip", title: "Tester la mémoire du futur JIT")
+            }
+            Divider()
+            Button {
+                jitStatusReport = MaxPS4NativeLinkCheck.jitARM64StagingReport
+            } label: {
+                settingButton(icon: "memorychip.fill", title: "Préparer un bloc ARM64 en mémoire")
+            }
+            Divider()
+            Button {
+                jitStatusReport = MaxPS4NativeLinkCheck.jitBlockIntegrityReport
+            } label: {
+                settingButton(icon: "checkmark.seal", title: "Vérifier l’intégrité des blocs ARM64")
+            }
+            Divider()
+            Button {
+                guard let bundleID = Bundle.main.bundleIdentifier,
+                      let escaped = bundleID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+                      let url = URL(string: "stikjit://enable-jit?bundle-id=" + escaped) else {
+                    jitStatusReport = "Impossible de préparer le lien StikDebug : identifiant d’application absent."
+                    return
+                }
+                UIApplication.shared.open(url, options: [:]) { opened in
+                    if !opened {
+                        jitStatusReport = "StikDebug n’a pas accepté le lien. Ouvre StikDebug manuellement et sélectionne MaxPS4."
+                    }
+                }
+            } label: {
+                settingButton(icon: "arrow.up.right.square", title: "Demander le JIT dans StikDebug")
+            }
+            Text("Ouvre StikDebug pour MaxPS4. Le retour dans l’application ne prouve pas que le JIT natif fonctionne.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Divider()
+            Button {
+                jitStatusReport = MaxPS4NativeLinkCheck.jitDualMappingReport
+            } label: {
+                settingButton(icon: "square.on.square", title: "Tester la double mémoire JIT (RW)")
+            }
+            Divider()
+            Button {
+                jitStatusReport = MaxPS4NativeLinkCheck.aetherGuestBackendReport
+            } label: {
+                settingButton(icon: "cpu", title: "Tester le backend CPU natif")
+            }
+            Divider()
+            Button {
+                jitStatusReport = MaxPS4NativeLinkCheck.aetherJITABIReport
+            } label: {
+                settingButton(icon: "memorychip", title: "Vérifier l’interface JIT native")
+            }
+            Divider()
+            Button {
+                jitStatusReport = MaxPS4NativeLinkCheck.arm64ExecutionBaselineReport
+            } label: {
+                settingButton(icon: "cpu.fill", title: "Tester l’exécution ARM64 native")
+            }
+            if let jitStatusReport {
+                Button {
+                    UIPasteboard.general.string = jitStatusReport
+                } label: {
+                    settingButton(icon: "doc.on.doc", title: "Copier le diagnostic JIT")
+                }
+                Divider()
+                Text(jitStatusReport)
+                    .font(.footnote.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .padding(.vertical, 10)
+            }
         }
-        .padding(.top, 8)
     }
 
     private var jitActivationCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Image(systemName: "bolt.fill")
-                    .font(.title2)
-                    .foregroundStyle(.yellow)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("ACTIVER LE JIT")
-                        .font(.headline.bold())
-                        .foregroundStyle(.white)
-                    Text("Étape essentielle avant les tests CPU FEXCore")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.72))
-                }
-                Spacer(minLength: 0)
-            }
-            Text("Active le JIT pour MaxPS4 depuis SideStore ou ton outil JIT compatible, puis reviens dans l’application pour lancer le diagnostic.")
-                .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.85))
-            Button {
-                withAnimation(.easeInOut(duration: 0.22)) { selectedTab = .developer }
-                showingFEXDiagnostic = true
-            } label: {
-                Label("Vérifier le JIT / FEXCore", systemImage: "checkmark.shield.fill")
-                    .font(.subheadline.bold())
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.yellow)
-            .accessibilityIdentifier("maxps4.jitProminentDiagnostic")
-            Text("L’application ne peut pas activer elle-même le JIT. Un test réussi ne garantit pas le lancement de jeux PS4.")
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.6))
+            Label("Préparer une session", systemImage: "bolt.shield").font(.headline)
+            Text("Vérifiez le JIT et le runtime avant un test sur l’appareil.")
+                .font(.subheadline).foregroundStyle(.secondary)
+            Button("Vérifier le JIT / FEXCore", systemImage: "arrow.up.right") { showingFEXDiagnostic = true }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("maxps4.jitProminentDiagnostic")
+            Text("L’activation du JIT nécessite un outil externe compatible.")
+                .font(.caption).foregroundStyle(.secondary)
         }
-        .padding(18)
-        .background(Color(red: 0.15, green: 0.11, blue: 0.18), in: RoundedRectangle(cornerRadius: 22))
-        .overlay(RoundedRectangle(cornerRadius: 22).stroke(.yellow.opacity(0.65), lineWidth: 1.5))
-    }
-
-    private var homeQuickActions: some View {
-        HStack(spacing: 12) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.22)) { selectedTab = .tools }
-            } label: {
-                HStack(spacing: 11) {
-                    Image(systemName: "gamecontroller.fill")
-                        .font(.title3)
-                        .foregroundStyle(.cyan)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("MAX MAZE").font(.subheadline.bold())
-                        Text("Mini-jeu arcade").font(.caption2).foregroundStyle(.white.opacity(0.60))
-                    }
-                    Spacer(minLength: 0)
-                    Image(systemName: "arrow.up.right").font(.caption.bold())
-                        .foregroundStyle(.cyan)
-                }
-                .padding(15)
-                .frame(maxWidth: .infinity)
-                .background(Color.cyan.opacity(0.09), in: RoundedRectangle(cornerRadius: 18))
-                .overlay(RoundedRectangle(cornerRadius: 18).stroke(.cyan.opacity(0.34)))
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint("Ouvre les outils où se trouve Max Maze")
-
-            Button {
-                importingGame = true
-            } label: {
-                VStack(spacing: 5) {
-                    Image(systemName: "plus.square.on.square")
-                        .font(.title3)
-                    Text("Importer").font(.caption.bold())
-                }
-                .foregroundStyle(.white)
-                .frame(width: 89, height: 62)
-                .background(.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 18))
-                .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.13)))
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private var systemOverview: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-            overviewTile(icon: "gamecontroller.fill", title: "Jeux", value: "\(emulator.games.count) importés")
-            overviewTile(icon: "internaldrive", title: "Stockage", value: "Local")
-            overviewTile(icon: "cpu", title: "CPU", value: emulator.backendReady ? "Connecté" : "Inactif")
-            overviewTile(icon: "desktopcomputer", title: "GPU", value: emulator.backendReady ? "Moteur connecté" : "Inactif")
-        }
-    }
-
-    private func overviewTile(icon: String, title: String, value: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .foregroundStyle(.cyan)
-                .font(.title3)
-                .frame(width: 30)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(value).font(.caption).foregroundStyle(.white.opacity(0.63))
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(14)
-        .background(Color(red: 0.055, green: 0.06, blue: 0.19), in: RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(.blue.opacity(0.28), lineWidth: 1))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20).maxPS4Surface()
     }
 
     private var backendCard: some View {
-        HStack(spacing: 14) {
-            Circle()
-                .fill(emulator.backendReady ? .green : .orange)
-                .frame(width: 14, height: 14)
-                .shadow(
-                    color: (emulator.backendReady ? Color.green : Color.orange).opacity(0.8),
-                    radius: 9
-                )
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(emulator.backendReady ? "Backend prêt" : "Frontend prêt")
-                    .font(.headline)
-
-                Text(
-                    emulator.backendReady
-                        ? "Moteur natif connecté"
-                        : "Interface active • pont natif à connecter"
-                )
-                .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.62))
-            }
-
-            Spacer()
-
-            Image(systemName: emulator.backendReady ? "checkmark.circle.fill" : "wrench.and.screwdriver.fill")
-                .foregroundStyle(emulator.backendReady ? .green : .orange)
-                .font(.title3)
+        VStack(alignment: .leading, spacing: 12) {
+            Label("État de l’émulateur", systemImage: "cpu").font(.headline)
+            Label(emulator.backendReady ? "Moteur natif connecté" : "Moteur de jeu non connecté",
+                  systemImage: emulator.backendReady ? "checkmark.circle.fill" : "circle.dotted")
+                .font(.subheadline).foregroundStyle(emulator.backendReady ? Color.green : Color.orange)
+            Text("La présence d’un fichier dans la bibliothèque ne garantit pas son lancement.")
+                .font(.caption).foregroundStyle(.secondary)
+            Button("Consulter les diagnostics") { selectedTab = .developer }
+                .buttonStyle(.bordered)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20).maxPS4Surface()
+    }
+
+    private func primaryAction(icon: String, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            actionLabel(icon: icon, title: title, subtitle: subtitle)
+        }
+        .buttonStyle(.plain)
         .padding(18)
-        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 22))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22)
-                .stroke(.blue.opacity(0.28), lineWidth: 1)
-        )
+        .foregroundStyle(.white)
+        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 18))
     }
 
-    private func primaryAction(
-        icon: String,
-        title: String,
-        subtitle: String,
-        action: @escaping () -> Void
-    ) -> some View {
+    private func secondaryAction(icon: String, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.title2)
-                    .frame(width: 52, height: 52)
-                    .background(.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 15))
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.headline)
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.76))
-                }
-
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.headline)
-            }
-            .foregroundStyle(.white)
-            .padding(18)
-            .background(
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.02, green: 0.31, blue: 0.95),
-                        Color(red: 0.0, green: 0.56, blue: 1.0)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: RoundedRectangle(cornerRadius: 24)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 24)
-                    .stroke(.cyan.opacity(0.60), lineWidth: 1)
-            )
-            .shadow(color: .blue.opacity(0.28), radius: 18, y: 6)
+            actionLabel(icon: icon, title: title, subtitle: subtitle)
+                .padding(18)
+                .maxPS4Surface()
         }
         .buttonStyle(.plain)
+        .foregroundStyle(.primary)
     }
 
-    private func secondaryAction(
-        icon: String,
-        title: String,
-        subtitle: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.title2)
-                    .frame(width: 52, height: 52)
-                    .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 15))
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.headline)
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.60))
-                }
-
-                Spacer()
-                Image(systemName: "chevron.right")
+    private func actionLabel(icon: String, title: String, subtitle: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon).font(.title3).frame(width: 28)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.headline)
+                Text(subtitle).font(.subheadline).opacity(0.7)
             }
-            .foregroundStyle(.white)
-            .padding(18)
-            .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 24))
-            .overlay(
-                RoundedRectangle(cornerRadius: 24)
-                    .stroke(.blue.opacity(0.22), lineWidth: 1)
-            )
+            Spacer(minLength: 8)
+            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).opacity(0.5)
         }
-        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     private var libraryHeader: some View {
@@ -924,7 +743,7 @@ struct MaxPS4HomeView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     Image(systemName: "gamecontroller.fill")
-                        .foregroundStyle(.cyan)
+                        .foregroundStyle(Color.accentColor)
                     Text("Bibliothèque")
                         .font(.title2.bold())
                 }
@@ -935,7 +754,7 @@ struct MaxPS4HomeView: View {
                         : "\(emulator.games.count) élément\(emulator.games.count > 1 ? "s" : "")"
                 )
                 .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.58))
+                .foregroundStyle(.secondary)
             }
 
             Spacer()
@@ -949,7 +768,7 @@ struct MaxPS4HomeView: View {
                         Image(systemName: "chevron.right")
                     }
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.cyan)
+                    .foregroundStyle(Color.accentColor)
                 }
             }
         }
@@ -957,36 +776,17 @@ struct MaxPS4HomeView: View {
     }
 
     private var emptyLibrary: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "gamecontroller")
-                .font(.system(size: 36))
-                .foregroundStyle(.white.opacity(0.58))
-
-            Text("Aucun jeu importé")
-                .font(.headline)
-
-            Text("Importez un eboot.bin / SELF ou un fichier de jeu que vous êtes autorisé à utiliser.")
-                .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.58))
-                .multilineTextAlignment(.center)
-
-            Button("Importer") {
-                importingGame = true
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.blue)
+        ContentUnavailableView {
+            Label("Votre bibliothèque vous attend", systemImage: "gamecontroller")
+        } description: {
+            Text("Ajoutez un fichier PKG, ELF, SELF ou eboot.bin pour commencer à l’inspecter.")
+        } actions: {
+            Button("Importer un fichier", systemImage: "plus") { importingGame = true }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("maxps4.library.emptyImport")
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 30)
-        .padding(.horizontal, 16)
-        .background(.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 24))
-        .overlay(
-            RoundedRectangle(cornerRadius: 24)
-                .stroke(
-                    .blue.opacity(0.32),
-                    style: StrokeStyle(lineWidth: 1, dash: [7, 6])
-                )
-        )
+        .padding(.vertical, 32)
+        .maxPS4Surface()
     }
 
     private func gameCard(_ game: MaxPS4Game, fixedWidth: CGFloat?) -> some View {
@@ -1013,10 +813,7 @@ struct MaxPS4HomeView: View {
                             .clipped()
                     }
 
-                    Circle()
-                        .fill(.white.opacity(0.10))
-                        .frame(width: 120, height: 120)
-                        .offset(x: 58, y: -78)
+                    LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .top, endPoint: .bottom)
 
                     VStack(alignment: .leading, spacing: 6) {
                         Image(systemName: "gamecontroller.fill")
@@ -1035,6 +832,7 @@ struct MaxPS4HomeView: View {
                             .lineLimit(1)
                             .foregroundStyle(.white.opacity(0.56))
                     }
+                    .foregroundStyle(.white)
                     .padding(14)
                 }
                 .frame(maxWidth: fixedWidth == nil ? .infinity : nil)
@@ -1046,6 +844,7 @@ struct MaxPS4HomeView: View {
                 )
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Afficher la fiche de " + game.name)
 
             HStack {
                 Button {
@@ -1053,154 +852,143 @@ struct MaxPS4HomeView: View {
                 } label: {
                     Label("Infos", systemImage: "info.circle")
                         .font(.caption.weight(.semibold))
+                        .frame(minHeight: 44)
                 }
 
                 Spacer()
 
-                Menu {
-                    Button {
-                        renamedGameTitle = game.name
-                        gameToRename = game
-                    } label: {
-                        Label("Renommer", systemImage: "pencil")
-                    }
-                    Button {
-                        inspectionReport = emulator.launchReadinessReport(for: game)
-                    } label: {
-                        Label("Diagnostic de lancement", systemImage: "stethoscope")
-                    }
-                    Button {
-                        if game.fileName.lowercased().hasSuffix(".pkg") {
-                            inspectionReport = "Analyse du PKG en cours…"
-                            Task { inspectionReport = await emulator.analyzePKG(game) }
-                        } else {
-                            emulator.inspect(game)
-                            inspectionReport = emulator.status
-                        }
-                    } label: {
-                        Label(game.fileName.lowercased().hasSuffix(".pkg") ? "Analyser PKG/PFS" : "Analyser l’exécutable", systemImage: "doc.text.magnifyingglass")
-                    }
-                    Button(role: .destructive) {
-                        gameToDelete = game
-                    } label: {
-                        Label("Supprimer…", systemImage: "trash")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.title3)
-                }
+                gameActions(game)
             }
-            .foregroundStyle(.white.opacity(0.82))
+            .foregroundStyle(.primary)
         }
         .frame(width: fixedWidth)
+    }
+
+
+    private func gameRow(_ game: MaxPS4Game) -> some View {
+        HStack(spacing: 12) {
+            Button {
+                selectedGameDetails = game
+            } label: {
+                HStack(spacing: 16) {
+                    Image(systemName: "gamecontroller.fill")
+                        .font(.title2).foregroundStyle(Color.accentColor)
+                        .frame(width: 48, height: 56)
+                        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(game.name).font(.headline).foregroundStyle(.primary).lineLimit(2)
+                        Text(game.fileName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        Text(game.fileName.lowercased().hasSuffix(".pkg") ? "PKG · Analyse uniquement" : "Exécutable · Admission à vérifier")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            gameActions(game)
+        }
+        .padding(16)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func gameActions(_ game: MaxPS4Game) -> some View {
+        Menu {
+            Button("Lancer", systemImage: "play.fill") { emulator.launch(game) }
+                .disabled(!MaxPS4LibraryPresentation.canRequestLaunch(fileName: game.fileName, backendReady: emulator.backendReady))
+            Button("Renommer", systemImage: "pencil") {
+                renamedGameTitle = game.name
+                gameToRename = game
+            }
+            Button("Diagnostic de lancement", systemImage: "stethoscope") {
+                inspectionReport = emulator.launchReadinessReport(for: game)
+            }
+            Button("Analyser le fichier", systemImage: "doc.text.magnifyingglass") {
+                if game.fileName.lowercased().hasSuffix(".pkg") {
+                    inspectionReport = "Analyse du PKG en cours…"
+                    Task { inspectionReport = await emulator.analyzePKG(game) }
+                } else {
+                    emulator.inspect(game)
+                    inspectionReport = emulator.status
+                }
+            }
+            Divider()
+            Button("Supprimer…", systemImage: "trash", role: .destructive) { gameToDelete = game }
+        } label: {
+            Label("Actions pour " + game.name, systemImage: "ellipsis.circle")
+                .labelStyle(.iconOnly).font(.title3)
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .accessibilityIdentifier("maxps4.game.actions." + game.id.uuidString)
     }
 
     private var statusCard: some View {
         HStack(spacing: 10) {
             Image(systemName: "info.circle.fill")
-                .foregroundStyle(.cyan)
+                .foregroundStyle(Color.accentColor)
             Text(emulator.status)
                 .font(.footnote)
-                .foregroundStyle(.white.opacity(0.72))
+                .foregroundStyle(.secondary)
             Spacer()
         }
         .padding(14)
-        .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 16))
+        .background(MaxPS4Design.surface, in: RoundedRectangle(cornerRadius: 16))
     }
 
     private var legalNotice: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "info.circle")
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(.secondary)
 
             Text("Utilisez uniquement des fichiers que vous êtes autorisé à utiliser. Aucun jeu, firmware ou contenu PlayStation n’est inclus dans l’app.")
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.46))
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private var heroPanel: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Label("MAXPS4  /  ÉDITION NOCTURNE", systemImage: "moon.stars.fill")
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .tracking(2)
-                    .foregroundStyle(.cyan)
-                Spacer()
-                Text("MaxPS4")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.55))
-            }
-            Text("Dans la légende")
-                .font(.system(size: 34, weight: .black, design: .rounded))
-                .foregroundStyle(.white)
-            Text("Un univers nocturne pour votre bibliothèque et vos diagnostics.")
-                .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.66))
-            HStack(spacing: 10) {
-                Label("\(emulator.games.count) JEUX", systemImage: "gamecontroller.fill")
-                Spacer()
-                Label("iOS", systemImage: "iphone.gen3")
-            }
-            .font(.system(size: 11, weight: .bold, design: .monospaced))
-            .foregroundStyle(.cyan)
-            HStack(spacing: 8) {
-                Circle().fill(emulator.backendReady ? Color.green : Color.orange)
-                    .frame(width: 7, height: 7)
-                Text(emulator.backendReady ? "Backend connecté" : "Émulation PS4 en développement")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.83))
-                Spacer()
-                Image(systemName: "waveform.path")
-                    .foregroundStyle(.cyan.opacity(0.8))
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(.black.opacity(0.24), in: RoundedRectangle(cornerRadius: 12))
+        VStack(alignment: .leading, spacing: 16) {
+            Label("VOTRE ESPACE MAXPS4", systemImage: "square.stack.3d.up")
+                .font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
+            Text("Une place pour chaque jeu.")
+                .font(.largeTitle.weight(.bold))
+            Text("Organisez vos fichiers, préparez vos sessions et retrouvez tous vos outils.")
+                .font(.body).foregroundStyle(.secondary)
+            Button("Ouvrir la bibliothèque", systemImage: "arrow.right") { selectedTab = .games }
+                .buttonStyle(.borderedProminent)
         }
-        .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            LinearGradient(colors: [
-                Color(red: 0.025, green: 0.045, blue: 0.10),
-                Color(red: 0.11, green: 0.075, blue: 0.20),
-                Color(red: 0.015, green: 0.02, blue: 0.06)
-            ], startPoint: .topLeading, endPoint: .bottomTrailing),
-            in: RoundedRectangle(cornerRadius: 28)
-        )
-        .overlay(RoundedRectangle(cornerRadius: 28)
-            .stroke(LinearGradient(colors: [.cyan.opacity(0.8), .purple.opacity(0.65)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.3))
-        .shadow(color: .purple.opacity(0.22), radius: 20, y: 8)
+        .padding(28)
+        .maxPS4Surface()
     }
 
     private var toolsPage: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 20) {
-                Text("IMPORT & OUTILS")
-                    .font(.system(size: 36, weight: .black, design: .rounded))
+                MaxPS4SectionHeading(title: "Import et outils", subtitle: "Les actions disponibles sur cet appareil.")
                 Text("CENTRE DE CONTRÔLE")
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .tracking(2).foregroundStyle(.cyan)
+                    .tracking(2).foregroundStyle(Color.accentColor)
                 VStack(alignment: .leading, spacing: 9) {
                     Text("APPAREIL iOS")
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(.cyan)
+                        .foregroundStyle(Color.accentColor)
                     Text(emulator.deviceDiagnostic)
                         .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.82))
+                        .foregroundStyle(.secondary)
                     Text("Moteur PS4 : " + (emulator.backendReady ? "connecté" : "non intégré"))
                         .font(.caption)
                         .foregroundStyle(emulator.backendReady ? Color.green : Color.orange)
                 }
                 .padding(18)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
+                .background(MaxPS4Design.surface, in: RoundedRectangle(cornerRadius: 18))
 
                 Text("JEUX ET STOCKAGE")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .font(.subheadline.weight(.semibold))
                     .tracking(1.1)
-                    .foregroundStyle(.cyan)
+                    .foregroundStyle(Color.accentColor)
                     .padding(.top, 8)
                 primaryAction(icon: "square.and.arrow.down.fill", title: "Importer un jeu", subtitle: "Sélectionner un fichier local") {
                     importingGame = true
@@ -1212,9 +1000,9 @@ struct MaxPS4HomeView: View {
                     selectedTab = .games
                 }
                 Text("ÉTAT DU MOTEUR")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .font(.subheadline.weight(.semibold))
                     .tracking(1.1)
-                    .foregroundStyle(.cyan)
+                    .foregroundStyle(Color.accentColor)
                     .padding(.top, 8)
                 secondaryAction(icon: "triangle.fill", title: "Diagnostic GPU Metal", subtitle: "Triangle animé natif • aucune émulation GPU PS4") {
                     showingMetalDiagnostic = true
@@ -1235,9 +1023,9 @@ struct MaxPS4HomeView: View {
                     emulator.testBackend()
                 }
                 Text("CHARGEUR ET EXÉCUTION")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .font(.subheadline.weight(.semibold))
                     .tracking(1.1)
-                    .foregroundStyle(.cyan)
+                    .foregroundStyle(Color.accentColor)
                     .padding(.top, 8)
                 secondaryAction(icon: "doc.zipper", title: "Tester le chargeur ELF64", subtitle: "Segments simulés • sans exécution PS4") {
                     emulator.testELFLoader()
@@ -1262,9 +1050,9 @@ struct MaxPS4HomeView: View {
                 }
                 MaxPS4MazeGame()
                 Text("PROTOTYPES CPU, MÉMOIRE ET SERVICES")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .font(.subheadline.weight(.semibold))
                     .tracking(1.1)
-                    .foregroundStyle(.cyan)
+                    .foregroundStyle(Color.accentColor)
                     .padding(.top, 8)
                 secondaryAction(icon: "cpu", title: "Tester le CPU x86-64", subtitle: "Instructions expérimentales • sans jeu PS4") {
                     emulator.testCPUPrototype()
@@ -1295,20 +1083,20 @@ struct MaxPS4HomeView: View {
                 }
                 statusCard
             }
-            .padding(.horizontal, 20).padding(.top, 20)
+            .frame(maxWidth: 1000).padding(24).frame(maxWidth: .infinity)
         }
     }
 
     private var developerPage: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("DIAGNOSTIC MOTEUR")
+                Text("Diagnostics du moteur")
                     .font(.title2.bold())
-                    .foregroundStyle(.cyan)
+                    .foregroundStyle(Color.accentColor)
                 Text("Tests sur l'iPhone • aucun jeu PS4 n'est exécuté par ces contrôles.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                settingsCard {
+                        settingsCard {
                     settingInfoRow(icon: "cpu", title: "Pont natif ARM64",
                                    value: "ABI " + String(emulator.nativeABIVersion),
                                    color: emulator.nativeABIVersion == 1 ? .green : .orange)
@@ -1327,7 +1115,7 @@ struct MaxPS4HomeView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.cyan)
+                .tint(.accentColor)
                 Button {
                     showingFEXDiagnostic = true
                 } label: {
@@ -1335,7 +1123,7 @@ struct MaxPS4HomeView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.cyan)
+                .tint(.accentColor)
                 .accessibilityIdentifier("maxps4.testFEXCore")
                 Button {
                     showingMetalDiagnostic = true
@@ -1344,7 +1132,7 @@ struct MaxPS4HomeView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.cyan)
+                .tint(.accentColor)
                 .accessibilityIdentifier("maxps4.openFEXMetal")
                 Button {
                     emulator.status = MaxPS4OnDeviceJITProbe.stikAllocatorPreflightReport()
@@ -1353,7 +1141,7 @@ struct MaxPS4HomeView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-                .tint(.cyan)
+                .tint(.accentColor)
                 Text("Précontrôle uniquement : aucun JIT FEXCore ni jeu PS4 exécuté.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1375,7 +1163,7 @@ struct MaxPS4HomeView: View {
                             .padding(12)
                         }
                         .buttonStyle(.bordered)
-                        .tint(.cyan)
+                        .tint(.accentColor)
                     }
                 }
                 Text("Journal du dernier test")
@@ -1385,82 +1173,69 @@ struct MaxPS4HomeView: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(14)
-                    .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+                    .background(MaxPS4Design.surface, in: RoundedRectangle(cornerRadius: 14))
                 Button {
                     UIPasteboard.general.string = emulator.nativeDiagnosticReport
                 } label: {
                     Label("Copier le rapport complet", systemImage: "doc.on.doc")
                 }
                 .buttonStyle(.bordered)
-                .tint(.cyan)
+                .tint(.accentColor)
                 Text("Les tests CPU sont limités. Un résultat positif ne signifie pas qu'un jeu PS4 peut démarrer.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
+            .frame(maxWidth: 1000).padding(24).frame(maxWidth: .infinity)
         }
     }
 
-    private var tabBar: some View {
-        HStack(spacing: 0) {
-            tabButton(.home, icon: "house.fill", title: "Accueil")
-            tabButton(.games, icon: "square.grid.2x2.fill", title: "Bibliothèque")
-            tabButton(.tools, icon: "square.and.arrow.down.fill", title: "Import")
-            tabButton(.developer, icon: "stethoscope", title: "Diagnostic")
-            tabButton(.settings, icon: "gearshape.fill", title: "Paramètres")
-        }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 11)
-        .background(Color(red: 0.035, green: 0.055, blue: 0.14).opacity(0.98),
-                    in: RoundedRectangle(cornerRadius: 24))
-        .overlay(RoundedRectangle(cornerRadius: 24)
-                    .stroke(.cyan.opacity(0.35), lineWidth: 1))
-        .shadow(color: .cyan.opacity(0.17), radius: 17, y: -3)
-        .padding(.horizontal, 12)
-        .padding(.bottom, 4)
-    }
-
-    private func tabButton(_ tab: MaxPS4Tab, icon: String, title: String) -> some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.22)) { selectedTab = tab }
-        } label: {
-            VStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 19, weight: .semibold))
-                    .frame(height: 23)
-                Text(title)
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
+    private var sidebar: some View {
+        List(selection: $selectedTab) {
+            Section("Bibliothèque") {
+                sidebarLink(.home)
+                sidebarLink(.games)
             }
-            .foregroundStyle(selectedTab == tab ? Color.cyan : Color.white.opacity(0.52))
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 7)
-            .background(selectedTab == tab ? Color.cyan.opacity(0.12) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 16))
+            Section("Espace de travail") {
+                sidebarLink(.tools)
+                sidebarLink(.developer)
+                sidebarLink(.controllers)
+            }
+            Section { sidebarLink(.settings) }
         }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
+        .listStyle(.sidebar)
+        .navigationTitle("MaxPS4")
+        .safeAreaInset(edge: .bottom) {
+            HStack(spacing: 10) {
+                Image(systemName: "cpu").foregroundStyle(emulator.backendReady ? Color.green : Color.orange)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(emulator.backendReady ? "Moteur connecté" : "Version expérimentale").font(.caption.weight(.semibold))
+                    Text("\(emulator.games.count) fichiers locaux").font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(20)
+            .background(.bar)
+        }
     }
 
-    private func settingsCard<Content: View>(
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(spacing: 0) {
-            content()
+    private func sidebarLink(_ tab: MaxPS4Tab) -> some View {
+        NavigationLink(value: tab) {
+            Label(tab.title, systemImage: tab.symbol)
         }
-        .padding(.horizontal, 16)
-        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 22))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22)
-                .stroke(.white.opacity(0.07), lineWidth: 1)
-        )
+        .accessibilityIdentifier("maxps4.sidebar." + tab.rawValue)
+    }
+
+    private func settingsCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(spacing: 0) { content() }
+            .padding(.horizontal, 20)
+            .maxPS4Surface()
     }
 
     private func settingLabel(icon: String, title: String) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .frame(width: 28)
-                .foregroundStyle(.cyan)
+                .foregroundStyle(Color.accentColor)
             Text(title)
         }
     }
@@ -1484,7 +1259,7 @@ struct MaxPS4HomeView: View {
     private func settingButton(
         icon: String,
         title: String,
-        color: Color = .white
+        color: Color = .primary
     ) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
@@ -1493,39 +1268,10 @@ struct MaxPS4HomeView: View {
             Spacer()
             Image(systemName: "chevron.right")
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.40))
+                .foregroundStyle(.secondary)
         }
         .foregroundStyle(color)
         .padding(.vertical, 16)
-    }
-}
-
-private struct MaxPS4Background: View {
-    var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.012, green: 0.025, blue: 0.07),
-                    Color(red: 0.055, green: 0.04, blue: 0.12),
-                    .black
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-
-            Circle()
-                .fill(.purple.opacity(0.18))
-                .frame(width: 360, height: 360)
-                .blur(radius: 80)
-                .offset(x: 180, y: -300)
-
-            Circle()
-                .fill(.cyan.opacity(0.08))
-                .frame(width: 260, height: 260)
-                .blur(radius: 70)
-                .offset(x: -180, y: 280)
-        }
     }
 }
 

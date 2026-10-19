@@ -50,7 +50,7 @@ struct MaxPS4MazeGame: View {
 
             Text("Glisse sur le labyrinthe ou utilise les flèches. Les super-pastilles permettent de capturer le fantôme.")
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.8))
+                .foregroundStyle(.secondary)
 
             HStack(spacing: 10) {
                 Label("\(moves) coups", systemImage: "figure.walk")
@@ -58,7 +58,7 @@ struct MaxPS4MazeGame: View {
                 Label("\(pellets.count) pastilles", systemImage: "circle.grid.2x2.fill")
             }
             .font(.caption.monospacedDigit())
-            .foregroundStyle(.white.opacity(0.8))
+            .foregroundStyle(.secondary)
 
             VStack(spacing: 2) {
                 ForEach(0..<Self.maze.count, id: \.self) { row in
@@ -105,7 +105,7 @@ struct MaxPS4MazeGame: View {
                     .font(.caption.bold())
             } else {
                 Text("Pastilles restantes : \(pellets.count)")
-                    .foregroundStyle(.white.opacity(0.8))
+                    .foregroundStyle(.secondary)
                     .font(.caption)
             }
 
@@ -130,10 +130,10 @@ struct MaxPS4MazeGame: View {
 
             Text("Mini-jeu iOS indépendant : il ne lance pas de jeu PS4.")
                 .font(.caption2)
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.secondary)
         }
         .padding(14)
-        .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 15))
+        .background(MaxPS4Design.surface, in: RoundedRectangle(cornerRadius: 15))
         .onAppear {
             if pellets.isEmpty && !finished { reset() }
         }

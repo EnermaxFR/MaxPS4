@@ -1,0 +1,60 @@
+name: Native SwiftUI interface
+on:
+  workflow_dispatch:
+  push:
+    branches: ['design/native-library']
+    paths:
+      - 'MaxPS4-iOS/Sources/**'
+      - 'MaxPS4-iOS/Tests/LibraryPresentationTest.swift'
+      - '.github/workflows/native-ui.yml'
+  pull_request:
+    paths:
+      - 'MaxPS4-iOS/Sources/**'
+      - 'MaxPS4-iOS/Tests/LibraryPresentationTest.swift'
+      - '.github/workflows/native-ui.yml'
+permissions:
+  contents: read
+concurrency:
+  group: native-ui-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  presentation-tests:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test library presentation and persisted preferences
+        run: |
+          mkdir -p build/ui
+          xcrun swiftc -parse-as-library \
+            MaxPS4-iOS/Sources/MaxPS4LibraryPresentation.swift \
+            MaxPS4-iOS/Tests/LibraryPresentationTest.swift -o build/ui/library-tests
+          build/ui/library-tests
+  ios-compile:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sdk: iphoneos
+            target: arm64-apple-ios18.0
+          - sdk: iphonesimulator
+            target: arm64-apple-ios18.0-simulator
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile all production Swift sources with the real native ABI headers
+        run: |
+          set -euo pipefail
+          mkdir -p build/ui
+          xcrun swiftc -parse-as-library -swift-version 5 -D MAXPS4_FEX_APP \
+            -sdk "$(xcrun --sdk '${{ matrix.sdk }}' --show-sdk-path)" \
+            -target '${{ matrix.target }}' \
+            -import-objc-header MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h \
+            -whole-module-optimization -c MaxPS4-iOS/Sources/*.swift \
+            -o 'build/ui/MaxPS4-${{ matrix.sdk }}.o' 2>&1 | tee build/ui/compile.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-ui-${{ matrix.sdk }}
+          path: build/ui/
