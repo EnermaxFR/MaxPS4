@@ -20,8 +20,6 @@ typedef long gcn_i64;
 inline float gcn_f(gcn_u32 v) { return as_type<float>(v); }
 inline gcn_u32 gcn_b(float f) { return as_type<uint>(f); }
 #define gcn_fma fma
-#define gcn_fmin fmin
-#define gcn_fmax fmax
 #define gcn_floor floor
 #define gcn_ceil ceil
 #define gcn_trunc trunc
@@ -49,8 +47,6 @@ typedef int64_t gcn_i64;
 GCN_INLINE float gcn_f(gcn_u32 v) { float f; std::memcpy(&f, &v, 4); return f; }
 GCN_INLINE gcn_u32 gcn_b(float f) { gcn_u32 v; std::memcpy(&v, &f, 4); return v; }
 #define gcn_fma std::fma
-#define gcn_fmin std::fmin
-#define gcn_fmax std::fmax
 #define gcn_floor std::floor
 #define gcn_ceil std::ceil
 #define gcn_trunc std::trunc
@@ -98,6 +94,11 @@ GCN_INLINE float gcn_half_to_float(gcn_u32 h) {
   if (exponent == 31u) return gcn_f(sign | 0x7f800000u | (mantissa << 13));
   return gcn_f(sign | ((exponent + 112u) << 23) | (mantissa << 13));
 }
+// min/max of v_min/v_max_f32 (GCNShader::minNum/maxNum): a NaN operand,
+// quiet or signalling, yields the other one (GCN with IEEE_MODE=0, the
+// graphics default; Metal's fmin/fmax and libm differ on signalling NaNs).
+GCN_INLINE float gcn_fmin(float x, float y) { return gcn_isnan(x) ? y : gcn_isnan(y) ? x : (y < x ? y : x); }
+GCN_INLINE float gcn_fmax(float x, float y) { return gcn_isnan(x) ? y : gcn_isnan(y) ? x : (x < y ? y : x); }
 GCN_INLINE float gcn_legacy_mul(float x, float y) { return (x == 0.0f || y == 0.0f) ? 0.0f : x * y; }
 GCN_INLINE float gcn_ldexp(float x, gcn_i32 e) {
   // Exact scaling by 2^e in steps that stay within the float exponent range.

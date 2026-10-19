@@ -532,6 +532,11 @@ struct GCNShader {
     if (op < 320) { const unsigned o = op - 256; return (o >= 3 && o <= 8) || (o >= 13 && o <= 16) || o == 31 || o == 32 || o == 33 || o == 43; }
     return op == 320 || op == 321 || op == 331 || op == 337 || op == 340 || op == 343;
   }
+  // v_min/v_max_f32: a NaN operand, quiet or signalling, yields the other one
+  // (IEEE_MODE=0, the graphics default; signalling-NaN quieting of
+  // IEEE_MODE=1 is not modelled). Equal operands (+-0) return the first.
+  static float minNum(float x, float y) { return std::isnan(x) ? y : std::isnan(y) ? x : (y < x ? y : x); }
+  static float maxNum(float x, float y) { return std::isnan(x) ? y : std::isnan(y) ? x : (x < y ? y : x); }
   static uint32_t flushDenormal(uint32_t v) { return (v & 0x7f800000U) ? v : (v & 0x80000000U); }
   // compute() under an fp32 denormal mode (Wave::fp32Denorm): float inputs
   // (all but ldexp's exponent) and float results are flushed to signed zero
@@ -576,8 +581,8 @@ struct GCNShader {
     case 267: r = (a & 0xffffff) * (b & 0xffffff); return true;
     case 269: return F(fa < fb ? fa : fb);                    // min_legacy
     case 270: return F(fa > fb ? fa : fb);                    // max_legacy
-    case 271: return F(std::fmin(fa, fb));
-    case 272: return F(std::fmax(fa, fb));
+    case 271: return F(minNum(fa, fb));
+    case 272: return F(maxNum(fa, fb));
     case 273: r = uint32_t(std::min(int32_t(a), int32_t(b))); return true;
     case 274: r = uint32_t(std::max(int32_t(a), int32_t(b))); return true;
     case 275: r = std::min(a, b); return true;
@@ -616,13 +621,13 @@ struct GCNShader {
     case 331: return F(std::fma(fa, fb, fc));
     case 334: r = uint32_t(((uint64_t(a) << 32) | b) >> (c & 31)); return true;
     case 335: r = uint32_t(((uint64_t(a) << 32) | b) >> ((c & 3) * 8)); return true;
-    case 337: return F(std::fmin(std::fmin(fa, fb), fc));
+    case 337: return F(minNum(minNum(fa, fb), fc));
     case 338: r = uint32_t(std::min({int32_t(a), int32_t(b), int32_t(c)})); return true;
     case 339: r = std::min({a, b, c}); return true;
-    case 340: return F(std::fmax(std::fmax(fa, fb), fc));
+    case 340: return F(maxNum(maxNum(fa, fb), fc));
     case 341: r = uint32_t(std::max({int32_t(a), int32_t(b), int32_t(c)})); return true;
     case 342: r = std::max({a, b, c}); return true;
-    case 343: { float m = std::fmax(std::fmin(fa, fb), std::fmin(std::fmax(fa, fb), fc)); return F(m); }
+    case 343: { float m = maxNum(minNum(fa, fb), minNum(maxNum(fa, fb), fc)); return F(m); }
     case 344: { int32_t x = int32_t(a), y = int32_t(b), z = int32_t(c); r = uint32_t(std::max(std::min(x, y), std::min(std::max(x, y), z))); return true; }
     case 345: r = std::max(std::min(a, b), std::min(std::max(a, b), c)); return true;
     case 361: r = a * b; return true;                                   // v_mul_lo_u32
