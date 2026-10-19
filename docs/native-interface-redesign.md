@@ -48,8 +48,10 @@ et iPhoneSimulator ARM64. Il compile des objets Swift ; il ne remplace pas le li
 complet de l’application, la signature, l’installation ou les tests sur appareil.
 
 La compilation IPA de la base a échoué dans `OrbisBootMission43Test.cpp:73` avant
-le packaging (run 39269999577). Ce problème natif préexistant doit être traité
-séparément ; aucun assouplissement des tests ou modification du runtime n’est inclus ici.
+le packaging (run 39269999577). Le test synthétique séparait RX et RW de 4 KiB : ses adresses sont désormais
+espacées de 16 KiB pour éviter une collision sur les pages des machines Apple.
+Les assertions de relocation, permissions RX/RW et refus TLS restent présentes ;
+aucune règle ni source du runtime n’est modifiée.
 
 Recette visuelle sur appareil : navigation compacte et large, modes clair/sombre/système,
 texte agrandi, recherche vide/sans résultats, tri, grille/liste, imports, fiches,

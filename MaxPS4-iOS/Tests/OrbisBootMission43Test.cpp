@@ -64,6 +64,15 @@ int main() {
     std::copy(dependency.begin(),dependency.end(),consumer.begin()+0x6a0);
     orbis_fixture::setTag(consumer,0x61000037,0xb0);
     orbis_fixture::appendTag(consumer,1,0xa0);
+    // Keep fabricated RX/RW segments on separate pages on Apple ARM64 (16 KiB)
+    // as well as Linux (4 KiB). The runtime must still reject shared-page W^X.
+    for (auto* fixture : {&consumer, &provider}) {
+        put(*fixture,24,0x4000);
+        put(*fixture,64+16,0x4000);
+        put(*fixture,64+56+16,0x8000);
+    }
+    put(provider,0x820,0x4000); // Exported function in RX.
+    put(consumer,0x900,0x8000); // GOT relocation in RW.
     const auto wrapped=mission43_fixture::wrap(consumer);
     std::unique_ptr<OrbisV4Translation> owner;std::string report;
     auto prepare=[&](const std::vector<uint8_t>& module) {
@@ -72,8 +81,8 @@ int main() {
     };
     assert(prepare(provider)==0 && owner);
     uint64_t got=0;
-    assert(owner->read(0x402000,&got,8)==0 && got==0x801000);
-    {auto lease=owner->lease();assert(lease.permitted(0x401000,1,5));assert(!lease.permitted(0x401000,1,2));}
+    assert(owner->read(0x408000,&got,8)==0 && got==0x804000);
+    {auto lease=owner->lease();assert(lease.permitted(0x404000,1,5));assert(!lease.permitted(0x404000,1,2));}
     owner->close();owner.reset();
     // Real TLS remains a transaction refusal; no guessed module IDs or offsets.
     assert(prepare(libc)==-ENOTSUP && !owner && report.find("TLS not supported")!=std::string::npos);
