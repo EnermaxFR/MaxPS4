@@ -46,14 +46,19 @@ def title_state(path):
     # Title background: dominant dark blue wall colour in the upper half.
     blue = sum(1 for y in range(0, 500, 10) for x in range(0, 1920, 10)
                if px[x, y][2] > 100 and px[x, y][0] < 60 and px[x, y][1] < 90)
-    return eyes, blue
+    # Logo in colour (active): bright yellow/white letters in the logo area;
+    # the inactive grey logo has none. Studio Pixel text lies below y 760.
+    bright = sum(1 for y in range(160, 560, 4) for x in range(340, 1580, 4)
+                 if min(px[x, y]) > 200 or (px[x, y][0] > 220 and px[x, y][1] > 180 and px[x, y][2] < 90))
+    return eyes, blue, bright
 
 
 previous = None
 for path in sorted(glob.glob(os.path.join(run, "frame-*.png"))):
     n = int(path[-9:-4])
-    eyes, blue = title_state(path)
-    state = ("titre" if blue > 3000 else "autre écran") + (", Negativus du o présent" if eyes else ", o libéré")
+    eyes, blue, bright = title_state(path)
+    state = ("titre" if blue > 3000 else "autre écran") + (", Negativus du o présent" if eyes else ", o libéré") + \
+            (", logo en couleurs" if bright > 400 else "")
     if state != previous:
-        print(f"  capture {n:5d}  {state} (yeux={eyes}, fond={blue})")
+        print(f"  capture {n:5d}  {state} (yeux={eyes}, fond={blue}, vif={bright})")
         previous = state

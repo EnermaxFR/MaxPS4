@@ -4,6 +4,13 @@
 `experiment/keroblaster-iphone-m53`. Rapport détaillé : `docs/mission61-keroblaster-playable.md`.
 Rien n'a été poussé ni fusionné.
 
+**Mise à jour mission 62 (19 octobre)** : le blocage du téléphone est résolu.
+Les sept ennemis du titre ont été éliminés, le téléphone a ouvert le menu,
+et une nouvelle partie a chargé `00newgame` puis l'introduction `00office1`.
+Le premier niveau contrôlable n'est pas encore validé. Session arrêtée au frame 1973,
+empreintes des trois exécutables correctes. Voir `docs/mission62-title-trigger.md`
+et `docs/mission62-input-script.txt`. Aucun nouveau commit, push ni merge.
+
 ## Ce qui fonctionne réellement (Ubuntu x86, simulateur ARM64 vixl)
 
 - Démarrage, chargement complet, écran titre jouable (~1 s par image).
@@ -23,8 +30,11 @@ Le déclencheur de l'événement `TitleLogo` n'est pas identifié :
 - Kero n'a pas encore été posé exactement sur le bureau du téléphone (l'inertie le fait dépasser).
 
 Pistes d'analyse :
-- `TitleLogo` est une classe de sprite (table des classes `eboot+0x14d180`, entrée 32 → `0x5ee70`)
-  qui suit un objet parent (pointeur `+0x80`) ;
+- **Correction mission 62** : le vrai comportement `TitleLogo` est `eboot+0x6f2e0`
+  (entrée 538, fonction à +0 et nom à +32 dans une entrée de 40 octets).
+  Il attend la destruction de tous ses ennemis, puis déclenche le téléphone.
+  L’ancienne adresse `0x5ee70` venait d’un décalage d’une entrée.
+  Voir `docs/mission62-title-trigger.md`.
 - objets de `00title.pxpack` (coordonnées en tuiles, format 8.8) : TitleLogo (15,6), type 4 sans nom
   (15,5) — probablement le parent —, Phone1 type 53 (10,12), Cake (17,12), type 239 (6,12),
   type 159 (15,13) = départ de Kero ;
