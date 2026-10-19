@@ -56,7 +56,12 @@ struct GcnEnv { device const float* attr; device gcn_u32* out; uint count; };
                 "  " + n + "(s, v, env);\n}\n";
     }
     MTLCompileOptions* options = [MTLCompileOptions new];
-    if (@available(macOS 15.0, *)) options.mathMode = MTLMathModeSafe; else options.fastMathEnabled = NO;
+    // fastMathEnabled is deprecated on newer SDKs in favour of mathMode, which the
+    // macos-14 runner SDK lacks; both select IEEE-conformant math here.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    options.fastMathEnabled = NO;
+#pragma clang diagnostic pop
     NSError* error = nil;
     id<MTLLibrary> library = [device newLibraryWithSource:[NSString stringWithUTF8String:source.c_str()] options:options error:&error];
     if (!library) { std::fprintf(stderr, "MSL compilation failed:\n%s\n", error.localizedDescription.UTF8String); return 1; }
