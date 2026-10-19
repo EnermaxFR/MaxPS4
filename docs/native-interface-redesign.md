@@ -47,11 +47,26 @@ Swift de production avec `MAXPS4_FEX_APP`, les vrais en-têtes ABI et les SDK iP
 et iPhoneSimulator ARM64. Il compile des objets Swift ; il ne remplace pas le lien
 complet de l’application, la signature, l’installation ou les tests sur appareil.
 
-La compilation IPA de la base a échoué dans `OrbisBootMission43Test.cpp:73` avant
-le packaging (run 39269999577). Le test synthétique séparait RX et RW de 4 KiB : ses adresses sont désormais
-espacées de 16 KiB pour éviter une collision sur les pages des machines Apple.
-Les assertions de relocation, permissions RX/RW et refus TLS restent présentes ;
-aucune règle ni source du runtime n’est modifiée.
+Les corrections de portabilité des contrôles Apple restent dans les tests et scripts :
+les fixtures synthétiques de boot/SELF/eboot et de compatibilité FEX utilisent des
+pages distinctes de 16 KiB lorsqu’elles doivent être mappées ; leurs assertions
+et refus sont conservés. Les tableaux d’arguments des scripts homebrew/FEX restent
+non vides pour Bash 3 sur macOS, avec les mêmes options de compilation.
+
+### Résultats vérifiés
+
+- Workflow interface : succès, révision Swift `3219a0c`,
+  https://github.com/EnermaxFR/MaxPS4/actions/runs/39272042180.
+- Tests de présentation sur macOS : succès.
+- Compilation des sources Swift iPhone ARM64 : succès.
+- Compilation des sources Swift simulateur ARM64 : succès.
+- Fixtures boot, SELF et eboot corrigées : succès local ASan/UBSan.
+- Suite FEX de traduction corrigée : succès dans un exécutable isolé sous
+  simulateur ARM64 VIXL sur Linux, avec les bibliothèques existantes inchangées.
+- Construction IPA complète : suivi séparé,
+  https://github.com/EnermaxFR/MaxPS4/actions/runs/39277105299.
+  Un succès de compilation Swift ne prouve ni le lien complet, ni la génération
+  d’une IPA, ni son installation ou sa jouabilité sur iPhone.
 
 Recette visuelle sur appareil : navigation compacte et large, modes clair/sombre/système,
 texte agrandi, recherche vide/sans résultats, tri, grille/liste, imports, fiches,
