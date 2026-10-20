@@ -20,6 +20,8 @@ inline Words vop3(unsigned op, unsigned dst, unsigned s0, unsigned s1, unsigned 
 inline Words vop3b(unsigned op, unsigned dst, unsigned sdst, unsigned s0, unsigned s1, unsigned s2 = 0) {
   return {0xd0000000U | op << 17 | sdst << 8 | dst, s0 | s1 << 9 | s2 << 18};
 }
+inline uint32_t sopc(unsigned op, unsigned s0, unsigned s1) { return 0xbf000000U | op << 16 | s1 << 8 | s0; }
+inline uint32_t sopk(unsigned op, unsigned dst, uint16_t imm) { return 0xb0000000U | op << 23 | dst << 16 | imm; }
 inline uint32_t vopc(unsigned op, unsigned src0, unsigned vsrc1) { return 0x7c000000U | op << 17 | (vsrc1 & 255) << 9 | src0; }
 inline uint32_t vintrp(unsigned op, unsigned dst, unsigned attr, unsigned chan, unsigned src) { return 0xc8000000U | dst << 18 | op << 16 | attr << 10 | chan << 8 | src; }
 inline Words exp(unsigned target, unsigned en, bool compr, bool done, bool vm, unsigned a, unsigned b, unsigned c, unsigned d) {
@@ -71,17 +73,57 @@ inline std::vector<Fixture> all() {
     add(c, {exp(0, 15, false, true, true, 5, 7, 8, 9)}); c.push_back(sopp(1));
     f.push_back({"ps_alu", c, 12, true, ""});
   }
+  { // Divergent if/else (LLVM's saveexec shape): v0 > 0.5 ? (v1 * s5, 1.0) : (s4 + v1, 2.0).
+    Words c{smrd(10, 4, 0, 0), sopp(12, 0x7f),
+            vopc(1, 240, 0),                                  // vcc = 0.5 < v0
+            sop1(36, 20, VCC), sop2(19, 20, EXEC, 20),        // s[20:21] = exec & ~vcc lanes; exec &= vcc
+            sopp(8, 2),                                       // s_cbranch_execz else
+            vop2(8, 2, 5, 1), vop1(1, 3, 242),                // then: v2 = s5 * v1, v3 = 1.0
+            sop1(37, 20, 20), sop2(19, EXEC, EXEC, 20),       // else lanes
+            sopp(8, 2),                                       // s_cbranch_execz end
+            vop2(3, 2, 4, 1), vop1(1, 3, 244),                // else: v2 = s4 + v1, v3 = 2.0
+            sop2(17, EXEC, EXEC, 20)};                        // end: restore
+    add(c, {exp(0, 15, false, true, true, 2, 3, 0, 1)}); c.push_back(sopp(1));
+    f.push_back({"ps_ifelse", c, 8, true, ""});
+  }
+  { // Discard: v_cmpx keeps v0 <= 0.5; killed lanes are not exported.
+    Words c{vopc(0x16, 240, 0), vop2(3, 2, V + 0, 1)};       // exec &= 0.5 >= v0; v2 = v0 + v1
+    add(c, {exp(0, 15, false, true, true, 0, 1, 2, 2)}); c.push_back(sopp(1));
+    f.push_back({"ps_kill", c, 4, true, ""});
+  }
+  { // Uniform branches on scalar compares (taken and not taken), s_branch, a skipped early exit.
+    Words c{smrd(10, 4, 0, 0), sopp(12, 0x7f),
+            sopc(10, 6, 144),        // scc = s6 < 16 (u32): false (s6 = 0xfffffff0)
+            sopp(5, 1), vop1(1, 0, 242),          // not taken: v0 = 1.0
+            sopc(6, 11, 128),        // scc = s11 == 0: true
+            sopp(5, 1), vop1(1, 1, 244),          // taken: v1 keeps its value
+            sopk(9, 4, 0x1234),      // scc = s4 == 0x1234: false
+            sopp(4, 1), sopp(1),                  // scc0 taken: skips s_endpgm
+            sopp(2, 1), vop1(1, 2, 246),          // s_branch over v2 = 4.0
+            vop1(1, 3, 243)};                     // v3 = -1.0
+    add(c, {exp(0, 15, false, true, true, 0, 1, 2, 3)}); c.push_back(sopp(1));
+    f.push_back({"ps_uniform", c, 4, true, ""});
+  }
+  { // Early exit under a pending uniform branch that is not taken: the second export must not happen.
+    Words c{smrd(10, 4, 0, 0), sopp(12, 0x7f)};
+    add(c, {exp(0, 15, false, false, true, 0, 1, 0, 1)});
+    c.push_back(sopc(6, 11, 129));                       // scc = s11 == 1: false
+    c.push_back(sopp(5, 1)); c.push_back(sopp(1));       // not taken: s_endpgm runs
+    add(c, {exp(0, 15, false, true, true, 1, 0, 1, 0)}); c.push_back(sopp(1));
+    f.push_back({"ps_early", c, 4, true, ""});
+  }
   // Refusals: exact reasons, never a partial translation.
-  f.push_back({"ref_branch", {sopp(2, 1), sopp(1), sopp(1)}, 4, false, "control flow"});
-  f.push_back({"ref_cmpx", {vopc(0x11, V + 0, 1), sopp(1)}, 4, false, "V_CMPX"});
+  f.push_back({"ref_branch", {sopp(2, -1), sopp(1)}, 4, false, "backward branch"});
+  f.push_back({"ref_execnz", {sopp(9, 0), sopp(1)}, 4, false, "execnz"});
+  f.push_back({"ref_scc_wave", {vopc(1, V + 0, 1), sop1(36, 20, VCC), sopp(5, 0), sopp(1)}, 4, false, "wave-level SCC"});
+  f.push_back({"ref_execz_scalar", {sopp(8, 1), sop1(3, 30, 128), sopp(1)}, 4, false, "region s_cbranch_execz may skip"});
+  f.push_back({"ref_wqm_after_kill", {vopc(0x11, V + 0, 1), sop1(10, EXEC, EXEC), sopp(1)}, 4, false, "helper lanes"});
   f.push_back({"ref_twice", {sop1(3, 4, 128), sop1(3, 4, 129), sopp(1)}, 4, false, "written twice"});
   { Words c; add(c, {mubuf(0, 0, 1, 0, 128, true)}); c.push_back(sopp(1)); f.push_back({"ref_buffer", c, 4, false, "buffer access"}); }
   f.push_back({"ref_readfirst", {vop1(2, 4, V + 0), sopp(1)}, 4, false, "not translated"});
-  f.push_back({"ref_order", {vop1(1, 0, 4), sop1(3, 4, 130), sopp(1)}, 4, false, "read by vector code before its write"});
-  // EXEC saved in VCC, VCC overwritten by a compare, EXEC restored from it.
-  f.push_back({"ref_vcc_clobber", {sop1(4, VCC, EXEC), vopc(1, V + 0, 1), sop1(4, EXEC, VCC), sopp(1)}, 4, false, "no longer holds it"});
+  f.push_back({"ref_order", {vop1(1, 0, 4), sop1(3, 4, 130), sopp(1)}, 4, false, "read by translated code before its write"});
   // A saved EXEC used as a vector operand.
-  f.push_back({"ref_exec_value", {sop1(4, 20, EXEC), vop1(1, 0, 20), sop1(4, EXEC, 20), sopp(1)}, 4, false, "saved EXEC read as a value"});
+  f.push_back({"ref_exec_value", {sop1(4, 20, EXEC), vop1(1, 0, 20), sop1(4, EXEC, 20), sopp(1)}, 4, false, "read as a value"});
   return f;
 }
 } // namespace gcnfix

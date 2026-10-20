@@ -35,8 +35,8 @@ struct TwinEnv { const float* attr; std::vector<gcn_u32> out; const GcnImage* im
 #define GCN_ENV_PARAM TwinEnv& env
 #define GCN_ENV_INTERP(a, c, k) env.attr[((a) * 4 + (c)) * 3 + (k)]
 #define GCN_ENV_SAMPLE(k, w0, w1, c, t) ((void)(w1), gcn_image(env.images[k], env.texels, w0, c, t))
-#define GCN_ENV_EXPORT(tg, en, cp, dn, e) \
-  do { env.out.push_back(tg); for (int q = 0; q < 4; ++q) env.out.push_back((e)[q]); } while (0)
+#define GCN_ENV_EXPORT(tg, en, cp, dn, e, live) \
+  do { env.out.push_back((tg) | ((live) ? 0x100u : 0u)); for (int q = 0; q < 4; ++q) env.out.push_back((e)[q]); } while (0)
 #include GCN_TRANSLATED
 #undef GCN_UNIFORM
 #undef GCN_ENV_PARAM
@@ -78,8 +78,8 @@ struct GcnEnv { device const float* attr; device gcn_u32* out; uint count; const
 #define GCN_ENV_PARAM thread GcnEnv& env
 #define GCN_ENV_INTERP(a, c, k) env.attr[((a) * 4 + (c)) * 3 + (k)]
 #define GCN_ENV_SAMPLE(k, w0, w1, c, t) ((void)(w1), gcn_image(env.images[k], env.texels, w0, c, t))
-#define GCN_ENV_EXPORT(tg, en, cp, dn, e) \
-  do { env.out[env.count++] = (tg); for (int q = 0; q < 4; ++q) env.out[env.count++] = (e)[q]; } while (0)
+#define GCN_ENV_EXPORT(tg, en, cp, dn, e, live) \
+  do { env.out[env.count++] = (tg) | ((live) ? 0x100u : 0u); for (int q = 0; q < 4; ++q) env.out[env.count++] = (e)[q]; } while (0)
 kernel void run_valu_cases(device const gcn_u32* in [[buffer(0)]], device gcn_u32* out [[buffer(1)]], uint id [[thread_position_in_grid]]) {
   bool carry = in[id * 5u + 4u] != 0u;
   out[id * 2u] = gcn_valu(in[id * 5u], in[id * 5u + 1u], in[id * 5u + 2u], in[id * 5u + 3u], carry);
@@ -96,7 +96,9 @@ kernel void run_image_cases(device const GcnImage* images [[buffer(0)]], device 
 }
 )MSL";
     std::string source = slurp(argv[1]) + slurp(argv[2]) + kernels + slurp(argv[3]);
-    const char* names[] = {"ps_clear", "ps_alu", "ps_textured"};
+#define GCN_NAME(name) #name,
+    const char* names[] = {GCN_TRANSLATED_LIST(GCN_NAME)};
+#undef GCN_NAME
     for (const char* n : names) {
       source += std::string("kernel void run_") + n + "(constant gcn_u32* s [[buffer(0)]], device const gcn_u32* vin [[buffer(1)]],"
                 " device const float* attr [[buffer(2)]], device gcn_u32* out [[buffer(3)]],"
@@ -129,7 +131,7 @@ kernel void run_image_cases(device const GcnImage* images [[buffer(0)]], device 
     NSError* error = nil;
     id<MTLLibrary> library = [device newLibraryWithSource:[NSString stringWithUTF8String:source.c_str()] options:options error:&error];
     if (!library) { std::fprintf(stderr, "MSL compilation failed:\n%s\n", error.localizedDescription.UTF8String); return 1; }
-    std::printf("MSL: %zu bytes compiled (image sampler, 3 translated pixel shaders)\n", source.size());
+    std::printf("MSL: %zu bytes compiled (image sampler, %zu translated pixel shaders)\n", source.size(), sizeof(names) / sizeof(names[0]));
 
     bool failed = false;   // every section runs; the verdict comes at the end
     // 0. Vector ALU opcodes: GPU gcn_valu against C++ gcn_valu.
@@ -269,7 +271,9 @@ kernel void run_image_cases(device const GcnImage* images [[buffer(0)]], device 
     for (unsigned k = 0; k < 4; ++k) st[16 + k] = ssharp[k];
 
     using Fn = void (*)(const gcn_u32*, gcn_u32*, TwinEnv&);
-    const std::map<std::string, Fn> twins{{"ps_clear", ps_clear}, {"ps_alu", ps_alu}, {"ps_textured", ps_textured}};
+#define GCN_FN(name) {#name, name},
+    const std::map<std::string, Fn> twins{GCN_TRANSLATED_LIST(GCN_FN)};
+#undef GCN_FN
     unsigned exact = 0, close = 0, compared = 0;
     for (const auto& f : gcnfix::all()) {
       if (!f.translatable) continue;

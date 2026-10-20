@@ -81,8 +81,8 @@ struct GCNPixelProgram {
          "#define GCN_ENV_PARAM GCN_THREAD GcnPixelEnv& env\n"
          "#define GCN_ENV_INTERP(a, c, k) env.interp[((a) * 4u + (c)) * 3u + (k)]\n"
          "#define GCN_ENV_SAMPLE(k, w0, w1, c, t) ((void)(w1), gcn_image(env.images[k], env.texels, w0, c, t))\n"
-         "#define GCN_ENV_EXPORT(tg, en, cp, dn, e) \\\n"
-         "  do { if ((tg) == 0u) { for (int q = 0; q < 4; ++q) env.out->data[q] = (e)[q]; env.out->exported = 1u; } } while (0)\n";
+         "#define GCN_ENV_EXPORT(tg, en, cp, dn, e, live) \\\n"
+         "  do { if ((tg) == 0u && (live)) { for (int q = 0; q < 4; ++q) env.out->data[q] = (e)[q]; env.out->exported = 1u; } } while (0)\n";
     s << GCNShaderTranslator::function("gcn_ps", r);
     s << "GCN_INLINE void gcn_pixel_shade(GCN_UNIFORM const gcn_u32* s, GCN_PIXEL_DATA const float* interp, gcn_u32 numInterp,\n"
          "    GCN_PIXEL_DATA const GcnImage* images, GCN_DEVICE const unsigned char* texels,\n"

@@ -5,8 +5,8 @@
 // render targets must be identical byte for byte. Covers a full-screen clear
 // (32_ABGR export), a textured, interpolated, alpha-blended triangle with
 // partial quads (FP16 export, bilinear sRGB texture), the same shader saving
-// EXEC into VCC, and one whose VCC is overwritten before EXEC is restored
-// from it, which the translator refuses: that draw must fall back.
+// EXEC into VCC, one discarding fragments (v_cmpx), and one with a wave-level
+// branch (s_cbranch_vccnz) the translator refuses: that draw must fall back.
 #include "../Native/GCNRenderer.hpp"
 #include "../Native/GNMCommandExecutor.hpp"
 #include "../Native/GuestProviders/GnmEmbeddedVS.hpp"
@@ -44,7 +44,7 @@ constexpr uint64_t base = 0x400000, vsAddr = base + 0x400, psAddr = base + 0x800
 
 struct Frame { std::vector<uint8_t> pixels; GCNRenderer::Stats stats; std::string refusal; };
 
-enum class Shader { clear, textured, vccSave, refused };
+enum class Shader { clear, textured, vccSave, discard, refused };
 
 static Words vertexShader() {
   // Embedded full-screen VS position code (v1 = x, v0 = y in {-1, 1}), scaled
@@ -65,15 +65,15 @@ static Words pixelShader(Shader kind) {
     c = {smrd(10, 4, 0, 0), sopp(12, 0x7f), vop1(1, 0, 4), vop1(1, 1, 5), vop1(1, 2, 6), vop1(1, 3, 7)};
     add(c, {exp(0, 15, false, true, true, 0, 1, 2, 3)});
   } else {
-    // T# s[0:7], S# s[8:11]; EXEC saved in s[20:21] or in VCC. "refused"
-    // overwrites VCC with a compare (u < 0.5) before restoring EXEC from it.
-    const unsigned save = kind == Shader::textured ? 20 : VCC;
+    // T# s[0:7], S# s[8:11]; EXEC saved in s[20:21] or in VCC.
+    const unsigned save = kind == Shader::vccSave ? VCC : 20;
     c = {sop1(4, save, EXEC), sop1(10, EXEC, EXEC),
          vintrp(0, 2, 0, 0, 0), vintrp(1, 2, 0, 0, 1), vintrp(0, 3, 0, 1, 0), vintrp(1, 3, 0, 1, 1)};
     add(c, {mimg(32, 15, 2, 4, 0, 8)});
-    if (kind == Shader::refused) c.push_back(vopc(1, 240, 2));   // v_cmp_lt_f32 vcc, 0.5, v2
+    if (kind == Shader::refused) c.push_back(sopp(7, 0));         // s_cbranch_vccnz (to the next instruction)
     c.push_back(sop1(4, EXEC, save)); c.push_back(sopp(12, 0x70));
     c.push_back(vintrp(0, 8, 0, 2, 0)); c.push_back(vintrp(1, 8, 0, 2, 1));
+    if (kind == Shader::discard) c.push_back(vopc(0x14, 255, 8)), c.push_back(fbits(0.03f));   // v_cmpx_gt_f32: keep fragments whose interpolated u*v is below 0.03
     c.push_back(vop2(8, 4, V + 4, 8));                      // tint red by u * v
     c.push_back(vop2(47, 0, V + 4, 5)); c.push_back(vop2(47, 1, V + 6, 7));
     add(c, {exp(0, 15, true, true, true, 0, 1, 0, 0)});
@@ -149,15 +149,18 @@ int main(int argc, char** argv) {
   unsigned offloadedPixels = 0;
   const struct { Shader kind; const char* name; bool offloads; } cases[] = {
     {Shader::clear, "clear", true}, {Shader::textured, "textured", true}, {Shader::vccSave, "vcc-save", true},
-    {Shader::refused, "refused", false}};
+    {Shader::discard, "discard", true}, {Shader::refused, "refused", false}};
   for (const auto& c : cases) {
     const Frame reference = render(c.kind, nullptr), offloaded = render(c.kind, &jit);
     if (bool(offloaded.stats.offloadedDraws) != c.offloads) {
       std::fprintf(stderr, "%s: offload %s (%s)\n", c.name, offloaded.stats.offloadedDraws ? "taken" : "refused", offloaded.refusal.c_str());
       return 1;
     }
-    if (!c.offloads && offloaded.refusal.find("VCC that no longer holds it") == std::string::npos) {
+    if (!c.offloads && offloaded.refusal.find("vccz/vccnz") == std::string::npos) {
       std::fprintf(stderr, "%s: unexpected refusal reason: %s\n", c.name, offloaded.refusal.c_str()); return 1;
+    }
+    if (c.kind == Shader::discard && !(reference.stats.pixelsWritten > 0 && reference.stats.pixelsWritten < 3364)) {   // 3364: the whole triangle
+      std::fprintf(stderr, "discard: expected a partly discarded triangle, %llu pixels written\n", (unsigned long long)reference.stats.pixelsWritten); return 1;
     }
     if (reference.stats.pixelsWritten == 0 || reference.stats.pixelsWritten != offloaded.stats.pixelsWritten) {
       std::fprintf(stderr, "%s: pixels written %llu vs %llu\n", c.name, (unsigned long long)reference.stats.pixelsWritten,

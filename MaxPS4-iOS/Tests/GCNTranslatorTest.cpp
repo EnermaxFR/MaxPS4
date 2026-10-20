@@ -30,7 +30,7 @@ struct TestMemory {
   }
 };
 
-struct Export { unsigned target, enable, compressed, done; gcn_u32 data[4]; };
+struct Export { unsigned target, enable, compressed, done; bool live; gcn_u32 data[4]; };
 struct Env {
   unsigned lane = 0;
   std::function<float(unsigned, unsigned, unsigned)> interp;
@@ -42,8 +42,8 @@ struct Env {
 #define GCN_ENV_PARAM Env& env
 #define GCN_ENV_INTERP(attr, chan, k) env.interp(attr, chan, k)
 #define GCN_ENV_SAMPLE(k, w0, w1, c, t) ((void)(w1), gcn_image(env.images[k], env.texels, w0, c, t))
-#define GCN_ENV_EXPORT(target, enable, compressed, done, e) \
-  env.exports.push_back(Export{target, enable, compressed, done, {e[0], e[1], e[2], e[3]}})
+#define GCN_ENV_EXPORT(target, enable, compressed, done, e, live) \
+  env.exports.push_back(Export{target, enable, compressed, done, bool(live), {e[0], e[1], e[2], e[3]}})
 #include GCN_TRANSLATED
 
 static float attribute(unsigned attr, unsigned chan, unsigned lane, unsigned k) {
@@ -55,7 +55,7 @@ static float attribute(unsigned attr, unsigned chan, unsigned lane, unsigned k) 
 int main() {
   constexpr uint64_t base = 0x400000, size = 4 * 1024 * 1024;
   constexpr uint64_t program = base, constants = base + 0x10000, texture = base + 0x20000;
-  unsigned shaders = 0, lanes = 0, values = 0;
+  unsigned shaders = 0, lanes = 0, values = 0, killed = 0;
   {
   TestMemory m{base, std::vector<uint8_t>(size)};
   const float consts[8] = {0.25f, -1.5f, 3.0f, 0.75f, 2.0f, 0.5f, 7.0f, 0.0f};
@@ -69,7 +69,9 @@ int main() {
   const uint32_t ssharp[4] = {2 | (2u << 3) | (2u << 6), 0, (1u << 20) | (1u << 22), 0};
 
   using Fn = void (*)(const gcn_u32*, gcn_u32*, Env&);
-  const std::map<std::string, Fn> functions{{"ps_clear", ps_clear}, {"ps_textured", ps_textured}, {"ps_alu", ps_alu}};
+#define GCN_FN(name) {#name, name},
+  const std::map<std::string, Fn> functions{GCN_TRANSLATED_LIST(GCN_FN)};
+#undef GCN_FN
   for (const auto& f : gcnfix::all()) {
     if (!f.translatable) continue;
     const auto translation = GCNShaderTranslator::translate(f.code, f.vgprs);
@@ -116,7 +118,13 @@ int main() {
           if (g.target != e.target || g.enable != e.enable || bool(g.compressed) != e.compressed || bool(g.done) != e.done) {
             std::fprintf(stderr, "%s: export %zu header\n", f.name.c_str(), x); return 1;
           }
-          if (!((e.exec >> lane) & 1)) continue;   // lane not exported by the hardware
+          if (!((live >> lane) & 1)) continue;     // the renderer shades covered fragments only
+          if (g.live != bool((e.exec >> lane) & 1)) {
+            std::fprintf(stderr, "%s trial %u lane %u export %zu: translated live=%d, interpreter exec bit %d\n", f.name.c_str(), trial, lane, x,
+                         int(g.live), int((e.exec >> lane) & 1));
+            return 1;
+          }
+          if (!g.live) { ++killed; continue; }     // lane not exported by the hardware (discard / inactive)
           for (unsigned c = 0; c < 4; ++c) {
             const bool used = e.compressed ? (c < 2 && ((e.enable >> (c * 2)) & 3)) : ((e.enable >> c) & 1);
             if (!used) continue;
@@ -136,6 +144,6 @@ int main() {
     ++shaders;
   }
   }
-  std::printf("PASS translator stage 2: %u translated pixel shaders, %u live lanes, %u exported values equal to the interpreter\n",
-              shaders, lanes, values);
+  std::printf("PASS translator stage 2: %u translated pixel shaders, %u live lanes, %u exported values equal to the interpreter, "
+              "%u lane exports suppressed by EXEC as by the interpreter\n", shaders, lanes, values, killed);
 }
