@@ -136,14 +136,12 @@ static Frame render(Shader kind, PixelBackend* backend) {
 int main(int argc, char** argv) {
   if (argc != 3) { std::fprintf(stderr, "usage: GCNRendererOffloadTest NATIVE_DIR WORK_DIR\n"); return 2; }
 #ifdef __OBJC__
-  id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-  if (!device) { NSArray<id<MTLDevice>>* all = MTLCopyAllDevices(); if (all.count) device = all[0]; }
-  if (!device) { std::printf("SKIP renderer pixel offload on Metal: no Metal device (nothing compared)\n"); return 0; }
-  auto slurp = [](const std::string& path) { std::ifstream f(path); std::stringstream t; t << f.rdbuf(); return t.str(); };
-  const std::string native = argv[1];
-  GCNMetalPixelBackend jit(device, slurp(native + "/GCNKernel.h") + slurp(native + "/GCNKernelImage.h"));
+  // The host provider (GCNMetalPixelOffloadHost.mm), as an app or runner gets it.
+  setenv("MAXPS4_GPU_PRELUDE_DIR", argv[1], 1);
+  auto* host = static_cast<GCNMetalPixelBackend*>(hostPixelBackend());
+  if (!host) { std::printf("SKIP renderer pixel offload on Metal: no Metal backend on this machine (nothing compared)\n"); return 0; }
+  GCNMetalPixelBackend& jit = *host;
   const char* backendName = "Metal";
-  std::printf("Metal device: %s\n", device.name.UTF8String);
 #else
   GCNCppJitBackend jit(argv[1], argv[2]);
   const char* backendName = "C++ JIT";

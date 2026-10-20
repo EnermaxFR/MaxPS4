@@ -8,6 +8,7 @@ on:
       - 'MaxPS4-iOS/Native/GCNImageBinding.hpp'
       - 'MaxPS4-iOS/Native/GCNPixelOffload.hpp'
       - 'MaxPS4-iOS/Native/GCNMetalPixelBackend.hpp'
+      - 'MaxPS4-iOS/Native/GCNMetalPixelOffloadHost.mm'
       - 'MaxPS4-iOS/Native/GCNRenderer.hpp'
       - 'MaxPS4-iOS/Native/GCNShader.hpp'
       - 'MaxPS4-iOS/Native/GCNShaderTranslator.hpp'
@@ -29,6 +30,7 @@ on:
       - 'MaxPS4-iOS/Native/GCNImageBinding.hpp'
       - 'MaxPS4-iOS/Native/GCNPixelOffload.hpp'
       - 'MaxPS4-iOS/Native/GCNMetalPixelBackend.hpp'
+      - 'MaxPS4-iOS/Native/GCNMetalPixelOffloadHost.mm'
       - 'MaxPS4-iOS/Native/GCNRenderer.hpp'
       - 'MaxPS4-iOS/Native/GCNShader.hpp'
       - 'MaxPS4-iOS/Native/GCNShaderTranslator.hpp'
@@ -76,5 +78,6 @@ jobs:
       - name: Renderer pixel offload on Metal (render targets equal to the interpreter)
         run: |
           xcrun clang++ -x objective-c++ -std=c++17 -O1 -fobjc-arc -Wno-misleading-indentation -I MaxPS4-iOS/Native \
-            MaxPS4-iOS/Tests/GCNRendererOffloadTest.cpp -framework Foundation -framework Metal -o build/gcn-metal/offload-test
+            MaxPS4-iOS/Tests/GCNRendererOffloadTest.cpp MaxPS4-iOS/Native/GCNMetalPixelOffloadHost.mm \
+            -framework Foundation -framework Metal -o build/gcn-metal/offload-test
           build/gcn-metal/offload-test "$PWD/MaxPS4-iOS/Native" build/gcn-metal

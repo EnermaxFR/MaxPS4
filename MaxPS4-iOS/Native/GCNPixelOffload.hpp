@@ -56,6 +56,12 @@ struct PixelBackend {
   virtual void release(PixelDraw&) {}
 };
 
+// The host's pixel backend, if the program links one (weak: absent means
+// none and every draw stays on the interpreter). Apple hosts get the Metal
+// backend from GCNMetalPixelOffloadHost.mm. Callers check the address first:
+//   if (&hostPixelBackend) renderer.pixelBackend = hostPixelBackend();
+__attribute__((weak)) PixelBackend* hostPixelBackend();
+
 struct GCNPixelProgram {
   // Source of the translated shader and its per-fragment entry. Backends
   // prepend GCNKernel.h and GCNKernelImage.h (and their own kernel wrapper).
