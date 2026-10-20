@@ -929,13 +929,14 @@ struct GCNShader {
     for (unsigned c = 0; c < 4; ++c) tex.select[c] = (t[3] >> (c * 3)) & 7;
     if (((t[3] >> 12) & 15) != 0 || ((t[3] >> 16) & 15) != 0) { why = "mipmapped image resource unsupported"; return false; }
     if (t[5] & 0x1fff) { why = "array image resource unsupported"; return false; }
-    if (tex.dfmt != 10 && tex.dfmt != 4 && tex.dfmt != 1 && tex.dfmt != 14) { why = "image data format " + std::to_string(tex.dfmt) + " unsupported"; return false; }
+    if (tex.dfmt != 10 && tex.dfmt != 4 && tex.dfmt != 1 && tex.dfmt != 14 && tex.dfmt != 16) { why = "image data format " + std::to_string(tex.dfmt) + " unsupported"; return false; }
+    if (tex.dfmt == 16 && tex.nfmt != 0) { why = "image 5_6_5 number format " + std::to_string(tex.nfmt) + " unsupported (UNORM only)"; return false; }
     if (!(tex.nfmt == 0 || tex.nfmt == 9 || (tex.nfmt == 7 && (tex.dfmt == 4 || tex.dfmt == 14)) || tex.nfmt == 4)) { why = "image number format " + std::to_string(tex.nfmt) + " unsupported"; return false; }
     if (tex.tile != 8 && tex.tile != 10) { why = "image tiling index " + std::to_string(tex.tile) + " unsupported"; return false; }
     if (tex.pitch < tex.width) { why = "image pitch smaller than width"; return false; }
     return true;
   }
-  static unsigned texelBytes(unsigned dfmt) { return dfmt == 1 ? 1 : dfmt == 14 ? 16 : 4; }
+  static unsigned texelBytes(unsigned dfmt) { return dfmt == 1 ? 1 : dfmt == 16 ? 2 : dfmt == 14 ? 16 : 4; }
   template <class Memory>
   bool texel(Memory& memory, const Texture& tex, unsigned x, unsigned y, std::array<float, 4>& out, std::string& why) {
     const unsigned bpp = texelBytes(tex.dfmt);
@@ -956,6 +957,10 @@ struct GCNShader {
         else c[k] = tex.nfmt == 9 && k < 3 ? srgbByteToLinear(raw[k]) : raw[k] / 255.0f;
       }
     } else if (tex.dfmt == 1) c[0] = tex.nfmt == 4 ? gcnFloat(raw[0]) : raw[0] / 255.0f;
+    else if (tex.dfmt == 16) { // 5_6_5 UNORM: x in bits 4:0, y in 10:5, z in 15:11
+      const unsigned v = raw[0] | (unsigned(raw[1]) << 8);
+      c[0] = float(v & 31) / 31.0f; c[1] = float((v >> 5) & 63) / 63.0f; c[2] = float(v >> 11) / 31.0f;
+    }
     else if (tex.dfmt == 4) { uint32_t v; std::memcpy(&v, raw.data(), 4); c[0] = tex.nfmt == 7 ? gcnFloat(v) : tex.nfmt == 4 ? gcnFloat(v) : float(v) / 4294967295.0f; }
     else { for (unsigned k = 0; k < 4; ++k) { uint32_t v; std::memcpy(&v, raw.data() + 4 * k, 4); c[k] = gcnFloat(v); } }
     for (unsigned k = 0; k < 4; ++k) {

@@ -64,6 +64,23 @@ GCN_TABLE gcn_u32 gcn_srgb_to_linear[256] = {
   0x3f704db8u, 0x3f7282afu, 0x3f74baaeu, 0x3f76f5aeu, 0x3f7933b9u, 0x3f7b74c6u, 0x3f7db8e0u, 0x3f800000u
 };
 // float(b) / 255.0f, correctly rounded, as bit patterns.
+// float(b) / 31.0f and float(b) / 63.0f (5_6_5 UNORM), correctly rounded.
+GCN_TABLE gcn_u32 gcn_unorm5[32] = {
+  0x00000000u, 0x3d042108u, 0x3d842108u, 0x3dc6318cu, 0x3e042108u, 0x3e25294au, 0x3e46318cu, 0x3e6739ceu,
+  0x3e842108u, 0x3e94a529u, 0x3ea5294au, 0x3eb5ad6bu, 0x3ec6318cu, 0x3ed6b5adu, 0x3ee739ceu, 0x3ef7bdefu,
+  0x3f042108u, 0x3f0c6319u, 0x3f14a529u, 0x3f1ce73au, 0x3f25294au, 0x3f2d6b5bu, 0x3f35ad6bu, 0x3f3def7cu,
+  0x3f46318cu, 0x3f4e739du, 0x3f56b5adu, 0x3f5ef7beu, 0x3f6739ceu, 0x3f6f7bdfu, 0x3f77bdefu, 0x3f800000u
+};
+GCN_TABLE gcn_u32 gcn_unorm6[64] = {
+  0x00000000u, 0x3c820821u, 0x3d020821u, 0x3d430c31u, 0x3d820821u, 0x3da28a29u, 0x3dc30c31u, 0x3de38e39u,
+  0x3e020821u, 0x3e124925u, 0x3e228a29u, 0x3e32cb2du, 0x3e430c31u, 0x3e534d35u, 0x3e638e39u, 0x3e73cf3du,
+  0x3e820821u, 0x3e8a28a3u, 0x3e924925u, 0x3e9a69a7u, 0x3ea28a29u, 0x3eaaaaabu, 0x3eb2cb2du, 0x3ebaebafu,
+  0x3ec30c31u, 0x3ecb2cb3u, 0x3ed34d35u, 0x3edb6db7u, 0x3ee38e39u, 0x3eebaebbu, 0x3ef3cf3du, 0x3efbefbfu,
+  0x3f020821u, 0x3f061862u, 0x3f0a28a3u, 0x3f0e38e4u, 0x3f124925u, 0x3f165966u, 0x3f1a69a7u, 0x3f1e79e8u,
+  0x3f228a29u, 0x3f269a6au, 0x3f2aaaabu, 0x3f2ebaecu, 0x3f32cb2du, 0x3f36db6eu, 0x3f3aebafu, 0x3f3efbf0u,
+  0x3f430c31u, 0x3f471c72u, 0x3f4b2cb3u, 0x3f4f3cf4u, 0x3f534d35u, 0x3f575d76u, 0x3f5b6db7u, 0x3f5f7df8u,
+  0x3f638e39u, 0x3f679e7au, 0x3f6baebbu, 0x3f6fbefcu, 0x3f73cf3du, 0x3f77df7eu, 0x3f7befbfu, 0x3f800000u
+};
 GCN_TABLE gcn_u32 gcn_unorm8[256] = {
   0x00000000u, 0x3b808081u, 0x3c008081u, 0x3c40c0c1u, 0x3c808081u, 0x3ca0a0a1u, 0x3cc0c0c1u, 0x3ce0e0e1u,
   0x3d008081u, 0x3d109091u, 0x3d20a0a1u, 0x3d30b0b1u, 0x3d40c0c1u, 0x3d50d0d1u, 0x3d60e0e1u, 0x3d70f0f1u,
@@ -119,7 +136,7 @@ GCN_INLINE gcn_u32 gcn_texel_word(GCN_DEVICE const unsigned char* p) {
 }
 // GCNShader::texel: decoded, swizzled channels as float bit patterns.
 GCN_INLINE void gcn_texel(const GcnImage img, GCN_DEVICE const unsigned char* texels, gcn_u32 x, gcn_u32 y, GCN_THREAD gcn_u32* out) {
-  const gcn_u32 bpp = img.dfmt == 1u ? 1u : img.dfmt == 14u ? 16u : 4u;
+  const gcn_u32 bpp = img.dfmt == 1u ? 1u : img.dfmt == 16u ? 2u : img.dfmt == 14u ? 16u : 4u;
   const gcn_u32 offset = img.tile == 8u ? (y * img.pitch + x) * bpp : gcn_tile10_offset(img.pitch, x, y);
   GCN_DEVICE const unsigned char* p = texels + img.base + offset;
   gcn_u32 c[4] = {0u, 0u, 0u, 0x3f800000u};
@@ -128,6 +145,9 @@ GCN_INLINE void gcn_texel(const GcnImage img, GCN_DEVICE const unsigned char* te
       c[k] = img.nfmt == 4u ? gcn_u32(p[k]) : (img.nfmt == 9u && k < 3u) ? gcn_srgb_to_linear[p[k]] : gcn_unorm8[p[k]];
   } else if (img.dfmt == 1u) {
     c[0] = img.nfmt == 4u ? gcn_u32(p[0]) : gcn_unorm8[p[0]];
+  } else if (img.dfmt == 16u) {                     // 5_6_5 UNORM
+    const gcn_u32 v = gcn_u32(p[0]) | (gcn_u32(p[1]) << 8);
+    c[0] = gcn_unorm5[v & 31u]; c[1] = gcn_unorm6[(v >> 5) & 63u]; c[2] = gcn_unorm5[(v >> 11) & 31u];
   } else if (img.dfmt == 4u) {
     const gcn_u32 v = gcn_texel_word(p);
     c[0] = (img.nfmt == 7u || img.nfmt == 4u) ? v : gcn_b(float(v) * 2.3283064365386963e-10f); // / 4294967295.0f == / 2^32

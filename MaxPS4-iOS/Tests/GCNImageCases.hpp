@@ -44,12 +44,13 @@ inline Suite make(unsigned count, uint64_t seed, uint64_t base = 0x10000000) {
     Case c;
     const unsigned region = next() % regions;
     const uint64_t address = base + uint64_t(region) * regionBytes;
-    static const unsigned dfmts[4] = {10, 1, 4, 14};
-    unsigned dfmt = dfmts[next() % 4], nfmt;
+    static const unsigned dfmts[5] = {10, 1, 4, 14, 16};
+    unsigned dfmt = dfmts[next() % 5], nfmt;
     const unsigned r = next() % 4;
     if (dfmt == 4 || dfmt == 14) nfmt = r == 0 ? 0 : r == 1 ? 4 : 7;
     else nfmt = r == 0 ? 4 : r == 1 ? 9 : 0;
     if (dfmt == 14) nfmt = r == 0 ? 0 : r == 1 ? 4 : 7;   // 32_32_32_32: raw words whatever the number format
+    if (dfmt == 16) nfmt = 0;                             // 5_6_5: UNORM only
     const bool tiled = (dfmt == 10 || dfmt == 4) && next() % 3 == 0;
     unsigned width = 1 + next() % 70, height = 1 + next() % 70, pitch;
     if (tiled) { pitch = 128 * (1 + next() % 2); width = 1 + next() % pitch; height = 1 + next() % 120; }

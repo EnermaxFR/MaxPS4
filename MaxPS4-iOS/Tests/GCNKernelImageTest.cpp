@@ -26,6 +26,8 @@ static bool tables() {
   for (unsigned b = 0; b < 256; ++b) {
     if (gcn_srgb_to_linear[b] != gcnBits(srgbByteToLinear(uint8_t(b)))) { std::fprintf(stderr, "sRGB table %u\n", b); return false; }
     if (gcn_unorm8[b] != gcnBits(b / 255.0f)) { std::fprintf(stderr, "unorm8 table %u\n", b); return false; }
+    if (b < 32 && gcn_unorm5[b] != gcnBits(float(b) / 31.0f)) { std::fprintf(stderr, "unorm5 table %u\n", b); return false; }
+    if (b < 64 && gcn_unorm6[b] != gcnBits(float(b) / 63.0f)) { std::fprintf(stderr, "unorm6 table %u\n", b); return false; }
   }
   for (uint32_t pitch : {128u, 256u, 1024u, 16384u}) {
     Display2DThin32 layout; std::string why;
