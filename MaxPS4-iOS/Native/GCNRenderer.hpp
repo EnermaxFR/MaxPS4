@@ -292,6 +292,9 @@ struct GCNRenderer {
     struct Worker {
       GCNShader ps; std::vector<Fragment> batch; Stats stats; std::string error;
       uint64_t minX = ~0ull, minY = ~0ull, maxX = 0, maxY = 0;
+      // Offload: fragments to shade, and the batches to resolve afterwards.
+      struct Deferred { std::vector<Fragment> batch; std::vector<uint8_t> lanes; size_t first = 0; };
+      std::vector<GcnPixelFragment> pending; std::vector<Deferred> deferred;
     };
     std::vector<Setup> setups;
     std::vector<Tri> tris;
@@ -320,68 +323,10 @@ struct GCNRenderer {
       PixelBackend*& backend; PixelDraw*& draw;
       ~OffloadRelease() { if (backend && draw) backend->release(*draw); }
     } offloadRelease{pixelBackend, offloadDraw};
-    auto flushWorker = [&](Worker& wk) -> bool {
-      auto& batch = wk.batch; auto& ps = wk.ps; auto& last = wk.stats; std::string& error = wk.error;
+    // Depth test/write and colour write of a shaded batch, in lane order.
+    auto resolve = [&](Worker& wk, const std::vector<Fragment>& batch, const GCNShader::Export* color) -> bool {
+      auto& last = wk.stats; std::string& error = wk.error;
       uint64_t &writtenMinX = wk.minX, &writtenMinY = wk.minY, &writtenMaxX = wk.maxX, &writtenMaxY = wk.maxY;
-      if (batch.empty()) return true;
-      GCNShader::Wave wave;
-      wave.configure(std::min(psSgprs, 104u), psVgprs);
-      wave.fp32Denorm = (psRsrc1 >> 16) & 3;   // FLOAT_MODE fp32 denormals
-      for (unsigned k = 0; k < psUser; ++k) wave.s[k] = sh[0xc + k];
-      if (psUser < wave.sgprs) wave.s[psUser] = 0; // PRIM_MASK: interpolation uses per-lane setups
-      uint64_t covered = 0;
-      unsigned reg = 0;
-      const bool persp = inputAddress & 2, linear = inputAddress & 0x20;
-      const unsigned perspReg = reg; if (persp) reg += 2;
-      const unsigned linearReg = reg; if (linear) reg += 2;
-      const unsigned posXReg = reg; if (inputAddress & 0x100) reg += 1;
-      const unsigned posYReg = reg; if (inputAddress & 0x200) reg += 1;
-      if (reg > psVgprs) { error = "PS input VGPRs exceed allocation"; return false; }
-      for (unsigned lane = 0; lane < batch.size(); ++lane) {
-        const auto& f = batch[lane];
-        if (f.covered) covered |= uint64_t(1) << lane;
-        if (inputEnable & 2) { wave.v[perspReg][lane] = gcnBits(f.i); wave.v[perspReg + 1][lane] = gcnBits(f.j); }
-        if (inputEnable & 0x20) { wave.v[linearReg][lane] = gcnBits(f.li); wave.v[linearReg + 1][lane] = gcnBits(f.lj); }
-        if (inputEnable & 0x100) wave.v[posXReg][lane] = gcnBits(float(f.x) + 0.5f);
-        if (inputEnable & 0x200) wave.v[posYReg][lane] = gcnBits(float(f.y) + 0.5f);
-      }
-      wave.setExec(covered);
-      wave.interpolate = [&](unsigned attr, unsigned chan, unsigned lane, float out[3]) {
-        if (attr >= numInterp || lane >= batch.size()) return false;
-        interpolant(setups[batch[lane].setup], attr, chan, out);
-        return true;
-      };
-      std::string why;
-      const GCNShader::Export* color = nullptr;
-      GCNShader::Export offloaded;
-      if (offloadDraw) {
-        // Covered lanes only: helper lanes never export and no derivative is taken.
-        GcnPixelFragment fragments[64]; GcnPixelOutput outputs[64]; unsigned lanes[64], n = 0;
-        for (unsigned lane = 0; lane < batch.size(); ++lane) {
-          if (!batch[lane].covered) continue;
-          GcnPixelFragment& f = fragments[n];
-          f = GcnPixelFragment{}; f.setup = batch[lane].setup;
-          for (unsigned r = 0; r < gcnPixelInputs && r < psVgprs; ++r) f.inputs[r] = wave.v[r][lane];
-          lanes[n++] = lane;
-        }
-        if (n && !pixelBackend->shade(*offloadDraw, fragments, n, outputs, why)) { error = "PS 0x" + hex(psProgram) + " offload: " + why; return false; }
-        offloaded.target = 0; offloaded.compressed = offloadDraw->translation.mrt0Compressed; offloaded.exec = 0;
-        for (unsigned k = 0; k < n; ++k) {
-          if (!outputs[k].exported) continue;
-          offloaded.exec |= uint64_t(1) << lanes[k];
-          for (unsigned c = 0; c < 4; ++c) offloaded.data[c][lanes[k]] = outputs[k].data[c];
-        }
-        color = &offloaded;
-        ++last.offloadBatches; last.offloadFragments += n;
-      } else {
-        if (!ps.run(memory, psProgram, wave, why)) { error = "PS 0x" + hex(psProgram) + ": " + why; return false; }
-        ++last.psWaves;
-        for (const auto& e : wave.exports) {
-          if (e.target == 0) { if (color) { error = "PS exported MRT0 twice"; return false; } color = &e; }
-          else if (e.target != 9) { error = "PS export target " + std::to_string(e.target) + " unsupported"; return false; }
-        }
-        if (!color) { error = "PS did not export MRT0"; return false; }
-      }
       for (unsigned lane = 0; lane < batch.size(); ++lane) {
         const auto& f = batch[lane];
         if (!f.covered || !((color->exec >> lane) & 1)) continue;
@@ -415,7 +360,88 @@ struct GCNRenderer {
         writtenMinX = std::min<uint64_t>(writtenMinX, f.x); writtenMaxX = std::max<uint64_t>(writtenMaxX, f.x);
         writtenMinY = std::min<uint64_t>(writtenMinY, f.y); writtenMaxY = std::max<uint64_t>(writtenMaxY, f.y);
       }
+      return true;
+    };
+    auto flushWorker = [&](Worker& wk) -> bool {
+      auto& batch = wk.batch; auto& ps = wk.ps; auto& last = wk.stats; std::string& error = wk.error;
+      if (batch.empty()) return true;
+      GCNShader::Wave wave;
+      wave.configure(std::min(psSgprs, 104u), psVgprs);
+      wave.fp32Denorm = (psRsrc1 >> 16) & 3;   // FLOAT_MODE fp32 denormals
+      for (unsigned k = 0; k < psUser; ++k) wave.s[k] = sh[0xc + k];
+      if (psUser < wave.sgprs) wave.s[psUser] = 0; // PRIM_MASK: interpolation uses per-lane setups
+      uint64_t covered = 0;
+      unsigned reg = 0;
+      const bool persp = inputAddress & 2, linear = inputAddress & 0x20;
+      const unsigned perspReg = reg; if (persp) reg += 2;
+      const unsigned linearReg = reg; if (linear) reg += 2;
+      const unsigned posXReg = reg; if (inputAddress & 0x100) reg += 1;
+      const unsigned posYReg = reg; if (inputAddress & 0x200) reg += 1;
+      if (reg > psVgprs) { error = "PS input VGPRs exceed allocation"; return false; }
+      for (unsigned lane = 0; lane < batch.size(); ++lane) {
+        const auto& f = batch[lane];
+        if (f.covered) covered |= uint64_t(1) << lane;
+        if (inputEnable & 2) { wave.v[perspReg][lane] = gcnBits(f.i); wave.v[perspReg + 1][lane] = gcnBits(f.j); }
+        if (inputEnable & 0x20) { wave.v[linearReg][lane] = gcnBits(f.li); wave.v[linearReg + 1][lane] = gcnBits(f.lj); }
+        if (inputEnable & 0x100) wave.v[posXReg][lane] = gcnBits(float(f.x) + 0.5f);
+        if (inputEnable & 0x200) wave.v[posYReg][lane] = gcnBits(float(f.y) + 0.5f);
+      }
+      wave.setExec(covered);
+      wave.interpolate = [&](unsigned attr, unsigned chan, unsigned lane, float out[3]) {
+        if (attr >= numInterp || lane >= batch.size()) return false;
+        interpolant(setups[batch[lane].setup], attr, chan, out);
+        return true;
+      };
+      std::string why;
+      if (offloadDraw) {
+        // Deferred: covered lanes only (helper lanes never export, no derivative
+        // is taken); the worker shades all its fragments in one backend call
+        // after its bands are rasterised (finishOffload), then resolves the
+        // batches in their original order.
+        typename Worker::Deferred d; d.batch = batch; d.first = wk.pending.size();
+        for (unsigned lane = 0; lane < batch.size(); ++lane) {
+          if (!batch[lane].covered) continue;
+          GcnPixelFragment f{}; f.setup = batch[lane].setup;
+          for (unsigned r = 0; r < gcnPixelInputs && r < psVgprs; ++r) f.inputs[r] = wave.v[r][lane];
+          wk.pending.push_back(f); d.lanes.push_back(uint8_t(lane));
+        }
+        wk.deferred.push_back(std::move(d));
+        batch.clear();
+        return true;
+      }
+      if (!ps.run(memory, psProgram, wave, why)) { error = "PS 0x" + hex(psProgram) + ": " + why; return false; }
+      ++last.psWaves;
+      const GCNShader::Export* color = nullptr;
+      for (const auto& e : wave.exports) {
+        if (e.target == 0) { if (color) { error = "PS exported MRT0 twice"; return false; } color = &e; }
+        else if (e.target != 9) { error = "PS export target " + std::to_string(e.target) + " unsupported"; return false; }
+      }
+      if (!color) { error = "PS did not export MRT0"; return false; }
+      const bool ok = resolve(wk, batch, color);
       batch.clear();
+      return ok;
+    };
+    auto finishOffload = [&](Worker& wk) -> bool {
+      if (wk.deferred.empty()) return true;
+      std::vector<GcnPixelOutput> outputs(wk.pending.size());
+      std::string why;
+      if (!wk.pending.empty() && !pixelBackend->shade(*offloadDraw, wk.pending.data(), wk.pending.size(), outputs.data(), why)) {
+        wk.error = "PS 0x" + hex(psProgram) + " offload: " + why; return false;
+      }
+      ++wk.stats.offloadBatches; wk.stats.offloadFragments += wk.pending.size();
+      GCNShader::Export color;
+      color.target = 0; color.compressed = offloadDraw->translation.mrt0Compressed;
+      for (const auto& d : wk.deferred) {
+        color.exec = 0;
+        for (size_t k = 0; k < d.lanes.size(); ++k) {
+          const GcnPixelOutput& o = outputs[d.first + k];
+          if (!o.exported) continue;
+          color.exec |= uint64_t(1) << d.lanes[k];
+          for (unsigned c = 0; c < 4; ++c) color.data[c][d.lanes[k]] = o.data[c];
+        }
+        if (!resolve(wk, d.batch, &color)) return false;
+      }
+      wk.deferred.clear(); wk.pending.clear();
       return true;
     };
 
@@ -544,9 +570,11 @@ struct GCNRenderer {
     std::vector<Worker> workers(threads);
     std::vector<std::string> bandErrors(size_t(std::max<int64_t>(bandCount, 0)));
     std::atomic<int64_t> nextBand{0}; std::atomic<bool> failed{false};
+    std::vector<std::string> offloadErrors(workers.size());
     auto work = [&](Worker& wk) {
       for (int64_t band; !failed && (band = nextBand.fetch_add(1)) < bandCount;)
         if (!rasterBand(wk, band * bandRows, (band + 1) * bandRows)) { bandErrors[size_t(band)] = wk.error; failed = true; }
+      if (offloadDraw && !failed && !finishOffload(wk)) { offloadErrors[size_t(&wk - workers.data())] = wk.error; failed = true; }
     };
     if (threads <= 1) work(workers[0]);
     else {
@@ -555,7 +583,11 @@ struct GCNRenderer {
       work(workers[0]);
       for (auto& t : pool) t.join();
     }
-    if (failed) { for (const auto& e : bandErrors) if (!e.empty()) { error = e; break; } return false; }
+    if (failed) {
+      for (const auto& e : bandErrors) if (!e.empty()) { error = e; break; }
+      if (error.empty()) for (const auto& e : offloadErrors) if (!e.empty()) { error = e; break; }
+      return false;
+    }
     GCNShader ps;
     for (auto& wk : workers) {
       last.quads += wk.stats.quads; last.psWaves += wk.stats.psWaves; last.fragments += wk.stats.fragments;
