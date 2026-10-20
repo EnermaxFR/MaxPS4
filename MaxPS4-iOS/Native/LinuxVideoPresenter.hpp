@@ -41,7 +41,9 @@ public:
             (display, root, 0, 0, 960, 540, 0, 0, 0);
         gc = symbol<void*(*)(void*,unsigned long,unsigned long,void*)>("XCreateGC")(display, window, 0, nullptr);
         if (!window || !gc) { error = "X11 window/GC creation failed"; return false; }
-        symbol<int(*)(void*,unsigned long,const char*)>("XStoreName")(display, window, "MaxPS4 - Kero Blaster - awaiting guest frame");
+        // MAXPS4_WINDOW_TITLE names the running title (the runner is not Kero Blaster-specific).
+        const char* title = std::getenv("MAXPS4_WINDOW_TITLE");
+        symbol<int(*)(void*,unsigned long,const char*)>("XStoreName")(display, window, title && *title ? title : "MaxPS4");
         symbol<int(*)(void*,unsigned long,long)>("XSelectInput")(display, window, 1L /*KeyPressMask*/ | 2L /*KeyReleaseMask*/);
         symbol<int(*)(void*,unsigned long)>("XMapWindow")(display, window);
         symbol<int(*)(void*,int)>("XSync")(display, 0);

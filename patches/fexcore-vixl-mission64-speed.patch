@@ -1,0 +1,181 @@
+FEXCore + vixl patch (MaxPS4 mission 64): simulator speed. Apply after the
+other patches/fexcore-*.patch and patches/vixl-*.patch files.
+Measured on Sonic Mania (vixl ARM64 simulator on x86-64): a sampling profile
+showed ~30% of the main thread in avoidable overhead.
+- Decode cache: call the visitor method directly through a member pointer
+  (std::function::target) instead of std::function::operator() (~11%).
+- The CPUFeaturesAuditor check runs only after a real decode; on a cache hit
+  the auditor did not run, so the check read stale state (~6%).
+- PreemptTarget: a lock-free byte filter in front of the shared_mutex map of
+  block entries; most taken branches are not entries (~13%).
+- NEON and/orr/eor/bic/mov on 16B/8B as 64-bit words instead of byte lanes.
+
+--- a/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/Core.cpp
++++ b/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/Core.cpp
+@@ -87,7 +87,15 @@
+ // loops. Cleared with the code cache (entries never outlive their buffer).
+ std::shared_mutex BlockEntriesMutex;
+ std::unordered_map<uint64_t, uint64_t> BlockEntries;
++// Lock-free filter in front of the map: one byte per hash bucket, set for
++// every registered entry, cleared with the map. Most taken branches are not
++// block entries; they return here without touching the lock. A stale zero
++// (registration racing a check) only delays the stop to a later entry.
++constexpr size_t BlockEntryFilterSize = size_t(1) << 20;
++std::atomic<uint8_t> BlockEntryFilter[BlockEntryFilterSize];
++static size_t BlockEntryBucket(uint64_t pc) { return (pc >> 2) & (BlockEntryFilterSize - 1); }
+ uint64_t PreemptTarget(uint64_t pc, uint64_t state) {
++  if (!BlockEntryFilter[BlockEntryBucket(pc)].load(std::memory_order_relaxed)) return 0;
+   uint64_t rip = 0;
+   {
+     std::shared_lock lk(BlockEntriesMutex);
+@@ -525,6 +533,7 @@
+   {
+     std::unique_lock lk_entries(MaxPS4::BlockEntriesMutex);
+     MaxPS4::BlockEntries.clear();
++    for (auto& b : MaxPS4::BlockEntryFilter) b.store(0, std::memory_order_relaxed);
+   }
+   FEXCORE_PROFILE_INSTANT("ClearCodeCache");
+ 
+@@ -1177,7 +1186,11 @@
+   if (DebugData) {
+     std::unique_lock lk_entries(MaxPS4::BlockEntriesMutex);
+     for (const auto& [EntryRIP, EntryHost] : CompiledCode.EntryPoints)
+-      if (EntryHost) MaxPS4::BlockEntries[reinterpret_cast<uint64_t>(FEXCore::Allocator::GetExecutableAddress(EntryHost))] = EntryRIP;
++      if (EntryHost) {
++        const uint64_t Host = reinterpret_cast<uint64_t>(FEXCore::Allocator::GetExecutableAddress(EntryHost));
++        MaxPS4::BlockEntries[Host] = EntryRIP;
++        MaxPS4::BlockEntryFilter[MaxPS4::BlockEntryBucket(Host)].store(1, std::memory_order_relaxed);
++      }
+   }
+ #endif
+   auto CodePtr = CompiledCode.EntryPoints[GuestRIP];
+--- a/src/aarch64/simulator-aarch64.h
++++ b/src/aarch64/simulator-aarch64.h
+@@ -1455,16 +1455,25 @@
+       DecodeCacheEntry& entry = decode_cache_[(reinterpret_cast<uintptr_t>(at) >> 2) & (decode_cache_.size() - 1)];
+       if (entry.pc == at && entry.bits == bits && entry.fn != NULL) {
+         form_hash_ = entry.form;
+-        (*entry.fn)(this, at);
++        // Direct member call when the handler is a plain visitor method
++        // (most forms); otherwise through the std::function.
++        if (entry.method != NULL) (this->*entry.method)(at);
++        else (*entry.fn)(this, at);
+       } else {
+         decoder_->Decode(at);
++        // The auditor ran for this decode: check availability now (a cache
++        // hit skips the auditor, so its last instruction would be stale).
++        VIXL_CHECK(cpu_features_auditor_.InstructionIsAvailable());
+         const FormToVisitorFnMap* fv = GetFormToVisitorFnMap();
+         FormToVisitorFnMap::const_iterator it = fv->find(form_hash_);
+         entry.pc = at; entry.bits = bits; entry.form = form_hash_;
+         entry.fn = it == fv->end() ? NULL : &it->second;
++        const DecodeMethod* method = entry.fn == NULL ? NULL : entry.fn->target<DecodeMethod>();
++        entry.method = method == NULL ? NULL : *method;
+       }
+     } else {
+       decoder_->Decode(pc_);
++      VIXL_CHECK(cpu_features_auditor_.InstructionIsAvailable());
+     }
+ 
+     if (last_instr_was_movprfx) {
+@@ -1476,8 +1485,6 @@
+     IncrementPc();
+     LogAllWrittenRegisters();
+     UpdateBType();
+-
+-    VIXL_CHECK(cpu_features_auditor_.InstructionIsAvailable());
+   }
+ 
+   virtual void Visit(Metadata* metadata,
+@@ -5456,10 +5463,12 @@
+   static const FormToVisitorFnMap* GetFormToVisitorFnMap();
+ 
+   uint32_t form_hash_{};
++  using DecodeMethod = void (Simulator::*)(const Instruction*);
+   struct DecodeCacheEntry {
+     const Instruction* pc = NULL;
+     uint32_t bits = 0, form = 0;
+     const std::function<void(Simulator*, const Instruction*)>* fn = NULL;
++    DecodeMethod method = NULL;
+   };
+   std::vector<DecodeCacheEntry> decode_cache_;
+ 
+--- a/src/aarch64/logic-aarch64.cc
++++ b/src/aarch64/logic-aarch64.cc
+@@ -1049,6 +1049,15 @@
+                                const LogicVRegister& src1,
+                                const LogicVRegister& src2) {
+   dst.ClearForWrite(vform);
++  // MaxPS4: bitwise forms are lane-size agnostic; 16B/8B as 64-bit words.
++  if (vform == kFormat16B || vform == kFormat8B) {
++    const VectorFormat wide = vform == kFormat16B ? kFormat2D : kFormat1D;
++    for (int i = 0; i < LaneCountFromFormat(wide); i++) {
++      const uint64_t a = src1.Uint(wide, i), b = src2.Uint(wide, i);
++      dst.SetUint(wide, i, a & b);
++    }
++    return dst;
++  }
+   for (int i = 0; i < LaneCountFromFormat(vform); i++) {
+     dst.SetUint(vform, i, src1.Uint(vform, i) & src2.Uint(vform, i));
+   }
+@@ -1061,6 +1070,15 @@
+                               const LogicVRegister& src1,
+                               const LogicVRegister& src2) {
+   dst.ClearForWrite(vform);
++  // MaxPS4: bitwise forms are lane-size agnostic; 16B/8B as 64-bit words.
++  if (vform == kFormat16B || vform == kFormat8B) {
++    const VectorFormat wide = vform == kFormat16B ? kFormat2D : kFormat1D;
++    for (int i = 0; i < LaneCountFromFormat(wide); i++) {
++      const uint64_t a = src1.Uint(wide, i), b = src2.Uint(wide, i);
++      dst.SetUint(wide, i, a | b);
++    }
++    return dst;
++  }
+   for (int i = 0; i < LaneCountFromFormat(vform); i++) {
+     dst.SetUint(vform, i, src1.Uint(vform, i) | src2.Uint(vform, i));
+   }
+@@ -1085,6 +1103,15 @@
+                               const LogicVRegister& src1,
+                               const LogicVRegister& src2) {
+   dst.ClearForWrite(vform);
++  // MaxPS4: bitwise forms are lane-size agnostic; 16B/8B as 64-bit words.
++  if (vform == kFormat16B || vform == kFormat8B) {
++    const VectorFormat wide = vform == kFormat16B ? kFormat2D : kFormat1D;
++    for (int i = 0; i < LaneCountFromFormat(wide); i++) {
++      const uint64_t a = src1.Uint(wide, i), b = src2.Uint(wide, i);
++      dst.SetUint(wide, i, a ^ b);
++    }
++    return dst;
++  }
+   for (int i = 0; i < LaneCountFromFormat(vform); i++) {
+     dst.SetUint(vform, i, src1.Uint(vform, i) ^ src2.Uint(vform, i));
+   }
+@@ -1097,6 +1124,15 @@
+                               const LogicVRegister& src1,
+                               const LogicVRegister& src2) {
+   dst.ClearForWrite(vform);
++  // MaxPS4: bitwise forms are lane-size agnostic; 16B/8B as 64-bit words.
++  if (vform == kFormat16B || vform == kFormat8B) {
++    const VectorFormat wide = vform == kFormat16B ? kFormat2D : kFormat1D;
++    for (int i = 0; i < LaneCountFromFormat(wide); i++) {
++      const uint64_t a = src1.Uint(wide, i), b = src2.Uint(wide, i);
++      dst.SetUint(wide, i, a & ~b);
++    }
++    return dst;
++  }
+   for (int i = 0; i < LaneCountFromFormat(vform); i++) {
+     dst.SetUint(vform, i, src1.Uint(vform, i) & ~src2.Uint(vform, i));
+   }
+@@ -3049,6 +3085,12 @@
+                               LogicVRegister dst,
+                               const LogicVRegister& src) {
+   dst.ClearForWrite(vform);
++  // MaxPS4: whole-register copies as 64-bit words.
++  if (vform == kFormat16B || vform == kFormat8B) {
++    const VectorFormat wide = vform == kFormat16B ? kFormat2D : kFormat1D;
++    for (int i = 0; i < LaneCountFromFormat(wide); i++) dst.SetUint(wide, i, src.Uint(wide, i));
++    return dst;
++  }
+   for (int lane = 0; lane < LaneCountFromFormat(vform); lane++) {
+     dst.SetUint(vform, lane, src.Uint(vform, lane));
+   }
