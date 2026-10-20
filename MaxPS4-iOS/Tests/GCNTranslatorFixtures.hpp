@@ -78,6 +78,10 @@ inline std::vector<Fixture> all() {
   { Words c; add(c, {mubuf(0, 0, 1, 0, 128, true)}); c.push_back(sopp(1)); f.push_back({"ref_buffer", c, 4, false, "buffer access"}); }
   f.push_back({"ref_readfirst", {vop1(2, 4, V + 0), sopp(1)}, 4, false, "not translated"});
   f.push_back({"ref_order", {vop1(1, 0, 4), sop1(3, 4, 130), sopp(1)}, 4, false, "read by vector code before its write"});
+  // EXEC saved in VCC, VCC overwritten by a compare, EXEC restored from it.
+  f.push_back({"ref_vcc_clobber", {sop1(4, VCC, EXEC), vopc(1, V + 0, 1), sop1(4, EXEC, VCC), sopp(1)}, 4, false, "no longer holds it"});
+  // A saved EXEC used as a vector operand.
+  f.push_back({"ref_exec_value", {sop1(4, 20, EXEC), vop1(1, 0, 20), sop1(4, EXEC, 20), sopp(1)}, 4, false, "saved EXEC read as a value"});
   return f;
 }
 } // namespace gcnfix

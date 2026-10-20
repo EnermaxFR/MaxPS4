@@ -65,6 +65,7 @@ struct GCNShaderTranslator {
     Result out; out.vgprs = vgprs;
     std::ostringstream body;
     std::set<unsigned> written, readBeforeWrite, execAlias;
+    bool vccHoldsExec = false;   // s_mov_b64 vcc, exec and no VCC write since
     GCNShader decoder;
     uint64_t pc = base;
     auto fail = [&](const GCNShader::Inst& i, const std::string& why) {
@@ -83,6 +84,7 @@ struct GCNShaderTranslator {
           if (r > 103) return "scalar write to special register " + std::to_string(r);
           if (written.count(r)) return "SGPR " + std::to_string(r) + " written twice (scalar prepass needs write-once SGPRs)";
           if (readBeforeWrite.count(r)) return "SGPR " + std::to_string(r) + " read by vector code before its write";
+          if (execAlias.count(r & ~1u)) return "SGPR " + std::to_string(r) + " holds a saved EXEC";
           written.insert(r);
         }
         out.needsScalarPrepass = true; return {};
@@ -94,7 +96,11 @@ struct GCNShaderTranslator {
           if (code - 256 >= vgprs) { bad = "VGPR " + std::to_string(code - 256) + " beyond the allocation"; return "0u"; }
           return "v[" + std::to_string(code - 256) + "]";
         }
-        if (code <= 103) { if (!written.count(code)) readBeforeWrite.insert(code); return "s[" + std::to_string(code) + "]"; }
+        if (code <= 103) {
+          if (execAlias.count(code & ~1u)) { bad = "saved EXEC read as a value"; return "0u"; }
+          if (!written.count(code)) readBeforeWrite.insert(code);
+          return "s[" + std::to_string(code) + "]";
+        }
         if (code >= 128 && code <= 192) return std::to_string(code - 128) + "u";
         if (code >= 193 && code <= 208) return "gcn_u32(" + std::to_string(192 - int(code)) + ")";
         static const char* floats[] = {"0x3f000000u", "0xbf000000u", "0x3f800000u", "0xbf800000u", "0x40000000u", "0xc0000000u", "0x40800000u", "0xc0800000u"};
@@ -111,11 +117,19 @@ struct GCNShaderTranslator {
       case GCNShader::Enc::SOP1: {
         const unsigned dst = (w >> 16) & 127, src = w & 255;
         if (i.op == 10 && dst == 126 && src == 126) break;          // s_wqm_b64 exec, exec: live mask
+        if (i.op == 4 && src == 126 && dst == 106) {                // s_mov_b64 vcc, exec (save): VCC = live lane
+          vccHoldsExec = true; body << "  vcc = true;\n"; break;
+        }
         if (i.op == 4 && src == 126) {                              // s_mov_b64 sN, exec (save)
-          if (dst > 102 || (dst & 1)) return fail(i, "EXEC saved outside an SGPR pair");
+          if (dst > 102 || (dst & 1)) return fail(i, "EXEC saved outside an SGPR pair or VCC");
+          if (written.count(dst) || written.count(dst + 1)) return fail(i, "EXEC saved into an SGPR pair already written");
           execAlias.insert(dst); break;
         }
         if (i.op == 4 && dst == 126 && execAlias.count(src)) break; // s_mov_b64 exec, sN (restore)
+        if (i.op == 4 && dst == 126 && src == 106) {                // s_mov_b64 exec, vcc (restore)
+          if (!vccHoldsExec) return fail(i, "EXEC restored from a VCC that no longer holds it");
+          break;
+        }
         if (i.op == 32 || i.op == 33 || (i.op >= 36 && i.op <= 43)) return fail(i, "control flow / *_saveexec not translated");
         if (dst >= 104) return fail(i, "EXEC/VCC write is not a live-mask idiom");
         static const std::set<unsigned> wide{4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 31, 44};
@@ -173,6 +187,7 @@ struct GCNShaderTranslator {
           if (sdst != 106) return fail(i, "compare result outside VCC");
           const std::string a = src(0, src0), b = src(1, src1); if (!bad.empty()) return fail(i, bad);
           body << "  vcc = gcn_compare(" << op << "u, " << a << ", " << b << ");\n";
+          vccHoldsExec = false;
           break;
         }
         if (!gcn_valu_supported(op)) return fail(i, "vector ALU opcode " + std::to_string(op) + " not translated");
@@ -187,7 +202,7 @@ struct GCNShaderTranslator {
         if (op == 256 && i.enc == GCNShader::Enc::VOP3 && src2 != 106) return fail(i, "v_cndmask condition outside VCC");
         if (vop3b && sdst != 106) return fail(i, "carry-out outside VCC");
         body << "  { bool k = vcc; gcn_u32 r = gcn_valu(" << op << "u, " << a << ", " << b << ", " << c << ", k);";
-        if (usesCarry && op != 256) body << " vcc = k;";
+        if (usesCarry && op != 256) { body << " vcc = k;"; vccHoldsExec = false; }
         if (GCNShader::isFloatOutput(op) && (omod || clamp)) body << " r = gcn_omod(r, " << omod << "u, " << (clamp ? "true" : "false") << ");";
         body << " v[" << vdst << "] = r; }\n";
         break;
