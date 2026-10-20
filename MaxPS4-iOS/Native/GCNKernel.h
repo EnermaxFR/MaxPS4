@@ -129,7 +129,10 @@ GCN_INLINE bool gcn_valu_supported(gcn_u32 op) {
 // fp32 denormals: translated shaders run in FLOAT_MODE fp32 denormal mode 0
 // (flush inputs and outputs, the PS4 default and what Apple GPUs do). The
 // flushes are explicit on bit patterns, so C++ and GPU agree whatever the
-// hardware does; this is GCNShader::computeMode(..., 0).
+// hardware does; this is GCNShader::computeMode(..., 0). One known GPU
+// departure remains: a product (or fma) whose exact value lies just below
+// 2^-126 and rounds up to it is +-2^-126 here but +-0 on Apple GPUs, which
+// detect tininess before rounding. Transcendentals follow libm / Metal.
 GCN_INLINE gcn_u32 gcn_ftz_bits(gcn_u32 v) { return (v & 0x7f800000u) != 0u ? v : (v & 0x80000000u); }
 GCN_INLINE float gcn_ftzf(float x) { return gcn_f(gcn_ftz_bits(gcn_b(x))); }
 // GCNShader::isFloatInput / isFloatOutput.
