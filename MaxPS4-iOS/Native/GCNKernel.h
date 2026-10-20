@@ -117,7 +117,7 @@ GCN_INLINE bool gcn_valu_supported(gcn_u32 op) {
   case 273: case 274: case 275: case 276: case 277: case 278: case 279: case 280: case 281: case 282: case 283:
   case 284: case 285: case 287: case 288: case 289: case 293: case 294: case 295: case 299: case 303: case 304:
   case 320: case 321: case 328: case 330: case 331: case 337: case 340: case 343: case 361: case 385: case 389:
-  case 390: case 391: case 392: case 394: case 395: case 397: case 401: case 402: case 403: case 404: case 416:
+  case 390: case 391: case 392: case 394: case 395: case 397: case 398: case 401: case 402: case 403: case 404: case 416:
   case 417: case 418: case 419: case 420: case 421: case 423: case 426: case 427: case 430: case 435: case 437:
   case 438: case 439:
     return true;
@@ -208,6 +208,7 @@ GCN_INLINE gcn_u32 gcn_valu_core(gcn_u32 op, gcn_u32 a, gcn_u32 b, gcn_u32 c, GC
   case 394: return gcn_half(fa, false);
   case 395: return gcn_b(gcn_half_to_float(a & 0xffffu));
   case 397: return gcn_u32(gcn_i32(gcn_floor(fa)));
+  case 398: return gcn_b(float(gcn_i32(a << 28) >> 28) * 0.0625f);   // v_cvt_off_f32_i4
   case 401: return gcn_b(float(a & 255u));
   case 402: return gcn_b(float((a >> 8) & 255u));
   case 403: return gcn_b(float((a >> 16) & 255u));

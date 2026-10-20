@@ -643,6 +643,7 @@ struct GCNShader {
     case 395: return F(gcnHalfToFloat(uint16_t(a)));                     // v_cvt_f32_f16
     case 396: r = uint32_t(int32_t(std::floor(fa + 0.5f))); return true;
     case 397: r = uint32_t(int32_t(std::floor(fa))); return true;
+    case 398: r = gcnBits(float(int32_t(a << 28) >> 28) * 0.0625f); return true;   // v_cvt_off_f32_i4: signed 4 bits / 16
     case 401: return F(float(a & 255));
     case 402: return F(float((a >> 8) & 255));
     case 403: return F(float((a >> 16) & 255));
