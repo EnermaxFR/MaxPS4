@@ -15,6 +15,11 @@ public:
         catch (const std::bad_alloc&) { return fail("Linker mapping allocation failed"); }
         catch (const std::runtime_error& error) { return fail(error.what()); }
     }
+    bool map(const OrbisLinker::TLSImage& image) {
+        try { return commit(image.mappings()); }
+        catch(const std::bad_alloc&) {return fail("TLS mapping allocation failed");}
+        catch(const std::runtime_error& error) {return fail(error.what());}
+    }
     bool map(const OrbisPRXPreparation& prepared) {
         std::vector<OrbisLinker::Mapping> mappings;
         try {
@@ -50,6 +55,9 @@ public:
         const auto& last = regions.back();
         const uint64_t high = (last.address + last.size + page - 1) / page * page;
         auto pending = std::make_unique<OrbisV4Translation>(std::move(invalidate));
+        // Headroom of the default budget for what is reserved next (return gate, stacks).
+        if (high-low > GuestAddressSpace::budget && pending->set_limit(static_cast<size_t>(high-low) + GuestAddressSpace::budget))
+            throw std::runtime_error("PRX translated reservation limit could not be raised");
         if (pending->reserve(low,static_cast<size_t>(high-low)))
             throw std::runtime_error("PRX translated reservation failed");
         for (const auto& r : regions) {
@@ -72,6 +80,7 @@ private:
     std::unique_ptr<GuestAddressSpace> memory_;
     std::string diagnostic_;
     bool fail(const char* why) { diagnostic_ = why; return false; }
+    static constexpr uint64_t imageSpanMax = uint64_t(256) * 1024 * 1024;
     bool commit(std::vector<OrbisLinker::Mapping> mappings) {
         try {
             if (mappings.empty() || mappings.size() > 4096) return fail("Mapping count outside 1..4096");
@@ -90,8 +99,13 @@ private:
                 const uint64_t end = (r.address+r.size+page-1)/page*page;
                 if (start < high) return fail("Guest mappings collide at host-page granularity");
                 high = end;
-                if (high-low > GuestAddressSpace::budget) return fail("Guest mapping span exceeds 32 MiB budget (including gaps)");
+                // Process images may exceed the 32 MiB default (Sonic Mania's
+                // eboot alone maps 14 MiB): the reservation limit is raised for
+                // this image only, up to 256 MiB including gaps.
+                if (high-low > imageSpanMax) return fail("Guest mapping span exceeds 256 MiB (including gaps)");
             }
+            if (high-low > GuestAddressSpace::budget && pending->set_limit(size_t(high-low) + GuestAddressSpace::budget))
+                return fail("Guest reservation limit could not be raised");
             int status = pending->reserve(low,size_t(high-low));
             if (status) { diagnostic_ = "Guest reservation failed: "+std::to_string(status); return false; }
             for (const auto& r : mappings) {

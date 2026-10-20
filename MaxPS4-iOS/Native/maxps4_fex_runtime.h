@@ -8,7 +8,9 @@ extern "C" {
 #endif
 // Opaque engine: no FEX C++ types cross the native/Swift boundary.
 typedef struct maxps4_fex_engine maxps4_fex_engine;
-enum { MAXPS4_V4_ABI_SYNTHETIC_HLT = 1 };
+enum { MAXPS4_V4_ABI_SYNTHETIC_HLT = 1, MAXPS4_V4_ABI_STATIC_EXEC_HLT = 2,
+       MAXPS4_V4_ABI_STARTUP_RETURN = 3, MAXPS4_V4_ABI_IMPORT_THREAD_SELF = 4,
+       MAXPS4_V4_ABI_IMPORT_CLOCK_GETRES = 5 };
 typedef struct maxps4_v4_prx_request {
     const uint8_t* file;
     size_t length;
@@ -16,17 +18,64 @@ typedef struct maxps4_v4_prx_request {
     uint32_t abi, instruction_budget;
 } maxps4_v4_prx_request;
 // Distinct one-shot V4 API. Requires initialized engine; immutable plaintext
-// ET_SCE_DYNAMIC bytes for one self-contained PRX. No imports/dependencies,
-// TLS, init/fini, syscalls or PS4 startup ABI. Explicit SYNTHETIC_HLT ABI only:
+// ET_SCE_DYNAMIC bytes for one self-contained PRX (SYNTHETIC_HLT), or plaintext
+// static ET_SCE_EXEC (STATIC_EXEC_HLT, zero bias and ELF entry required).
+// No imports/dependencies, TLS, init/fini, syscalls or PS4 startup ABI.
+// Both explicit experimental HLT contracts use:
 // zero integer registers, private 16-byte-aligned RW/NX stack, no arguments,
 // no CALL/RET. Admits finite MOV EAX,imm32 / ADD EAX,imm32 / NOP /
-// MOV RDI,imm64 / MOV EAX,[RDI] (proven readable) / final HLT only.
+// MOV RDI,imm64 / MOV or ADD EAX,[RDI] (proven readable) / final HLT only.
 // Unsupported requirements/instructions return -ENOTSUP. No fallback.
 // Owner lease spans validation/compilation/dispatch; close precedes thread
 // destruction. Output fields are zero on every failure. Serialized with other
 // engine execution; caller serializes engine close and keeps file bytes stable.
 int32_t maxps4_fex_engine_run_v4_prx(maxps4_fex_engine* engine,
     const maxps4_v4_prx_request* request, uint64_t* result, uint32_t* backend);
+// STARTUP_RETURN: static ET_SCE_EXEC only; fixed argc=1, argv[0]="homebrew",
+// empty environment/AT_NULL, RDI points to argc/argv block, RSI=0 (no callback),
+// RSP%16=8 with controlled guest return address; other integer registers zero,
+// FS/GS=0. No TLS/libc/process ABI. Same finite instruction subset, final RET
+// required instead of HLT; MOV RDI,[RDI+8] additionally admits argv[0] access.
+// Startup also admits MOV/ADD EAX,[RIP+disp32] with checked signed guest
+// addressing and complete readable 4-byte operands, including .data/.bss.
+// Static ABI 2/3 also accept strict unsigned SELF containing only PT_LOAD,
+// alignment <=16 KiB, via an in-memory adapter to the existing ELF linker.
+// Signed/opaque, dynamic, TLS and other headers remain refused for dispatch.
+// A return reaches a private RX HLT trampoline; it is not sceKernelExitProcess.
+// Diagnostic preflight: no engine/JIT/dispatch; nonempty writable buffer required.
+// Returns the same admission status, with a bounded NUL-terminated diagnostic.
+int32_t maxps4_fex_v4_preflight(const maxps4_v4_prx_request* request,
+                              char* diagnostic, size_t capacity);
+// Separate caller-owned plaintext eboot snapshot, <=32 MiB, stable throughout
+// each call. No filesystem/PKG/PFS access. Preflight inventories ELF metadata
+// and verifies temporary translated mappings; zero does not mean CPU execution.
+// Only experimental static V4 function-entry ABI is admitted, not a PS4 CRT.
+// Report is NUL-terminated; truncation returns -ENOSPC (never readiness).
+int32_t maxps4_fex_eboot_preflight(const uint8_t* bytes, size_t length,
+                                 char* report, size_t capacity);
+// Revalidates bytes at dispatch. Failures zero result/backend. Existing engine
+// initialization and serialization/lifetime rules apply; no automatic fallback.
+int32_t maxps4_fex_engine_run_eboot(maxps4_fex_engine* engine,
+    const uint8_t* bytes, size_t length, uint64_t* result, uint32_t* backend);
+
+// Explicit experimental SELF opt-in: signature verification is not required.
+// All plaintext/profile/bounds/linker/W^X and finite CPU admission checks remain.
+// No decryption. Default eboot entry points keep their existing policy.
+int32_t maxps4_fex_eboot_experimental_preflight(const uint8_t* bytes, size_t length,
+                                             char* report, size_t capacity);
+int32_t maxps4_fex_engine_run_eboot_experimental(maxps4_fex_engine* engine,
+    const uint8_t* bytes, size_t length, uint64_t* result, uint32_t* backend);
+
+// IMPORT_THREAD_SELF is a separate bounded SCE dynamic ELF/PRX contract:
+// exactly one libkernel scePthreadSelf NID import and JUMP_SLOT relocation.
+// Canonical five-instruction body with aligned GOT CALL and controlled RET.
+// A guest RX thunk invokes the existing pointer-free service; no host address
+// enters the GOT. Other imports, TLS, init/fini and raw syscalls are refused.
+// IMPORT_CLOCK_GETRES: separate seven-instruction body passing clock ID 4 in
+// EDI and a validated 16-byte app RW/NX output in RSI; one clock_getres import.
+// Buffer excludes GOT/control storage. FEX reads the written nanoseconds into
+// EAX before RET. Data copies occur under the dispatch lease, without remapping
+// or code invalidation. Host service failure rejects execution success (-EIO).
 // Self-contained synthetic Orbis test, using the existing loader/linker/FEX
 // runtime. Status -ECANCELED means an operation was not attempted. Values are
 // valid only when their operation succeeded; no interpreter fallback occurs.
@@ -241,6 +290,13 @@ int32_t maxps4_fex_engine_run_m1(maxps4_fex_engine*, const uint8_t*, size_t,
 // 16 PT_TLS templates. Dynamic resolver/DTV ABI is not installed. This fixture
 // API uses FS-relative payload accesses admitted against the exact module spans.
 typedef struct maxps4_m1_tls_input { const uint8_t* bytes; size_t size; } maxps4_m1_tls_input;
+// Reservation-only diagnostic: no CPU/JIT, never overwrites an occupied VA.
+typedef struct maxps4_m1_collision_report {
+    uint64_t candidate_guest, page_size;
+    int32_t candidate_status, candidate_host_status, controlled_direct_status, translated_status;
+    uint32_t marker_preserved, recreated;
+} maxps4_m1_collision_report;
+int32_t maxps4_fex_m1_collision_diagnostic(maxps4_m1_collision_report*);
 typedef struct maxps4_m1_thread_report {
     maxps4_m1_report cpu;
     uint64_t id, modules[16], zeros[16], lock_result, unlock_result;

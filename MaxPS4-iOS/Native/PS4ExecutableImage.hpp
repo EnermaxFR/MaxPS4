@@ -14,6 +14,7 @@
 namespace maxps4 {
 class PS4ExecutableImage {
 public:
+    enum class SelfPolicy { Strict, StageSignedClear };
     struct Header {
         uint32_t type, flags;
         uint64_t offset, address, fileSize, memorySize, alignment;
@@ -26,6 +27,7 @@ public:
     uint64_t entry = 0;
     uint16_t type = 0;
     bool isSelf = false, requiresLinker = false, requiresTLS = false;
+    bool signedSelfUnverified = false; // Inspection only, never signature trust.
     std::vector<Header> headers; // Retain metadata; staging never applies it.
     std::vector<Segment> segments;
 
@@ -39,12 +41,12 @@ public:
         }
         return nullptr;
     }
-    int load(const uint8_t* file, size_t size) {
+    int load(const uint8_t* file, size_t size, SelfPolicy policy=SelfPolicy::Strict) {
         *this = PS4ExecutableImage{};
         if (!file || size < 64 || size > 64 * 1024 * 1024) return -EINVAL;
         try {
             PS4ExecutableImage pending;
-            const int error = pending.parse(file, size);
+            const int error = pending.parse(file, size, policy);
             if (error) { stage = pending.stage; diagnosticIndex = pending.diagnosticIndex; return error; }
             *this = std::move(pending); // No partial image escapes a rejected file.
             return 0;
@@ -59,9 +61,44 @@ private:
     static bool range(uint64_t offset, uint64_t count, size_t size) {
         return offset <= size && count <= size - offset;
     }
+    // Some SELF producers append PT_SCE_LIBVERSION records after file_size.
+    // Accept only the explicitly described, bounded non-loadable trailer. It
+    // never extends a block's source range or enters staged guest memory.
+    static bool selfTrailer(const uint8_t* file,size_t size,size_t declared,
+                            size_t origin,size_t headerEnd) {
+        if (size-declared>1024*1024) return false;
+        const auto* elf=file+origin;
+        if (std::memcmp(elf,"\177ELF\2\1\1\11\0",9) || read(elf+54,2)!=56) return false;
+        const uint64_t table=read(elf+32,8), count=read(elf+56,2);
+        if (table<64 || !count || count>128 ||
+            !range(table,count*56,headerEnd-origin)) return false;
+        unsigned found=0;
+        uint64_t versionOffset=0, logicalEnd=0;
+        for (size_t i=0;i<count;++i) {
+            const auto* h=elf+table+i*56;
+            const uint64_t offset=read(h+8,8), bytes=read(h+32,8);
+            if (offset>UINT64_MAX-bytes) return false;
+            if (read(h,4)!=0x6fffff01) {
+                if (bytes && offset+bytes>logicalEnd) logicalEnd=offset+bytes;
+                continue;
+            }
+            versionOffset=offset;
+            if (++found!=1 || read(h+4,4)!=0 || read(h+32,8)!=size-declared ||
+                read(h+40,8)!=0) return false;
+        }
+        if (found!=1 || versionOffset<logicalEnd) return false;
+        for (size_t cursor=declared;cursor<size;) {
+            const size_t length=file[cursor++];
+            if (length<6 || length>size-cursor || file[cursor+length-5]!=':') return false;
+            for (size_t j=0;j<length-5;++j)
+                if (file[cursor+j]<0x21 || file[cursor+j]>0x7e) return false;
+            cursor+=length; // Length-prefixed name ':' and four version bytes.
+        }
+        return true;
+    }
     struct SelfSegment { uint64_t flags, offset, size, decodedSize; };
-    int parse(const uint8_t* file, size_t size) {
-        size_t origin = 0, payloadStart = 0;
+    int parse(const uint8_t* file, size_t size, SelfPolicy policy) {
+        size_t origin = 0, payloadStart = 0, selfSize = size, selfHeaderEnd = 0;
         std::vector<SelfSegment> selfSegments;
         isSelf = read(file, 4) == 0x1d3d154f;
         stage = "ELF.CONTAINER";
@@ -74,19 +111,39 @@ private:
             if (!count || count > 128 || count > (size - 32) / 32) return -ENOEXEC;
             origin = 32 + count * 32;
             if (!range(origin, 64, size)) return -ENOEXEC;
-            payloadStart = read(file + 12, 2) + read(file + 14, 2);
-            if (payloadStart < origin + 64 || payloadStart > size || read(file + 16, 4) != size)
+            selfHeaderEnd = read(file + 12, 2);
+            payloadStart = selfHeaderEnd + read(file + 14, 2);
+            selfSize = read(file + 16, 4); // u32 SELF extent, not necessarily host EOF.
+            if (selfHeaderEnd < origin + 64 || selfHeaderEnd > size || payloadStart > selfSize || selfSize > size)
                 return -ENOEXEC;
+            if (selfSize != size) {
+                stage = "SELF.TRAILER";
+                if (!selfTrailer(file,size,selfSize,origin,selfHeaderEnd)) return -ENOEXEC;
+            }
             stage = "SELF.BLOCK";
             for (size_t i = 0; i < count; ++i) {
                 diagnosticIndex = i;
                 const auto* p = file + 32 + i * 32;
                 SelfSegment s {read(p, 8), read(p + 8, 8), read(p + 16, 8), read(p + 24, 8)};
-                // This narrow loader accepts only plaintext, uncompressed blocks.
-                if (s.flags & 0xeU) return -ENOTSUP;
-                if (s.flags & ~(uint64_t{0xfff} << 20 | uint64_t{0x801})) return -ENOTSUP;
-                if (!range(s.offset, s.size, size) || (s.size && s.offset < payloadStart))
+                // Signature is not encryption. The opt-in policy stages only
+                // untrusted clear bytes for inspection, never dispatch/trust.
+                if (s.flags & 0x2U) { stage="SELF.ENCRYPTED"; return -ENOTSUP; }
+                if (s.flags & 0x8U) { stage="SELF.COMPRESSED_UNSUPPORTED"; return -ENOTSUP; }
+                const uint64_t properties=s.flags & 0xfffff;
+                if (s.flags >> 32) return -ENOTSUP;
+                if (policy==SelfPolicy::Strict) {
+                    if (s.flags & ~(uint64_t{0xfff} << 20 | uint64_t{0x801})) return -ENOTSUP;
+                } else {
+                    const bool legacy=(properties & ~uint64_t{0x805})==0 &&
+                        (!(properties&4) || (properties&0x800));
+                    if (!legacy && properties!=0x2804 && properties!=0x10004) return -ENOTSUP;
+                    signedSelfUnverified |= (s.flags&4)!=0;
+                }
+                if (!range(s.offset, s.size, selfSize) || (s.size && s.offset < payloadStart))
                     return -ENOEXEC;
+                for (const auto& old:selfSegments)
+                    if (s.size && old.size && s.offset<old.offset+old.size && old.offset<s.offset+s.size)
+                        return -ENOEXEC;
                 selfSegments.push_back(s);
             }
         }
@@ -105,7 +162,7 @@ private:
         const uint64_t table = read(elf + 32, 8), count = read(elf + 56, 2);
         if (table < 64 || !count || count > 128 ||
             !range(table, count * 56, size - origin)) return -ENOEXEC;
-        if (isSelf && origin + table + count * 56 > payloadStart) return -ENOEXEC;
+        if (isSelf && origin + table + count * 56 > selfHeaderEnd) return -ENOEXEC;
         stage = "ELF.SECTION_TABLE";
         const uint64_t shoff = read(elf + 40, 8), shnum = read(elf + 60, 2);
         if (shnum && (read(elf + 58, 2) != 64 || shnum > 4096 ||
@@ -116,6 +173,36 @@ private:
         stage = "SELF.BLOCK_ID";
         for (const auto& s : selfSegments)
             if ((s.flags & 0x800) && ((s.flags >> 20) & 0xfff) >= count) return -ENOEXEC;
+        if (isSelf && policy==SelfPolicy::StageSignedClear) {
+            // Two distinct IDs: data blocks reference ELF PH indices; digest
+            // tables reference SELF descriptor indices. Never map digest bytes.
+            std::vector<unsigned> digests(selfSegments.size(),0);
+            std::vector<bool> usedPH(count,false);
+            for (size_t i=0;i<selfSegments.size();++i) {
+                diagnosticIndex=i; stage="SELF.ASSOCIATION";
+                const auto& block=selfSegments[i];
+                const auto properties=block.flags&0xfffff;
+                const size_t id=(block.flags>>20)&0xfff;
+                if (properties==0x10004) {
+                    if (id>=selfSegments.size() || ++digests[id]!=1) return -ENOEXEC;
+                    const auto& data=selfSegments[id];
+                    if ((data.flags&0xfffff)!=0x2804 || !data.size ||
+                        block.size!=block.decodedSize ||
+                        block.size!=((data.size+0x3fff)/0x4000)*32 || (block.offset&15))
+                        return -ENOEXEC;
+                } else if (block.flags&0x800) {
+                    if (usedPH[id]) return -ENOEXEC;
+                    usedPH[id]=true;
+                    const auto* h=elf+table+id*56;
+                    if (block.size!=block.decodedSize || block.size!=read(h+32,8)) return -ENOEXEC;
+                    if (properties==0x2804 && (block.offset&15)) return -ENOEXEC;
+                }
+            }
+            for (size_t i=0;i<selfSegments.size();++i) {
+                diagnosticIndex=i;
+                if ((selfSegments[i].flags&0xfffff)==0x2804 && digests[i]!=1) return -ENOEXEC;
+            }
+        }
         size_t allocated = 0;
         for (size_t i = 0; i < count; ++i) {
             stage = "ELF.SEGMENT"; diagnosticIndex = i;
@@ -129,6 +216,7 @@ private:
             if (h.type != 1 && h.type != 0x61000010) continue; // Metadata retained, not executed.
             if (!h.memorySize || h.fileSize > h.memorySize || h.memorySize > memoryBudget - allocated ||
                 h.address > UINT64_MAX - h.memorySize || (h.flags & ~7U) || !(h.flags & 4U) ||
+                (isSelf && policy==SelfPolicy::StageSignedClear && (h.flags&3U)==3U) ||
                 (h.alignment > 1 && ((h.alignment & (h.alignment - 1)) ||
                     h.address % h.alignment != h.offset % h.alignment))) return -ENOEXEC;
             for (const auto& old : segments)
