@@ -11,6 +11,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <map>
@@ -108,7 +109,16 @@ struct OrbisV4AudioOutService {
         services.implement("sceAudioOutOutput", [st](const R& r, M& m) {
             auto it = st->ports.find(int32_t(r.rdi)); if (it == st->ports.end()) return value(notOpened);
             Port& port = it->second;
-            const uint64_t duration = uint64_t(port.length) * 1000000000ull / port.frequency;
+            // MAXPS4_AUDIO_TIME_SCALE=N (default 1): each buffer counts as N times
+            // its real duration. When emulation runs far slower than real time the
+            // audio thread is never ahead and never waits, taking CPU time from the
+            // game; a larger scale makes it wait (the sound is not real time anyway).
+            static const uint64_t timeScale = [] {
+                const char* e = std::getenv("MAXPS4_AUDIO_TIME_SCALE");
+                const unsigned long v = e ? std::strtoul(e, nullptr, 10) : 1;
+                return uint64_t(v >= 1 && v <= 1000 ? v : 1);
+            }();
+            const uint64_t duration = uint64_t(port.length) * 1000000000ull / port.frequency * timeScale;
             const uint64_t now = st->clock();
             const int32_t handle = int32_t(r.rdi); const uint64_t buffer = r.rsi;
             const size_t bytes = size_t(port.length) * frameBytes(port);
