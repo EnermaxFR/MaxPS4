@@ -9,10 +9,22 @@ showed ~30% of the main thread in avoidable overhead.
 - PreemptTarget: a lock-free byte filter in front of the shared_mutex map of
   block entries; most taken branches are not entries (~13%).
 - NEON and/orr/eor/bic/mov on 16B/8B as 64-bit words instead of byte lanes.
+- Diagnostics (MAXPS4_GUEST_SAMPLES in the runner): vixl records the target
+  of the last taken branch while vixl_maxps4_sample_branches is set, and
+  FEXCore::MaxPS4::GuestOfHost maps a host pc to the guest RIP of the block
+  containing it (ordered copy of the block-entry registry).
 
 --- a/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/Core.cpp
 +++ b/runtime/sources/fexcore-darwin/FEXCore/Source/Interface/Core/Core.cpp
-@@ -87,7 +87,15 @@
+@@ -78,6 +78,7 @@
+ #include <unordered_map>
+ #include <utility>
+ #include <xxhash.h>
++#include <map>
+ 
+ namespace FEXCore::MaxPS4 {
+ std::atomic<uint8_t> PreemptRequest {0};
+@@ -87,7 +88,26 @@
  // loops. Cleared with the code cache (entries never outlive their buffer).
  std::shared_mutex BlockEntriesMutex;
  std::unordered_map<uint64_t, uint64_t> BlockEntries;
@@ -23,20 +35,32 @@ showed ~30% of the main thread in avoidable overhead.
 +constexpr size_t BlockEntryFilterSize = size_t(1) << 20;
 +std::atomic<uint8_t> BlockEntryFilter[BlockEntryFilterSize];
 +static size_t BlockEntryBucket(uint64_t pc) { return (pc >> 2) & (BlockEntryFilterSize - 1); }
++// Same entries ordered by host address (diagnostics): a host pc inside a
++// block maps to the nearest entry at or below it (blocks are laid out one
++// after another in the code buffer).
++std::map<uint64_t, uint64_t> BlockEntriesOrdered;
++uint64_t GuestOfHost(uint64_t host) {
++  std::shared_lock lk(BlockEntriesMutex);
++  auto it = BlockEntriesOrdered.upper_bound(host);
++  if (it == BlockEntriesOrdered.begin()) return 0;
++  --it;
++  return host - it->first < 0x10000 ? it->second : 0;
++}
  uint64_t PreemptTarget(uint64_t pc, uint64_t state) {
 +  if (!BlockEntryFilter[BlockEntryBucket(pc)].load(std::memory_order_relaxed)) return 0;
    uint64_t rip = 0;
    {
      std::shared_lock lk(BlockEntriesMutex);
-@@ -525,6 +533,7 @@
+@@ -525,6 +545,8 @@
    {
      std::unique_lock lk_entries(MaxPS4::BlockEntriesMutex);
      MaxPS4::BlockEntries.clear();
++    MaxPS4::BlockEntriesOrdered.clear();
 +    for (auto& b : MaxPS4::BlockEntryFilter) b.store(0, std::memory_order_relaxed);
    }
    FEXCORE_PROFILE_INSTANT("ClearCodeCache");
  
-@@ -1177,7 +1186,11 @@
+@@ -1177,7 +1199,12 @@
    if (DebugData) {
      std::unique_lock lk_entries(MaxPS4::BlockEntriesMutex);
      for (const auto& [EntryRIP, EntryHost] : CompiledCode.EntryPoints)
@@ -44,14 +68,38 @@ showed ~30% of the main thread in avoidable overhead.
 +      if (EntryHost) {
 +        const uint64_t Host = reinterpret_cast<uint64_t>(FEXCore::Allocator::GetExecutableAddress(EntryHost));
 +        MaxPS4::BlockEntries[Host] = EntryRIP;
++        MaxPS4::BlockEntriesOrdered[Host] = EntryRIP;
 +        MaxPS4::BlockEntryFilter[MaxPS4::BlockEntryBucket(Host)].store(1, std::memory_order_relaxed);
 +      }
    }
  #endif
    auto CodePtr = CompiledCode.EntryPoints[GuestRIP];
+--- a/runtime/sources/fexcore-darwin/FEXCore/include/FEXCore/Core/Context.h
++++ b/runtime/sources/fexcore-darwin/FEXCore/include/FEXCore/Core/Context.h
+@@ -32,6 +32,9 @@
+ // Simulator builds: continuation address for a pending preemption at host
+ // code 'pc' (a block entry), or 0; 'state' is the guest CpuStateFrame (x28).
+ uint64_t PreemptTarget(uint64_t pc, uint64_t state);
++// Diagnostics (simulator builds): guest RIP of the block whose host entry is
++// exactly 'host', or 0.
++FEX_DEFAULT_VISIBILITY uint64_t GuestOfHost(uint64_t host);
+ } // namespace FEXCore::MaxPS4
+ 
+ namespace FEXCore::Core {
 --- a/src/aarch64/simulator-aarch64.h
 +++ b/src/aarch64/simulator-aarch64.h
-@@ -1455,16 +1455,25 @@
+@@ -79,6 +79,10 @@
+ extern "C" {
+ extern const volatile uint8_t* vixl_maxps4_preempt;
+ extern uint64_t (*vixl_maxps4_preempt_target)(uint64_t pc, uint64_t state);
++// MaxPS4 diagnostics: target of the last taken branch (host code address),
++// written only while vixl_maxps4_sample_branches is non-zero.
++extern volatile uint64_t vixl_maxps4_last_branch;
++extern volatile uint8_t vixl_maxps4_sample_branches;
+ }
+ 
+ namespace vixl {
+@@ -1455,16 +1459,25 @@
        DecodeCacheEntry& entry = decode_cache_[(reinterpret_cast<uintptr_t>(at) >> 2) & (decode_cache_.size() - 1)];
        if (entry.pc == at && entry.bits == bits && entry.fn != NULL) {
          form_hash_ = entry.form;
@@ -78,7 +126,7 @@ showed ~30% of the main thread in avoidable overhead.
      }
  
      if (last_instr_was_movprfx) {
-@@ -1476,8 +1485,6 @@
+@@ -1476,8 +1489,6 @@
      IncrementPc();
      LogAllWrittenRegisters();
      UpdateBType();
@@ -87,7 +135,7 @@ showed ~30% of the main thread in avoidable overhead.
    }
  
    virtual void Visit(Metadata* metadata,
-@@ -5456,10 +5463,12 @@
+@@ -5456,10 +5467,12 @@
    static const FormToVisitorFnMap* GetFormToVisitorFnMap();
  
    uint32_t form_hash_{};
@@ -100,6 +148,25 @@ showed ~30% of the main thread in avoidable overhead.
    };
    std::vector<DecodeCacheEntry> decode_cache_;
  
+--- a/src/aarch64/simulator-aarch64.cc
++++ b/src/aarch64/simulator-aarch64.cc
+@@ -817,6 +817,8 @@
+ extern "C" {
+ const volatile uint8_t* vixl_maxps4_preempt = nullptr;
+ uint64_t (*vixl_maxps4_preempt_target)(uint64_t pc, uint64_t state) = nullptr;
++volatile uint64_t vixl_maxps4_last_branch = 0;
++volatile uint8_t vixl_maxps4_sample_branches = 0;
+ }
+ 
+ void Simulator::Run() {
+@@ -849,6 +851,7 @@
+       const auto* instruction = ReadPc();
+       ExecuteInstruction();
+       branched = pc_modified_;
++      if (branched && vixl_maxps4_sample_branches) vixl_maxps4_last_branch = reinterpret_cast<uint64_t>(ReadPc());
+       if (trace && (++executed <= 256 || executed % 1000000 == 0)) {
+         fprintf(stderr, "EXEC.A64 count=%llu pc=%p bits=%08x\n",
+                 static_cast<unsigned long long>(executed),
 --- a/src/aarch64/logic-aarch64.cc
 +++ b/src/aarch64/logic-aarch64.cc
 @@ -1049,6 +1049,15 @@
