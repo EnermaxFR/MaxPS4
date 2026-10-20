@@ -112,8 +112,30 @@ inline std::vector<Fixture> all() {
     add(c, {exp(0, 15, false, true, true, 1, 0, 1, 0)}); c.push_back(sopp(1));
     f.push_back({"ps_early", c, 4, true, ""});
   }
+  // Divergent loop (LLVM's shape): v2 = |v0| + 0.5 doubled until above 4.0, v3 counts the iterations
+  // (1 to 4 depending on the lane). `scc` ends the loop with s_cbranch_scc1 on the SCC of s_andn2_b64 exec.
+  for (bool scc : {false, true}) {
+    Words c;
+    add(c, {vop3(259, 2, V + 0, 240, 0, 0, 1)});              // v2 = |v0| + 0.5
+    c.push_back(vop1(1, 3, 128));                             // v3 = 0
+    c.push_back(sop1(4, 20, 128));                            // s[20:21] = 0: lanes done
+    c.push_back(vop2(8, 2, 244, 2));                          // loop: v2 = 2.0 * v2
+    c.push_back(vop2(3, 3, 242, 3));                          //       v3 = 1.0 + v3
+    c.push_back(vopc(1, 246, 2));                             //       vcc = 4.0 < v2
+    c.push_back(sop2(17, 20, VCC, 20));                       //       done |= vcc
+    c.push_back(sop2(21, EXEC, EXEC, 20));                    //       exec &= ~done
+    c.push_back(sopp(scc ? 5 : 9, -6));                       //       while any lane is active
+    c.push_back(sop2(17, EXEC, EXEC, 20));                    // exec |= done
+    add(c, {exp(0, 15, false, true, true, 2, 3, 0, 1)}); c.push_back(sopp(1));
+    f.push_back({scc ? "ps_loop_scc" : "ps_loop", c, 4, true, ""});
+  }
   // Refusals: exact reasons, never a partial translation.
-  f.push_back({"ref_branch", {sopp(2, -1), sopp(1)}, 4, false, "backward branch"});
+  f.push_back({"ref_branch", {sopp(2, -1), sopp(1)}, 4, false, "uniform loop"});
+  // VCC after a divergent loop depends on the iterations other lanes ran.
+  f.push_back({"ref_vcc_after_loop", {sop1(4, 20, 128), vopc(1, 246, 2), sop2(17, 20, VCC, 20), sop2(21, EXEC, EXEC, 20), sopp(9, -4),
+                                      sop2(17, EXEC, EXEC, 20), vop2(0, 1, V + 0, 2), sopp(1)}, 4, false, "VCC read after a loop"});
+  // s_or_saveexec in a loop would turn inactive lanes back on.
+  f.push_back({"ref_loop_revive", {sop1(37, 20, VCC), sopp(9, -2), sopp(1)}, 4, false, "revives an inactive lane"});
   f.push_back({"ref_execnz", {sopp(9, 0), sopp(1)}, 4, false, "execnz"});
   f.push_back({"ref_scc_wave", {vopc(1, V + 0, 1), sop1(36, 20, VCC), sopp(5, 0), sopp(1)}, 4, false, "wave-level SCC"});
   f.push_back({"ref_execz_scalar", {sopp(8, 1), sop1(3, 30, 128), sopp(1)}, 4, false, "region s_cbranch_execz may skip"});

@@ -17,7 +17,12 @@
 //   SCC from a scalar compare) become guards on the skipped instructions,
 //   without goto (MSL has none); s_cbranch_execz is a shortcut for inactive
 //   waves and is ignored when the region it may skip has no scalar effect.
-//   Loops (backward branches), execnz and vccz/vccnz are refused.
+//   Divergent loops (backward s_cbranch_execnz, or s_cbranch_scc1 on the SCC
+//   of the mask op that wrote EXEC) run per fragment while its EXEC bit is
+//   on (bounded at 65536 iterations); the effects other lanes' iterations
+//   could have on this lane's masks are simulated and such masks may not be
+//   read afterwards. Uniform loops, nested loops, forward execnz and
+//   vccz/vccnz are refused.
 // * fp32 denormals are flushed as FLOAT_MODE denormal mode 0 (inputs and
 //   outputs, multiply-add products, interpolation): see floatModeSupported.
 // * Interpolation, image sampling and exports call macros the including
@@ -28,6 +33,8 @@
 #include "GCNShader.hpp"
 #include "GCNKernel.h"
 #include <algorithm>
+#include <functional>
+#include <map>
 #include <set>
 #include <sstream>
 #include <string>
@@ -38,7 +45,7 @@ struct GCNShaderTranslator {
   struct Result {
     bool ok = false;
     std::string error, body;   // body: statements of the function (uses s, v, vcc, exec, scc)
-    unsigned instructions = 0, vgprs = 0, branches = 0;
+    unsigned instructions = 0, vgprs = 0, branches = 0, loops = 0;
     bool usesInterpolation = false, usesImages = false, needsScalarPrepass = false;
     std::set<unsigned> exportTargets;
     unsigned exports = 0;          // EXP instructions (any target)
@@ -79,8 +86,47 @@ struct GCNShaderTranslator {
     unsigned jumpIds = 0;
     enum class Scc { unknown, uniform, wave } scc = Scc::unknown;
     bool execTouched = false;            // EXEC may be off for a covered fragment
+    std::ostringstream decls;            // function-scope declarations (lane masks, branch flags)
+    // Divergent loops: a backward s_cbranch_execnz (or s_cbranch_scc1 on the
+    // SCC = EXEC != 0 of the mask op that wrote EXEC) runs `do { } while (exec)`
+    // per fragment. A fragment that left the loop still sees, on hardware, the
+    // iterations other lanes run, with its EXEC bit off: the lane-mask effects
+    // of the body are simulated with EXEC off and every mask they could change
+    // becomes unknown after the loop (reading it is refused).
+    using MaskState = std::map<int, bool>;   // register -> lane bit; key -3: an inactive lane was revived
+    struct Loop { uint64_t header = 0, latch = 0; unsigned id = 0; std::set<int> regs; std::vector<std::function<void(MaskState&)>> effects; };
+    std::map<uint64_t, uint64_t> loopAt;     // header -> latch (pre-scan)
+    std::vector<Loop> loops;                 // open loops (nesting refused)
+    std::set<int> unknown;                   // lane masks that depend on other lanes' loop iterations
+    bool sccExecNonZero = false;             // SCC is EXEC != 0 (last SCC writer set EXEC)
+    // s_mov_b64 sN, 0/-1 at top level: a uniform constant that may become a
+    // lane mask (LLVM's loop break mask) as long as nothing read it as a value.
+    std::map<unsigned, bool> constPairs;
+    unsigned loopIds = 0;
     GCNShader decoder;
     uint64_t pc = base;
+    { // Pre-scan: backward branches give the loop headers.
+      uint64_t at = base, furthest = base;
+      std::set<uint64_t> starts, duplicate;
+      for (unsigned n = 0; n < 4096; ++n) {
+        GCNShader::Inst i; std::string why;
+        if (!decoder.fetch(memory, at, i, why)) break;          // reported by the main pass
+        starts.insert(at);
+        const uint64_t after = at + 4ull * i.length;
+        if (i.enc == GCNShader::Enc::SOPP && (i.op == 2 || (i.op >= 4 && i.op <= 9))) {
+          const uint64_t t = after + int64_t(int16_t(i.w0 & 0xffff)) * 4;
+          if (t <= at) { if (!loopAt.emplace(t, at).second) duplicate.insert(t); }
+          else furthest = std::max(furthest, t);
+        }
+        if (i.enc == GCNShader::Enc::SOPP && i.op == 1 && at >= furthest) break;
+        at = after;
+      }
+      for (const auto& [header, latch] : loopAt) {
+        if (!starts.count(header) || duplicate.count(header)) {
+          out.error = "pc=0x" + hex(latch) + ": loop header shared or inside an instruction"; return out;
+        }
+      }
+    }
     auto fail = [&](const GCNShader::Inst& i, const std::string& why) {
       std::ostringstream m; m << "pc=0x" << std::hex << pc << ' ' << GCNShader::opName(i.enc, i.op) << ": " << why;
       out.error = m.str(); out.ok = false; return out;
@@ -93,15 +139,35 @@ struct GCNShaderTranslator {
       execzEnds.erase(std::remove(execzEnds.begin(), execzEnds.end(), pc), execzEnds.end());
       std::string guard;   // true while a taken uniform branch skips this instruction
       for (const auto& j : jumps) guard += (guard.empty() ? "j" : " || j") + std::to_string(j.id);
+      if (auto h = loopAt.find(pc); h != loopAt.end()) {      // loop header
+        auto refuse = [&](const std::string& why) { out.error = "pc=0x" + hex(pc) + ": " + why; return out; };
+        if (!loops.empty()) return refuse("nested loops not translated");
+        if (!guard.empty()) return refuse("loop inside a uniform branch not translated");
+        for (uint64_t e : execzEnds) if (e <= h->second) return refuse("s_cbranch_execz region ending inside a loop");
+        Loop l; l.header = pc; l.latch = h->second; l.id = loopIds++;
+        loops.push_back(l);
+        body << "  { unsigned it" << l.id << " = 0u; do {\n";
+        execTouched = true;
+      }
 
       GCNShader::Inst i; std::string why;
       if (!decoder.fetch(memory, pc, i, why)) { out.error = "pc=0x" + hex(pc) + ": " + why; return out; }
       const uint32_t w = i.w0;
       ++out.instructions;
-      std::ostringstream ib, pre;   // this instruction's statements; declarations before its guard
+      std::ostringstream ib, pre;   // this instruction's statements; unguarded assignments before them
+      std::string bad;              // first operand error of this instruction
+      // Loop bookkeeping: lane-mask effects of the open loop's body.
+      auto maskId = [](unsigned code) -> int { return code == 128 ? -1 : code == 193 ? -2 : int(code); };
+      auto bit = [](MaskState& st, int r) { return r == -1 ? false : r == -2 ? true : st[r]; };
+      auto effect = [&](std::initializer_list<int> regs, std::function<void(MaskState&)> fn) {
+        if (loops.empty()) return;
+        for (int r : regs) if (r >= 0) loops.back().regs.insert(r);
+        loops.back().effects.push_back(std::move(fn));
+      };
       // ---- uniform scalar destinations: write-once, outside skippable regions ----
       auto scalarWrite = [&](unsigned dst, unsigned count) -> std::string {
         if (!execzEnds.empty()) return "scalar write inside a region s_cbranch_execz may skip";
+        if (!loops.empty()) return "scalar write inside a divergent loop";
         for (unsigned k = 0; k < count; ++k) {
           const unsigned r = dst + k;
           if (r > 103) return "scalar write to special register " + std::to_string(r);
@@ -114,11 +180,21 @@ struct GCNShaderTranslator {
       };
       // A uniform scalar source must not be a lane mask (its prepass value is the wave's).
       auto uniformSource = [&](unsigned code) {
+        if (code <= 103) constPairs.erase(code & ~1u);
         return !(code == 106 || code == 107 || code == 126 || code == 127 || (code <= 103 && masks.count(code & ~1u)));
       };
       // ---- lane mask operands (per-fragment booleans) ----
       auto isMask = [&](unsigned code) { return code == 106 || code == 126 || (code <= 102 && !(code & 1) && masks.count(code)); };
+      auto adopt = [&](unsigned pair) {           // a constant pair becomes a lane mask
+        auto c = constPairs.find(pair);
+        if (c == constPairs.end()) return;
+        written.erase(pair); written.erase(pair + 1); masks.insert(pair);
+        decls << "  bool m" << pair << " = " << (c->second ? "true" : "false") << ";\n";
+        constPairs.erase(c);
+      };
       auto maskExpr = [&](unsigned code, std::string& e) -> bool {
+        if (code <= 102 && !(code & 1)) adopt(code);
+        if (unknown.count(int(code))) { bad = "lane mask " + std::to_string(code) + " depends on other lanes' loop iterations"; e = "false"; return true; }
         if (code == 106) { e = "vcc"; return true; }
         if (code == 126) { e = "exec"; return true; }
         if (code == 128) { e = "false"; return true; }        // 0
@@ -127,20 +203,22 @@ struct GCNShaderTranslator {
         return false;
       };
       auto maskDest = [&](unsigned dst, std::string& e) -> std::string {
+        unknown.erase(int(dst));
         if (dst == 106) { e = "vcc"; return {}; }
         if (dst == 126) { e = "exec"; execTouched = true; return {}; }
         if (dst > 102 || (dst & 1)) return "lane mask written outside an SGPR pair, VCC or EXEC";
+        adopt(dst);
         if (!masks.count(dst)) {
           if (!execzEnds.empty()) return "lane mask SGPR first written inside a region s_cbranch_execz may skip";
           if (written.count(dst) || written.count(dst + 1)) return "lane mask written into a uniform SGPR pair";
           if (readBeforeWrite.count(dst) || readBeforeWrite.count(dst + 1)) return "lane mask SGPR read as a uniform value before";
-          masks.insert(dst); pre << "  bool m" << dst << " = false;\n";
+          masks.insert(dst); decls << "  bool m" << dst << " = false;\n";
         }
         e = "m" + std::to_string(dst); return {};
       };
       // ---- scalar operands of emitted uniform code (SCC) ----
-      std::string bad;
       auto scalarExpr = [&](unsigned code, uint32_t literal) -> std::string {
+        if (code <= 103) constPairs.erase(code & ~1u);
         if (code <= 103) {
           if (masks.count(code & ~1u)) { bad = "lane mask used as a scalar value"; return "0u"; }
           if (!written.count(code)) readBeforeWrite.insert(code);
@@ -153,6 +231,7 @@ struct GCNShaderTranslator {
       };
       // ---- vector operand expressions ----
       auto operand = [&](unsigned code, uint32_t literal) -> std::string {
+        if (code <= 103) constPairs.erase(code & ~1u);
         if (code >= 256) {
           if (code - 256 >= vgprs) { bad = "VGPR " + std::to_string(code - 256) + " beyond the allocation"; return "0u"; }
           return "v[" + std::to_string(code - 256) + "]";
@@ -173,31 +252,58 @@ struct GCNShaderTranslator {
       switch (i.enc) {
       case GCNShader::Enc::SOPP: {
         const uint64_t target = next + int64_t(int16_t(w & 0xffff)) * 4;
+        if ((i.op == 2 || (i.op >= 4 && i.op <= 9)) && target <= pc) {   // loop latch
+          if (loops.empty() || loops.back().header != target || loops.back().latch != pc) return fail(i, "backward branch (loop) not translated");
+          if (i.op == 6 || i.op == 7) return fail(i, "s_cbranch_vccz/vccnz (wave-level VCC) loop not translated");
+          if (!(i.op == 9 || (i.op == 5 && scc == Scc::wave && sccExecNonZero)))
+            return fail(i, "uniform loop (scalar counter or unconditional) not translated");
+          for (uint64_t e : execzEnds) if (e > pc) return fail(i, "s_cbranch_execz region leaving a loop");
+          // Iterations run by other lanes, with this lane's EXEC off.
+          Loop& l = loops.back();
+          std::vector<int> regs(l.regs.begin(), l.regs.end());
+          regs.erase(std::remove(regs.begin(), regs.end(), 126), regs.end());
+          if (regs.size() > 12) return fail(i, "loop with more than 12 lane masks not translated");
+          std::set<int> changed;
+          for (uint32_t m = 0; m < (1u << regs.size()); ++m) {
+            MaskState st; st[126] = false;
+            for (size_t k = 0; k < regs.size(); ++k) st[regs[k]] = (m >> k) & 1;
+            MaskState after = st;
+            for (const auto& fn : l.effects) fn(after);
+            if (after[-3] || after[126]) return fail(i, "loop body revives an inactive lane (EXEC not monotonic)");
+            for (int r : regs) if (after[r] != st[r]) changed.insert(r);
+          }
+          unknown.insert(changed.begin(), changed.end());
+          body << "  } while (exec && ++it" << l.id << " < 65536u); }\n";   // bound: a GPU never hangs
+          loops.pop_back();
+          ++out.loops;
+          break;
+        }
         switch (i.op) {
         case 0: case 12: case 15: break;                        // s_nop, s_waitcnt, s_setprio
         case 1:                                                 // s_endpgm
           if (!execzEnds.empty()) return fail(i, "s_endpgm inside a region s_cbranch_execz may skip");
-          if (jumps.empty()) { out.ok = true; out.body = body.str(); return out; }
+          if (!loops.empty()) return fail(i, "s_endpgm inside a loop");
+          if (jumps.empty()) { out.ok = true; out.body = decls.str() + body.str(); return out; }
           ib << "  return;\n";                                  // guarded early exit
           break;
         case 2: case 4: case 5: {                               // s_branch, s_cbranch_scc0/1 (uniform)
-          if (target <= pc) return fail(i, "backward branch (loop) not translated");
+          if (!loops.empty()) return fail(i, "uniform branch inside a divergent loop not translated");
           for (uint64_t e : execzEnds) if (target > e) return fail(i, "uniform branch leaving a region s_cbranch_execz may skip");
           if (i.op != 2 && scc != Scc::uniform)
             return fail(i, scc == Scc::wave ? "branch on a wave-level SCC (lane mask result)" : "branch on an SCC the translator does not compute");
           if (target == next) break;
           const unsigned id = jumpIds++;
-          pre << "  bool j" << id << " = " << (guard.empty() ? "" : "!(" + guard + ") && ") << (i.op == 2 ? "true" : i.op == 4 ? "!scc" : "scc") << ";\n";
+          decls << "  bool j" << id << " = false;\n";
+          pre << "  j" << id << " = " << (guard.empty() ? "" : "!(" + guard + ") && ") << (i.op == 2 ? "true" : i.op == 4 ? "!scc" : "scc") << ";\n";
           jumps.push_back({target, id});
           ++out.branches;
           break;
         }
         case 8:                                                 // s_cbranch_execz: a shortcut for inactive waves
-          if (target <= pc) return fail(i, "backward branch (loop) not translated");
           execzEnds.push_back(target);
           ++out.branches;
           break;
-        case 9: return fail(i, "s_cbranch_execnz (wave-level condition, loops) not translated");
+        case 9: return fail(i, "forward s_cbranch_execnz (wave-level condition) not translated");
         case 6: case 7: return fail(i, "s_cbranch_vccz/vccnz (wave-level VCC) not translated");
         default: return fail(i, "SOPP opcode not translated");
         }
@@ -209,21 +315,29 @@ struct GCNShaderTranslator {
         if (wide64 && (dst == 106 || dst == 126 || isMask(src) || (dst <= 102 && masks.count(dst)) || (op >= 36 && op <= 39))) {
           std::string a, d;
           if (!maskExpr(src, a)) return fail(i, "64-bit lane mask operand " + std::to_string(src) + " unsupported");
+          if (!bad.empty()) return fail(i, bad);
           if (op == 10) {                                       // s_wqm_b64 exec, exec
             if (dst != 126 || src != 126) return fail(i, "s_wqm_b64 outside the EXEC live-mask idiom");
             if (execTouched) return fail(i, "s_wqm_b64 after EXEC changed (helper lanes would revive)");
-            scc = Scc::wave; break;
+            scc = Scc::wave; sccExecNonZero = false; break;
           }
           if (op >= 36 && op <= 39) {                           // s_*_saveexec_b64: dst = EXEC, EXEC = op(src, EXEC)
             if (dst == 126) return fail(i, "saveexec into EXEC");
             if (const auto e = maskDest(dst, d); !e.empty()) return fail(i, e);
             static const char* fn[] = {"a && e", "a || e", "a != e", "a && !e"};
             ib << "  { const bool a = " << a << ", e = exec; " << d << " = e; exec = " << fn[op - 36] << "; }\n";
-            execTouched = true; scc = Scc::wave; break;
+            execTouched = true; scc = Scc::wave; sccExecNonZero = true;
+            effect({maskId(src), int(dst), 126}, [=](MaskState& st) {
+              const bool av = bit(st, maskId(src)), ev = st[126];
+              st[int(dst)] = ev;
+              st[126] = op == 36 ? (av && ev) : op == 37 ? (av || ev) : op == 38 ? (av != ev) : (av && !ev);
+            });
+            break;
           }
           if (const auto e = maskDest(dst, d); !e.empty()) return fail(i, e);
           ib << "  " << d << " = " << (op == 8 ? "!" : "") << a << ";\n";
-          if (op == 8) scc = Scc::wave;
+          if (op == 8) { scc = Scc::wave; sccExecNonZero = dst == 126; }
+          effect({maskId(src), int(dst)}, [=](MaskState& st) { const bool av = bit(st, maskId(src)); st[int(dst)] = op == 8 ? !av : av; });
           break;
         }
         if (op == 32 || op == 33) return fail(i, "s_setpc/s_swappc (indirect control flow) not translated");
@@ -232,7 +346,8 @@ struct GCNShaderTranslator {
         if (!uniformSource(src)) return fail(i, "lane mask used as a scalar value");
         static const std::set<unsigned> wide{4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 31, 44};
         if (const auto e = scalarWrite(dst, wide.count(op) ? 2 : 1); !e.empty()) return fail(i, e);
-        if (op != 3 && op != 4) { if (!execzEnds.empty()) return fail(i, "SCC written inside a region s_cbranch_execz may skip"); scc = Scc::unknown; }
+        if (op == 4 && (src == 128 || src == 193) && !(dst & 1) && dst <= 102 && guard.empty() && loops.empty()) constPairs[dst] = src == 193;
+        if (op != 3 && op != 4) { if (!execzEnds.empty()) return fail(i, "SCC written inside a region s_cbranch_execz may skip"); scc = Scc::unknown; sccExecNonZero = false; }
         break;
       }
       case GCNShader::Enc::SOP2: {
@@ -241,6 +356,7 @@ struct GCNShaderTranslator {
         if (logic64 && (dst == 106 || dst == 126 || isMask(a0) || isMask(b0) || (dst <= 102 && masks.count(dst)))) {
           std::string a, b, d;
           if (!maskExpr(a0, a) || !maskExpr(b0, b)) return fail(i, "64-bit lane mask operand unsupported");
+          if (!bad.empty()) return fail(i, bad);
           if (const auto e = maskDest(dst, d); !e.empty()) return fail(i, e);
           std::string r;
           switch (op) {
@@ -249,13 +365,23 @@ struct GCNShaderTranslator {
           case 27: r = "!(" + a + " || " + b + ")"; break; default: r = a + " == " + b; break;
           }
           ib << "  { const bool r = " << r << "; " << d << " = r; }\n";
-          scc = Scc::wave; break;
+          scc = Scc::wave; sccExecNonZero = dst == 126;
+          effect({maskId(a0), maskId(b0), int(dst)}, [=](MaskState& st) {
+            const bool x = bit(st, maskId(a0)), y = bit(st, maskId(b0));
+            bool v = false;
+            switch (op) {
+            case 15: v = x && y; break; case 17: v = x || y; break; case 19: v = x != y; break; case 21: v = x && !y; break;
+            case 23: v = x || !y; break; case 25: v = !(x && y); break; case 27: v = !(x || y); break; default: v = x == y; break;
+            }
+            st[int(dst)] = v;
+          });
+          break;
         }
         if (dst >= 104) return fail(i, "scalar write to EXEC/VCC/special register");
         if (!uniformSource(a0) || !uniformSource(b0)) return fail(i, "lane mask used as a scalar value");
         static const std::set<unsigned> wide{11, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35, 37, 40, 41};
         if (const auto e = scalarWrite(dst, wide.count(op) ? 2 : 1); !e.empty()) return fail(i, e);
-        scc = Scc::unknown;
+        scc = Scc::unknown; sccExecNonZero = false;
         break;
       }
       case GCNShader::Enc::SOPK: {
@@ -268,12 +394,12 @@ struct GCNShaderTranslator {
           const unsigned n = i.op - 3;
           if (n < 6) ib << "  scc = gcn_i32(" << d << ") " << ops[n] << " gcn_i32(" << k << ");\n";
           else ib << "  scc = " << d << " " << ops[n - 6] << " " << uk << "u;\n";
-          scc = Scc::uniform; break;
+          scc = Scc::uniform; sccExecNonZero = false; break;
         }
         if (dst >= 104) return fail(i, "scalar write to EXEC/VCC/special register");
         if (i.op != 0 && !uniformSource(dst)) return fail(i, "lane mask used as a scalar value");
         if (const auto e = scalarWrite(dst, 1); !e.empty()) return fail(i, e);
-        if (i.op != 0) scc = Scc::unknown;
+        if (i.op != 0) { scc = Scc::unknown; sccExecNonZero = false; }
         break;
       }
       case GCNShader::Enc::SOPC: {
@@ -285,7 +411,7 @@ struct GCNShaderTranslator {
         if (i.op < 6) ib << "  scc = gcn_i32(" << a << ") " << ops[i.op] << " gcn_i32(" << b << ");\n";
         else if (i.op < 12) ib << "  scc = " << a << " " << ops[i.op - 6] << " " << b << ";\n";
         else ib << "  scc = ((" << a << " >> (" << b << " & 31u)) & 1u) " << (i.op == 12 ? "== 0u" : "!= 0u") << ";\n";
-        scc = Scc::uniform; break;
+        scc = Scc::uniform; sccExecNonZero = false; break;
       }
       case GCNShader::Enc::SMRD: {
         const unsigned dst = (w >> 15) & 127, op = i.op, sbase = ((w >> 9) & 63) * 2;
@@ -327,6 +453,9 @@ struct GCNShaderTranslator {
           const std::string a = src(0, src0), b = src(1, src1); if (!bad.empty()) return fail(i, bad);
           if (cmpx) { ib << "  { const bool c = exec && gcn_compare(" << compare << "u, " << a << ", " << b << "); exec = c; vcc = c; }\n"; execTouched = true; }
           else ib << "  vcc = exec && gcn_compare(" << compare << "u, " << a << ", " << b << ");\n";
+          unknown.erase(106);
+          // With EXEC off the result is 0 (and V_CMPX keeps EXEC off).
+          effect({106, 126}, [cmpx](MaskState& st) { if (st[126]) st[-3] = true; st[106] = false; if (cmpx) st[126] = false; });
           break;
         }
         if (!gcn_valu_supported(op)) return fail(i, "vector ALU opcode " + std::to_string(op) + " not translated");
@@ -340,10 +469,15 @@ struct GCNShaderTranslator {
         const bool usesCarry = op == 256 || (op >= 293 && op <= 298);
         if (op == 256 && i.enc == GCNShader::Enc::VOP3 && src2 != 106) return fail(i, "v_cndmask condition outside VCC");
         if (vop3b && sdst != 106) return fail(i, "carry-out outside VCC");
+        if ((op == 256 || (op >= 296 && op <= 298)) && unknown.count(106)) return fail(i, "VCC read after a loop it depends on");
         ib << "  { bool k = vcc; gcn_u32 r = gcn_valu(" << op << "u, " << a << ", " << b << ", " << c << ", k);";
         if (GCNShader::isFloatOutput(op) && (omod || clamp)) ib << " r = gcn_omod(r, " << omod << "u, " << (clamp ? "true" : "false") << ");";
         ib << " if (exec) v[" << vdst << "] = r;";
-        if (usesCarry && op != 256) ib << " vcc = exec && k;";
+        if (usesCarry && op != 256) {
+          ib << " vcc = exec && k;";
+          unknown.erase(106);
+          effect({106, 126}, [](MaskState& st) { if (st[126]) st[-3] = true; st[106] = false; });
+        }
         ib << " (void)k; }\n";
         break;
       }
@@ -364,6 +498,7 @@ struct GCNShaderTranslator {
         break;
       }
       case GCNShader::Enc::EXP: {
+        if (!loops.empty()) return fail(i, "export inside a loop");
         const unsigned enable = w & 15, target = (w >> 4) & 63, compressed = (w >> 10) & 1, done = (w >> 11) & 1;
         ib << "  { gcn_u32 e[4] = {";
         for (unsigned c = 0; c < 4; ++c) {
