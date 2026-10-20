@@ -316,6 +316,10 @@ struct GCNRenderer {
     };
     PixelDraw offload;
     PixelDraw* offloadDraw = nullptr;
+    struct OffloadRelease {   // the backend's per-draw resources, on every exit path
+      PixelBackend*& backend; PixelDraw*& draw;
+      ~OffloadRelease() { if (backend && draw) backend->release(*draw); }
+    } offloadRelease{pixelBackend, offloadDraw};
     auto flushWorker = [&](Worker& wk) -> bool {
       auto& batch = wk.batch; auto& ps = wk.ps; auto& last = wk.stats; std::string& error = wk.error;
       uint64_t &writtenMinX = wk.minX, &writtenMinY = wk.minY, &writtenMaxX = wk.maxX, &writtenMaxY = wk.maxY;

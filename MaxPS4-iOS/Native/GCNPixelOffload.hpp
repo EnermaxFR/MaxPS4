@@ -52,6 +52,8 @@ struct PixelBackend {
   virtual bool prepare(PixelDraw& draw, std::string& why) = 0;
   // Shade n fragments; called concurrently by the renderer's workers.
   virtual bool shade(const PixelDraw& draw, const GcnPixelFragment* fragments, size_t n, GcnPixelOutput* out, std::string& error) = 0;
+  // End of the draw (also after a failed one): per-draw resources go.
+  virtual void release(PixelDraw&) {}
 };
 
 struct GCNPixelProgram {

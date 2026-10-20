@@ -9,11 +9,17 @@
 #include "../Native/GCNRenderer.hpp"
 #include "../Native/GNMCommandExecutor.hpp"
 #include "../Native/GuestProviders/GnmEmbeddedVS.hpp"
-#include "GCNCppJitBackend.hpp"
 #include "GCNTranslatorFixtures.hpp"
 #include <cassert>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <sstream>
+#ifdef __OBJC__   // built as Objective-C++ on macOS: the Metal backend instead of the C++ JIT
+#include "../Native/GCNMetalPixelBackend.hpp"
+#else
+#include "GCNCppJitBackend.hpp"
+#endif
 
 using namespace maxps4::gpu;
 using namespace gcnfix;
@@ -126,7 +132,19 @@ static Frame render(Shader kind, PixelBackend* backend) {
 
 int main(int argc, char** argv) {
   if (argc != 3) { std::fprintf(stderr, "usage: GCNRendererOffloadTest NATIVE_DIR WORK_DIR\n"); return 2; }
+#ifdef __OBJC__
+  id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+  if (!device) { NSArray<id<MTLDevice>>* all = MTLCopyAllDevices(); if (all.count) device = all[0]; }
+  if (!device) { std::printf("SKIP renderer pixel offload on Metal: no Metal device (nothing compared)\n"); return 0; }
+  auto slurp = [](const std::string& path) { std::ifstream f(path); std::stringstream t; t << f.rdbuf(); return t.str(); };
+  const std::string native = argv[1];
+  GCNMetalPixelBackend jit(device, slurp(native + "/GCNKernel.h") + slurp(native + "/GCNKernelImage.h"));
+  const char* backendName = "Metal";
+  std::printf("Metal device: %s\n", device.name.UTF8String);
+#else
   GCNCppJitBackend jit(argv[1], argv[2]);
+  const char* backendName = "C++ JIT";
+#endif
   unsigned offloadedPixels = 0;
   const struct { Shader kind; const char* name; bool offloads; } cases[] = {
     {Shader::clear, "clear", true}, {Shader::textured, "textured", true}, {Shader::refused, "refused", false}};
@@ -154,6 +172,6 @@ int main(int argc, char** argv) {
                 c.offloads ? "offloaded" : "kept on the interpreter", c.offloads ? "" : " (", c.offloads ? "" : (offloaded.refusal + ")").c_str());
     if (c.offloads) offloadedPixels += unsigned(offloaded.stats.offloadFragments);
   }
-  std::printf("PASS renderer pixel offload: %u fragments shaded by translated code, render targets identical to the interpreter (%u shaders compiled)\n",
-              offloadedPixels, jit.compiled);
+  std::printf("PASS renderer pixel offload (%s): %u fragments shaded by translated code, render targets identical to the interpreter (%u shaders compiled)\n",
+              backendName, offloadedPixels, jit.compiled);
 }
