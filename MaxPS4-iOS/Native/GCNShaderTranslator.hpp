@@ -35,6 +35,8 @@ struct GCNShaderTranslator {
     unsigned instructions = 0, vgprs = 0;
     bool usesInterpolation = false, usesImages = false, needsScalarPrepass = false;
     std::set<unsigned> exportTargets;
+    unsigned exports = 0;          // EXP instructions (any target)
+    bool mrt0Compressed = false;   // the MRT0 export's COMPR bit
     // Images the host binds (GCNImageBinding) from the scalar prepass, by slot:
     // T# at s[rsrc..rsrc+7], S# at s[ssamp..ssamp+3] when sampled.
     struct Image { unsigned rsrc = 0, ssamp = 0; bool sampled = false; };
@@ -53,10 +55,17 @@ struct GCNShaderTranslator {
   static std::string hex(uint64_t v) { std::ostringstream o; o << "0x" << std::hex << v << "u"; return o.str(); }
 
   static Result translate(const std::vector<uint32_t>& words, unsigned vgprs, uint64_t base = 0x1000) {
+    WordMemory memory{base, words};
+    return translate(memory, base, vgprs);
+  }
+  // The program at `base` in guest memory (read through the same decoder as
+  // the interpreter, so its bounds checks apply).
+  template <class Memory>
+  static Result translate(Memory& memory, uint64_t base, unsigned vgprs) {
     Result out; out.vgprs = vgprs;
     std::ostringstream body;
     std::set<unsigned> written, readBeforeWrite, execAlias;
-    GCNShader decoder; WordMemory memory{base, words};
+    GCNShader decoder;
     uint64_t pc = base;
     auto fail = [&](const GCNShader::Inst& i, const std::string& why) {
       std::ostringstream m; m << "pc=0x" << std::hex << pc << ' ' << GCNShader::opName(i.enc, i.op) << ": " << why;
@@ -210,6 +219,8 @@ struct GCNShaderTranslator {
         }
         body << "}; GCN_ENV_EXPORT(" << target << "u, " << enable << "u, " << compressed << "u, " << done << "u, e); }\n";
         out.exportTargets.insert(target);
+        ++out.exports;
+        if (target == 0) out.mrt0Compressed = compressed != 0;
         break;
       }
       case GCNShader::Enc::MIMG: {

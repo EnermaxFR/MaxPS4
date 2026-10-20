@@ -9,9 +9,11 @@
 // precise reason instead of being approximated.
 //
 // The backend is portable C++17 (no host code generation, no W^X changes).
-// A Metal backend can later consume the same validated draw description
-// (vertex outputs, primitive list, PS program and target description).
+// Pixel shading can be offloaded to a PixelBackend (GCNPixelOffload.hpp)
+// running the translated shader; everything else stays here, so the result
+// is the same whichever path shades the fragments.
 #include "GCNShader.hpp"
+#include "GCNPixelOffload.hpp"
 #include <array>
 #include <atomic>
 #include <thread>
@@ -35,8 +37,13 @@ struct GCNRenderer {
   struct Stats {
     uint64_t draws = 0, vertices = 0, vsWaves = 0, vsInstructions = 0, primitives = 0, culled = 0,
              clippedAway = 0, rasterized = 0, quads = 0, psWaves = 0, psInstructions = 0, fragments = 0,
-             pixelsWritten = 0, pixelsChanged = 0, sourceAlphaNonZero = 0, depthWrites = 0, depthRejected = 0, samples = 0;
+             pixelsWritten = 0, pixelsChanged = 0, sourceAlphaNonZero = 0, depthWrites = 0, depthRejected = 0, samples = 0,
+             offloadedDraws = 0, offloadBatches = 0, offloadFragments = 0, offloadRefusals = 0;
   };
+  // Optional pixel shading backend (not owned). Draws it cannot take stay on
+  // the interpreter; lastOffloadRefusal says why for the last such draw.
+  PixelBackend* pixelBackend = nullptr;
+  std::string lastOffloadRefusal;
   Stats total, last;
   std::string lastVertexHistogram, lastPixelHistogram;
   // Host-side depth planes keyed by guest DB_Z_WRITE_BASE. Depth/HTILE guest
@@ -289,6 +296,26 @@ struct GCNRenderer {
     std::vector<Setup> setups;
     std::vector<Tri> tris;
     uint64_t writtenMinX = ~0ull, writtenMinY = ~0ull, writtenMaxX = 0, writtenMaxY = 0;
+    // P0/P10/P20 of one PS input channel for a setup (the interpreter's
+    // interpolation callback and the offload table use this one function).
+    auto interpolant = [&](const Setup& s, unsigned attr, unsigned chan, float out[3]) {
+      const uint32_t control = inputControl[attr];
+      if (inputParam[attr] < 0) {
+        const unsigned def = (control >> 8) & 3;
+        const float values[4][4] = {{0, 0, 0, 0}, {0, 0, 0, 1}, {1, 1, 1, 0}, {1, 1, 1, 1}};
+        out[0] = values[def][chan]; out[1] = out[2] = 0; return;
+      }
+      const unsigned p = unsigned(inputParam[attr]);
+      float value[3];
+      for (unsigned v = 0; v < 3; ++v) {
+        value[v] = 0;
+        for (unsigned k = 0; k < 3; ++k) value[v] += s.bary[v][k] * s.source[k]->params[p][chan];
+      }
+      if (control & 0x400U) { const float flat = s.source[provokeLast ? 2 : 0]->params[p][chan]; out[0] = flat; out[1] = out[2] = 0; return; }
+      out[0] = value[0]; out[1] = value[1] - value[0]; out[2] = value[2] - value[0];
+    };
+    PixelDraw offload;
+    PixelDraw* offloadDraw = nullptr;
     auto flushWorker = [&](Worker& wk) -> bool {
       auto& batch = wk.batch; auto& ps = wk.ps; auto& last = wk.stats; std::string& error = wk.error;
       uint64_t &writtenMinX = wk.minX, &writtenMinY = wk.minY, &writtenMaxX = wk.maxX, &writtenMaxY = wk.maxY;
@@ -317,32 +344,40 @@ struct GCNRenderer {
       wave.setExec(covered);
       wave.interpolate = [&](unsigned attr, unsigned chan, unsigned lane, float out[3]) {
         if (attr >= numInterp || lane >= batch.size()) return false;
-        const uint32_t control = inputControl[attr];
-        if (inputParam[attr] < 0) {
-          const unsigned def = (control >> 8) & 3;
-          const float values[4][4] = {{0, 0, 0, 0}, {0, 0, 0, 1}, {1, 1, 1, 0}, {1, 1, 1, 1}};
-          out[0] = values[def][chan]; out[1] = out[2] = 0; return true;
-        }
-        const auto& s = setups[batch[lane].setup];
-        const unsigned p = unsigned(inputParam[attr]);
-        float value[3];
-        for (unsigned v = 0; v < 3; ++v) {
-          value[v] = 0;
-          for (unsigned k = 0; k < 3; ++k) value[v] += s.bary[v][k] * s.source[k]->params[p][chan];
-        }
-        if (control & 0x400U) { const float flat = s.source[provokeLast ? 2 : 0]->params[p][chan]; out[0] = flat; out[1] = out[2] = 0; return true; }
-        out[0] = value[0]; out[1] = value[1] - value[0]; out[2] = value[2] - value[0];
+        interpolant(setups[batch[lane].setup], attr, chan, out);
         return true;
       };
       std::string why;
-      if (!ps.run(memory, psProgram, wave, why)) { error = "PS 0x" + hex(psProgram) + ": " + why; return false; }
-      ++last.psWaves;
       const GCNShader::Export* color = nullptr;
-      for (const auto& e : wave.exports) {
-        if (e.target == 0) { if (color) { error = "PS exported MRT0 twice"; return false; } color = &e; }
-        else if (e.target != 9) { error = "PS export target " + std::to_string(e.target) + " unsupported"; return false; }
+      GCNShader::Export offloaded;
+      if (offloadDraw) {
+        // Covered lanes only: helper lanes never export and no derivative is taken.
+        GcnPixelFragment fragments[64]; GcnPixelOutput outputs[64]; unsigned lanes[64], n = 0;
+        for (unsigned lane = 0; lane < batch.size(); ++lane) {
+          if (!batch[lane].covered) continue;
+          GcnPixelFragment& f = fragments[n];
+          f = GcnPixelFragment{}; f.setup = batch[lane].setup;
+          for (unsigned r = 0; r < gcnPixelInputs && r < psVgprs; ++r) f.inputs[r] = wave.v[r][lane];
+          lanes[n++] = lane;
+        }
+        if (n && !pixelBackend->shade(*offloadDraw, fragments, n, outputs, why)) { error = "PS 0x" + hex(psProgram) + " offload: " + why; return false; }
+        offloaded.target = 0; offloaded.compressed = offloadDraw->translation.mrt0Compressed; offloaded.exec = 0;
+        for (unsigned k = 0; k < n; ++k) {
+          if (!outputs[k].exported) continue;
+          offloaded.exec |= uint64_t(1) << lanes[k];
+          for (unsigned c = 0; c < 4; ++c) offloaded.data[c][lanes[k]] = outputs[k].data[c];
+        }
+        color = &offloaded;
+        ++last.offloadBatches; last.offloadFragments += n;
+      } else {
+        if (!ps.run(memory, psProgram, wave, why)) { error = "PS 0x" + hex(psProgram) + ": " + why; return false; }
+        ++last.psWaves;
+        for (const auto& e : wave.exports) {
+          if (e.target == 0) { if (color) { error = "PS exported MRT0 twice"; return false; } color = &e; }
+          else if (e.target != 9) { error = "PS export target " + std::to_string(e.target) + " unsupported"; return false; }
+        }
+        if (!color) { error = "PS did not export MRT0"; return false; }
       }
-      if (!color) { error = "PS did not export MRT0"; return false; }
       for (unsigned lane = 0; lane < batch.size(); ++lane) {
         const auto& f = batch[lane];
         if (!f.covered || !((color->exec >> lane) & 1)) continue;
@@ -439,6 +474,14 @@ struct GCNRenderer {
         tris.push_back({setupIndex, a, b, c, area});
       }
     }
+    if (pixelBackend) {
+      std::string why;
+      if (prepareOffload(memory, offload, psProgram, psRsrc1, psVgprs, psSgprs, psUser, sh, numInterp, setups.size(),
+                         [&](size_t setup, unsigned attr, unsigned chan, float out[3]) { interpolant(setups[setup], attr, chan, out); }, why) &&
+          pixelBackend->prepare(offload, why)) {
+        offloadDraw = &offload; last.offloadedDraws = 1;
+      } else { last.offloadRefusals = 1; lastOffloadRefusal = why; }
+    }
     constexpr int64_t bandRows = 32;
     const int64_t bandCount = sy1 > sy0 ? (int64_t(sy1) + bandRows - 1) / bandRows : 0;
     auto rasterBand = [&](Worker& wk, int64_t bandY0, int64_t bandY1) -> bool {
@@ -514,6 +557,7 @@ struct GCNRenderer {
       last.quads += wk.stats.quads; last.psWaves += wk.stats.psWaves; last.fragments += wk.stats.fragments;
       last.pixelsWritten += wk.stats.pixelsWritten; last.pixelsChanged += wk.stats.pixelsChanged; last.sourceAlphaNonZero += wk.stats.sourceAlphaNonZero;
       last.depthWrites += wk.stats.depthWrites; last.depthRejected += wk.stats.depthRejected;
+      last.offloadBatches += wk.stats.offloadBatches; last.offloadFragments += wk.stats.offloadFragments;
       writtenMinX = std::min(writtenMinX, wk.minX); writtenMinY = std::min(writtenMinY, wk.minY);
       writtenMaxX = std::max(writtenMaxX, wk.maxX); writtenMaxY = std::max(writtenMaxY, wk.maxY);
       ps.stats.merge(wk.ps.stats);
@@ -526,6 +570,7 @@ struct GCNRenderer {
     total.primitives += last.primitives; total.culled += last.culled; total.clippedAway += last.clippedAway; total.rasterized += last.rasterized;
     total.quads += last.quads; total.psWaves += last.psWaves; total.psInstructions += last.psInstructions; total.fragments += last.fragments;
     total.pixelsWritten += last.pixelsWritten; total.pixelsChanged += last.pixelsChanged; total.sourceAlphaNonZero += last.sourceAlphaNonZero; total.depthWrites += last.depthWrites; total.depthRejected += last.depthRejected; total.samples += last.samples;
+    total.offloadedDraws += last.offloadedDraws; total.offloadBatches += last.offloadBatches; total.offloadFragments += last.offloadFragments; total.offloadRefusals += last.offloadRefusals;
     if (verbose) {
       std::fprintf(stderr, "GPU.DRAW n=%llu opcode=0x%x count=%u prim=0x%x VS=0x%llx PS=0x%llx cb=0x%llx tile=%u fmt=%u/%u swap=%u depth=%s%s blend=%08x\n",
                    (unsigned long long)total.draws, call.opcode, call.count, primitive, (unsigned long long)vsProgram, (unsigned long long)psProgram,
@@ -538,6 +583,10 @@ struct GCNRenderer {
       std::fprintf(stderr, "GPU.RASTER primitives=%llu rasterized=%llu culled=%llu clipped_away=%llu quads=%llu scissor=%d,%d-%d,%d\n",
                    (unsigned long long)last.primitives, (unsigned long long)last.rasterized, (unsigned long long)last.culled,
                    (unsigned long long)last.clippedAway, (unsigned long long)last.quads, sx0, sy0, sx1, sy1);
+      if (pixelBackend)
+        std::fprintf(stderr, "GPU.OFFLOAD %s batches=%llu fragments=%llu%s%s\n", last.offloadedDraws ? "on" : "off",
+                     (unsigned long long)last.offloadBatches, (unsigned long long)last.offloadFragments,
+                     last.offloadedDraws ? "" : " reason=", last.offloadedDraws ? "" : lastOffloadRefusal.c_str());
       std::fprintf(stderr, "GPU.PIXEL waves=%llu instructions=%llu fragments=%llu samples=%llu ops=%s\n", (unsigned long long)last.psWaves,
                    (unsigned long long)last.psInstructions, (unsigned long long)last.fragments, (unsigned long long)last.samples, lastPixelHistogram.c_str());
       if (ps.stats.texels)
@@ -608,6 +657,54 @@ struct GCNRenderer {
   }
 
   static std::string hex(uint64_t v) { std::ostringstream s; s << std::hex << v; return s.str(); }
+
+  // Everything a PixelBackend needs for one draw, or false (with the reason)
+  // when the draw must stay on the interpreter.
+  template <class Memory, class Interp>
+  static bool prepareOffload(Memory& memory, PixelDraw& d, uint64_t program, uint32_t rsrc1, unsigned vgprs, unsigned sgprs,
+                             unsigned user, const Bank& sh, unsigned numInterp, size_t setupCount, Interp interp, std::string& why) {
+    d = PixelDraw{};
+    d.program = program; d.rsrc1 = rsrc1; d.vgprs = vgprs; d.numInterp = numInterp;
+    if (!GCNShaderTranslator::floatModeSupported(rsrc1)) { why = "FLOAT_MODE keeps fp32 denormals (translated code flushes them)"; return false; }
+    d.translation = GCNShaderTranslator::translate(memory, program, vgprs);
+    if (!d.translation.ok) { why = "translation: " + d.translation.error; return false; }
+    const auto& targets = d.translation.exportTargets;
+    if (!targets.count(0) || d.translation.exports != targets.size() || targets.size() > 2 || (targets.size() == 2 && !targets.count(9))) {
+      why = "exports other than one MRT0 (and the null target)"; return false;
+    }
+    // Scalar prepass: one lane through the interpreter, with the batch's user SGPRs.
+    GCNShader pre; GCNShader::Wave w;
+    w.configure(std::min(sgprs, 104u), vgprs);
+    w.fp32Denorm = (rsrc1 >> 16) & 3;
+    for (unsigned k = 0; k < user; ++k) w.s[k] = sh[0xc + k];
+    if (user < w.sgprs) w.s[user] = 0;
+    w.setExec(1);
+    w.interpolate = [](unsigned, unsigned, unsigned, float out[3]) { out[0] = out[1] = out[2] = 0; return true; };
+    if (!pre.run(memory, program, w, why)) { why = "scalar prepass: " + why; return false; }
+    d.sgprs.assign(w.s.begin(), w.s.end());
+    for (const auto& image : d.translation.images) {
+      GCNImageBinding binding;
+      if (!binding.describe(&d.sgprs[image.rsrc], &d.sgprs[image.ssamp], image.sampled, why)) { why = "image: " + why; return false; }
+      const size_t at = (d.texels.size() + 15) & ~size_t(15);
+      if (at + binding.bytes >= (uint64_t(1) << 30)) { why = "images of 1 GiB or more in one draw"; return false; }
+      d.texels.resize(at + size_t(binding.bytes));
+      for (uint64_t off = 0; off < binding.bytes; off += 1 << 20) {
+        const size_t n = size_t(std::min<uint64_t>(binding.bytes - off, 1 << 20));
+        if (!memory.permitted(binding.guestBase + off, n, 4) || memory.read_data(binding.guestBase + off, d.texels.data() + at + off, n)) {
+          why = "image 0x" + hex(binding.guestBase) + " unreadable"; return false;
+        }
+      }
+      binding.image.base = uint32_t(at);
+      d.images.push_back(binding.image);
+    }
+    d.interp.assign(setupCount * numInterp * 12, 0.0f);
+    for (size_t setup = 0; setup < setupCount; ++setup)
+      for (unsigned attr = 0; attr < numInterp; ++attr)
+        for (unsigned chan = 0; chan < 4; ++chan) interp(setup, attr, chan, &d.interp[((setup * numInterp + attr) * 4 + chan) * 3]);
+    d.source = GCNPixelProgram::generate(d.translation);
+    d.key = GCNPixelProgram::hash(d.source);
+    return true;
+  }
 
   static float blendFactor(unsigned f, const std::array<float, 4>& s, const std::array<float, 4>& d, const std::array<float, 4>& k, unsigned c, bool& ok) {
     switch (f) {

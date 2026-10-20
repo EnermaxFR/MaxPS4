@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # GCN -> C++/MSL pixel shader translator: kernel prelude and image sampling
-# equivalence, stage 1
-# (translation and refusals) and stage 2 (translated code compiled as C++ and
-# compared with the interpreter), natively and under ASan/UBSan.
+# equivalence, stage 1 (translation and refusals), stage 2 (translated code
+# compiled as C++ and compared with the interpreter) and the renderer's pixel
+# offload (render targets equal to the interpreter's), natively and under
+# ASan/UBSan.
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
@@ -20,4 +21,9 @@ for mode in native sanitized; do
   "${CXX:-c++}" "${flags[@]}" -DGCN_TRANSLATED="\"$ROOT/$OUT/translated-$mode.inc\"" \
     MaxPS4-iOS/Tests/GCNTranslatorTest.cpp -ldl -o "$OUT/GCNTranslatorTest-$mode"
   ASAN_OPTIONS=detect_leaks=1 python3 scripts/run-bounded.py 300 "$OUT/GCNTranslatorTest-$mode.txt" "$OUT/GCNTranslatorTest-$mode"
+  # Renderer with the pixel offload: translated shaders compiled at run time (C++), targets equal to the interpreter.
+  "${CXX:-c++}" "${flags[@]}" -Wno-misleading-indentation MaxPS4-iOS/Tests/GCNRendererOffloadTest.cpp -ldl -o "$OUT/GCNRendererOffloadTest-$mode"
+  mkdir -p "$OUT/jit-$mode"
+  ASAN_OPTIONS=detect_leaks=1 python3 scripts/run-bounded.py 300 "$OUT/GCNRendererOffloadTest-$mode.txt" "$OUT/GCNRendererOffloadTest-$mode" \
+    "$ROOT/MaxPS4-iOS/Native" "$ROOT/$OUT/jit-$mode"
 done
