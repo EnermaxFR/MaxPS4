@@ -35,6 +35,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install ELF linker for source-built homebrew
+        run: brew list lld >/dev/null 2>&1 || HOMEBREW_NO_AUTO_UPDATE=1 brew install lld
       - name: Validate PKG metadata and runtime preparation before packaging
         shell: bash
         run: |
