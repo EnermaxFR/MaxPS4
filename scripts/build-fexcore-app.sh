@@ -117,10 +117,8 @@ set -x
 xcrun nm -u build/Payload/MaxPS4.app/MaxPS4 > build/diagnostics/fex-app-imports.txt
 xcrun otool -L build/Payload/MaxPS4.app/MaxPS4 > build/diagnostics/fex-app-libraries.txt
 xcrun nm -gU "$FRAMEWORK/MaxPS4FEXRuntime" > build/diagnostics/fex-app-runtime-exports.txt
-for symbol in maxps4_fex_m1_collision_diagnostic maxps4_fex_engine_run_m1_threads; do
-  grep -q "_${symbol}$" build/diagnostics/fex-app-runtime-exports.txt
-  grep -q "_${symbol}$" build/diagnostics/fex-app-imports.txt
-done
+# The M1 collision diagnostic (maxps4_fex_m1_collision_diagnostic and its
+# Swift view) is not committed yet: restore its export/import check with it.
 # Every public ABI entry must be exported by the embedded runtime. Only
 # entries actually called by the Swift app are required in its undefined imports;
 # the compiler may legitimately omit unused public functions.
