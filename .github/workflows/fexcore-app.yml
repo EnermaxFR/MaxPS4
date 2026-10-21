@@ -30,7 +30,7 @@ jobs:
     # Issue #207: package this experiment only by dispatch after correctness CI.
     if: github.event_name != 'pull_request' || (github.head_ref != 'experiment/codex-orbis-prx-fex-bridge' && github.head_ref != 'experiment/maxps4-209-translation-audit')
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -211,7 +211,7 @@ jobs:
           set -euo pipefail
           python3 scripts/run-bounded.py 60 build/fex-app-host/swift-diagnostic-leaks.txt leaks --atExit -- build/fex-app-host/swift-fex-test
       - name: Build full Xcode application and verified re-signable IPA
-        timeout-minutes: 15
+        timeout-minutes: 30
         run: bash scripts/build-fexcore-app.sh build/aether-app
       - name: Record exact pre-resigning signature and entitlements
         run: python3 scripts/audit-ios-signature.py build/Payload/MaxPS4.app > build/diagnostics/ios-signature.json
