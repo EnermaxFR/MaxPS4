@@ -36,7 +36,7 @@ struct OrbisV4ProcessBatch {
     // identity of the libkernel stub (not a real PS4 NID).
     // pattern: code found by its bytes instead of a libc NID (hex, ".." = any byte).
     struct Redirect {
-        enum class Form { Jump, FloatBinary, RsdkFillLoop, RsdkHScroll };
+        enum class Form { Jump, FloatBinary, RsdkFillLoop, RsdkHScroll, RsdkScreenCopy };
         const char* nid; const char* service; const char* serviceNid; Form form; const char* switchVar; uint64_t minSize;
         const char* pattern;
     };
@@ -77,11 +77,20 @@ struct OrbisV4ProcessBatch {
         "85db7461c1e1088d53fff7db4889f781e100ff0f00034c24c44c01e10f1f000fb6294885ed74114c89f048c1e0094c01e80fb704686689"
         "0648ffc14883c602ffc375dc4889fe488b7c24e0488d745602eb13666666662e0f1f84000000000089d8488d344649ffc24983c01041ff"
         "c7443b7c24dc0f8c25fbffff5b415c415d415e415f5dc3";
+    // RSDK v5 screen upload (Sonic Mania): the 240-line copy of one software
+    // screen into its GPU texture, after the call that returns the texture.
+    static constexpr const char* rsdkScreenCopy =
+        "b90d0e0000be0100000089c04c89ffc4c270f7541c10418b8f1860090048c1e00831db29cec1f90401d6448d41014c63ce666666666666"
+        "2e0f1f84000000000085c90f8e990000004489c60f1f4400000fb717ffce6689100fb75702668950020fb75704668950040fb757066689"
+        "50060fb75708668950080fb7570a6689500a0fb7570c6689500c0fb7570e6689500e0fb75710668950100fb75712668950120fb7571466"
+        "8950140fb75716668950160fb75718668950180fb7571a6689501a0fb7571c6689501c0fb7571e4883c7206689501e4883c02083fe010f"
+        "8f6fffffffffc34a8d044881fbf00000000f854dffffff";
     static constexpr Redirect redirects[] = {
         {"Q3VBxCXhUHs", "maxps4_memcpy", "Q3VBxCXhUHs", Redirect::Form::Jump, "MAXPS4_HLE_MEMCPY", 5, nullptr},        // memcpy
         {"EH-x713A99c", "maxps4_atan2f", "MaxPS4atan2", Redirect::Form::FloatBinary, "MAXPS4_HLE_MATH", 18, nullptr}, // atan2f
         {"", "maxps4_rsdk_fill", "MaxPS4rsdkF", Redirect::Form::RsdkFillLoop, "MAXPS4_HLE_RSDK", 0, rsdkFillLoop},
         {"", "maxps4_rsdk_hscroll", "MaxPS4rsdkH", Redirect::Form::RsdkHScroll, "MAXPS4_HLE_RSDK", 0, rsdkHScroll},
+        {"", "maxps4_rsdk_upload", "MaxPS4rsdkU", Redirect::Form::RsdkScreenCopy, "MAXPS4_HLE_RSDK", 0, rsdkScreenCopy},
     };
     // Offset of the first match of a Redirect pattern in bytes, or SIZE_MAX.
     static size_t findPattern(const uint8_t* bytes, size_t size, const char* pattern) {
@@ -317,6 +326,13 @@ private:
                                          0x49, 0xc1, 0xe7, 0x10, 0x4d, 0x09, 0xc7, 0x4d, 0x89, 0xf8}; // r8 = r15 << 16 | r8
                 code.insert(code.end(), moves, moves + sizeof moves);
                 ok = found && rel32(0xe8, code.size());                                // call stub
+                const int32_t back = int32_t(std::strlen(h.r->pattern) / 2) - int32_t(code.size() + 5);
+                code.push_back(0xe9); for (int k = 0; k < 4; ++k) code.push_back(uint8_t(uint32_t(back) >> (8 * k)));
+            } else if (ok && h.r->form == Redirect::Form::RsdkScreenCopy) {
+                // rsi = texture >> 8 (eax), edx = texture descriptor word, rdi =
+                // screen; then jump past the copy loop (pattern end).
+                code = {0x89, 0xc0, 0x48, 0x89, 0xc6, 0x41, 0x8b, 0x54, 0x1c, 0x10, 0x4c, 0x89, 0xff};
+                ok = rel32(0xe8, code.size());
                 const int32_t back = int32_t(std::strlen(h.r->pattern) / 2) - int32_t(code.size() + 5);
                 code.push_back(0xe9); for (int k = 0; k < 4; ++k) code.push_back(uint8_t(uint32_t(back) >> (8 * k)));
             } else if (ok && h.r->form == Redirect::Form::RsdkHScroll) {

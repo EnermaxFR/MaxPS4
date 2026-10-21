@@ -66,6 +66,9 @@ présenter des images mais n'a ouvert aucun fichier depuis : la scène suivante 
   par ses 1398 octets) remplacé par `maxps4_rsdk_hscroll` (même interrupteur `MAXPS4_HLE_RSDK=0`).
   Il prenait 62 % du temps hors fondu. Mesure sur 10 min, un run seul : 314 images contre 163,
   1,68 s par image contre 3,16 s ; les 163 images communes sont identiques au pixel près.
+- Copie de l'écran logiciel RSDK vers la texture GPU (`eboot+0x2038c0`, 240 lignes par écran) remplacée
+  par `maxps4_rsdk_upload` (même interrupteur). Environ 9 % du temps ; les 314 images communes avec le
+  run précédent sont identiques. Gain non mesuré seul (394 images en 10 min, en parallèle d'un autre run).
 - `MAXPS4_TSO=0` désactive l'ordre mémoire x86 (sans risque : tous les threads invités tournent sur
   un seul thread hôte). Mesure sur 10 min, un run seul par réglage : 123 images contre 111, écart par
   image 3,07 s contre 3,13 s, aucun plantage. Gain dans le bruit, le défaut reste TSO activé.

@@ -953,6 +953,25 @@ struct OrbisV4SystemServices {
                 else if (first) { draw(t, rowOffset, first); dst += first; }
             }
             return ok(0); });
+        // HLE RSDK screen upload (OrbisV4ProcessBatch): rdi screen (RGB565 pixels,
+        // pitch at +0x96018), rsi texture address >> 8, edx descriptor word whose
+        // bits 13..26 give the texture pitch - 1. 240 lines of (pitch >> 4) * 16
+        // pixels; the source is packed, the destination advances by its pitch.
+        services.implement("maxps4_rsdk_upload", [](const Registers& r, Memory& m) {
+            uint32_t pitch;
+            if (m.read_data(r.rdi + 0x96018, &pitch, 4)) return trap("maxps4_rsdk_upload: screen not accessible");
+            const int32_t tiles = int32_t(pitch) >> 4, skip = int32_t((uint32_t(r.rdx) >> 13) & 0x3fff) + 1 - int32_t(pitch);
+            uint64_t src = r.rdi, dst = uint64_t(uint32_t(r.rsi)) << 8;
+            const size_t row = tiles > 0 ? size_t(tiles) * 32 : 0;
+            std::vector<uint8_t> line(row);
+            for (int y = 0; y < 240; ++y) {
+                if (row) {
+                    if (m.read_data(src, line.data(), row) || m.write_data(dst, line.data(), row)) return trap("maxps4_rsdk_upload: guest range not accessible");
+                    src += row; dst += row;
+                }
+                dst += uint64_t(int64_t(skip) * 2);
+            }
+            return ok(0); });
         // sceRtcGetCurrentTick(SceRtcTick*): UTC microseconds since 0001-01-01.
         services.implement("sceRtcGetCurrentTick", [](const Registers& r, Memory& m) {
             using namespace std::chrono;
