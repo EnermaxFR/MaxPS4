@@ -36,7 +36,7 @@ struct OrbisV4ProcessBatch {
     // identity of the libkernel stub (not a real PS4 NID).
     // pattern: code found by its bytes instead of a libc NID (hex, ".." = any byte).
     struct Redirect {
-        enum class Form { Jump, FloatBinary, RsdkFillLoop };
+        enum class Form { Jump, FloatBinary, RsdkFillLoop, RsdkHScroll };
         const char* nid; const char* service; const char* serviceNid; Form form; const char* switchVar; uint64_t minSize;
         const char* pattern;
     };
@@ -47,10 +47,41 @@ struct OrbisV4ProcessBatch {
         "4d8d1c5429f3c1e605c1e3054863f64863d34901f64963f14d8d2c544963d0470fb73474498d347441b8060500004901d7430fb73c7c"
         "660f1f8400000000000fb728ffc9c4e238f7d54889eb66418b54550083e51f48c1eb0b668b2c6e66418b1c5b664401f2c1e2066601fd"
         "664401d3c1e30b09da09d56689284883c00283f9017fbc";
+    // RSDK v5 DrawLayerHScroll (Sonic Mania): the whole function (1398 bytes);
+    // its 5 RIP-relative operands (7-byte instructions, rel32 at +3) are masked.
+    static constexpr uint32_t rsdkHScrollOperands[] = {0x0a, 0x34, 0x41, 0x48, 0x61};
+    static constexpr const char* rsdkHScroll =
+        "55415741564155415453488d05........488b00448bb8206009008b8828600900894c24dc4139cf0f8d3d0500008b90186009004c8d15"
+        "........4489f94d63c74c8d25........4c8d2d........48897c24e00fafca4d01c249c1e004c1fa044c0305........48895424f848"
+        "63c9488d34488d42feb90100000048c1e00429d14883c010894c24d448894424f090410fbf58020fb74f08450fb63248897424c885db78"
+        "1ac1e10489da29ca7c1c6689d36641895002eb120f1f8000000000c1e1048d1c0b6641895802410fb74006418b7004458b1883e30fba10"
+        "00000029da83e00fc1e004c1fe1441c1fb14894424c48a4f05488b8748340000d3e64401de4863ce4c8d0c480fb70c484c895424e881f9"
+        "ffff0000747785d20f847f0000008b5424c4488b7424c8c1e1084d89c24189d881e100ff0f004183f00f09da09d18d53f04c01e1660f1f"
+        "8400000000000fb6294885ed74114c89f048c1e0094c01e80fb7046866890648ffc14883c602ffc275dc488b7424c8488b7c24e04a8d74"
+        "46024d89d0eb1d0f1f840000000000488b7424c889d0488d3446eb080f1f00488b7424c80fb747084983c10241ffc34c89c94889c24801"
+        "d24829d14139c3488b4424f8410f94c2490f45c983f8010f840c030000448b4c24d44c894424c84889f54c8d461e44897c24d80f1f4400"
+        "00440fb7394181ffffff00000f848b02000041c1e7084181e700ff0f0044037c24c466438b143c84d274260fb6c24c89f248c1e2094c01"
+        "ea0fb7044266418940e2438a543c01eb0c660f1f840000000000c1ea0884d274164c89f60fb6c248c1e6094c01ee0fb7044666418940e4"
+        "66438b543c0284d274290fb6c24c89f248c1e2094c01ea0fb7044266418940e6438a543c03eb0f6666662e0f1f840000000000c1ea0884"
+        "d274164c89f60fb6c248c1e6094c01ee0fb7044666418940e866438b543c0484d274290fb6c24c89f248c1e2094c01ea0fb70442664189"
+        "40ea438a543c05eb0f6666662e0f1f840000000000c1ea0884d274164c89f60fb6c248c1e6094c01ee0fb7044666418940ec66438b543c"
+        "0684d274290fb6c24c89f248c1e2094c01ea0fb7044266418940ee438a543c07eb0f6666662e0f1f840000000000c1ea0884d274164c89"
+        "f60fb6c248c1e6094c01ee0fb7044666418940f066438b543c0884d274290fb6c24c89f248c1e2094c01ea0fb7044266418940f2438a54"
+        "3c09eb0f6666662e0f1f840000000000c1ea0884d274164c89f60fb6c248c1e6094c01ee0fb7044666418940f466438b543c0a84d27429"
+        "0fb6c24c89f248c1e2094c01ea0fb7044266418940f6438a543c0beb0f6666662e0f1f840000000000c1ea0884d274164c89f60fb6c248"
+        "c1e6094c01ee0fb7044666418940f866438b543c0c84d274290fb6c24c89f248c1e2094c01ea0fb7044266418940fa438a543c0deb0f66"
+        "66662e0f1f840000000000c1ea0884d274164c89f60fb6c248c1e6094c01ee0fb7044666418940fc66438b543c0e84d274290fb6c24c89"
+        "f248c1e2094c01ea0fb7044266418940fe438a543c0feb0f6666662e0f1f840000000000c1ea0884d274154c89f60fb6c248c1e6094c01"
+        "ee0fb70446664189000fb757084889c841ffc3b9010000004883c00241f6c201440f45d94889c14889d64801f64829f14139d3410f94c2"
+        "480f45c84983c02041ffc10f8525fdffff488b4424f0448b7c24d84c8b4424c84889ee488d34460fb7094c8b5424e881f9ffff0000745f"
+        "85db7461c1e1088d53fff7db4889f781e100ff0f00034c24c44c01e10f1f000fb6294885ed74114c89f048c1e0094c01e80fb704686689"
+        "0648ffc14883c602ffc375dc4889fe488b7c24e0488d745602eb13666666662e0f1f84000000000089d8488d344649ffc24983c01041ff"
+        "c7443b7c24dc0f8c25fbffff5b415c415d415e415f5dc3";
     static constexpr Redirect redirects[] = {
         {"Q3VBxCXhUHs", "maxps4_memcpy", "Q3VBxCXhUHs", Redirect::Form::Jump, "MAXPS4_HLE_MEMCPY", 5, nullptr},        // memcpy
         {"EH-x713A99c", "maxps4_atan2f", "MaxPS4atan2", Redirect::Form::FloatBinary, "MAXPS4_HLE_MATH", 18, nullptr}, // atan2f
         {"", "maxps4_rsdk_fill", "MaxPS4rsdkF", Redirect::Form::RsdkFillLoop, "MAXPS4_HLE_RSDK", 0, rsdkFillLoop},
+        {"", "maxps4_rsdk_hscroll", "MaxPS4rsdkH", Redirect::Form::RsdkHScroll, "MAXPS4_HLE_RSDK", 0, rsdkHScroll},
     };
     // Offset of the first match of a Redirect pattern in bytes, or SIZE_MAX.
     static size_t findPattern(const uint8_t* bytes, size_t size, const char* pattern) {
@@ -288,6 +319,26 @@ private:
                 ok = found && rel32(0xe8, code.size());                                // call stub
                 const int32_t back = int32_t(std::strlen(h.r->pattern) / 2) - int32_t(code.size() + 5);
                 code.push_back(0xe9); for (int k = 0; k < 4; ++k) code.push_back(uint8_t(uint32_t(back) >> (8 * k)));
+            } else if (ok && h.r->form == Redirect::Form::RsdkHScroll) {
+                // lea rsi/rdx/rcx/r8/r9 = the 5 operand targets (screen pointer,
+                // line palettes, tileset, palettes, scanline pointer), then jump
+                // to the stub with the layer still in rdi.
+                static constexpr uint8_t lea[5][3] = {{0x48, 0x8d, 0x35}, {0x48, 0x8d, 0x15}, {0x48, 0x8d, 0x0d}, {0x4c, 0x8d, 0x05}, {0x4c, 0x8d, 0x0d}};
+                const uint8_t* fn = nullptr;
+                for (const auto& seg : m.meta.segments)
+                    if (seg.type == 1 && h.entry >= seg.address && h.entry + 0x68 <= seg.address + seg.filesz)
+                        fn = m.bytes.data() + seg.offset + (h.entry - seg.address);
+                ok = fn != nullptr;
+                for (int i = 0; ok && i < 5; ++i) {
+                    const uint32_t off = rsdkHScrollOperands[i];
+                    int32_t rel; std::memcpy(&rel, fn + off + 3, 4);
+                    const int64_t target = int64_t(h.entry) + off + 7 + rel, next = int64_t(h.entry) + 7 * (i + 1);
+                    if (target - next < INT32_MIN || target - next > INT32_MAX) { ok = false; break; }
+                    const int32_t moved = int32_t(target - next);
+                    code.insert(code.end(), lea[i], lea[i] + 3);
+                    for (int k = 0; k < 4; ++k) code.push_back(uint8_t(uint32_t(moved) >> (8 * k)));
+                }
+                ok = ok && rel32(0xe9, code.size());                                // jmp stub
             } else if (ok) {
                 code = {0x66, 0x0f, 0x7e, 0xc7, 0x66, 0x0f, 0x7e, 0xce};   // movd edi, xmm0; movd esi, xmm1
                 ok = rel32(0xe8, code.size());                                 // call stub

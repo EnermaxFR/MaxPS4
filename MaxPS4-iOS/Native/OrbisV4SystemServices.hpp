@@ -879,6 +879,80 @@ struct OrbisV4SystemServices {
             }
             if (m.write_data(pixels, px.data(), px.size() * 2)) return trap("maxps4_rsdk_fill: guest range not accessible");
             return ok(0); });
+        // HLE RSDK DrawLayerHScroll (OrbisV4ProcessBatch): rdi TileLayer, rsi
+        // &currentScreen, rdx line palette bytes, rcx tileset (u8 [tile][16][16]),
+        // r8 palettes (u16 [bank][256]), r9 &scanline array (16 bytes per line).
+        // Mirrors the guest code step by step, including the scanline x wrap it
+        // writes back and its lazily reset column counter; pixel 0 is transparent.
+        services.implement("maxps4_rsdk_hscroll", [](const Registers& r, Memory& m) {
+            const OrbisV4Translation::Range* last = nullptr;
+            auto at = [&](uint64_t guest, uint64_t bytes, uint32_t perm) -> uint8_t* {
+                if (last && guest >= last->guest && guest - last->guest < last->size && bytes <= last->size - (guest - last->guest))
+                    return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(last->host + (guest - last->guest)));
+                for (const auto& range : m.ranges())
+                    if (guest >= range.guest && guest - range.guest < range.size) {
+                        if (bytes > range.size - (guest - range.guest) || (range.permissions & perm) != perm || ((perm & 2) && (range.permissions & 1))) return nullptr;
+                        last = &range;
+                        return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(range.host + (guest - range.guest)));
+                    }
+                return nullptr;
+            };
+            auto u64 = [&](uint64_t g, uint64_t& v) { const uint8_t* p = at(g, 8, 4); if (p) std::memcpy(&v, p, 8); return p != nullptr; };
+            uint64_t screen = 0, scanBase = 0, layout = 0;
+            const uint8_t* layer = at(r.rdi, 0x3450, 4);
+            const uint8_t* screenTail = nullptr;
+            if (!layer || !u64(r.rsi, screen) || !u64(r.r9, scanBase) || !(screenTail = at(screen + 0x96018, 0x14, 4)))
+                return trap("maxps4_rsdk_hscroll: guest range not accessible");
+            int32_t clipY1, clipY2; uint32_t pitch;
+            std::memcpy(&pitch, screenTail, 4); std::memcpy(&clipY1, screenTail + 8, 4); std::memcpy(&clipY2, screenTail + 0x10, 4);
+            if (clipY1 >= clipY2) return ok(0);
+            const uint8_t shift = layer[5]; uint16_t width; std::memcpy(&width, layer + 8, 2); std::memcpy(&layout, layer + 0x3448, 8);
+            const int32_t tilesPerLine = int32_t(pitch) >> 4;
+            uint8_t* tiles = at(r.rcx, 0x100000, 4);
+            const uint8_t* palettes = at(r.r8, 256 * 512, 4);
+            const uint8_t* banks = at(r.rdx + int64_t(clipY1), uint64_t(clipY2 - clipY1), 4);
+            uint8_t* scan = at(scanBase + int64_t(clipY1) * 16, uint64_t(clipY2 - clipY1) * 16, 6);
+            uint8_t* frame = at(screen + uint64_t(int64_t(int32_t(uint32_t(clipY1) * pitch)) * 2), uint64_t(clipY2 - clipY1) * pitch * 2, 6);
+            if (!tiles || !palettes || !banks || !scan || !frame) return trap("maxps4_rsdk_hscroll: guest range not accessible");
+            uint16_t* dst = reinterpret_cast<uint16_t*>(frame);
+            auto tileAt = [&](int64_t entry, uint16_t& t) {   // entry: index into the layout (u16)
+                const uint8_t* p = at(layout + uint64_t(entry * 2), 2, 4); if (p) std::memcpy(&t, p, 2); return p != nullptr; };
+            for (int32_t y = clipY1; y < clipY2; ++y, scan += 16) {
+                const uint16_t* palette = reinterpret_cast<const uint16_t*>(palettes) + size_t(banks[y - clipY1]) * 256;
+                int16_t sx; std::memcpy(&sx, scan + 2, 2);
+                int32_t px = sx; const int32_t span = int32_t(width) << 4;
+                if (px >= 0) { const int32_t d = px - span; if (d >= 0) { px = d & 0xffff; const int16_t w = int16_t(d); std::memcpy(scan + 2, &w, 2); } }
+                else { px += span; const uint16_t w = uint16_t(px); std::memcpy(scan + 2, &w, 2); }
+                uint16_t sy; int32_t posX, posY; std::memcpy(&sy, scan + 6, 2); std::memcpy(&posX, scan, 4); std::memcpy(&posY, scan + 4, 4);
+                const uint32_t rowOffset = uint32_t(sy & 0xf) << 4;
+                int32_t column = posX >> 20;
+                const int64_t entryBase = int32_t((uint32_t(posY >> 20) << (shift & 31)) + uint32_t(column));
+                const int32_t first = px & 0xf, count = 16 - first;
+                auto draw = [&](uint16_t t, uint32_t offset, int32_t n) {
+                    const uint8_t* src = tiles + ((((uint32_t(t) << 8) & 0xfff00) + offset) & 0xfffff);
+                    for (int32_t i = 0; i < n; ++i) if (src[i]) dst[i] = palette[src[i]];
+                };
+                uint16_t t;
+                if (!tileAt(entryBase, t)) return trap("maxps4_rsdk_hscroll: layout not accessible");
+                if (t == 0xffff) dst += count;
+                else if (count) { draw(t, rowOffset | uint32_t(first), count); dst += count; }
+                int64_t entry = entryBase + 1;
+                ++column; bool wrapped = column == int32_t(width);
+                int64_t cursor = wrapped ? entry - width : entry;
+                for (int32_t k = 1; k < tilesPerLine; ++k) {
+                    if (!tileAt(cursor, t)) return trap("maxps4_rsdk_hscroll: layout not accessible");
+                    if (t != 0xffff) draw(t, rowOffset, 16);
+                    dst += 16;
+                    const int64_t next = cursor + 1;
+                    ++column; if (wrapped) column = 1;
+                    wrapped = column == int32_t(width);
+                    cursor = wrapped ? next - width : next;
+                }
+                if (!tileAt(cursor, t)) return trap("maxps4_rsdk_hscroll: layout not accessible");
+                if (t == 0xffff) dst += first;
+                else if (first) { draw(t, rowOffset, first); dst += first; }
+            }
+            return ok(0); });
         // sceRtcGetCurrentTick(SceRtcTick*): UTC microseconds since 0001-01-01.
         services.implement("sceRtcGetCurrentTick", [](const Registers& r, Memory& m) {
             using namespace std::chrono;

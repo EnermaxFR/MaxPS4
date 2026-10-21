@@ -62,6 +62,10 @@ présenter des images mais n'a ouvert aucun fichier depuis : la scène suivante 
   mémoire par le service hôte `maxps4_rsdk_fill` (`MAXPS4_HLE_RSDK=0` pour revenir en arrière).
   Mesure sur 10 min, un run seul : 163 images contre 111, écart pendant le fondu 3,10 s contre
   5,43 s ; les 111 images communes sont identiques au pixel près (empreintes FNV-64).
+- Dessin des couches de tuiles RSDK (`DrawLayerHScroll`, `eboot+0x22d1b0`, toute la fonction repérée
+  par ses 1398 octets) remplacé par `maxps4_rsdk_hscroll` (même interrupteur `MAXPS4_HLE_RSDK=0`).
+  Il prenait 62 % du temps hors fondu. Mesure sur 10 min, un run seul : 314 images contre 163,
+  1,68 s par image contre 3,16 s ; les 163 images communes sont identiques au pixel près.
 - `MAXPS4_TSO=0` désactive l'ordre mémoire x86 (sans risque : tous les threads invités tournent sur
   un seul thread hôte). Mesure sur 10 min, un run seul par réglage : 123 images contre 111, écart par
   image 3,07 s contre 3,13 s, aucun plantage. Gain dans le bruit, le défaut reste TSO activé.
