@@ -23,6 +23,11 @@ if [[ "${3:-}" == --host-runtime ]]; then
   SYSTEM=Darwin
   DEPLOYMENT=15.0
 fi
+# A previous run of this script on the same checkout left the MaxPS4 patch
+# applied; remove it so the scripted patches below see their pinned context.
+if patch -p1 -R --dry-run -s -f -d "$FEX" < "$ROOT/patches/fexcore-maxps4-local.patch" >/dev/null 2>&1; then
+  patch -p1 -R -s -f -d "$FEX" < "$ROOT/patches/fexcore-maxps4-local.patch"
+fi
 python3 -B "$ROOT/MaxPS4-iOS/Tests/FEXDispatcherInitPatchTest.py" "$FEX"
 python3 -B "$ROOT/scripts/patch-fexcore-dispatcher-init.py" "$FEX"
 python3 -B "$ROOT/MaxPS4-iOS/Tests/FEXGuestTranslationPatchTest.py" "$FEX"
