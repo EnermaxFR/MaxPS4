@@ -1,6 +1,15 @@
 --- a/FEXCore/Source/Interface/Core/Core.cpp
 +++ b/FEXCore/Source/Interface/Core/Core.cpp
-@@ -78,6 +78,63 @@
+@@ -52,6 +52,8 @@
+ #include <FEXCore/Utils/Threads.h>
+ #include <FEXCore/Utils/Profiler.h>
+ #include <FEXCore/Utils/SHMStats.h>
++#include <sys/mman.h>
++#include <unistd.h>
+ #include <FEXCore/fextl/fmt.h>
+ #include <FEXCore/fextl/memory.h>
+ #include <FEXCore/fextl/set.h>
+@@ -78,6 +80,82 @@
  #include <unordered_map>
  #include <utility>
  #include <xxhash.h>
@@ -33,9 +42,28 @@
 +  return host - it->first < 0x10000 ? it->second : 0;
 +}
 +std::atomic<bool> NativePreemptCheck {false};
-+void* InterruptFaultPage(FEXCore::Core::InternalThreadState* Thread, size_t* Size) {
-+  if (Size) *Size = sizeof(Thread->InterruptFaultPage);
-+  return Thread->InterruptFaultPage;
++// One readable page and one guard page (no access), host page sized.
++static uint8_t* PreemptPage(bool Guard) {
++  static uint8_t* Pages = [] {
++    const size_t Size = static_cast<size_t>(sysconf(_SC_PAGESIZE));
++    void* Map = ::mmap(nullptr, 2 * Size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
++    if (Map == MAP_FAILED || ::mprotect(static_cast<uint8_t*>(Map) + Size, Size, PROT_NONE)) {
++      LOGMAN_MSG_A_FMT("MaxPS4 preemption pages unavailable");
++    }
++    return static_cast<uint8_t*>(Map);
++  }();
++  return Pages + (Guard ? static_cast<size_t>(sysconf(_SC_PAGESIZE)) : 0);
++}
++void ArmPreempt(FEXCore::Core::InternalThreadState* Thread, bool Pending) {
++  // The JIT entry loads this pointer with a scaled 64-bit immediate (JIT.cpp).
++  static_assert(offsetof(FEXCore::Core::InternalThreadState, InterruptFaultPage) -
++                offsetof(FEXCore::Core::InternalThreadState, BaseFrameState) <= 32760);
++  __atomic_store_n(reinterpret_cast<uint8_t**>(Thread->InterruptFaultPage), PreemptPage(Pending), __ATOMIC_RELEASE);
++}
++bool IsPreemptFault(const void* Address) {
++  const auto* Guard = PreemptPage(true);
++  const auto* At = static_cast<const uint8_t*>(Address);
++  return At >= Guard && At < Guard + static_cast<size_t>(sysconf(_SC_PAGESIZE));
 +}
 +// Native builds call this from a signal handler, on the faulting thread while
 +// it runs JIT code: the registry lock is never held there (it is only taken
@@ -64,7 +92,15 @@
  
  namespace FEXCore::Context {
  ContextImpl::ContextImpl(const FEXCore::HostFeatures& Features)
-@@ -493,6 +550,12 @@
+@@ -435,6 +513,7 @@
+   InitializeCompiler(Thread);
+ 
+   Thread->CurrentFrame->State.DeferredSignalRefCount.Store(0);
++  MaxPS4::ArmPreempt(Thread, false);
+ 
+   if (Config.BlockJITNaming() || Config.GlobalJITNaming() || Config.LibraryJITNaming()) {
+     // Allocate a JIT symbol buffer only if enabled.
+@@ -493,6 +572,12 @@
  }
  
  void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, bool NewCodeBuffer) {
@@ -77,7 +113,7 @@
    FEXCORE_PROFILE_INSTANT("ClearCodeCache");
  
    if (NewCodeBuffer) {
-@@ -727,6 +790,19 @@
+@@ -727,6 +812,19 @@
          Offset = Emit->WrapNode(Emit->_Constant(static_cast<uint64_t>(static_cast<int64_t>(M->Offset)))); M->Offset = 0;
           Permissions = 4; break;
        }
@@ -97,7 +133,7 @@
        case IR::OP_PUSH:
        case IR::OP_PUSHTWO:
        case IR::OP_POP:
-@@ -737,14 +813,11 @@
+@@ -737,14 +835,11 @@
        case IR::OP_VSTOREVECTORMASKED:
        case IR::OP_VLOADVECTORGATHERMASKED:
        case IR::OP_VLOADVECTORGATHERMASKEDQPS:
@@ -113,7 +149,7 @@
        default: break;
        }
        if (AddrIndex != 255) {
-@@ -1136,6 +1209,20 @@
+@@ -1136,6 +1231,20 @@
    FEXCORE_PROFILE_INSTANT_INCREMENT(Thread, AccumulatedJITCount, 1);
  
    auto [CompiledCode, DebugData, StartAddr, Length, NeedsAddGuestCodeRanges] = CompileCode(Thread, GuestRIP, MaxInst);
@@ -180,21 +216,20 @@
      Frame->State.rip = GuestRip;
      return Frame->Pointers.DispatcherLoopTop;
    } else {
-@@ -867,6 +868,19 @@
+@@ -867,6 +868,18 @@
  }
  
  void Arm64JITCore::EmitEntryPoint(ARMEmitter::BackwardLabel& HeaderLabel, bool CheckTF) {
 +#ifndef VIXL_SIMULATOR
 +  if (FEXCore::MaxPS4::NativePreemptCheck.load(std::memory_order_relaxed)) {
-+    // MaxPS4 preemption point, first instruction of the entry (see Context.h):
-+    // faults while the embedder keeps this thread's interrupt page read-only.
++    // MaxPS4 preemption point, first two instructions of the entry (see
++    // Context.h): the second load faults while the thread is armed. TMP1 is
++    // free here (the entry code below overwrites it).
 +    constexpr size_t InterruptPageOffset =
 +      offsetof(FEXCore::Core::InternalThreadState, InterruptFaultPage) - offsetof(FEXCore::Core::InternalThreadState, BaseFrameState);
-+    if constexpr (InterruptPageOffset <= 32760) {
-+      str(ARMEmitter::XReg::zr, STATE, InterruptPageOffset);
-+    } else {
-+      str(ARMEmitter::QReg::q0, STATE, InterruptPageOffset);
-+    }
++    static_assert(InterruptPageOffset <= 32760 && InterruptPageOffset % 8 == 0);
++    ldr(TMP1, STATE, InterruptPageOffset);
++    ldr(TMP1.W(), TMP1, 0);
 +  }
 +#endif
    // Get the address of the JITCodeHeader and store in to the core state.
@@ -292,7 +327,7 @@
  #include <functional>
  #include <stdint.h>
  
-@@ -20,6 +21,33 @@
+@@ -20,6 +21,38 @@
  class ThunkHandler;
  } // namespace FEXCore
  
@@ -313,11 +348,16 @@
 +// ask it at every block entry; native builds from the fault handler below.
 +FEX_DEFAULT_VISIBILITY uint64_t PreemptTarget(uint64_t pc, uint64_t state);
 +// Native builds: when set before code is compiled, every block entry starts
-+// with a store to its thread's InterruptFaultPage. The embedder preempts a
-+// running thread by making that page read-only; its SIGSEGV/SIGBUS handler
-+// restores the page and continues at PreemptTarget(pc, x28) when non-zero.
++// by loading a pointer from its thread's (otherwise unused) InterruptFaultPage
++// and then loading through it. ArmPreempt(Thread, true) points it at a guard
++// page with no access (works with 4 KiB and 16 KiB host pages, no syscall);
++// the embedder's SIGSEGV/SIGBUS handler sees IsPreemptFault(si_addr), calls
++// ArmPreempt(Thread, false) and continues at PreemptTarget(pc - 4, x28), or
++// at pc - 4 (the entry again) when that is zero. Threads are disarmed when
++// created; the embedder disarms a thread before running it.
 +FEX_DEFAULT_VISIBILITY extern std::atomic<bool> NativePreemptCheck;
-+FEX_DEFAULT_VISIBILITY void* InterruptFaultPage(FEXCore::Core::InternalThreadState* Thread, size_t* Size);
++FEX_DEFAULT_VISIBILITY void ArmPreempt(FEXCore::Core::InternalThreadState* Thread, bool Pending);
++FEX_DEFAULT_VISIBILITY bool IsPreemptFault(const void* Address);
 +// Diagnostics (simulator builds): guest RIP of the block whose host entry is
 +// exactly 'host', or 0.
 +FEX_DEFAULT_VISIBILITY uint64_t GuestOfHost(uint64_t host);

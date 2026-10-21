@@ -48,21 +48,20 @@ private:
     void* ptr_;
 };
 #if !defined(VIXL_SIMULATOR)
-// Native preemption (FEXCore::MaxPS4::NativePreemptCheck): faults on the
-// running thread's read-only interrupt page continue at PreemptTarget.
+// Native preemption (FEXCore::MaxPS4::NativePreemptCheck): the armed entry
+// load faults on the guard page and continues at PreemptTarget.
 static std::atomic<FEXCore::Core::InternalThreadState*> preempt_running{nullptr};
 static void preempt_fault(int, siginfo_t* info, void* context) {
     auto* thread=preempt_running.load();
-    size_t size=0; auto* page=thread?static_cast<uint8_t*>(FEXCore::MaxPS4::InterruptFaultPage(thread,&size)):nullptr;
-    auto* at=static_cast<uint8_t*>(info->si_addr);
-    if (!page || at<page || at>=page+size) std::abort();
-    ::mprotect(page,size,PROT_READ|PROT_WRITE);
+    if (!thread || !FEXCore::MaxPS4::IsPreemptFault(info->si_addr)) std::abort();
+    FEXCore::MaxPS4::ArmPreempt(thread,false);
     auto* uc=static_cast<ucontext_t*>(context);
 #if defined(__APPLE__)
     auto& pc=uc->uc_mcontext->__ss.__pc; const uint64_t x28=uc->uc_mcontext->__ss.__x[28];
 #else
     auto& pc=uc->uc_mcontext.pc; const uint64_t x28=uc->uc_mcontext.regs[28];
 #endif
+    pc-=4; // the entry's first load
     if (const uint64_t target=FEXCore::MaxPS4::PreemptTarget(pc,x28)) pc=target;
 }
 #endif
@@ -229,6 +228,7 @@ int main() {
                 FEXCore::Core::GuestMemoryFaultData fault{}; cpu.GuestMemoryFaultRecord=&fault;
                 std::atomic<bool> done{false};
 #if !defined(VIXL_SIMULATOR)
+                FEXCore::MaxPS4::ArmPreempt(current,false);
                 preempt_running=current;
 #endif
                 std::thread ticker([&] {
@@ -236,15 +236,13 @@ int main() {
                     if (done) return;
                     FEXCore::MaxPS4::PreemptRequest=1;
 #if !defined(VIXL_SIMULATOR)
-                    size_t size=0; void* page=FEXCore::MaxPS4::InterruptFaultPage(current,&size);
-                    ::mprotect(page,size,PROT_READ);
+                    FEXCore::MaxPS4::ArmPreempt(current,true);
 #endif
                 });
                 ctx->ExecuteThread(current); done=true; ticker.join();
 #if !defined(VIXL_SIMULATOR)
                 preempt_running=nullptr;
-                size_t size=0; void* page=FEXCore::MaxPS4::InterruptFaultPage(current,&size);
-                ::mprotect(page,size,PROT_READ|PROT_WRITE);
+                FEXCore::MaxPS4::ArmPreempt(current,false);
 #endif
                 FEXCore::MaxPS4::PreemptRequest=0;
                 cpu.GuestMemoryFaultRecord=nullptr;
