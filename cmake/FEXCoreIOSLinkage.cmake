@@ -20,6 +20,7 @@ function(maxps4_complete_fexcore_linkage)
       "${NATIVE}/maxps4_jit_memory.cpp"
       "${NATIVE}/maxps4_fex_runtime.cpp"
       "${NATIVE}/maxps4_game_session.cpp"
+      "${NATIVE}/GCNMetalPixelOffloadHost.mm"
       "${NATIVE}/maxps4_guest_elf.cpp"
       "${NATIVE}/maxps4_ps4_libkernel.cpp"
       "${NATIVE}/maxps4_ps4_virtual_memory.cpp"
@@ -34,6 +35,10 @@ function(maxps4_complete_fexcore_linkage)
       "${CMAKE_SOURCE_DIR}/Source/Common/HostFeatures.cpp"
       "${CMAKE_SOURCE_DIR}/Source/Common/CPUInfo.cpp")
     target_compile_features(MaxPS4FEXRuntime PRIVATE cxx_std_23)
+    # The game session's GPU pixel backend (Metal), compiled as Objective-C++.
+    set_source_files_properties("${NATIVE}/GCNMetalPixelOffloadHost.mm" PROPERTIES
+      LANGUAGE CXX COMPILE_OPTIONS "-xobjective-c++;-fobjc-arc")
+    target_link_options(MaxPS4FEXRuntime PRIVATE "LINKER:-framework,Foundation" "LINKER:-framework,Metal")
     target_compile_definitions(MaxPS4FEXRuntime PRIVATE
       ARCHITECTURE_arm64=1 MAXPS4_PLATFORM_JIT_ONLY=1)
     target_include_directories(MaxPS4FEXRuntime PRIVATE
