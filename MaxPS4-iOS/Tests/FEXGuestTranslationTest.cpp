@@ -36,8 +36,18 @@
 #include <atomic>
 #include <csignal>
 #include <sys/mman.h>
+#include <unistd.h>
 
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); std::abort(); } } while (0)
+// The compatibility consumer fixture (OrbisV4CompatibilityFixture.h) places
+// code and data 4 KiB apart: on 16 KiB hosts (Apple) the bridge refuses the
+// shared page. Those provider cases are skipped there (run on Linux).
+static bool fixture_needs_small_pages(const maxps4::OrbisPRXFEXBridge& bridge) {
+    const long page=sysconf(_SC_PAGESIZE);
+    CHECK(page>4096 && bridge.diagnostic()=="Guest mappings collide at host-page granularity");
+    std::printf("SKIP compatibility consumer fixture on %ld-byte host pages (code/data 4 KiB apart)\n",page);
+    return true;
+}
 class CallRetMemory {
 public:
     CallRetMemory() : ptr_(::mmap(nullptr,size(),PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0)) { CHECK(ptr_!=MAP_FAILED); }
@@ -445,7 +455,7 @@ int main() {
                 {{{"compat-app.prx",{path}},app.data(),app.size()},0x400000},
                 {{{path,{}},provider.data(),provider.size()},bias}}, {},image,error,32*1024*1024,&linked));
             CHECK(linked.committed && linked.resolvedImports==(errorDialog ? 4U : common ? 1U : 5U));
-            maxps4::OrbisPRXFEXBridge bridge;if(!bridge.map(image))std::fprintf(stderr,"bridge.map: %s\n",bridge.diagnostic().c_str());CHECK(bridge.memory());
+            maxps4::OrbisPRXFEXBridge bridge;if(!bridge.map(image)){if(fixture_needs_small_pages(bridge))continue;}CHECK(bridge.memory());
             auto owner=bridge.make_translation([&]{ctx->ClearCodeCache(thread,false);ctx->ClearCodeCache(second,false);});
             constexpr uint64_t stack=0x700000000ULL;
             CHECK(owner->reserve(stack,page)==0 && owner->map(stack,page,6)==0);
@@ -555,7 +565,7 @@ int main() {
                 {{{"np-app.prx",{path}},app.data(),app.size()},0x400000},
                 {{{path,{}},provider.data(),provider.size()},bias}}, {},image,error,32*1024*1024,&linked));
             CHECK(linked.committed && linked.resolvedImports==nids.size());
-            maxps4::OrbisPRXFEXBridge bridge;if(!bridge.map(image))std::fprintf(stderr,"bridge.map: %s\n",bridge.diagnostic().c_str());CHECK(bridge.memory());
+            maxps4::OrbisPRXFEXBridge bridge;if(!bridge.map(image)){if(fixture_needs_small_pages(bridge))continue;}CHECK(bridge.memory());
             auto owner=bridge.make_translation([&]{ctx->ClearCodeCache(thread,false);ctx->ClearCodeCache(second,false);});
             constexpr uint64_t stack=0x700000000ULL;
             const uint64_t output=stack+16*page;
@@ -661,7 +671,7 @@ int main() {
                 CHECK(maxps4::OrbisLinker::link({
                     {{{"local-app.prx",{module.path()}},app.data(),app.size()},0x400000},
                     {{{module.path(),{}},provider.data(),provider.size()},maxps4::OrbisV4LocalServices::bias(mi)}}, {},image,error));
-                maxps4::OrbisPRXFEXBridge bridge;if(!bridge.map(image))std::fprintf(stderr,"bridge.map: %s\n",bridge.diagnostic().c_str());CHECK(bridge.memory());
+                maxps4::OrbisPRXFEXBridge bridge;if(!bridge.map(image)){if(fixture_needs_small_pages(bridge))continue;}CHECK(bridge.memory());
                 auto owner=bridge.make_translation([&]{ctx->ClearCodeCache(thread,false);ctx->ClearCodeCache(second,false);});
                 constexpr uint64_t stack=0x700000000ULL;const uint64_t output=stack+16*page;
                 CHECK(owner->reserve(stack,page)==0 && owner->map(stack,page,6)==0);
@@ -763,7 +773,7 @@ int main() {
                 {{{"trophy-app.prx",{T::path}},app.data(),app.size()},0x400000},
                 {{{T::path,{}},provider.data(),provider.size()},T::bias}}, {},image,error,32*1024*1024,&linked));
             CHECK(linked.committed && linked.resolvedImports==4);
-            maxps4::OrbisPRXFEXBridge bridge;if(!bridge.map(image))std::fprintf(stderr,"bridge.map: %s\n",bridge.diagnostic().c_str());CHECK(bridge.memory());
+            maxps4::OrbisPRXFEXBridge bridge;if(!bridge.map(image)){if(fixture_needs_small_pages(bridge))continue;}CHECK(bridge.memory());
             auto owner=bridge.make_translation([&]{ctx->ClearCodeCache(thread,false);ctx->ClearCodeCache(second,false);});
             constexpr uint64_t stack=0x700000000ULL;
             const uint64_t output=stack+16*page;
@@ -836,7 +846,7 @@ int main() {
         }
         std::puts("PASS NpTrophy eight real GOT calls: truthful unsupported/invalid objects, null/scalar/64-bit options, RO/RX/hole outputs untouched, no success/handle/context/trophy/account/PSN state");
         // Offline NpCommon utility contracts: no account/session exists.
-        {
+        do {
             using NP=maxps4::OrbisV4NpCommon;
             const auto provider=NP::provider();
             const auto app=compat_fixture::consumer("libSceNpCommon",NP::path,
@@ -846,7 +856,7 @@ int main() {
                 {{{"np-app.prx",{NP::path}},app.data(),app.size()},0x400000},
                 {{{NP::path,{}},provider.data(),provider.size()},NP::bias}}, {},image,error,32*1024*1024,&linked));
             CHECK(linked.committed && linked.resolvedImports==2);
-            maxps4::OrbisPRXFEXBridge bridge;if(!bridge.map(image))std::fprintf(stderr,"bridge.map: %s\n",bridge.diagnostic().c_str());CHECK(bridge.memory());
+            maxps4::OrbisPRXFEXBridge bridge;if(!bridge.map(image)){if(fixture_needs_small_pages(bridge))continue;}CHECK(bridge.memory());
             auto owner=bridge.make_translation([&]{ctx->ClearCodeCache(thread,false);ctx->ClearCodeCache(second,false);});
             constexpr uint64_t stack=0x700000000ULL;
             const uint64_t output=stack+16*page;
@@ -908,7 +918,7 @@ int main() {
             std::array<uint8_t,36> after{};CHECK(owner->read(output,after.data(),after.size())==0 && after==left);
             owner->close();owner.reset();bridge.unload();
             std::puts("PASS NpCommon two real GOT calls: offline bounded identifier comparisons, null/mismatch errors, NUL/tail/padding, non-ASCII, RO/unaligned/hole/overflow and no guest writes or PSN state");
-        }
+        } while (false);
         // Partial GnmDriver: actual guest construction, never a GPU submit.
         for(size_t first=0;first<16;first+=4){
             using Gnm=maxps4::OrbisV4GnmDriver;
@@ -920,7 +930,7 @@ int main() {
                 {{{"gnm-app.prx",{Gnm::path}},app.data(),app.size()},0x400000},
                 {{{Gnm::path,{}},provider.data(),provider.size()},Gnm::bias}}, {},image,error,32*1024*1024,&linked));
             CHECK(linked.committed && linked.resolvedImports==4);
-            maxps4::OrbisPRXFEXBridge bridge;if(!bridge.map(image))std::fprintf(stderr,"bridge.map: %s\n",bridge.diagnostic().c_str());CHECK(bridge.memory());
+            maxps4::OrbisPRXFEXBridge bridge;if(!bridge.map(image)){if(fixture_needs_small_pages(bridge))continue;}CHECK(bridge.memory());
             auto owner=bridge.make_translation([&]{ctx->ClearCodeCache(thread,false);ctx->ClearCodeCache(second,false);});
             constexpr uint64_t stack=0x700000000ULL;
             const uint64_t output=stack+16*page;
