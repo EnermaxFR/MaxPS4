@@ -19,6 +19,7 @@ function(maxps4_complete_fexcore_linkage)
     add_library(MaxPS4FEXRuntime SHARED
       "${NATIVE}/maxps4_jit_memory.cpp"
       "${NATIVE}/maxps4_fex_runtime.cpp"
+      "${NATIVE}/maxps4_game_session.cpp"
       "${NATIVE}/maxps4_guest_elf.cpp"
       "${NATIVE}/maxps4_ps4_libkernel.cpp"
       "${NATIVE}/maxps4_ps4_virtual_memory.cpp"
@@ -37,7 +38,7 @@ function(maxps4_complete_fexcore_linkage)
       ARCHITECTURE_arm64=1 MAXPS4_PLATFORM_JIT_ONLY=1)
     target_include_directories(MaxPS4FEXRuntime PRIVATE
       "${NATIVE}" "${NATIVE}/shadps4" "${MAXPS4_AETHER_SOURCE}/src"
-      "${CMAKE_BINARY_DIR}/generated")
+      "${CMAKE_BINARY_DIR}/generated" "${CMAKE_SOURCE_DIR}/Source")
     target_link_libraries(MaxPS4FEXRuntime PRIVATE
       FEXCore FEXCore_Base JemallocLibs range-v3::range-v3)
     target_link_options(MaxPS4FEXRuntime PRIVATE "LINKER:-undefined,error")

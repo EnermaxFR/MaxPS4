@@ -1,5 +1,6 @@
 #pragma once
 #include "maxps4_fex_runtime.h"
+#include "maxps4_game_session.h"
 #include "PM4MetalDrawBridge.h"
 #include "PS4PKGBridge.h"
 
