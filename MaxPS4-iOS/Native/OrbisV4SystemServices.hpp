@@ -858,6 +858,27 @@ struct OrbisV4SystemServices {
             std::memcpy(&y, &yb, 4); std::memcpy(&x, &xb, 4);
             const float v = std::atan2(y, x); uint32_t vb; std::memcpy(&vb, &v, 4);
             return ok(vb); });
+        // HLE RSDK FillScreen loop (OrbisV4ProcessBatch): rdi RGB565 pixels, edx
+        // count, r9 blendLookupTable (u16[256][32]); rcx/rsi/r8 = (channel colour
+        // << 16) | alpha for R/G/B. Same 16-bit arithmetic as the guest loop.
+        services.implement("maxps4_rsdk_fill", [](const Registers& r, Memory& m) {
+            const uint64_t pixels = r.rdi, count = uint32_t(r.rdx), table = r.r9;
+            const uint32_t alpha[3] = {uint32_t(r.rcx & 0xffff), uint32_t(r.rsi & 0xffff), uint32_t(r.r8 & 0xffff)};
+            const uint32_t colour[3] = {uint32_t(r.rcx >> 16 & 0xffff), uint32_t(r.rsi >> 16 & 0xffff), uint32_t(r.r8 >> 16 & 0xffff)};
+            size_t entries = 255 * 32 + 32;
+            for (int c = 0; c < 3; ++c) entries = std::max<size_t>(entries, colour[c] + alpha[c] * 32 + 1);
+            std::vector<uint16_t> blend(entries), px(static_cast<size_t>(count));
+            if (m.read_data(table, blend.data(), entries * 2) || m.read_data(pixels, px.data(), px.size() * 2))
+                return trap("maxps4_rsdk_fill: guest range not accessible");
+            const uint16_t* keep[3]; uint16_t add[3];
+            for (int c = 0; c < 3; ++c) { keep[c] = blend.data() + (255 - alpha[c]) * 32; add[c] = blend[colour[c] + alpha[c] * 32]; }
+            for (auto& p : px) {
+                const uint16_t red = uint16_t(keep[0][p >> 11] + add[0]), green = uint16_t(keep[1][(p >> 6) & 31] + add[1]),
+                               blue = uint16_t(keep[2][p & 31] + add[2]);
+                p = uint16_t(blue | uint32_t(green) << 6 | uint32_t(red) << 11);
+            }
+            if (m.write_data(pixels, px.data(), px.size() * 2)) return trap("maxps4_rsdk_fill: guest range not accessible");
+            return ok(0); });
         // sceRtcGetCurrentTick(SceRtcTick*): UTC microseconds since 0001-01-01.
         services.implement("sceRtcGetCurrentTick", [](const Registers& r, Memory& m) {
             using namespace std::chrono;

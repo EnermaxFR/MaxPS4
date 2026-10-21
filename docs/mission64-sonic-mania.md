@@ -58,6 +58,10 @@ présenter des images mais n'a ouvert aucun fichier depuis : la scène suivante 
 - `atan2f` de la libc redirigé de la même façon vers `maxps4_atan2f` (`MAXPS4_HLE_MATH=0` pour
   revenir en arrière) ; les redirections sont décrites dans une table de `OrbisV4ProcessBatch.hpp`.
   Valeurs vérifiées sur 65 536 appels ; le gain de temps n'est pas mesuré à part.
+- Boucle de fondu RSDK (`FillScreen`, `eboot+0x21d23b`, repérée par ses 185 octets) remplacée en
+  mémoire par le service hôte `maxps4_rsdk_fill` (`MAXPS4_HLE_RSDK=0` pour revenir en arrière).
+  Mesure sur 10 min, un run seul : 163 images contre 111, écart pendant le fondu 3,10 s contre
+  5,43 s ; les 111 images communes sont identiques au pixel près (empreintes FNV-64).
 - `MAXPS4_TSO=0` désactive l'ordre mémoire x86 (sans risque : tous les threads invités tournent sur
   un seul thread hôte). Mesure sur 10 min, un run seul par réglage : 123 images contre 111, écart par
   image 3,07 s contre 3,13 s, aucun plantage. Gain dans le bruit, le défaut reste TSO activé.

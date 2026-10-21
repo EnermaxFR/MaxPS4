@@ -34,14 +34,36 @@ struct OrbisV4ProcessBatch {
     static size_t stateFor(const std::string& path) { return path == "libkernel.prx" ? kernelState : providerState; }
     // libc functions served on the host (see buildImpl). serviceNid: the
     // identity of the libkernel stub (not a real PS4 NID).
+    // pattern: code found by its bytes instead of a libc NID (hex, ".." = any byte).
     struct Redirect {
-        enum class Form { Jump, FloatBinary };
+        enum class Form { Jump, FloatBinary, RsdkFillLoop };
         const char* nid; const char* service; const char* serviceNid; Form form; const char* switchVar; uint64_t minSize;
+        const char* pattern;
     };
+    // RSDK v5 FillScreen (Sonic Mania): the per-pixel RGB565 fade loop, from
+    // its "lea r12, blendLookupTable" to the loop end (185 bytes).
+    static constexpr const char* rsdkFillLoop =
+        "4c8d25........baff0000004529c141c1e005ffc14429d241c1e20541c1e1054963fac1e2054801fb4863d2450fb7145cbbff000000"
+        "4d8d1c5429f3c1e605c1e3054863f64863d34901f64963f14d8d2c544963d0470fb73474498d347441b8060500004901d7430fb73c7c"
+        "660f1f8400000000000fb728ffc9c4e238f7d54889eb66418b54550083e51f48c1eb0b668b2c6e66418b1c5b664401f2c1e2066601fd"
+        "664401d3c1e30b09da09d56689284883c00283f9017fbc";
     static constexpr Redirect redirects[] = {
-        {"Q3VBxCXhUHs", "maxps4_memcpy", "Q3VBxCXhUHs", Redirect::Form::Jump, "MAXPS4_HLE_MEMCPY", 5},        // memcpy
-        {"EH-x713A99c", "maxps4_atan2f", "MaxPS4atan2", Redirect::Form::FloatBinary, "MAXPS4_HLE_MATH", 18}, // atan2f
+        {"Q3VBxCXhUHs", "maxps4_memcpy", "Q3VBxCXhUHs", Redirect::Form::Jump, "MAXPS4_HLE_MEMCPY", 5, nullptr},        // memcpy
+        {"EH-x713A99c", "maxps4_atan2f", "MaxPS4atan2", Redirect::Form::FloatBinary, "MAXPS4_HLE_MATH", 18, nullptr}, // atan2f
+        {"", "maxps4_rsdk_fill", "MaxPS4rsdkF", Redirect::Form::RsdkFillLoop, "MAXPS4_HLE_RSDK", 0, rsdkFillLoop},
     };
+    // Offset of the first match of a Redirect pattern in bytes, or SIZE_MAX.
+    static size_t findPattern(const uint8_t* bytes, size_t size, const char* pattern) {
+        std::vector<int> want;
+        for (const char* c = pattern; c[0] && c[1]; c += 2)
+            want.push_back(c[0] == '.' ? -1 : int(std::stoul(std::string(c, 2), nullptr, 16)));
+        for (size_t i = 0; i + want.size() <= size; ++i) {
+            size_t k = 0;
+            while (k < want.size() && (want[k] < 0 || bytes[i + k] == want[k])) ++k;
+            if (k == want.size()) return i;
+        }
+        return SIZE_MAX;
+    }
     static std::string hexText(uint64_t v) { char b[24]; std::snprintf(b, sizeof b, "%llx", (unsigned long long)v); return b; }
     std::vector<std::unique_ptr<std::vector<uint8_t>>> storage;
     std::vector<OrbisLinker::Input> inputs;
@@ -151,14 +173,23 @@ private:
         // HLE: some of the title's own libc functions are redirected (in
         // memory, never on disk) to host services served by libkernel stubs,
         // because simulating them dominates loading: memcpy (Sonic Mania copies
-        // 183 MB) and atan2f (RSDK's trigonometric tables). MAXPS4_HLE_MEMCPY=0
-        // and MAXPS4_HLE_MATH=0 keep the guest implementations.
+        // 183 MB) and atan2f (RSDK's trigonometric tables); plus RSDK's screen
+        // fade loop, found by its code bytes. MAXPS4_HLE_MEMCPY=0, MAXPS4_HLE_MATH=0
+        // and MAXPS4_HLE_RSDK=0 keep the guest implementations.
         struct Hle { const Redirect* r; size_t module; uint64_t entry; };
         std::vector<Hle> hles;
         {
             auto off = [](const char* v) { const char* e = std::getenv(v); return e && std::string(e) == "0"; };
             for (const auto& r : redirects) {
                 if (off(r.switchVar)) continue;
+                if (r.pattern) {
+                    for (size_t i = 0; i < real; ++i) for (const auto& seg : modules[i].meta.segments) {
+                        if (seg.type != 1 || !(seg.flags & 1) || seg.offset + seg.filesz > modules[i].bytes.size()) continue;
+                        const size_t at = findPattern(modules[i].bytes.data() + seg.offset, size_t(seg.filesz), r.pattern);
+                        if (at != SIZE_MAX) { hles.push_back({&r, i, seg.address + at}); goto next; }
+                    }
+                    continue;
+                }
                 for (size_t i = 0; i < real; ++i) for (const auto& s : modules[i].meta.symbols)
                     if (s.defined && s.nid == r.nid && s.library == "libc" && s.kind == 2 && s.size >= r.minSize) { hles.push_back({&r, i, s.value}); goto next; }
                 next:;
@@ -238,7 +269,26 @@ private:
             };
             bool ok = stub != 0;
             if (ok && h.r->form == Redirect::Form::Jump) ok = rel32(0xe9, 0);
-            else if (ok) {
+            else if (ok && h.r->form == Redirect::Form::RsdkFillLoop) {
+                // The loop's registers become the service arguments: rdi pixels,
+                // edx count, r9 blendLookupTable (same rel32 as the original lea
+                // r12), rcx/rsi/r8 = (channel colour << 16) | alpha for R/G/B.
+                // Then jump to the function epilogue (pattern end).
+                bool found = false;
+                for (const auto& seg : m.meta.segments)
+                    if (seg.type == 1 && h.entry >= seg.address && h.entry + 7 <= seg.address + seg.filesz) {
+                        const uint8_t* lea = m.bytes.data() + seg.offset + (h.entry - seg.address);
+                        code = {0x4c, 0x8d, 0x0d, lea[3], lea[4], lea[5], lea[6]}; found = true; break;
+                    }
+                const uint8_t moves[] = {0x48, 0x89, 0xc7, 0x89, 0xca,                         // mov rdi, rax; mov edx, ecx
+                                         0x48, 0xc1, 0xe3, 0x10, 0x4c, 0x09, 0xd3, 0x48, 0x89, 0xd9, // rcx = rbx << 16 | r10
+                                         0x49, 0xc1, 0xe6, 0x10, 0x49, 0x09, 0xf6, 0x4c, 0x89, 0xf6, // rsi = r14 << 16 | rsi
+                                         0x49, 0xc1, 0xe7, 0x10, 0x4d, 0x09, 0xc7, 0x4d, 0x89, 0xf8}; // r8 = r15 << 16 | r8
+                code.insert(code.end(), moves, moves + sizeof moves);
+                ok = found && rel32(0xe8, code.size());                                // call stub
+                const int32_t back = int32_t(std::strlen(h.r->pattern) / 2) - int32_t(code.size() + 5);
+                code.push_back(0xe9); for (int k = 0; k < 4; ++k) code.push_back(uint8_t(uint32_t(back) >> (8 * k)));
+            } else if (ok) {
                 code = {0x66, 0x0f, 0x7e, 0xc7, 0x66, 0x0f, 0x7e, 0xce};   // movd edi, xmm0; movd esi, xmm1
                 ok = rel32(0xe8, code.size());                                 // call stub
                 const uint8_t tail[] = {0x66, 0x0f, 0x6e, 0xc0, 0xc3};         // movd xmm0, eax; ret
