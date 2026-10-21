@@ -73,7 +73,7 @@ int main() {
     bad=prepared; bad.modules[0].regions[0].flags=1; rejected(bad); // execute-only unsupported
     bad=prepared; bad.modules[1].regions[0].address=UINT64_MAX; rejected(bad);
     bad=prepared; bad.modules[1].regions[0].address=(uint64_t{1}<<47)-1; rejected(bad);
-    bad=prepared; bad.modules[1].regions[0].address=0x4000000; rejected(bad); // sparse span budget
+    bad=prepared; bad.modules[1].regions[0].address=0x20000000; rejected(bad); // sparse span budget (256 MiB)
     bad=prepared; bad.modules[0].regions[0].bytes.clear(); rejected(bad);
     rejected(OrbisPRXPreparation{});
     bad=prepared; bad.modules[0].metadata.segments[0].type=7; rejected(bad);

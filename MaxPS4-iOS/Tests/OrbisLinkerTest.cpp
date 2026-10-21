@@ -1,6 +1,9 @@
 #include "../Native/OrbisLinker.hpp"
 #include "../Native/OrbisLinkerBridge.h"
 #include "OrbisLinkerFixture.h"
+#include "OrbisEHFrameFixture.h"
+#include "OrbisDynamicTagsFixture.h"
+#include "OrbisSymbolsFixture.h"
 #include <iostream>
 #include <cstdlib>
 #include <fstream>
@@ -36,7 +39,7 @@ int main(int argc, char** argv) {
     check(Linker::link(reversed,{},reordered,diagnostic),"reversed input links");
     check(reordered.modules[0].path==image.modules[0].path && value(reordered,0x102000)==value(image,0x102000),"deterministic order and bytes");
     auto reject = [&](std::vector<Linker::Input> inputs, const std::string& expected, size_t budget = 64*1024*1024) {
-        check(!Linker::link(inputs,{},image,diagnostic,budget),"expected rejection");
+        check(!Linker::link(inputs,{},image,diagnostic,budget),("expected rejection: "+expected).c_str());
         check(diagnostic.find(expected)!=std::string::npos,diagnostic.c_str());
         check(image.modules.size()==2 && value(image,0x102000)==0x201000,"failed link preserves complete previous image");
     };
@@ -191,7 +194,321 @@ int main(int argc, char** argv) {
     setTag(provider,0x6100000d,uint64_t(moduleOffset-0x600)|(uint64_t{0x200}<<32)|(uint64_t{1}<<48));
     reject(batch(),"incompatible"); provider=make(true);
     // Static executable preparation needs no invented dynamic tables/imports.
-    put(consumer,64+3*56,3,4); reject(batch(),"unsupported runtime program header"); consumer=original;
+    // PT_SHLIB (5) has unspecified semantics and stays refused (PT_INTERP is accepted since mission 49).
+    put(consumer,64+3*56,5,4); reject(batch(),"unsupported runtime program header 5"); consumer=original;
+    // PT_SCE_MODULE_PARAM: exact 24-byte view of the RW PT_LOAD (mission 46).
+    // Layout mirrors libc.prx/libSceFios2.prx; the view is never mapped itself.
+    auto withParam = [&](std::vector<uint8_t> b, uint64_t address = 0x2010) {
+        put(b,56,5,2); const size_t p = 64+4*56;
+        put(b,p,0x61000002,4); put(b,p+4,4,4); put(b,p+8,0x300+address-0x2000); put(b,p+16,address);
+        put(b,p+32,24); put(b,p+40,24); put(b,p+48,8);
+        const size_t f = 0x300+address-0x2000;
+        put(b,f,24); put(b,f+8,0x3C13F4BF,4); put(b,f+12,1,4); put(b,f+16,0x04008061,4); put(b,f+20,0,4);
+        return b;
+    };
+    const auto paramProvider = withParam(make(true)), paramConsumer = withParam(original);
+    provider = paramProvider; consumer = paramConsumer;
+    Linker::Image params; Linker::Report paramReport;
+    check(Linker::link(batch(),{},params,diagnostic,4096,&paramReport),diagnostic.c_str());
+    check(paramReport.moduleParams==2 && paramReport.segments==4 && paramReport.memoryBytes==0x400 &&
+        params.mappings().size()==4,"module param adds no mapping or memory");
+    check(params.modules[0].moduleParam.present && params.modules[0].moduleParam.address==0x2010 &&
+        params.modules[0].moduleParam.sdkVersion==0x04008061 && params.modules[1].moduleParam.version==1,"module param recorded");
+    check(value(params,0x202010)==24 && value(params,0x102010)==24 && value(params,0x102000)==0x201000,
+        "module param bytes come from PT_LOAD; ordinary relocation unaffected");
+    check(paramReport.text().find("sans écriture) : 2")!=std::string::npos,"module param reported");
+    auto rejectParam = [&](size_t offset, uint64_t v, size_t n, const char* expected) {
+        consumer = paramConsumer; put(consumer,offset,v,n); reject(batch(),expected); consumer = paramConsumer;
+    };
+    const size_t ph = 64+4*56, field = 0x310;
+    rejectParam(ph+4,6,4,"read-only flags");
+    rejectParam(ph+32,32,8,"24-byte"); rejectParam(ph+40,32,8,"24-byte");
+    rejectParam(ph+48,4,8,"alignment"); rejectParam(ph+16,0x2014,8,"alignment");
+    rejectParam(ph+16,0x20f0,8,"outside loadable"); rejectParam(ph+16,0x3000,8,"outside loadable");
+    rejectParam(ph+16,0x1010,8,"executable owner"); rejectParam(ph+8,0x318,8,"file offset differs");
+    rejectParam(field,32,8,"size field"); rejectParam(field+8,0x3C13F4BE,4,"magic");
+    rejectParam(field+12,2,4,"unsupported version"); rejectParam(field+20,1,4,"reserved field");
+    // File-backed requirement: shrink PT_LOAD file bytes so the view lands in BSS.
+    rejectParam(64+56+32,0x10,8,"file-backed");
+    // A RELRO owner is not the verified profile.
+    rejectParam(64+56,0x61000010,4,"PT_LOAD owner");
+    // The verified layout has no pointer: any relocation into it is refused.
+    rejectParam(0x900,0x2018,8,"relocation into PT_SCE_MODULE_PARAM");
+    rejectParam(0x900,0x200c,8,"relocation into PT_SCE_MODULE_PARAM");
+    consumer = paramConsumer; put(consumer,0x900,0x2028); // Adjacent (after) write is allowed.
+    check(Linker::link(batch(),{},params,diagnostic),diagnostic.c_str()); check(value(params,0x102028)==0x201000,"adjacent relocation");
+    consumer = paramConsumer; put(consumer,0x900,0x2008); // Adjacent (before) write is allowed.
+    check(Linker::link(batch(),{},params,diagnostic),diagnostic.c_str()); check(value(params,0x102008)==0x201000,"adjacent relocation before");
+    // Duplicate header, TLS overlap: refused before any write.
+    consumer = paramConsumer; put(consumer,56,6,2); std::copy(consumer.begin()+ph,consumer.begin()+ph+56,consumer.begin()+ph+56);
+    reject(batch(),"duplicate header");
+    consumer = paramConsumer; put(consumer,56,6,2);
+    { const size_t t=ph+56; put(consumer,t,7,4); put(consumer,t+4,4,4); put(consumer,t+8,0x300); put(consumer,t+16,0x2000);
+      put(consumer,t+32,0); put(consumer,t+40,0x18); put(consumer,t+48,8); }
+    reject(batch(),"TLS not supported");
+    { std::string why;
+      // TLS overlap is diagnosed by the module-param validator itself as well.
+      maxps4::PS4ExecutableImage staged; check(!staged.load(consumer.data(),consumer.size()),"TLS fixture stages");
+      maxps4::OrbisModuleParam::Value v; check(!maxps4::OrbisModuleParam::validate(staged,v,why) && why.find("overlaps PT_TLS")!=std::string::npos,why.c_str());
+    }
+    // Process param (PT_SCE_PROCPARAM) remains an explicit refusal.
+    consumer = paramConsumer; put(consumer,ph,0x61000001,4); reject(batch(),"PT_SCE_PROCPARAM: 72- or 80-byte file-backed profile required");
+    provider = make(true); consumer = original;
+    // PT_GNU_EH_FRAME (mission 47): unwinding metadata viewed inside text PT_LOAD.
+    auto withEH = [](std::vector<uint8_t> b) { eh_fixture::addEHFrame(b,4,0x1000,0x200); return b; };
+    const auto ehProvider = withEH(make(true)), ehConsumer = withEH(original);
+    provider = ehProvider; consumer = ehConsumer;
+    Linker::Image eh; Linker::Report ehReport;
+    check(Linker::link(batch(),{},eh,diagnostic,4096,&ehReport),diagnostic.c_str());
+    check(ehReport.ehFrameHeaders==2 && ehReport.segments==4 && ehReport.memoryBytes==0x400 && eh.mappings().size()==4,
+        "EH_FRAME adds no mapping or memory");
+    { const auto& v = eh.modules[1].ehFrameHeader;
+      check(v.present && v.address==0x10e0 && v.size==28 && v.ehFrame==0x10a0 && v.fdeCount==2 &&
+          v.firstLocation==0x1000 && v.lastLocation==0x1010,"EH_FRAME recorded module-relative"); }
+    check(eh.translate(0x1010e0,28,5)!=nullptr && value(eh,0x1010e0)==0x3b031b01ULL+(uint64_t(uint32_t(-0x44))<<32),
+        "EH_FRAME bytes are read from the RX text mapping");
+    check(!eh.translate(0x1010e0,1,2),"EH_FRAME never writable");
+    check(ehReport.text().find("aucun unwinder) : 2")!=std::string::npos,"EH_FRAME reported");
+    const size_t ehPh = 64+4*56, hdr = eh_fixture::headerFile(0x200);
+    auto rejectEH = [&](size_t offset, uint64_t v, size_t n, const char* expected) {
+        consumer = ehConsumer; put(consumer,offset,v,n); reject(batch(),expected); consumer = ehConsumer;
+    };
+    rejectEH(ehPh+4,5,4,"read-only flags"); rejectEH(ehPh+4,6,4,"read-only flags");
+    rejectEH(ehPh+40,32,8,"at least 12 bytes"); rejectEH(ehPh+32,8,8,"at least 12 bytes");
+    rejectEH(ehPh+48,8,8,"4-byte alignment"); rejectEH(ehPh+16,0x10e2,8,"4-byte alignment");
+    rejectEH(ehPh+16,0x10f0,8,"outside loadable"); rejectEH(ehPh+16,0x3000,8,"outside loadable");
+    rejectEH(ehPh+16,0x2000,8,"readable non-writable owner"); rejectEH(ehPh+8,0x2e4,8,"file offset differs");
+    rejectEH(64+32,0xf0,8,"file-backed");
+    rejectEH(hdr,2,1,"unsupported version"); rejectEH(hdr+1,0x03,1,"pointer encodings");
+    rejectEH(hdr+2,0x0b,1,"pointer encodings"); rejectEH(hdr+3,0x1b,1,"pointer encodings");
+    rejectEH(hdr+4,0,4,"eh_frame outside"); rejectEH(hdr+4,uint32_t(-0xf0),4,"eh_frame outside");
+    rejectEH(hdr+8,0,4,"count out of bounds"); rejectEH(hdr+8,3,4,"count out of bounds");
+    rejectEH(hdr+12,uint32_t(-0xd0),4,"strictly sorted");
+    rejectEH(hdr+20,uint32_t(0x2000-0x10e0),4,"outside file-backed code");
+    rejectEH(hdr+16,0,4,"FDE outside eh_frame"); rejectEH(hdr+16,uint32_t(-0x50),4,"FDE outside eh_frame");
+    rejectEH(0x2b0,0,4,"FDE length"); rejectEH(0x2b0,0xffffffff,4,"FDE length"); rejectEH(0x2c0,0x40,4,"FDE length");
+    rejectEH(0x2b4,0,4,"CIE pointer"); rejectEH(0x2b4,0x100,4,"CIE pointer"); rejectEH(0x2b4,8,4,"CIE pointer");
+    rejectEH(0x2a4,1,4,"does not reference a CIE"); rejectEH(0x2a0,0,4,"CIE length");
+    { // Trailing table bytes must be zero padding (observed on libc.prx).
+      consumer = ehConsumer; put(consumer,ehPh+32,32); put(consumer,ehPh+40,32);
+      check(Linker::link(batch(),{},eh,diagnostic),diagnostic.c_str());
+      put(consumer,hdr+29,1,1); reject(batch(),"non-zero bytes after table"); consumer = ehConsumer; }
+    { // Duplicate header and RELRO owner.
+      consumer = ehConsumer; std::copy(consumer.begin()+ehPh,consumer.begin()+ehPh+56,consumer.begin()+ehPh+56);
+      put(consumer,56,6,2); reject(batch(),"duplicate header"); consumer = ehConsumer;
+      std::copy(consumer.begin()+0x2a0,consumer.begin()+0x2fc,consumer.begin()+0x3a0);
+      put(consumer,64+56,0x61000010,4); put(consumer,64+56+4,4,4); put(consumer,ehPh+8,0x3e0); put(consumer,ehPh+16,0x20e0);
+      reject(batch(),"PT_LOAD owner required"); consumer = ehConsumer; }
+    // A relocation can never write into the read-only unwinding table.
+    rejectEH(0x900,0x10e4,8,"relocation target outside RW/non-X");
+    // 0x6fffff00/0x6fffff01: accepted only as inert entries, never read.
+    consumer = ehConsumer;
+    eh_fixture::program(consumer,5,0x6fffff00,0,0xb00,0,0x10,0,0x10);
+    eh_fixture::program(consumer,6,0x6fffff01,0,0xb10,0,0x8,0,0x10);
+    const auto opaqueConsumer = consumer;
+    check(Linker::link(batch(),{},eh,diagnostic,4096,&ehReport),diagnostic.c_str());
+    check(ehReport.opaqueHeaders==2 && ehReport.segments==4 && ehReport.memoryBytes==0x400,"opaque headers add nothing");
+    for (const auto& field : {std::pair<size_t,uint64_t>{40,8},{16,0x1000},{4,4}}) {
+        consumer = opaqueConsumer; put(consumer,64+5*56+field.first,field.second,field.first==4 ? 4 : 8);
+        reject(batch(),"with memory footprint refused");
+        consumer = opaqueConsumer; put(consumer,64+6*56+field.first,field.second,field.first==4 ? 4 : 8);
+        reject(batch(),"with memory footprint refused");
+    }
+    // Other GNU/OS types are not implied by this acceptance.
+    consumer = opaqueConsumer; put(consumer,64+5*56,0x6474e551,4); reject(batch(),"unsupported runtime program header 1685382481");
+    consumer = opaqueConsumer; put(consumer,64+5*56,0x6fffff02,4); reject(batch(),"unsupported runtime program header");
+    // Module param + EH_FRAME + opaque in one module: same real header set as Fios2.
+    // withParam writes program header 4, so the EH_FRAME entry moves to index 7.
+    auto combined = [&](const std::vector<uint8_t>& withEHFrame) {
+        auto result = withParam(withEHFrame);
+        std::copy(withEHFrame.begin()+ehPh,withEHFrame.begin()+ehPh+56,result.begin()+64+7*56);
+        put(result,56,8,2); return result;
+    };
+    provider = combined(ehProvider); consumer = combined(opaqueConsumer);
+    check(Linker::link(batch(),{},eh,diagnostic,4096,&ehReport),diagnostic.c_str());
+    check(ehReport.moduleParams==2 && ehReport.ehFrameHeaders==2 && ehReport.opaqueHeaders==2 && eh.modules[1].moduleParam.present &&
+        eh.modules[1].ehFrameHeader.present && ehReport.memoryBytes==0x400,"param, EH_FRAME and opaque headers together");
+    provider = make(true); consumer = original;
+    // Mission 48: dynamic tags observed on CUSA06015, validated as metadata only.
+    auto retag = [](std::vector<uint8_t>& b, uint64_t from, uint64_t to) {
+        for (size_t p=0x400;p<0x600;p+=16) { uint64_t t=0; for (size_t i=0;i<8;++i) t|=uint64_t(b[p+i])<<(8*i);
+            if (t==from) { put(b,p,to); return; } }
+        throw std::runtime_error("retag");
+    };
+    auto removeTag = [](std::vector<uint8_t>& b, uint64_t tag) { // Shift later entries; keep DT_NULL last.
+        for (size_t p=0x400;p<0x600;p+=16) { uint64_t t=0; for (size_t i=0;i<8;++i) t|=uint64_t(b[p+i])<<(8*i);
+            if (t==tag) { std::copy(b.begin()+p+16,b.begin()+0x600,b.begin()+p); std::fill(b.begin()+0x5f0,b.begin()+0x600,0); return; } }
+        throw std::runtime_error("removeTag");
+    };
+    auto dynProvider = make(true), dynConsumer = original;
+    dyn_fixture::add(dynProvider,{"provider.prx",0x1000,0x2100,0,1,0,false});
+    dyn_fixture::add(dynConsumer,{"",0x1000,0x2100,0x2040,0,1,false});
+    provider = dynProvider; consumer = dynConsumer;
+    Linker::Image dynImage; Linker::Report dynReport;
+    check(Linker::link(batch(),{},dynImage,diagnostic,4096,&dynReport),diagnostic.c_str());
+    check(dynReport.recognisedDynamicTags==34 && dynReport.initFunctions==2 && dynReport.finiFunctions==2 &&
+        dynReport.initArrayEntries==0 && dynImage.mappings().size()==4 && dynReport.memoryBytes==0x400,"dynamic tags add no memory");
+    { const auto& pi = dynImage.modules[0].dynamic; const auto& ci = dynImage.modules[1].dynamic;
+      check(dynImage.modules[0].path=="provider.prx" && pi.hash && pi.buckets==1 && pi.chains==2 && pi.fingerprint &&
+          pi.fingerprintBytes[0]==0xa0 && pi.fingerprintBytes[19]==0xb3 && pi.soname=="provider.prx" &&
+          pi.originalFilename=="W:/Build/fixture path/provider.prx" && pi.init && pi.initAddress==0x1000 && pi.fini &&
+          pi.initArray.present && !pi.initArray.size && pi.exportLibraryAttributes.at(1)==1 && !pi.textrel,"provider dynamic info");
+      check(ci.soname.empty() && ci.pltgot && ci.pltgotAddress==0x2040 && ci.importLibraryAttributes.at(1)==9,"consumer dynamic info"); }
+    check(dynReport.text().find("exécutés : 0")!=std::string::npos,"init/fini never executed");
+    auto rejectDyn = [&](auto mutate, const char* expected) {
+        provider = dynProvider; consumer = dynConsumer; mutate(); reject(batch(),expected); provider = dynProvider; consumer = dynConsumer;
+    };
+    const size_t h = dyn_fixture::hashFile;
+    // SCE hash table: structure only, never used for symbol lookup.
+    rejectDyn([&]{ put(consumer,h+4,3,4); },"hash chain count differs");
+    rejectDyn([&]{ put(consumer,h,2,4); },"hash table size differs");
+    rejectDyn([&]{ put(consumer,h+8,2,4); },"hash index out of bounds");
+    rejectDyn([&]{ put(consumer,h+16,1,4); },"hash chain cycle"); // chain[1]=1 loops forever.
+    rejectDyn([&]{ put(consumer,h+16,2,4); },"hash index out of bounds");
+    rejectDyn([&]{ put(consumer,h+8,0,4); },"cover every symbol");
+    rejectDyn([&]{ put(consumer,h+12,1,4); },"chain[0]");
+    rejectDyn([&]{ setTag(consumer,0x6100003d,18); },"hash table size");
+    rejectDyn([&]{ setTag(consumer,0x61000025,0x542); },"DT_SCE_HASH alignment");
+    rejectDyn([&]{ setTag(consumer,0x61000025,0x5f8); },"SCE table out of bounds");
+    rejectDyn([&]{ setTag(consumer,0x6100003d,uint64_t{1}<<40); },"DT_SCE_HASH alignment or budget");
+    rejectDyn([&]{ retag(consumer,0x61000025,0x6100003b+0x100000); },"unsupported dynamic tag");
+    rejectDyn([&]{ removeTag(consumer,0x61000025); },"pair incomplete");
+    rejectDyn([&]{ removeTag(consumer,0x6100003d); },"pair incomplete");
+    // Fingerprint, names and attributes.
+    rejectDyn([&]{ setTag(consumer,0x61000007,0x5f0); },"SCE table out of bounds");
+    rejectDyn([&]{ setTag(provider,14,dyn_fixture::appendString(provider,"other.prx")); },"DT_SONAME differs");
+    rejectDyn([&]{ setTag(provider,0x61000009,0xffff); },"string offset");
+    rejectDyn([&]{ provider[0x600+dyn_fixture::getTag(provider,0x61000009)+3]=0x07; },"invalid original filename");
+    rejectDyn([&]{ setTag(consumer,0x61000011,1); },"DT_SCE_MODULE_ATTR");
+    rejectDyn([&]{ setTag(consumer,21,1); },"DT_DEBUG");
+    rejectDyn([&]{ setTag(consumer,30,1); },"DT_FLAGS bits"); rejectDyn([&]{ setTag(consumer,30,8); },"DT_FLAGS bits");
+    rejectDyn([&]{ setTag(provider,0x61000017,(uint64_t{1}<<48)|9); },"library attribute value");
+    // Imports accept 9 and 1 (strict, Sonic Mania); other values stay refused.
+    rejectDyn([&]{ setTag(consumer,0x61000019,(uint64_t{1}<<48)|5); },"library attribute value");
+    rejectDyn([&]{ setTag(consumer,0x61000019,(uint64_t{7}<<48)|9); },"without library descriptor");
+    rejectDyn([&]{ orbis_fixture::appendTag(consumer,0x61000019,(uint64_t{1}<<48)|9); },"duplicate library attribute");
+    rejectDyn([&]{ orbis_fixture::appendTag(consumer,21,0); },"duplicate dynamic tag");
+    // Init/fini functions and arrays: bounds, alignment, permissions.
+    rejectDyn([&]{ setTag(consumer,12,0x2000); },"DT_INIT outside file-backed code");
+    rejectDyn([&]{ setTag(consumer,13,0x1100); },"DT_FINI outside file-backed code");
+    rejectDyn([&]{ setTag(consumer,25,0x1000); },"DT_INIT_ARRAY outside");
+    rejectDyn([&]{ setTag(consumer,26,0x2004); },"DT_FINI_ARRAY outside");
+    rejectDyn([&]{ setTag(consumer,33,4); },"DT_PREINIT_ARRAY outside");
+    rejectDyn([&]{ setTag(consumer,27,8); },"DT_INIT_ARRAY outside"); // 0x2100 + 8 beyond file bytes.
+    rejectDyn([&]{ setTag(consumer,25,0x2000); setTag(consumer,27,128*1024); },"DT_INIT_ARRAY outside");
+    rejectDyn([&]{ removeTag(consumer,28); },"pair incomplete");
+    rejectDyn([&]{ removeTag(consumer,32); },"pair incomplete");
+    // PLTGOT: placement and reserved entries never written by JMPREL.
+    rejectDyn([&]{ setTag(consumer,0x61000027,0x2044); },"DT_SCE_PLTGOT outside");
+    rejectDyn([&]{ setTag(consumer,0x61000027,0x1000); },"DT_SCE_PLTGOT outside");
+    rejectDyn([&]{ retag(consumer,0x6100002f,0x61000029); retag(consumer,0x61000031,0x6100002d); retag(consumer,0x61000033,0x6100002b);
+        setTag(consumer,0x6100002b,7); setTag(consumer,0x61000027,0x1ff0); },"DT_SCE_PLTGOT outside"); // RW starts at 0x2000.
+    rejectDyn([&]{ retag(consumer,0x6100002f,0x61000029); retag(consumer,0x61000031,0x6100002d); retag(consumer,0x61000033,0x6100002b);
+        setTag(consumer,0x6100002b,7); setTag(consumer,0x61000027,0x2000); },"JMPREL writes reserved PLTGOT entries");
+    { provider = dynProvider; consumer = dynConsumer; // JMPREL beyond the 3 reserved slots is accepted.
+      retag(consumer,0x6100002f,0x61000029); retag(consumer,0x61000031,0x6100002d); retag(consumer,0x61000033,0x6100002b);
+      setTag(consumer,0x6100002b,7); put(consumer,0x900,0x2058); setTag(consumer,0x61000027,0x2040);
+      check(Linker::link(batch(),{},dynImage,diagnostic),diagnostic.c_str()); check(value(dynImage,0x102058)==0x201000,"JMPREL after PLTGOT"); }
+    // Init array entry: must be a pointer relocation landing in module code.
+    { provider = dynProvider; consumer = dynConsumer;
+      setTag(consumer,25,0x2050); setTag(consumer,27,8); setTag(consumer,0x61000031,48);
+      put(consumer,0x918,0x2050); put(consumer,0x920,8); put(consumer,0x928,0x1000);
+      const auto withEntry = consumer;
+      check(Linker::link(batch(),{},dynImage,diagnostic,4096,&dynReport),diagnostic.c_str());
+      check(dynReport.initArrayEntries==1 && value(dynImage,0x102050)==0x101000,"init array entry relocated to code (not executed)");
+      consumer = withEntry; put(consumer,0x928,0x2000); reject(batch(),"init/fini array entry outside module code");
+      consumer = withEntry; put(consumer,0x928,0x1100); reject(batch(),"init/fini array entry outside module code");
+      consumer = withEntry; setTag(consumer,0x61000031,24); reject(batch(),"without pointer relocation");
+      consumer = withEntry; put(consumer,0x918,0x2058); reject(batch(),"without pointer relocation");
+      consumer = withEntry; setTag(consumer,32,0x2050); setTag(consumer,33,8); setTag(consumer,26,0x2050); setTag(consumer,28,8);
+      check(Linker::link(batch(),{},dynImage,diagnostic,4096,&dynReport) && dynReport.initArrayEntries==3,"shared entry counted per array"); }
+    // DT_TEXTREL / DF_TEXTREL: accepted only while no relocation targets code.
+    { auto textrel = original; dyn_fixture::add(textrel,{"",0x1000,0x2100,0,0,0,true});
+      provider = dynProvider; consumer = textrel;
+      check(Linker::link(batch(),{},dynImage,diagnostic),diagnostic.c_str());
+      check(dynImage.modules[1].dynamic.textrel && !dynImage.translate(0x101000,1,2) && value(dynImage,0x102000)==0x201000,
+          "TEXTREL module stays W^X with data relocations");
+      put(consumer,0x900,0x1008); reject(batch(),"DT_TEXTREL relocation into executable segment refused (W^X)");
+      consumer = textrel; setTag(consumer,22,1); reject(batch(),"DT_TEXTREL value"); }
+    // Tags without established behaviour stay refused.
+    for (uint64_t tag : {16U, 24U, 29U, 0x6100001bU, 0x61000005U}) {
+        provider = dynProvider; consumer = dynConsumer; orbis_fixture::appendTag(consumer,tag,0);
+        reject(batch(),"unsupported dynamic tag");
+    }
+    // Dependency order is unchanged: the provider (declared dependency) stays first.
+    provider = dynProvider; consumer = dynConsumer;
+    { auto reversed = batch(); std::reverse(reversed.begin(),reversed.end());
+      check(Linker::link(reversed,{},dynImage,diagnostic) && dynImage.modules[0].path=="provider.prx" &&
+          dynImage.modules[0].dynamic.init,"dependency-first order with dynamic info"); }
+    provider = make(true); consumer = original;
+    // Mission 49: undefined plain-name symbols are never given an address.
+    using mission49_fixture::addSymbol;
+    auto symConsumer = original;
+    const auto weakIdx = addSymbol(symConsumer,dyn_fixture::appendString(symConsumer,"module_start"),0x20,0,0,0,0);
+    const auto globalIdx = addSymbol(symConsumer,dyn_fixture::appendString(symConsumer,"__start__Ztext"),0x10,0,0,0,0);
+    provider = make(true); consumer = symConsumer;
+    Linker::Image symImage; Linker::Report symReport;
+    check(Linker::link(batch(),{},symImage,diagnostic,4096,&symReport),diagnostic.c_str());
+    check(symReport.unboundWeakSymbols==1 && symReport.unboundGlobalSymbols==1 && symReport.imports==1 &&
+        value(symImage,0x102000)==0x201000,"unreferenced weak/global plain names accepted, never addressed");
+    auto rejectSym = [&](auto mutate, const char* expected) { consumer = symConsumer; mutate(); reject(batch(),expected); consumer = symConsumer; };
+    rejectSym([&]{ put(consumer,0x908,(uint64_t(weakIdx)<<32)|7); },"unbound weak undefined symbol module_start");
+    rejectSym([&]{ put(consumer,0x908,(uint64_t(globalIdx)<<32)|1); },"unbound global undefined symbol __start__Ztext");
+    rejectSym([&]{ put(consumer,0x908,(uint64_t(weakIdx)<<32)|6); },"unbound weak");
+    const size_t weakSym = 0x800+weakIdx*24, globalSym = 0x800+globalIdx*24;
+    rejectSym([&]{ consumer[weakSym+4]=0x22; },"invalid NID identity: module_start");   // weak FUNC: not the NOTYPE profile.
+    rejectSym([&]{ put(consumer,weakSym+16,8); },"invalid NID identity: module_start");  // non-zero size.
+    rejectSym([&]{ consumer[weakSym+4]=0x00; },"invalid undefined symbol: module_start"); // local undefined.
+    rejectSym([&]{ put(consumer,globalSym+8,0x10); },"invalid undefined symbol: __start__Ztext");
+    rejectSym([&]{ consumer[weakSym+5]=3; },"visibility/section: module_start");
+    rejectSym([&]{ std::string bad="mod-start"; std::copy(bad.begin(),bad.end(),consumer.begin()+0x600+dyn_fixture::getTag(consumer,0x61000037)-28); },
+        "invalid NID identity");
+    // STV_PROTECTED: a defined export binds locally and is never preempted.
+    provider = make(true); consumer = original; provider[0x81d]=3;
+    check(Linker::link(batch(),{},symImage,diagnostic,4096,&symReport) && symReport.protectedSymbols==1 &&
+        value(symImage,0x102000)==0x201000,"protected export resolves exactly");
+    provider[0x81d]=2; reject(batch(),"visibility"); provider[0x81d]=1; reject(batch(),"visibility");
+    provider = make(true); consumer[0x81d]=3; reject(batch(),"visibility"); consumer = original; // undefined protected.
+    consumer[0x81c]=0x16; reject(batch(),"STT_TLS symbol requires the TLS linking path"); consumer = original;
+    provider[0x81c]=0x16; reject(batch(),"STT_TLS symbol requires the TLS linking path"); provider = make(true);
+    // PT_SCE_PROCPARAM / PT_INTERP views in the executable (mission 49).
+    auto procConsumer = original;
+    eh_fixture::program(procConsumer,4,0x61000001,4,0x310,0x2010,72,72,8);
+    put(procConsumer,0x310,72); put(procConsumer,0x318,0x4942524f,4); put(procConsumer,0x31c,2,4); put(procConsumer,0x320,0x04008061,4);
+    put(procConsumer,0x348,0x2080); put(procConsumer,0x350,0x2088);
+    setTag(procConsumer,0x61000031,72);
+    put(procConsumer,0x918,0x2048); put(procConsumer,0x920,8); put(procConsumer,0x928,0x2080);
+    put(procConsumer,0x930,0x2050); put(procConsumer,0x938,8); put(procConsumer,0x940,0x2088);
+    eh_fixture::program(procConsumer,5,3,4,0x220,0x1020,21,21,1);
+    { const std::string interp="/libexec/ld-elf.so.1"; std::copy(interp.begin(),interp.end(),procConsumer.begin()+0x220); procConsumer[0x234]=0; }
+    provider = make(true); consumer = procConsumer;
+    check(Linker::link(batch(),{},symImage,diagnostic,4096,&symReport),diagnostic.c_str());
+    check(symReport.processParams==1 && symReport.interpreters==1 && symImage.modules[1].processParam.present &&
+        symImage.modules[1].processParam.address==0x2010 && symImage.modules[1].processParam.sdkVersion==0x04008061 &&
+        symImage.modules[1].processParam.interpreter=="/libexec/ld-elf.so.1" && symImage.mappings().size()==4 && symReport.memoryBytes==0x400,
+        "PROCPARAM/INTERP are unmapped views");
+    check(value(symImage,0x102048)==0x102080 && value(symImage,0x102050)==0x102088 && value(symImage,0x102000)==0x201000,"PROCPARAM pointers relocated");
+    auto rejectProc = [&](size_t offset, uint64_t v, size_t n, const char* expected) {
+        consumer = procConsumer; put(consumer,offset,v,n); reject(batch(),expected); consumer = procConsumer;
+    };
+    const size_t pp = 64+4*56, ip = 64+5*56;
+    rejectProc(0x318,0x4942524e,4,"PROCPARAM: magic"); rejectProc(0x31c,3,4,"unsupported version");
+    rejectProc(0x310,80,8,"size field"); rejectProc(0x330,1,1,"reserved bytes");
+    rejectProc(pp+4,6,4,"read-only flags"); rejectProc(pp+48,4,8,"8-byte alignment"); rejectProc(pp+32,64,8,"72- or 80-byte");
+    rejectProc(pp+8,0x318,8,"not a file-backed view"); rejectProc(pp+16,0x20d0,8,"not a file-backed view");
+    { consumer = procConsumer; put(consumer,pp+8,0x260); put(consumer,pp+16,0x1060); reject(batch(),"executable owner refused"); consumer = procConsumer; }
+    rejectProc(0x928,0x1000,8,"pointer outside file-backed module data");
+    rejectProc(0x918,0x2018,8,"write outside its RELATIVE pointer fields");
+    rejectProc(0x920,(uint64_t{1}<<32)|1,8,"write outside its RELATIVE pointer fields");
+    { consumer = procConsumer; setTag(consumer,0x61000031,48); reject(batch(),"pointer field without RELATIVE relocation"); consumer = procConsumer; }
+    rejectProc(0x220,'l',1,"absolute NUL-terminated"); rejectProc(0x234,'x',1,"absolute NUL-terminated");
+    rejectProc(0x225,0x07,1,"printable path"); rejectProc(ip+4,5,4,"read-only 2..256"); rejectProc(ip+32,300,8,"read-only 2..256");
+    rejectProc(ip+16,0x10f0,8,"not a file-backed view");
+    { consumer = procConsumer; std::copy(consumer.begin()+pp,consumer.begin()+pp+56,consumer.begin()+64+6*56); put(consumer,56,7,2);
+      reject(batch(),"PT_SCE_PROCPARAM: duplicate header"); consumer = procConsumer; }
+    { auto prx = make(true); eh_fixture::program(prx,4,3,4,0x220,0x1020,21,21,1); provider = prx;
+      reject(batch(),"executable module required"); provider = make(true); }
+    provider = make(true); consumer = original;
     auto standalone=makeStatic(); Linker::Image staticImage;
     check(Linker::link({input("static.elf",standalone,0x400000,{})},{},staticImage,diagnostic,4096,&progress),diagnostic.c_str());
     check(progress.committed && progress.imports==0 && progress.relocations==0 && progress.memoryBytes==0x300,"static report counts");
