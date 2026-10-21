@@ -26,6 +26,11 @@ targets:
       - path: Native/PS4PKGBridge.cpp
       - path: Native/OrbisAnalysisBridge.cpp
       - path: Native/OrbisLinkerBridge.cpp
+      # Kernel prelude read at run time by the Metal pixel backend (GCNMetalPixelOffloadHost.mm).
+      - path: Native/GCNKernel.h
+        buildPhase: resources
+      - path: Native/GCNKernelImage.h
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.enermaxfr.maxps4

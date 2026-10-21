@@ -1,0 +1,488 @@
+file	library	module	library_version	module_version	type	binding	nid	name	metadata_status	behavior	game_execution	before_metadata_status	category	implementation_status	existing_service
+eboot.bin	libSceAppContent	libSceAppContentUtil	1	257	2	1	99b82IKXpH4	sceAppContentAppParamGetInt	metadata-match	partial-profile	not-observed	metadata-match	system-other	partial-profile	
+eboot.bin	libSceAppContent	libSceAppContentUtil	1	257	2	1	R9lA82OraNs	sceAppContentInitialize	metadata-match	implemented-profile	not-observed	metadata-match	system-other	implemented-profile	
+eboot.bin	libSceAudioOut	libSceAudioOut	1	257	2	1	s1--uE9mBFw	sceAudioOutClose	metadata-match	explicit-refusal	not-observed	metadata-match	audio	explicit-refusal	
+eboot.bin	libSceAudioOut	libSceAudioOut	1	257	2	1	JfEPXVxhFqA	sceAudioOutInit	metadata-match	implemented-profile	not-observed	metadata-match	audio	implemented-profile	
+eboot.bin	libSceAudioOut	libSceAudioOut	1	257	2	1	ekNvsT22rsY	sceAudioOutOpen	metadata-match	explicit-refusal	not-observed	metadata-match	audio	explicit-refusal	
+eboot.bin	libSceAudioOut	libSceAudioOut	1	257	2	1	QOQtbeDqsT4	sceAudioOutOutput	metadata-match	explicit-refusal	not-observed	metadata-match	audio	explicit-refusal	
+eboot.bin	libSceAudioOut	libSceAudioOut	1	257	2	1	b+uAV89IlxE	sceAudioOutSetVolume	metadata-match	explicit-refusal	not-observed	metadata-match	audio	explicit-refusal	
+eboot.bin	libSceCommonDialog	libSceCommonDialog	1	257	2	1	uoUpLGNkygk	sceCommonDialogInitialize	metadata-match	implemented-profile	not-observed	metadata-match	system-other	implemented-profile	
+eboot.bin	libSceErrorDialog	libSceErrorDialog	1	257	2	1	I88KChlynSs	sceErrorDialogInitialize	metadata-match	implemented-profile	not-observed	metadata-match	system-other	implemented-profile	
+eboot.bin	libSceErrorDialog	libSceErrorDialog	1	257	2	1	M2ZF-ClLhgY	sceErrorDialogOpen	metadata-match	explicit-refusal	not-observed	metadata-match	system-other	explicit-refusal	
+eboot.bin	libSceErrorDialog	libSceErrorDialog	1	257	2	1	9XAxK2PMwk8	sceErrorDialogTerminate	metadata-match	implemented-profile	not-observed	metadata-match	system-other	implemented-profile	
+eboot.bin	libSceErrorDialog	libSceErrorDialog	1	257	2	1	WWiGuh9XfgQ	sceErrorDialogUpdateStatus	metadata-match	implemented-profile	not-observed	metadata-match	system-other	implemented-profile	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	0BzLGljcwBo	sceGnmDispatchDirect	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	Z43vKp5k7r0	sceGnmDispatchIndirect	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	HlTPoZ-oY7Y	sceGnmDrawIndex	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	GGsn7jMTxw4	sceGnmDrawIndexAuto	metadata-match	partial-profile	not-observed	metadata-match	graphics	partial-profile	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	ED9-Fjr8Ta4	sceGnmDrawIndexIndirect	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	thbPcG7E7qk	sceGnmDrawIndexIndirectCountMulti	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	5q95ravnueg	sceGnmDrawIndexIndirectMulti	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	jHdPvIzlpKc	sceGnmDrawIndexMultiInstanced	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	oYM+YzfCm2Y	sceGnmDrawIndexOffset	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	4v+otIIdjqg	sceGnmDrawIndirect	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	cUCo8OvArrw	sceGnmDrawIndirectCountMulti	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	f5QQLp9rzGk	sceGnmDrawIndirectMulti	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	yb2cRhagD1I	sceGnmDrawInitDefaultHardwareState350	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	im2ZuItabu4	sceGnmDrawInitToDefaultContextState400	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	stDSYW2SBVM	sceGnmDrawOpaqueAuto	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	7qZVNgEu+SY	sceGnmInsertPopMarker	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	aPIZJTXC+cU	sceGnmInsertPushColorMarker	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	W1Etj-jlW7Y	sceGnmInsertPushMarker	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	aj3L-iaFmyk	sceGnmInsertSetColorMarker	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	jiItzS6+22g	sceGnmInsertSetMarker	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	URDgJcXhQOs	sceGnmInsertThreadTraceMarker	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	1qXLHIpROPE	sceGnmInsertWaitFlipDone	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	MYRtYhojKdA	sceGnmResetVgtControl	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	Kx-h-nWQJ8A	sceGnmSetCsShaderWithModifier	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	X9Omw9dwv5M	sceGnmSetEmbeddedPsShader	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	+AFvOEXrKJk	sceGnmSetEmbeddedVsShader	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	FUHG8sQ3R58	sceGnmSetEsShader	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	UJwNuMBcUAk	sceGnmSetGsShader	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	VJNjFtqiF5w	sceGnmSetHsShader	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	vckdzbQ46SI	sceGnmSetLsShader	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	5uFKckiJYRM	sceGnmSetPsShader350	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	cFCp0NX8wf0	sceGnmSetVgtControl	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	gAhCn6UiU4Y	sceGnmSetVsShader	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	nLM2i2+65hA	sceGnmUpdateGsShader	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	GNlx+y7xPdE	sceGnmUpdateHsShader	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	mLVL7N7BVBg	sceGnmUpdatePsShader350	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	V31V01UiScY	sceGnmUpdateVsShader	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	b0xyllnVY-I	sceGnmAddEqEvent	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	b08AgtPlHPg	sceGnmAreSubmitsAllowed	metadata-match	implemented-profile	not-observed	metadata-match	graphics	implemented-profile	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	ihxrbsoSKWc	sceGnmBeginWorkload	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	5udAm+6boVg	sceGnmCreateWorkloadStream	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	qpGITzPE+Zc	sceGnmDebugHardwareStatus	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	PVT+fuoS9gU	sceGnmDeleteEqEvent	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	UtObDRQiGbs	sceGnmDestroyWorkloadStream	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	bX5IbRvECXk	sceGnmDingDong	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	byXlqupd8cE	sceGnmDingDongForWorkload	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	HHo1BAljZO8	sceGnmDisableMipStatsReport	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	TLV4mswiZ4A	sceGnmDriverCaptureInProgress	metadata-match	implemented-profile	not-observed	metadata-match	graphics	implemented-profile	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	R6z1xM3pW-w	sceGnmDriverTraceInProgress	metadata-match	implemented-profile	not-observed	metadata-match	graphics	implemented-profile	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	d88anrgNoKY	sceGnmDriverTriggerCapture	metadata-match	explicit-refusal	not-observed	metadata-match	graphics	explicit-refusal	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	Fa3x75OOLRA	sceGnmEndWorkload	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	iBt3Oe00Kvc	sceGnmFlushGarlic	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	UoYY0DWMC0U	sceGnmGetEqEventType	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	H7-fgvEutM0	sceGnmGetEqTimeStamp	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	oL4hGI1PMpw	sceGnmGetGpuBlockStatus	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	tZCSL5ulnB4	sceGnmGetGpuInfoStatus	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	iFirFzgYsvw	sceGnmGetLastWaitedAddress	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	KnldROUkWJY	sceGnmGetNumTcaUnits	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	FFVZcCu3zWU	sceGnmGetOffChipTessellationBufferSize	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	fzJdEihTFV4	sceGnmGetProtectionFaultTimeStamp	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	nEyFbYUloIM	sceGnmGetShaderProgramBaseAddress	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	k7iGTvDQPLQ	sceGnmGetShaderStatus	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	ln33zjBrfjk	sceGnmGetTheTessellationFactorRingBufferBaseAddress	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	jg33rEKLfVs	sceGnmIsUserPaEnabled	metadata-match	implemented-profile	not-observed	metadata-match	graphics	implemented-profile	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	26PM5Mzl8zc	sceGnmLogicalCuIndexToPhysicalCuIndex	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	RU74kek-N0c	sceGnmLogicalCuMaskToPhysicalCuMask	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	29oKvKXzEZo	sceGnmMapComputeQueue	metadata-match	explicit-refusal	not-observed	metadata-match	graphics	explicit-refusal	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	A+uGq+3KFtQ	sceGnmMapComputeQueueWithPriority	metadata-match	explicit-refusal	not-observed	metadata-match	graphics	explicit-refusal	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	gObODli-OH8	sceGnmRequestFlipAndSubmitDone	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	6YRHhh5mHCs	sceGnmRequestFlipAndSubmitDoneForWorkload	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	f85orjx7qts	sceGnmRequestMipStatsReportAndReset	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	jtkqXpAOY6w	sceGnmSetGsRingSizes	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	XiyzNZ9J4nQ	sceGnmSetWaveLimitMultipliers	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	+xuDhxlWRPg	sceGnmSetupMipStatsReport	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	xbxNatawohc	sceGnmSubmitAndFlipCommandBuffers	metadata-match	explicit-refusal	not-observed	metadata-match	graphics	explicit-refusal	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	Ga6r7H6Y0RI	sceGnmSubmitAndFlipCommandBuffersForWorkload	metadata-match	explicit-refusal	not-observed	metadata-match	graphics	explicit-refusal	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	zwY0YV91TTI	sceGnmSubmitCommandBuffers	metadata-match	explicit-refusal	not-observed	metadata-match	graphics	explicit-refusal	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	jRcI8VcgTz4	sceGnmSubmitCommandBuffersForWorkload	metadata-match	explicit-refusal	not-observed	metadata-match	graphics	explicit-refusal	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	yvZ73uQUqrk	sceGnmSubmitDone	metadata-match	explicit-refusal	not-observed	metadata-match	graphics	explicit-refusal	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	ArSg-TGinhk	sceGnmUnmapComputeQueue	metadata-match	explicit-refusal	not-observed	metadata-match	graphics	explicit-refusal	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	u9YKpRRHe-M	sceRazorCaptureImmediate	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	f33OrruQYbM	sceRazorIsLoaded	metadata-match	implemented-profile	not-observed	metadata-match	graphics	implemented-profile	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	wED4ZXCFJT0	sceGnmDispatchIndirectOnMec	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	nF6bFRUBRAU	sceGnmDispatchInitDefaultHardwareState	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	NfvOrNzy6sk	sceGnmInsertDingDongMarker	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	q-qhDxP67Hg	sceGnmSetResourceRegistrationUserMemory	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	K3BKBBYKUSE	sceGnmSetResourceUserData	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	yhFCnaz5daw	sceGnmUnregisterAllResourcesForOwner	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	fhKwCVVj9nk	sceGnmUnregisterOwnerAndResources	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	k8EXkhIP+lM	sceGnmUnregisterResource	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	4Mv9OXypBG8	sceGnmFindResourcesPublic	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	QJjPjlmPAL0	sceGnmGetOwnerName	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	4PKnYXOhcx4	sceGnmGetResourceBaseAddressAndSizeInBytes	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	O0S96YnD04U	sceGnmGetResourceName	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	UBv7FkVfzcQ	sceGnmGetResourceShaderGuid	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	bdqdvIkLPIU	sceGnmGetResourceType	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	UoBuWAhKk7U	sceGnmGetResourceUserData	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	SXw4dZEkgpA	sceGnmValidateDisableDiagnostics	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	qGP74T5OWJc	sceGnmValidateDispatchCommandBuffers	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	hsZPf1lON7E	sceGnmValidateDrawCommandBuffers	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	RX7XCNSaL6I	sceGnmValidateGetDiagnosticInfo	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	5SHGNwLXBV4	sceGnmValidateGetDiagnostics	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	HzMN7ANqYEc	sceGnmValidateGetVersion	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	rTIV11nMQuM	sceGnmValidateOnSubmitEnabled	metadata-match	implemented-profile	not-observed	metadata-match	graphics	implemented-profile	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	MBMa6EFu4Ko	sceGnmValidateResetState	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	Q7t4VEYLafI	sceGnmValidationRegisterMemoryCheckCallback	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	6IMbpR7nTzA	sceGnmQueryResourceRegistrationUserMemoryRequirements	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	9Mv61HaMhfA	sceGnmRegisterGdsResource	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	ZFqKFl23aMc	sceGnmRegisterOwner	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	nvEwfYAImTs	sceGnmRegisterResource	missing-export	no-export	not-observed	missing-export	graphics	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceNpTrophy	libSceNpTrophy	1	257	2	1	XbkjbobZlCY	sceNpTrophyCreateContext	metadata-match	explicit-refusal	not-observed	metadata-match	network-psn	explicit-refusal	
+eboot.bin	libSceNpTrophy	libSceNpTrophy	1	257	2	1	E1Wrwd07Lr8	sceNpTrophyDestroyContext	metadata-match	explicit-refusal	not-observed	metadata-match	network-psn	explicit-refusal	
+eboot.bin	libSceNpTrophy	libSceNpTrophy	1	257	2	1	aTnHs7W-9Uk	sceNpTrophyAbortHandle	metadata-match	explicit-refusal	not-observed	metadata-match	network-psn	explicit-refusal	
+eboot.bin	libSceNpTrophy	libSceNpTrophy	1	257	2	1	q7U6tEAQf7c	sceNpTrophyCreateHandle	metadata-match	explicit-refusal	not-observed	metadata-match	network-psn	explicit-refusal	
+eboot.bin	libSceNpTrophy	libSceNpTrophy	1	257	2	1	GNcF4oidY0Y	sceNpTrophyDestroyHandle	metadata-match	explicit-refusal	not-observed	metadata-match	network-psn	explicit-refusal	
+eboot.bin	libSceNpTrophy	libSceNpTrophy	1	257	2	1	LHuSmO3SLd8	sceNpTrophyGetTrophyUnlockState	metadata-match	explicit-refusal	not-observed	metadata-match	network-psn	explicit-refusal	
+eboot.bin	libSceNpTrophy	libSceNpTrophy	1	257	2	1	TJCAxto9SEU	sceNpTrophyRegisterContext	metadata-match	explicit-refusal	not-observed	metadata-match	network-psn	explicit-refusal	
+eboot.bin	libSceNpTrophy	libSceNpTrophy	1	257	2	1	28xmRUFao68	sceNpTrophyUnlockTrophy	metadata-match	explicit-refusal	not-observed	metadata-match	network-psn	explicit-refusal	
+eboot.bin	libScePad	libScePad	1	257	2	1	6ncge5+l5Qs	scePadClose	metadata-match	explicit-refusal	not-observed	metadata-match	system-other	explicit-refusal	
+eboot.bin	libScePad	libScePad	1	257	2	1	gjP9-KQzoUk	scePadGetControllerInformation	metadata-match	explicit-refusal	not-observed	metadata-match	system-other	explicit-refusal	
+eboot.bin	libScePad	libScePad	1	257	2	1	hv1luiJrqQM	scePadInit	metadata-match	implemented-profile	not-observed	metadata-match	system-other	implemented-profile	
+eboot.bin	libScePad	libScePad	1	257	2	1	xk0AcarP3V4	scePadOpen	metadata-match	explicit-refusal	not-observed	metadata-match	system-other	explicit-refusal	
+eboot.bin	libScePad	libScePad	1	257	2	1	YndgXqQVV7c	scePadReadState	metadata-match	explicit-refusal	not-observed	metadata-match	system-other	explicit-refusal	
+eboot.bin	libScePngDec	libScePngDec	1	257	2	1	m0uW+8pFyaw	scePngDecCreate	metadata-match	explicit-refusal	not-observed	metadata-match	graphics	explicit-refusal	
+eboot.bin	libScePngDec	libScePngDec	1	257	2	1	WC216DD3El4	scePngDecDecode	metadata-match	explicit-refusal	not-observed	metadata-match	graphics	explicit-refusal	
+eboot.bin	libScePngDec	libScePngDec	1	257	2	1	U6h4e5JRPaQ	scePngDecParseHeader	metadata-match	partial-profile	not-observed	metadata-match	graphics	partial-profile	
+eboot.bin	libScePngDec	libScePngDec	1	257	2	1	-6srIGbLTIU	scePngDecQueryMemorySize	metadata-match	explicit-refusal	not-observed	metadata-match	graphics	explicit-refusal	
+eboot.bin	libSceSaveData	libSceSaveData	1	257	2	1	RQOqDbk3bSU	sceSaveDataCheckBackupData	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+eboot.bin	libSceSaveData	libSceSaveData	1	257	2	1	S1GkePI17zQ	sceSaveDataDelete	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+eboot.bin	libSceSaveData	libSceSaveData	1	257	2	1	65VH0Qaaz6s	sceSaveDataGetMountInfo	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+eboot.bin	libSceSaveData	libSceSaveData	1	257	2	1	TywrFKCoLGY	sceSaveDataInitialize3	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+eboot.bin	libSceSaveData	libSceSaveData	1	257	2	1	0z45PIH+SNI	sceSaveDataMount2	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+eboot.bin	libSceSaveData	libSceSaveData	1	257	2	1	lU9YRFsgwSU	sceSaveDataRestoreBackupData	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+eboot.bin	libSceSaveData	libSceSaveData	1	257	2	1	c88Yy54Mx0w	sceSaveDataSaveIcon	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+eboot.bin	libSceSaveData	libSceSaveData	1	257	2	1	85zul--eGXs	sceSaveDataSetParam	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+eboot.bin	libSceSaveData	libSceSaveData	1	257	2	1	yKDy8S5yLA0	sceSaveDataTerminate	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+eboot.bin	libSceSaveData	libSceSaveData	1	257	2	1	BMR4F-Uek3E	sceSaveDataUmount	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+eboot.bin	libSceSaveData	libSceSaveData	1	257	2	1	VwadwBBBJ80	sceSaveDataUmountWithBackup	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+eboot.bin	libSceSaveData	libSceSaveData	1	257	2	1	j8xKtiFj0SY	sceSaveDataGetEventResult	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+eboot.bin	libSceSaveData	libSceSaveData	1	257	2	1	QwOO7vegnV8	sceSaveDataGetSaveDataMemory2	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+eboot.bin	libSceSaveData	libSceSaveData	1	257	2	1	cduy9v4YmT4	sceSaveDataSetSaveDataMemory2	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+eboot.bin	libSceSaveData	libSceSaveData	1	257	2	1	oQySEUfgXRA	sceSaveDataSetupSaveDataMemory2	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+eboot.bin	libSceSaveData	libSceSaveData	1	257	2	1	wiT9jeC7xPw	sceSaveDataSyncSaveDataMemory	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+eboot.bin	libSceSaveDataDialog	libSceSaveDataDialog	1	257	2	1	yEiJ-qqr6Cg	sceSaveDataDialogGetResult	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+eboot.bin	libSceSaveDataDialog	libSceSaveDataDialog	1	257	2	1	s9e3+YpRnzw	sceSaveDataDialogInitialize	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+eboot.bin	libSceSaveDataDialog	libSceSaveDataDialog	1	257	2	1	4tPhsP6FpDI	sceSaveDataDialogOpen	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+eboot.bin	libSceSaveDataDialog	libSceSaveDataDialog	1	257	2	1	YuH2FA7azqQ	sceSaveDataDialogTerminate	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+eboot.bin	libSceSaveDataDialog	libSceSaveDataDialog	1	257	2	1	KK3Bdg1RWK0	sceSaveDataDialogUpdateStatus	metadata-match	implemented-profile	not-observed	metadata-match	files-storage	implemented-profile	
+eboot.bin	libSceSysmodule	libSceSysmodule	1	257	2	1	g8cM39EUZ6o	sceSysmoduleLoadModule	metadata-match	explicit-refusal	not-observed	metadata-match	loading-initialization	explicit-refusal	
+eboot.bin	libSceSysmodule	libSceSysmodule	1	257	2	1	eR2bZFAAU0Q	sceSysmoduleUnloadModule	metadata-match	explicit-refusal	not-observed	metadata-match	loading-initialization	explicit-refusal	
+eboot.bin	libSceSystemService	libSceSystemService	1	257	2	1	Vo5V8KAwCmk	sceSystemServiceHideSplashScreen	metadata-match	explicit-refusal	not-observed	metadata-match	system-other	explicit-refusal	
+eboot.bin	libSceSystemService	libSceSystemService	1	257	2	1	fZo48un7LK4	sceSystemServiceParamGetInt	metadata-match	explicit-refusal	not-observed	metadata-match	system-other	explicit-refusal	
+eboot.bin	libSceUserService	libSceUserService	1	257	2	1	CdWp0oHWGr0	sceUserServiceGetInitialUser	metadata-match	explicit-refusal	not-observed	metadata-match	system-other	explicit-refusal	
+eboot.bin	libSceUserService	libSceUserService	1	257	2	1	j3YMu1MVNNo	sceUserServiceInitialize	metadata-match	implemented-profile	not-observed	metadata-match	loading-initialization	implemented-profile	
+eboot.bin	libSceUserService	libSceUserService	1	257	2	1	bwFjS+bX9mA	sceUserServiceTerminate	metadata-match	implemented-profile	not-observed	metadata-match	loading-initialization	implemented-profile	
+eboot.bin	libSceVideoOut	libSceVideoOut	1	0	2	1	uquVH4-Du78	sceVideoOutClose	metadata-match	explicit-refusal	not-observed	metadata-match	graphics	explicit-refusal	
+eboot.bin	libSceVideoOut	libSceVideoOut	1	0	2	1	Up36PTk687E	sceVideoOutOpen	metadata-match	explicit-refusal	not-observed	metadata-match	graphics	explicit-refusal	
+eboot.bin	libSceVideoOut	libSceVideoOut	1	0	2	1	w3BY+tAEiQY	sceVideoOutRegisterBuffers	metadata-match	explicit-refusal	not-observed	metadata-match	graphics	explicit-refusal	
+eboot.bin	libSceVideoOut	libSceVideoOut	1	0	2	1	i6-sR91Wt-4	sceVideoOutSetBufferAttribute	metadata-match	implemented-profile	not-observed	metadata-match	graphics	implemented-profile	
+eboot.bin	libSceVideoOut	libSceVideoOut	1	0	2	1	CBiu4mCE1DA	sceVideoOutSetFlipRate	metadata-match	explicit-refusal	not-observed	metadata-match	graphics	explicit-refusal	
+eboot.bin	libc	libc	1	257	2	1	Ovb2dSJOAuE	strcmp	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	z+P+xCnWLBk	_ZdlPv	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	fJnpuVVBbKk	_Znwm	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	kiZSXIWd9vg	strcpy	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	tcVi5SivF7Q	sprintf	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	j4ViWNHEgww	strlen	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	zlfEH8FmyUA	_Stoul	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	MLWl90SFWNE	_ZdaPv	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	hdm0YfMa7TQ	_Znam	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	uodLYyUip20	fclose	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	xeYO4u7uyJ0	fopen	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	aZK8lNei-Qw	fputc	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	tIhsqj0qsFE	free	metadata-match	unverified	not-observed	metadata-match	memory-threads	unverified	
+eboot.bin	libc	libc	1	257	2	1	MpxhMh8QFro	fwrite	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	gQX+4GDQjpM	malloc	metadata-match	unverified	not-observed	metadata-match	memory-threads	unverified	
+eboot.bin	libc	libc	1	257	2	1	8zTFvBIAIN8	memset	metadata-match	unverified	not-observed	metadata-match	memory-threads	unverified	
+eboot.bin	libc	libc	1	257	2	1	ZtjspkJQ+vw	_FSin	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	cCXjU72Z0Ow	_Sin	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	cpCOXWMgha0	rand	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	Ls4tzzhimqQ	strcat	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	Q3VBxCXhUHs	memcpy	metadata-match	unverified	not-observed	metadata-match	memory-threads	unverified	
+eboot.bin	libc	libc	1	257	2	1	tsvEmnenz48	__cxa_atexit	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	fiiNDnNBKVY	localtime_s	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	DfivPArhucg	memcmp	metadata-match	unverified	not-observed	metadata-match	memory-threads	unverified	
+eboot.bin	libc	libc	1	257	2	1	wLlFkwG9UcQ	time	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	OXmauLdQ8kY	atan	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	jbz9I9vkqkk	vsprintf	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	SHlt7EhOtqA	fgetpos	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	lbB+UlZqVG0	fread	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	rQFVBXp-Cxg	fseek	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	-VVn74ZyhEs	difftime	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	efhK-YSUYYQ	localtime	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	n7AepwR0s34	mktime	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	SRI6S9B+-a4	atof	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	KdP-nULpuGw	fgets	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	fffwELXNVFA	fprintf	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	Qazy8LmXTvw	ftell	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	iPBqs+YUUFw	_Atomic_fetch_add_4	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	2HnmKiLmV6s	_Atomic_fetch_sub_4	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	sUP1hBaouOw	_Getpctype	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	1uJgoVq3bQU	_Getptolower	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	rcQCUr0EaRU	_Getptoupper	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	kALvdgEv5ME	_Locksyslock	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	9nf8joUTSaQ	_Unlocksyslock	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	DuW5ZqZv-70	_ZNKSt9exception6_RaiseEv	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	1	1	Cv+zC4EjGMA	_ZNSt5ctypeIcE2idE	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	hEQ2Yi4PJXA	_ZNSt6locale16_GetgloballocaleEv	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	1	1	H4fcpQOpc08	_ZNSt6locale2id7_Id_cntE	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	QW2jL1J5rwY	_ZNSt6locale5facet9_RegisterEv	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	hqi8yMOCmG0	_ZNSt8_LocinfoC1EPKc	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	p6LrHjIQMdk	_ZNSt8_LocinfoD1Ev	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	N2f485TmJms	_ZNSt8ios_base7failureD1Ev	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	tQIo+GIPklo	_ZSt14_Xlength_errorPKc	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	ozMAr28BwSY	_ZSt14_Xout_of_rangePKc	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	V23qt24VPVs	_ZSt17iostream_categoryv	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	1	1	5PfqUBaQf4g	_ZSt4cout	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	1	1	yLE5H3058Ao	_ZTVNSt8ios_base7failureE	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	1	1	Bq8m04PN1zw	_ZTVSt12system_error	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	1	1	-L+-8F0+gBc	_ZTVSt13runtime_error	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	+P6FRGH4LfA	memmove	metadata-match	unverified	not-observed	metadata-match	memory-threads	unverified	
+eboot.bin	libc	libc	1	257	2	1	hcuQgD53UxM	printf	metadata-match	unverified	not-observed	metadata-match	files-storage	unverified	
+eboot.bin	libc	libc	1	257	2	1	YQ0navp+YIc	puts	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	eLdDw6l0-bU	snprintf	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	SfQIZcqvvms	strlcpy	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	1	1	P330P3dFF68	Need_sceLibc	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	bzQExy189ZI	_init_env	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	8G2LB+A3rzg	atexit	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	XKRegsFpEpk	catchReturnFromMain	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	uMei1W9uyNo	exit	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	1	1	H8AprKeZtNg	_Stderr	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	AEJdIVZTEmo	qsort	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	3GPpjQdAMTw	__cxa_guard_acquire	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	9rAeANT2tyE	__cxa_guard_release	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	Q2V+iqvjgC0	vsnprintf	metadata-match	unverified	not-observed	metadata-match	files-storage	unverified	
+eboot.bin	libc	libc	1	257	2	1	dnaeGXbjP6E	exp2	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libc	libc	1	257	2	1	9LCjpWyQ5Zc	pow	metadata-match	unverified	not-observed	metadata-match	system-other	unverified	
+eboot.bin	libScePosix	libkernel	1	257	2	1	ltCfaGr2JGE	pthread_mutex_destroy	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libScePosix	libkernel	1	257	2	1	ttHNfU+qDBU	pthread_mutex_init	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libScePosix	libkernel	1	257	2	1	7H0iTOciTLo	pthread_mutex_lock	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libScePosix	libkernel	1	257	2	1	K-jXhbt2gn4	pthread_mutex_trylock	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libScePosix	libkernel	1	257	2	1	2Z+PpY6CaJg	pthread_mutex_unlock	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libScePosix	libkernel	1	257	2	1	OxhIB8LB-PQ	pthread_create	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libScePosix	libkernel	1	257	2	1	FJrT5LuUBAU	pthread_exit	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libScePosix	libkernel	1	257	2	1	h9CcP3J0oVM	pthread_join	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	Ou3iL1abvng	__stack_chk_fail	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	1	1	f7uOxY9mM1U	__stack_chk_guard	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	1jfXLRVzisc	sceKernelUsleep	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	rTXw65xmLIA	sceKernelAllocateDirectMemory	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	D0OdFMjp46I	sceKernelCreateEqueue	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	jpFjmgAC5AE	sceKernelDeleteEqueue	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	pO96TwzOm5E	sceKernelGetDirectMemorySize	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	L-Q3LEjIbgA	sceKernelMapDirectMemory	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	cQke9UuBQOk	sceKernelMunmap	missing-export	no-export	not-observed	missing-export	memory-threads	existing-service-not-bound	munmap
+eboot.bin	libkernel	libkernel	1	257	2	1	MBuItvba6z8	sceKernelReleaseDirectMemory	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	fzyMKs9kim0	sceKernelWaitEqueue	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	UK2Tl2DWUns	sceKernelClose	missing-export	no-export	not-observed	missing-export	files-storage	existing-service-not-bound	close
+eboot.bin	libkernel	libkernel	1	257	2	1	1G3lF1Gg1k8	sceKernelOpen	missing-export	no-export	not-observed	missing-export	files-storage	existing-service-not-bound	open
+eboot.bin	libkernel	libkernel	1	257	2	1	Cg4srZ6TKbU	sceKernelRead	missing-export	no-export	not-observed	missing-export	files-storage	existing-service-not-bound	read
+eboot.bin	libkernel	libkernel	1	257	2	1	-ZR+hG7aDHw	sceKernelSleep	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	eV9wAD2riIA	sceKernelStat	missing-export	no-export	not-observed	missing-export	files-storage	existing-service-not-bound	stat
+eboot.bin	libkernel	libkernel	1	257	2	1	4wSze92BhLI	sceKernelWrite	missing-export	no-export	not-observed	missing-export	files-storage	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	62KCwEMmzcM	scePthreadAttrDestroy	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	nsYoNRywwNg	scePthreadAttrInit	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	6UgtwV+0zb4	scePthreadCreate	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	3kg7rT0NQIs	scePthreadExit	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	onNY9Byn-W8	scePthreadJoin	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	4J2sUJmuHZQ	sceKernelGetProcessTime	missing-export	no-export	not-observed	missing-export	system-other	existing-service-not-bound	process_time
+eboot.bin	libkernel	libkernel	1	257	2	1	2Of0f+3mhhE	scePthreadMutexDestroy	missing-export	no-export	not-observed	missing-export	memory-threads	existing-service-not-bound	mutex_destroy
+eboot.bin	libkernel	libkernel	1	257	2	1	cmo1RIYva9o	scePthreadMutexInit	missing-export	no-export	not-observed	missing-export	memory-threads	existing-service-not-bound	mutex_init
+eboot.bin	libkernel	libkernel	1	257	2	1	9UK1vLZQft4	scePthreadMutexLock	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	tn3VlD0hG60	scePthreadMutexUnlock	missing-export	no-export	not-observed	missing-export	memory-threads	existing-service-not-bound	mutex_unlock
+eboot.bin	libkernel	libkernel	1	257	2	1	JGgj7Uvrl+A	scePthreadCondBroadcast	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	g+PZd2hiacg	scePthreadCondDestroy	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	2Tb92quprl0	scePthreadCondInit	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	WKAXJ4XBPQ4	scePthreadCondWait	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	WslcK1FQcGI	sceKernelIsNeoMode	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+eboot.bin	libkernel	libkernel	1	257	2	1	T72hz6ffq08	scePthreadYield	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libSceFios2	libSceFios2	1	257	2	1	+mfO27a-bEY	sceFiosDeallocatePassthruFH	metadata-match	unverified	not-observed	metadata-match	files-storage	unverified	
+libc.prx	libSceFios2	libSceFios2	1	257	2	1	oRgsgfJY3Mc	sceFiosFilenoToFH	metadata-match	unverified	not-observed	metadata-match	files-storage	unverified	
+libc.prx	libSceFios2	libSceFios2	1	257	2	1	8dzXU5GxsjI	sceFiosFHToFileno	metadata-match	unverified	not-observed	metadata-match	files-storage	unverified	
+libc.prx	libSceFios2	libSceFios2	1	257	2	1	8IGjwtnvYwI	sceFiosIsValidHandle	metadata-match	unverified	not-observed	metadata-match	files-storage	unverified	
+libc.prx	libSceFios2	libSceFios2	1	257	2	1	KsVTc04kN9k	sceFiosDeleteSync	metadata-match	unverified	not-observed	metadata-match	files-storage	unverified	
+libc.prx	libSceFios2	libSceFios2	1	257	2	1	AOujSGqU+ms	sceFiosFHCloseSync	metadata-match	unverified	not-observed	metadata-match	files-storage	unverified	
+libc.prx	libSceFios2	libSceFios2	1	257	2	1	w13Ojm7ON9o	sceFiosFHOpenWithModeSync	metadata-match	unverified	not-observed	metadata-match	files-storage	unverified	
+libc.prx	libSceFios2	libSceFios2	1	257	2	1	Bn2ZF4ZjeuQ	sceFiosFHReadSync	metadata-match	unverified	not-observed	metadata-match	files-storage	unverified	
+libc.prx	libSceFios2	libSceFios2	1	257	2	1	xReSebwKApA	sceFiosFHSeek	metadata-match	unverified	not-observed	metadata-match	files-storage	unverified	
+libc.prx	libSceFios2	libSceFios2	1	257	2	1	Kl-TbrDU9YM	sceFiosFHWriteSync	metadata-match	unverified	not-observed	metadata-match	files-storage	unverified	
+libc.prx	libSceFios2	libSceFios2	1	257	2	1	G-39lsdSgXo	sceFiosRenameSync	metadata-match	unverified	not-observed	metadata-match	files-storage	unverified	
+libc.prx	libSceLibcInternalExt	libSceLibcInternal	1	257	2	1	NWtTN10cJzE	sceLibcHeapGetTraceInfo	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	OMDRKKAZ8I4	sceKernelDebugRaiseException	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	zE-wXIZjLoM	sceKernelDebugRaiseExceptionOnReleaseMode	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	Ou3iL1abvng	__stack_chk_fail	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	1	1	f7uOxY9mM1U	__stack_chk_guard	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	62KCwEMmzcM	scePthreadAttrDestroy	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	x1X76arYMxU	scePthreadAttrGet	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	8+s5BzZjxSg	scePthreadAttrGetaffinity	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	nsYoNRywwNg	scePthreadAttrInit	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	aI+OeCz8xrQ	scePthreadSelf	missing-export	no-export	not-observed	missing-export	memory-threads	existing-service-not-bound	thread_self
+libc.prx	libkernel	libkernel	1	257	2	1	6Z83sYWFlA8	_exit	missing-export	no-export	not-observed	missing-export	loading-initialization	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	vNe1w4diLCs	__tls_get_addr	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	kDh-NfxgMtE	scePthreadCondSignal	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	WKAXJ4XBPQ4	scePthreadCondWait	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	9UK1vLZQft4	scePthreadMutexLock	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	tn3VlD0hG60	scePthreadMutexUnlock	missing-export	no-export	not-observed	missing-export	memory-threads	existing-service-not-bound	mutex_unlock
+libc.prx	libkernel	libkernel	1	257	2	1	9BcDykPmo1I	__error	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	-o5uEDpN+oY	sceKernelConvertUtcToLocaltime	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	JGgj7Uvrl+A	scePthreadCondBroadcast	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	g+PZd2hiacg	scePthreadCondDestroy	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	2Tb92quprl0	scePthreadCondInit	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	BmMjYxmew1w	scePthreadCondTimedwait	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	3PtV6p3QNX4	scePthreadEqual	metadata-match	implemented-profile	not-observed	missing-export	memory-threads	implemented-profile	
+libc.prx	libkernel	libkernel	1	257	2	1	2Of0f+3mhhE	scePthreadMutexDestroy	missing-export	no-export	not-observed	missing-export	memory-threads	existing-service-not-bound	mutex_destroy
+libc.prx	libkernel	libkernel	1	257	2	1	cmo1RIYva9o	scePthreadMutexInit	missing-export	no-export	not-observed	missing-export	memory-threads	existing-service-not-bound	mutex_init
+libc.prx	libkernel	libkernel	1	257	2	1	upoVrzMHFeE	scePthreadMutexTrylock	missing-export	no-export	not-observed	missing-export	memory-threads	existing-service-not-bound	mutex_trylock
+libc.prx	libkernel	libkernel	1	257	2	1	14bOACANTBo	scePthreadOnce	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	eoht7mQOCmo	scePthreadGetspecific	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	geDaqgH9lTg	scePthreadKeyCreate	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	PrdHuuDekhY	scePthreadKeyDelete	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	+BzXYkqYeLE	scePthreadSetspecific	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	n88vx3C5nW8	gettimeofday	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	0NTHN1NKONI	sceKernelConvertLocaltimeToUtc	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	smWEktiyyG0	scePthreadMutexattrDestroy	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	F8bUHwAG284	scePthreadMutexattrInit	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	iMp8QpE+XO4	scePthreadMutexattrSettype	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	VADc3MNQ3cM	signal	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	yS8U2TGCe1A	nanosleep	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	959qrazPIrg	sceKernelGetProcParam	missing-export	no-export	not-observed	missing-export	loading-initialization	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	UTXzJbWhhTE	scePthreadAttrSetstacksize	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	6UgtwV+0zb4	scePthreadCreate	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	4qGrR6eoP9Y	scePthreadDetach	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	3kg7rT0NQIs	scePthreadExit	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	onNY9Byn-W8	scePthreadJoin	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	T72hz6ffq08	scePthreadYield	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	p5EcQeEeJAE	_sceKernelRtldSetApplicationHeapAPI	missing-export	no-export	not-observed	missing-export	loading-initialization	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	-YTW+qXc3CQ	sceKernelInternalMemoryGetModuleSegmentInfo	missing-export	no-export	not-observed	missing-export	loading-initialization	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	mL8NDH86iQI	sceKernelMapNamedFlexibleMemory	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	3k6kx-zOOSQ	sceKernelMlock	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	cQke9UuBQOk	sceKernelMunmap	missing-export	no-export	not-observed	missing-export	memory-threads	existing-service-not-bound	munmap
+libc.prx	libkernel	libkernel	1	257	2	1	Wl2o5hOVZdw	sceKernelPrintBacktraceWithModuleInfo	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	DRuBt2pvICk	_read	missing-export	no-export	not-observed	missing-export	files-storage	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	FxVZqBAA7ks	_write	missing-export	no-export	not-observed	missing-export	files-storage	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	oib76F-12fk	sceKernelLseek	missing-export	no-export	not-observed	missing-export	files-storage	existing-service-not-bound	lseek
+libc.prx	libkernel	libkernel	1	257	2	1	hHlZQUnlxSM	getrusage	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	4J2sUJmuHZQ	sceKernelGetProcessTime	missing-export	no-export	not-observed	missing-export	system-other	existing-service-not-bound	process_time
+libc.prx	libkernel	libkernel	1	257	1	1	djxxOmW6-aw	__progname	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	lLMT9vJAck0	clock_gettime	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	Fjc4-n1+y2g	__elf_phdr_match_addr	missing-export	no-export	not-observed	missing-export	loading-initialization	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	kbw4UHHSYy0	__pthread_cxa_finalize	missing-export	no-export	not-observed	missing-export	loading-initialization	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	f7KBOafysXo	sceKernelGetModuleInfoFromAddr	missing-export	no-export	not-observed	missing-export	loading-initialization	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	6xVpy0Fdq+I	_sigprocmask	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	7H0iTOciTLo	pthread_mutex_lock	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	2Z+PpY6CaJg	pthread_mutex_unlock	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	6XG4B33N09g	sched_yield	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	crb5j7mkk1c	_is_signal_return	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	mo0bFmWppIw	sigreturn	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	aPcyptbOiZs	sigprocmask	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	k+AXqu2-eBc	getpagesize	metadata-match	implemented-profile	not-observed	metadata-match	memory-threads	implemented-profile	
+libc.prx	libkernel	libkernel	1	257	2	1	BPE9s9vQQXo	mmap	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	VkTAsrZDcJ0	sigfillset	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	tZY4+SZNFhA	msync	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libc.prx	libkernel	libkernel	1	257	2	1	RpQJJVKTiFM	sceKernelGetModuleInfoForUnwind	missing-export	no-export	not-observed	missing-export	loading-initialization	requires-implementation-or-explicit-ABI	
+libc.prx			0	0	0	1	__start__Ztext	__start__Ztext	unsupported-unqualified-identity	no-export	not-observed	unsupported-unqualified-identity	loading-initialization	requires-implementation-or-explicit-ABI	
+libc.prx			0	0	0	1	__stop__Ztext	__stop__Ztext	unsupported-unqualified-identity	no-export	not-observed	unsupported-unqualified-identity	loading-initialization	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libSceDiscMap	libSceDiscMap	1	257	2	1	lbQKqsERhtE	sceDiscMapIsRequestOnHDD	metadata-match	explicit-refusal	not-observed	metadata-match	files-storage	explicit-refusal	
+libSceFios2.prx	libSceDiscMap	libSceDiscMap	1	257	2	1	fJgP+wqifno	UNKNOWN	missing-export	no-export	not-observed	missing-export	files-storage	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libSceLibcInternal	libSceLibcInternal	1	257	1	1	ZT4ODD2Ts9o	Need_sceLibcInternal	missing-export	no-export	not-observed	missing-export	loading-initialization	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libSceLibcInternal	libSceLibcInternal	1	257	2	1	H2e8t5ScQGc	__cxa_finalize	missing-export	no-export	not-observed	missing-export	loading-initialization	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libSceLibcInternal	libSceLibcInternal	1	257	2	1	hcuQgD53UxM	printf	missing-export	no-export	not-observed	missing-export	files-storage	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libSceLibcInternal	libSceLibcInternal	1	257	2	1	Q2V+iqvjgC0	vsnprintf	missing-export	no-export	not-observed	missing-export	files-storage	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libSceLibcInternal	libSceLibcInternal	1	257	2	1	8zTFvBIAIN8	memset	metadata-match	implemented-profile	not-observed	metadata-match	memory-threads	implemented-profile	
+libSceFios2.prx	libSceLibcInternal	libSceLibcInternal	1	257	2	1	Q3VBxCXhUHs	memcpy	metadata-match	implemented-profile	not-observed	metadata-match	memory-threads	implemented-profile	
+libSceFios2.prx	libSceLibcInternal	libSceLibcInternal	1	257	1	1	2sWzhYqFH4E	_Stdout	missing-export	no-export	not-observed	missing-export	files-storage	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libSceLibcInternal	libSceLibcInternal	1	257	2	1	MUjC4lbHrK4	fflush	missing-export	no-export	not-observed	missing-export	files-storage	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libSceLibcInternal	libSceLibcInternal	1	257	2	1	GMpvxPFW924	vprintf	missing-export	no-export	not-observed	missing-export	files-storage	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libSceLibcInternal	libSceLibcInternal	1	257	2	1	1mecP7RgI2A	gmtime	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libSceLibcInternal	libSceLibcInternal	1	257	2	1	5bBacGLyLOs	gmtime_s	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libSceLibcInternal	libSceLibcInternal	1	257	2	1	efhK-YSUYYQ	localtime	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libSceLibcInternal	libSceLibcInternal	1	257	2	1	n7AepwR0s34	mktime	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libSceLibcInternal	libSceLibcInternal	1	257	2	1	wLlFkwG9UcQ	time	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libSceLibcInternal	libSceLibcInternal	1	257	2	1	tIhsqj0qsFE	free	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libSceLibcInternal	libSceLibcInternal	1	257	2	1	gQX+4GDQjpM	malloc	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libSceSysmodule	libSceSysmodule	1	257	2	1	g8cM39EUZ6o	sceSysmoduleLoadModule	metadata-match	explicit-refusal	not-observed	metadata-match	loading-initialization	explicit-refusal	
+libSceFios2.prx	libSceSysmodule	libSceSysmodule	1	257	2	1	eR2bZFAAU0Q	sceSysmoduleUnloadModule	metadata-match	explicit-refusal	not-observed	metadata-match	loading-initialization	explicit-refusal	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	Ou3iL1abvng	__stack_chk_fail	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	1	1	f7uOxY9mM1U	__stack_chk_guard	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	vNe1w4diLCs	__tls_get_addr	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	QBi7HCK03hw	sceKernelClockGettime	missing-export	no-export	not-observed	missing-export	system-other	existing-service-not-bound	clock_gettime
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	ejekcaNQNq0	sceKernelGettimeofday	missing-export	no-export	not-observed	missing-export	system-other	existing-service-not-bound	gettimeofday
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	9BcDykPmo1I	__error	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	UK2Tl2DWUns	sceKernelClose	missing-export	no-export	not-observed	missing-export	files-storage	existing-service-not-bound	close
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	kBwCPsYX-m4	sceKernelFstat	missing-export	no-export	not-observed	missing-export	files-storage	existing-service-not-bound	fstat
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	fTx66l5iWIA	sceKernelFsync	missing-export	no-export	not-observed	missing-export	files-storage	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	VW3TVZiM4-E	sceKernelFtruncate	missing-export	no-export	not-observed	missing-export	files-storage	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	taRWhTJFTgE	sceKernelGetdirentries	missing-export	no-export	not-observed	missing-export	files-storage	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	oib76F-12fk	sceKernelLseek	missing-export	no-export	not-observed	missing-export	files-storage	existing-service-not-bound	lseek
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	1-LFLmRFxxM	sceKernelMkdir	missing-export	no-export	not-observed	missing-export	files-storage	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	1G3lF1Gg1k8	sceKernelOpen	missing-export	no-export	not-observed	missing-export	files-storage	existing-service-not-bound	open
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	+r3rMFwItV4	sceKernelPread	missing-export	no-export	not-observed	missing-export	files-storage	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	nKWi-N2HBV4	sceKernelPwrite	missing-export	no-export	not-observed	missing-export	files-storage	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	Cg4srZ6TKbU	sceKernelRead	missing-export	no-export	not-observed	missing-export	files-storage	existing-service-not-bound	read
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	52NcYU9+lEo	sceKernelRename	missing-export	no-export	not-observed	missing-export	files-storage	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	naInUjYt3so	sceKernelRmdir	missing-export	no-export	not-observed	missing-export	files-storage	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	eV9wAD2riIA	sceKernelStat	missing-export	no-export	not-observed	missing-export	files-storage	existing-service-not-bound	stat
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	WlyEA-sLDf0	sceKernelTruncate	missing-export	no-export	not-observed	missing-export	files-storage	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	AUXVxWeJU-A	sceKernelUnlink	missing-export	no-export	not-observed	missing-export	files-storage	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	4wSze92BhLI	sceKernelWrite	missing-export	no-export	not-observed	missing-export	files-storage	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	JGgj7Uvrl+A	scePthreadCondBroadcast	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	g+PZd2hiacg	scePthreadCondDestroy	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	2Tb92quprl0	scePthreadCondInit	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	kDh-NfxgMtE	scePthreadCondSignal	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	BmMjYxmew1w	scePthreadCondTimedwait	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	WKAXJ4XBPQ4	scePthreadCondWait	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	2Of0f+3mhhE	scePthreadMutexDestroy	missing-export	no-export	not-observed	missing-export	memory-threads	existing-service-not-bound	mutex_destroy
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	cmo1RIYva9o	scePthreadMutexInit	missing-export	no-export	not-observed	missing-export	memory-threads	existing-service-not-bound	mutex_init
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	9UK1vLZQft4	scePthreadMutexLock	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	upoVrzMHFeE	scePthreadMutexTrylock	missing-export	no-export	not-observed	missing-export	memory-threads	existing-service-not-bound	mutex_trylock
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	tn3VlD0hG60	scePthreadMutexUnlock	missing-export	no-export	not-observed	missing-export	memory-threads	existing-service-not-bound	mutex_unlock
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	smWEktiyyG0	scePthreadMutexattrDestroy	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	F8bUHwAG284	scePthreadMutexattrInit	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	1FGvU0i9saQ	scePthreadMutexattrSetprotocol	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	iMp8QpE+XO4	scePthreadMutexattrSettype	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	BB+kb08Tl9A	scePthreadRwlockDestroy	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	6ULAa0fq4jA	scePthreadRwlockInit	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	Ox9i0c7L5w0	scePthreadRwlockRdlock	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	XD3mDeybCnk	scePthreadRwlockTryrdlock	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	bIHoZCTomsI	scePthreadRwlockTrywrlock	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	+L98PIbGttk	scePthreadRwlockUnlock	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	mqdNorrB+gI	scePthreadRwlockWrlock	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	1jfXLRVzisc	sceKernelUsleep	missing-export	no-export	not-observed	missing-export	system-other	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	62KCwEMmzcM	scePthreadAttrDestroy	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	nsYoNRywwNg	scePthreadAttrInit	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	3qxgM4ezETA	scePthreadAttrSetaffinity	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	-Wreprtu0Qs	scePthreadAttrSetdetachstate	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	eXbUSpEaTsA	scePthreadAttrSetinheritsched	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	DzES9hQF4f4	scePthreadAttrSetschedparam	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	UTXzJbWhhTE	scePthreadAttrSetstacksize	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	6UgtwV+0zb4	scePthreadCreate	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	3PtV6p3QNX4	scePthreadEqual	metadata-match	implemented-profile	not-observed	missing-export	memory-threads	implemented-profile	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	rcrVFJsQWRY	scePthreadGetaffinity	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	1tKyG7RlMJo	scePthreadGetprio	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	onNY9Byn-W8	scePthreadJoin	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	aI+OeCz8xrQ	scePthreadSelf	missing-export	no-export	not-observed	missing-export	memory-threads	existing-service-not-bound	thread_self
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	bt3CTBKmGyI	scePthreadSetaffinity	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx	libkernel	libkernel	1	257	2	1	W0Hpm2X0uPE	scePthreadSetprio	missing-export	no-export	not-observed	missing-export	memory-threads	requires-implementation-or-explicit-ABI	
+libSceFios2.prx			0	0	0	2	module_stop	module_stop	unsupported-unqualified-identity	no-export	not-observed	unsupported-unqualified-identity	loading-initialization	requires-implementation-or-explicit-ABI	
+libSceFios2.prx			0	0	0	2	module_start	module_start	unsupported-unqualified-identity	no-export	not-observed	unsupported-unqualified-identity	loading-initialization	requires-implementation-or-explicit-ABI	
+eboot.bin	libSceNpScore	libSceNpScore	1	257	2	1	GWnWQNXZH5M	sceNpScoreCreateNpTitleCtxA	computed-nid
+eboot.bin	libSceNpScore	libSceNpScore	1	257	2	1	gW8qyjYrUbk	sceNpScoreCreateRequest	computed-nid
+eboot.bin	libSceNpScore	libSceNpScore	1	257	2	1	dK8-SgYf6r4	sceNpScoreDeleteRequest	computed-nid
+eboot.bin	libSceNpScore	libSceNpScore	1	257	2	1	ANJssPz3mY0	sceNpScoreRecordScoreAsync	computed-nid
+eboot.bin	libSceNpScore	libSceNpScore	1	257	2	1	y5ja7WI05rs	sceNpScoreGetRankingByRangeAAsync	computed-nid
+eboot.bin	libSceNpScore	libSceNpScore	1	257	2	1	dRszNNyGWkw	sceNpScoreGetRankingByAccountIdAsync	computed-nid
+eboot.bin	libSceNpScore	libSceNpScore	1	257	2	1	m1DfNRstkSQ	sceNpScorePollAsync	computed-nid
+eboot.bin	libSceRtc	libSceRtc	1	257	2	1	18B2NS1y9UU	sceRtcGetCurrentTick	computed-nid
+eboot.bin	libSceScreenShot	libSceScreenShot	1	257	2	1	73WQ4Jj0nJI	sceScreenShotSetOverlayImageWithOrigin	computed-nid
+eboot.bin	libSceNpManager	libSceNpManager	1	257	2	1	8Z2Jc5GvGDI	sceNpCheckNpAvailabilityA	computed-nid
+eboot.bin	libSceNpManager	libSceNpManager	1	257	2	1	eiqMCt9UshI	sceNpCreateAsyncRequest	computed-nid
+eboot.bin	libSceNpManager	libSceNpManager	1	257	2	1	S7QTn72PrDw	sceNpDeleteRequest	computed-nid
+eboot.bin	libSceNpManager	libSceNpManager	1	257	2	1	rbknaUjpqWo	sceNpGetAccountIdA	computed-nid
+eboot.bin	libSceNpManager	libSceNpManager	1	257	2	1	VgYczPGB5ss	sceNpGetUserIdByAccountId	computed-nid
+eboot.bin	libSceNpManager	libSceNpManager	1	257	2	1	uqcPJLWL08M	sceNpPollAsync	computed-nid
+eboot.bin	libSceNpManager	libSceNpManager	1	257	2	1	A2CQ3kgSopQ	sceNpSetContentRestriction	computed-nid
+eboot.bin	libSceNpManager	libSceNpManager	1	257	2	1	Ec63y59l9tw	sceNpSetNpTitleId	computed-nid
+eboot.bin	libSceSystemService	libSceSystemService	1	257	2	1	rPo6tV8D9bM	sceSystemServiceGetStatus	computed-nid
+eboot.bin	libSceSystemService	libSceSystemService	1	257	2	1	656LMQSrg6U	sceSystemServiceReceiveEvent	computed-nid
+eboot.bin	libSceUserService	libSceUserService	1	257	2	1	fPhymKNvK-A	sceUserServiceGetLoginUserIdList	computed-nid
+eboot.bin	libSceUserService	libSceUserService	1	257	2	1	yH17Q6NWtVg	sceUserServiceGetEvent	computed-nid
+eboot.bin	libSceVideoOut	libSceVideoOut	1	257	2	1	6kPnj51T62Y	sceVideoOutGetResolutionStatus	computed-nid
+eboot.bin	libSceVideoOut	libSceVideoOut	1	257	2	1	HXzjK9yI30k	sceVideoOutAddFlipEvent	computed-nid
+eboot.bin	libSceVideoOut	libSceVideoOut	1	257	2	1	U46NwOiJpys	sceVideoOutSubmitFlip	computed-nid
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	ffrNQOshows	sceGnmComputeWaitOnAddress	computed-nid
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	EJapNl2+pgU	sceGnmComputeWaitSemaphore	computed-nid
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	Kl0Z3LH07QI	sceGnmLogicalTcaUnitToPhysical	computed-nid
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	dewXw5roLs0	sceGnmGetPhysicalCounterFromVirtualized	computed-nid
+eboot.bin	libSceGnmDriver	libSceGnmDriver	1	257	2	1	BgM3t3LvcNk	sceGnmValidateDisableDiagnostics2	computed-nid

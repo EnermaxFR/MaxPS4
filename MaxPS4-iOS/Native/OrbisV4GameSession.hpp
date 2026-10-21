@@ -88,6 +88,7 @@ struct OrbisV4GameHost {
     std::function<void(const int16_t* pcm, size_t frames)> audio;  // 48 kHz stereo S16
     std::function<void(std::ostream&)> summary;                    // extra end-of-run lines
     const std::atomic<bool>* cancel = nullptr;                     // stop request (checked between slices)
+    std::function<int()> prepareJIT;                               // before InitCore (iOS: prepared JIT regions); 0 = ready
 };
 namespace v4game {
 namespace x86 = FEXCore::X86State;
@@ -222,6 +223,7 @@ inline int runOrbisV4Game(const OrbisV4GameFiles& game, OrbisV4GameHost& host) {
     Space space;
     auto ctx = FEXCore::Context::Context::CreateNewContext(features);
     ctx->SetSignalDelegator(&signals); ctx->SetSyscallHandler(&space); ctx->EnableExitOnHLT();
+    if (host.prepareJIT) if (const int prepared = host.prepareJIT()) { out << "JIT preparation failed (" << prepared << ")\n"; return 1; }
     if (!ctx->InitCore()) { out << "FEX init failed\n"; return 1; }
     FEXCore::Core::InternalThreadState* thread = nullptr;
     std::unique_ptr<OrbisV4TLSRuntime> runtime;

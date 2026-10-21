@@ -1,6 +1,10 @@
 // maxps4_game_run: the app's entry into OrbisV4GameSession.hpp.
 #include "maxps4_game_session.h"
 #include "OrbisV4GameSession.hpp"
+#include "maxps4_jit_memory.h"
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
 #include <cerrno>
 #include <fstream>
 #include <iterator>
@@ -63,6 +67,11 @@ extern "C" int maxps4_game_run(const char* game_dir, const char* names_tsv, cons
         return true;
     };
     if (c.audio) host.audio = [c](const int16_t* pcm, size_t frames) { c.audio(c.context, pcm, frames); };
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    // Verify the StikDebug-prepared dispatcher/cache regions (nonce, Mach
+    // W^X aliases, native canary) before FEX emits code into them.
+    host.prepareJIT = [] { return int(maxps4_jit_prepare()); };
+#endif
     std::atomic<bool> stop{false};
     host.cancel = &stop;
     std::thread watch;
