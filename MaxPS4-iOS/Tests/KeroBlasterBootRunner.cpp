@@ -161,9 +161,13 @@ int main(int argc, char** argv) {
     FEXCore::Config::Set(FEXCore::Config::CONFIG_IS64BIT_MODE, "1");
     FEXCore::Config::Set(FEXCore::Config::CONFIG_DISABLETELEMETRY, "1");
     FEXCore::Config::Set(FEXCore::Config::CONFIG_ENABLECODECACHINGWIP, "0");
-    // Keep x86 memory ordering enabled until an explicit off-mode is validated.
-    FEXCore::Config::Set(FEXCore::Config::CONFIG_TSOENABLED, "1");
-    std::cout << "FEX.CONFIG TSO=1\n";
+    // x86 memory ordering (TSO). MAXPS4_TSO=0 turns it off: every guest thread
+    // runs on this one host thread (cooperative scheduler), so no two guest
+    // threads ever access memory concurrently, and the GPU worker threads are
+    // joined before each draw returns; LOCK-prefixed atomics stay atomic.
+    const bool tso = !(std::getenv("MAXPS4_TSO") && std::string(std::getenv("MAXPS4_TSO")) == "0");
+    FEXCore::Config::Set(FEXCore::Config::CONFIG_TSOENABLED, tso ? "1" : "0");
+    std::cout << "FEX.CONFIG TSO=" << (tso ? 1 : 0) << "\n";
     // Each translated access emits a per-range check ladder (bounded at 16 MiB
     // per block by the guest-memory patch). Smaller blocks keep that bound.
     // MAXPS4_JIT_MAP=1: FEX writes /tmp/perf-<pid>.map (host code -> guest RIP per block),

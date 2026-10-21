@@ -10,8 +10,9 @@ vérifiés avant et après chaque extraction.
 
 Le logo SEGA s'affiche dans la fenêtre. Le fondu commence à l'image 33 (environ 4 min 30)
 et le logo est net vers l'image 55. Le fondu monte le bleu, puis le vert, puis le rouge,
-avec un fond qui tend vers le blanc. Aucune entrée manette n'a été testée, et rien n'a
-été vu au-delà du logo.
+avec un fond qui tend vers le blanc. Aucune entrée manette n'a été testée. Après le logo (run 29),
+l'écran passe au bleu nuit (image 215) puis au noir (image 230, ~26 min) ; le jeu continue de
+présenter des images mais n'a ouvert aucun fichier depuis : la scène suivante n'est pas chargée.
 
 ## Ce qu'il a fallu ajouter
 
@@ -54,6 +55,12 @@ avec un fond qui tend vers le blanc. Aucune entrée manette n'a été testée, e
   - ensuite, le rendu logiciel RSDK (boucle par pixel RGB565 de fondu et de teinte).
 - `MAXPS4_AUDIO_TIME_SCALE=N` : chaque tampon audio compte N fois sa durée. Le son n'est de toute
   façon pas en temps réel à cette vitesse. C'est ce réglage qui a fait apparaître le logo.
+- `atan2f` de la libc redirigé de la même façon vers `maxps4_atan2f` (`MAXPS4_HLE_MATH=0` pour
+  revenir en arrière) ; les redirections sont décrites dans une table de `OrbisV4ProcessBatch.hpp`.
+  Valeurs vérifiées sur 65 536 appels ; le gain de temps n'est pas mesuré à part.
+- `MAXPS4_TSO=0` désactive l'ordre mémoire x86 (sans risque : tous les threads invités tournent sur
+  un seul thread hôte). Mesure sur 10 min, un run seul par réglage : 123 images contre 111, écart par
+  image 3,07 s contre 3,13 s, aucun plantage. Gain dans le bruit, le défaut reste TSO activé.
 - Essayé puis écarté : `MAXPS4_MAXINST=32` plante (`LoadMemX87SVEOptPredicate` n'est pas géré par
   la traduction mémoire), et SVE ne peut pas être désactivé (chemin AVX-256 défectueux connu).
 

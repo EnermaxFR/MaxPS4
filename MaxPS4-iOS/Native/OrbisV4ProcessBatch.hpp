@@ -5,6 +5,7 @@
 #include "OrbisV4ServicePRX.hpp"
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <random>
 #include <set>
@@ -31,7 +32,16 @@ struct OrbisV4ProcessBatch {
     // objects whose fields libc accesses directly, see OrbisV4SystemServices).
     static constexpr size_t kernelState = 0x200000, kernelArena = 0x4000;
     static size_t stateFor(const std::string& path) { return path == "libkernel.prx" ? kernelState : providerState; }
-    static constexpr const char* hleMemcpyNid = "Q3VBxCXhUHs"; // memcpy
+    // libc functions served on the host (see buildImpl). serviceNid: the
+    // identity of the libkernel stub (not a real PS4 NID).
+    struct Redirect {
+        enum class Form { Jump, FloatBinary };
+        const char* nid; const char* service; const char* serviceNid; Form form; const char* switchVar; uint64_t minSize;
+    };
+    static constexpr Redirect redirects[] = {
+        {"Q3VBxCXhUHs", "maxps4_memcpy", "Q3VBxCXhUHs", Redirect::Form::Jump, "MAXPS4_HLE_MEMCPY", 5},        // memcpy
+        {"EH-x713A99c", "maxps4_atan2f", "MaxPS4atan2", Redirect::Form::FloatBinary, "MAXPS4_HLE_MATH", 18}, // atan2f
+    };
     static std::string hexText(uint64_t v) { char b[24]; std::snprintf(b, sizeof b, "%llx", (unsigned long long)v); return b; }
     std::vector<std::unique_ptr<std::vector<uint8_t>>> storage;
     std::vector<OrbisLinker::Input> inputs;
@@ -138,24 +148,26 @@ private:
             auto& need = needs[modules[owner].path][key];
             need.key = key; need.kind = s.kind; need.consumers.insert(modules[i].path);
         }
-        // HLE: the title's own libc memcpy is redirected (in memory, never on
-        // disk) to a host service, maxps4_memcpy, served by a libkernel stub:
-        // simulated byte copies dominate loading (Sonic Mania copies 183 MB).
-        // MAXPS4_HLE_MEMCPY=0 keeps the guest implementation.
-        size_t hleModule = SIZE_MAX; uint64_t hleEntry = 0;
+        // HLE: some of the title's own libc functions are redirected (in
+        // memory, never on disk) to host services served by libkernel stubs,
+        // because simulating them dominates loading: memcpy (Sonic Mania copies
+        // 183 MB) and atan2f (RSDK's trigonometric tables). MAXPS4_HLE_MEMCPY=0
+        // and MAXPS4_HLE_MATH=0 keep the guest implementations.
+        struct Hle { const Redirect* r; size_t module; uint64_t entry; };
+        std::vector<Hle> hles;
         {
-            const char* e = std::getenv("MAXPS4_HLE_MEMCPY");
-            const bool enabled = !(e && std::string(e) == "0");
-            for (size_t i = 0; enabled && i < real && hleModule == SIZE_MAX; ++i)
-                for (const auto& s : modules[i].meta.symbols)
-                    if (s.defined && s.nid == hleMemcpyNid && s.library == "libc" && s.kind == 2) { hleModule = i; hleEntry = s.value; break; }
-            if (hleModule != SIZE_MAX) {
-                for (size_t p = real; p < modules.size(); ++p) if (modules[p].path == "libkernel.prx") {
-                    const auto& lib = modules[p].meta.libraries[0];
-                    const Key key{hleMemcpyNid, lib.name, modules[p].meta.modules[0].name, lib.version, modules[p].meta.modules[0].version};
-                    auto& need = needs[modules[p].path][key];
-                    need.key = key; need.kind = 2; need.consumers.insert(modules[hleModule].path + " (HLE memcpy)");
-                }
+            auto off = [](const char* v) { const char* e = std::getenv(v); return e && std::string(e) == "0"; };
+            for (const auto& r : redirects) {
+                if (off(r.switchVar)) continue;
+                for (size_t i = 0; i < real; ++i) for (const auto& s : modules[i].meta.symbols)
+                    if (s.defined && s.nid == r.nid && s.library == "libc" && s.kind == 2 && s.size >= r.minSize) { hles.push_back({&r, i, s.value}); goto next; }
+                next:;
+            }
+            for (const auto& h : hles) for (size_t p = real; p < modules.size(); ++p) if (modules[p].path == "libkernel.prx") {
+                const auto& lib = modules[p].meta.libraries[0];
+                const Key key{h.r->serviceNid, lib.name, modules[p].meta.modules[0].name, lib.version, modules[p].meta.modules[0].version};
+                auto& need = needs[modules[p].path][key];
+                need.key = key; need.kind = 2; need.consumers.insert(modules[h.module].path + " (HLE " + h.r->service + ")");
             }
         }
         std::random_device entropy;
@@ -176,7 +188,8 @@ private:
             uint64_t dataCursor = 0x100;
             for (const auto& entry : it->second) {
                 const auto& need = entry.second; const auto& k = need.key;
-                const auto name = k.nid == hleMemcpyNid ? std::string("maxps4_memcpy") : names.count(k.nid) ? names.at(k.nid) : std::string("?");
+                std::string name = names.count(k.nid) ? names.at(k.nid) : std::string("?");
+                for (const auto& r : redirects) if (k.nid == r.serviceNid) name = r.service;
                 const size_t library = libraryIndex(k);
                 if (need.kind == 1) {
                     std::vector<uint8_t> bytes; std::string meaning;
@@ -209,22 +222,35 @@ private:
             stateBase[m.path] = m.bias + OrbisV4ServicePRX::state;
             for (const auto& e : extra) report += "PROVIDER.LIBRARY: " + m.path + " adds " + e.name + " v" + std::to_string(e.version) + "\n";
         }
-        // Redirect the guest memcpy entry: jmp rel32 to the maxps4_memcpy stub
-        // (the stub's ret returns to memcpy's caller).
-        if (hleModule != SIZE_MAX) {
+        // Patch each redirected entry: memcpy jumps to its stub (the stub's ret
+        // returns to the caller); atan2f moves xmm0/xmm1 to edi/esi, calls the
+        // stub and moves eax back to xmm0 (18 bytes).
+        for (const auto& h : hles) {
             uint64_t stub = 0;
-            for (const auto& s : services) if (s.name == "maxps4_memcpy") stub = s.stub;
-            auto& m = modules[hleModule];
+            for (const auto& s : services) if (s.name == h.r->service) stub = s.stub;
+            auto& m = modules[h.module];
+            std::vector<uint8_t> code;
+            auto rel32 = [&](uint8_t opcode, size_t at) {   // at: offset of the opcode inside code
+                const int64_t rel = int64_t(stub) - int64_t(m.bias + h.entry + at + 5);
+                if (rel < INT32_MIN || rel > INT32_MAX) return false;
+                code.push_back(opcode); for (int k = 0; k < 4; ++k) code.push_back(uint8_t(uint32_t(int32_t(rel)) >> (8 * k)));
+                return true;
+            };
+            bool ok = stub != 0;
+            if (ok && h.r->form == Redirect::Form::Jump) ok = rel32(0xe9, 0);
+            else if (ok) {
+                code = {0x66, 0x0f, 0x7e, 0xc7, 0x66, 0x0f, 0x7e, 0xce};   // movd edi, xmm0; movd esi, xmm1
+                ok = rel32(0xe8, code.size());                                 // call stub
+                const uint8_t tail[] = {0x66, 0x0f, 0x6e, 0xc0, 0xc3};         // movd xmm0, eax; ret
+                code.insert(code.end(), tail, tail + 5);
+            }
             bool patched = false;
             for (const auto& seg : m.meta.segments) {
-                if (seg.type != 1 || !(seg.flags & 1) || hleEntry < seg.address || hleEntry + 5 > seg.address + seg.filesz) continue;
-                const int64_t rel = int64_t(stub) - int64_t(m.bias + hleEntry + 5);
-                if (!stub || rel < INT32_MIN || rel > INT32_MAX) break;
-                uint8_t* at = m.bytes.data() + seg.offset + (hleEntry - seg.address);
-                at[0] = 0xe9; for (int k = 0; k < 4; ++k) at[1 + k] = uint8_t(uint32_t(int32_t(rel)) >> (8 * k));
+                if (!ok || seg.type != 1 || !(seg.flags & 1) || h.entry < seg.address || h.entry + code.size() > seg.address + seg.filesz) continue;
+                std::memcpy(m.bytes.data() + seg.offset + (h.entry - seg.address), code.data(), code.size());
                 patched = true; break;
             }
-            report += patched ? "HLE.MEMCPY " + m.path + "+0x" + hexText(hleEntry) + " -> host\n" : "HLE.MEMCPY not applied\n";
+            report += std::string("HLE.") + h.r->service + " " + m.path + "+0x" + hexText(h.entry) + (patched ? " -> host\n" : " not applied\n");
         }
         for (auto& m : modules) {
             bias[m.path] = m.bias;

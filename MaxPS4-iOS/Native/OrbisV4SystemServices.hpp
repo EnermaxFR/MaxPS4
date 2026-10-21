@@ -849,6 +849,15 @@ struct OrbisV4SystemServices {
                 done += len;
             }
             return ok(dst); });
+        // HLE atan2f (OrbisV4ProcessBatch): float atan2f(float y, float x), the
+        // operands' bits in edi/esi (moved from xmm0/xmm1 by the patched entry),
+        // the result's bits in eax. Host libm: may differ from the PS4 libc in
+        // the last bit (MAXPS4_HLE_MATH=0 keeps the guest implementation).
+        services.implement("maxps4_atan2f", [](const Registers& r, Memory&) {
+            float y, x; const uint32_t yb = uint32_t(r.rdi), xb = uint32_t(r.rsi);
+            std::memcpy(&y, &yb, 4); std::memcpy(&x, &xb, 4);
+            const float v = std::atan2(y, x); uint32_t vb; std::memcpy(&vb, &v, 4);
+            return ok(vb); });
         // sceRtcGetCurrentTick(SceRtcTick*): UTC microseconds since 0001-01-01.
         services.implement("sceRtcGetCurrentTick", [](const Registers& r, Memory& m) {
             using namespace std::chrono;
