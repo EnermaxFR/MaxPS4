@@ -29,6 +29,11 @@ python3 -B "$ROOT/MaxPS4-iOS/Tests/FEXGuestTranslationPatchTest.py" "$FEX"
 python3 -B "$ROOT/scripts/patch-fexcore-memory-translation.py" "$FEX"
 python3 -B "$ROOT/MaxPS4-iOS/Tests/FEXJITProviderPatchTest.py" "$FEX"
 python3 -B "$ROOT/scripts/patch-fexcore-jit-provider.py" "$FEX"
+# MaxPS4 FEX changes beyond the scripted patches (preemption incl. the native
+# interrupt-page check, translated x87/prefetch), see test-ps4-fex-linked.sh.
+if patch -p1 --dry-run -s -f -d "$FEX" < "$ROOT/patches/fexcore-maxps4-local.patch" >/dev/null 2>&1; then
+  patch -p1 -s -f -d "$FEX" < "$ROOT/patches/fexcore-maxps4-local.patch"
+fi
 # Patch only the disposable dependency checkout. No replacement symbols are defined.
 python3 - "$FEX" <<'PY'
 from pathlib import Path
