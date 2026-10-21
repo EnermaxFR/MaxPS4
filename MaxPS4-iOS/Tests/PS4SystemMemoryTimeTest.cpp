@@ -39,7 +39,7 @@ int main() {
     assert(invoke(S::mprotect, {address, page, 5}) == 0);
     assert(memory.fetch(address, &byte, 1));
     assert(!memory.write(address, word, 1));
-    assert(invoke(S::mprotect, {address, page, 7}) == kernel_error(access));
+    assert(invoke(S::mprotect, {address, page, 7}) == kernel_error(maxps4::ps4::access));
     assert(memory.executable(address, 1)); // Failed protect preserves permissions.
     assert(invoke(S::mprotect, {address + 1, page, 3}) == kernel_error(inval));
     assert(invoke(S::mprotect, {address, page, 8}) == kernel_error(notsup));
