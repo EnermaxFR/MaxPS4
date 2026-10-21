@@ -1,0 +1,221 @@
+diff --git a/src/aarch64/logic-aarch64.cc b/src/aarch64/logic-aarch64.cc
+index 0e268b9..9488665 100644
+--- a/src/aarch64/logic-aarch64.cc
++++ b/src/aarch64/logic-aarch64.cc
+@@ -1049,6 +1049,15 @@ LogicVRegister Simulator::and_(VectorFormat vform,
+                                const LogicVRegister& src1,
+                                const LogicVRegister& src2) {
+   dst.ClearForWrite(vform);
++  // MaxPS4: bitwise forms are lane-size agnostic; 16B/8B as 64-bit words.
++  if (vform == kFormat16B || vform == kFormat8B) {
++    const VectorFormat wide = vform == kFormat16B ? kFormat2D : kFormat1D;
++    for (int i = 0; i < LaneCountFromFormat(wide); i++) {
++      const uint64_t a = src1.Uint(wide, i), b = src2.Uint(wide, i);
++      dst.SetUint(wide, i, a & b);
++    }
++    return dst;
++  }
+   for (int i = 0; i < LaneCountFromFormat(vform); i++) {
+     dst.SetUint(vform, i, src1.Uint(vform, i) & src2.Uint(vform, i));
+   }
+@@ -1061,6 +1070,15 @@ LogicVRegister Simulator::orr(VectorFormat vform,
+                               const LogicVRegister& src1,
+                               const LogicVRegister& src2) {
+   dst.ClearForWrite(vform);
++  // MaxPS4: bitwise forms are lane-size agnostic; 16B/8B as 64-bit words.
++  if (vform == kFormat16B || vform == kFormat8B) {
++    const VectorFormat wide = vform == kFormat16B ? kFormat2D : kFormat1D;
++    for (int i = 0; i < LaneCountFromFormat(wide); i++) {
++      const uint64_t a = src1.Uint(wide, i), b = src2.Uint(wide, i);
++      dst.SetUint(wide, i, a | b);
++    }
++    return dst;
++  }
+   for (int i = 0; i < LaneCountFromFormat(vform); i++) {
+     dst.SetUint(vform, i, src1.Uint(vform, i) | src2.Uint(vform, i));
+   }
+@@ -1085,6 +1103,15 @@ LogicVRegister Simulator::eor(VectorFormat vform,
+                               const LogicVRegister& src1,
+                               const LogicVRegister& src2) {
+   dst.ClearForWrite(vform);
++  // MaxPS4: bitwise forms are lane-size agnostic; 16B/8B as 64-bit words.
++  if (vform == kFormat16B || vform == kFormat8B) {
++    const VectorFormat wide = vform == kFormat16B ? kFormat2D : kFormat1D;
++    for (int i = 0; i < LaneCountFromFormat(wide); i++) {
++      const uint64_t a = src1.Uint(wide, i), b = src2.Uint(wide, i);
++      dst.SetUint(wide, i, a ^ b);
++    }
++    return dst;
++  }
+   for (int i = 0; i < LaneCountFromFormat(vform); i++) {
+     dst.SetUint(vform, i, src1.Uint(vform, i) ^ src2.Uint(vform, i));
+   }
+@@ -1097,6 +1124,15 @@ LogicVRegister Simulator::bic(VectorFormat vform,
+                               const LogicVRegister& src1,
+                               const LogicVRegister& src2) {
+   dst.ClearForWrite(vform);
++  // MaxPS4: bitwise forms are lane-size agnostic; 16B/8B as 64-bit words.
++  if (vform == kFormat16B || vform == kFormat8B) {
++    const VectorFormat wide = vform == kFormat16B ? kFormat2D : kFormat1D;
++    for (int i = 0; i < LaneCountFromFormat(wide); i++) {
++      const uint64_t a = src1.Uint(wide, i), b = src2.Uint(wide, i);
++      dst.SetUint(wide, i, a & ~b);
++    }
++    return dst;
++  }
+   for (int i = 0; i < LaneCountFromFormat(vform); i++) {
+     dst.SetUint(vform, i, src1.Uint(vform, i) & ~src2.Uint(vform, i));
+   }
+@@ -3049,6 +3085,12 @@ LogicVRegister Simulator::mov(VectorFormat vform,
+                               LogicVRegister dst,
+                               const LogicVRegister& src) {
+   dst.ClearForWrite(vform);
++  // MaxPS4: whole-register copies as 64-bit words.
++  if (vform == kFormat16B || vform == kFormat8B) {
++    const VectorFormat wide = vform == kFormat16B ? kFormat2D : kFormat1D;
++    for (int i = 0; i < LaneCountFromFormat(wide); i++) dst.SetUint(wide, i, src.Uint(wide, i));
++    return dst;
++  }
+   for (int lane = 0; lane < LaneCountFromFormat(vform); lane++) {
+     dst.SetUint(vform, lane, src.Uint(vform, lane));
+   }
+diff --git a/src/aarch64/simulator-aarch64.cc b/src/aarch64/simulator-aarch64.cc
+index c4f87d0..584bd85 100644
+--- a/src/aarch64/simulator-aarch64.cc
++++ b/src/aarch64/simulator-aarch64.cc
+@@ -29,6 +29,7 @@
+ #include "simulator-aarch64.h"
+ 
+ #include <cmath>
++#include <cstdlib>
+ #include <cstring>
+ #include <errno.h>
+ #include <limits>
+@@ -813,6 +814,13 @@ Simulator::~Simulator() {
+ }
+ 
+ 
++extern "C" {
++const volatile uint8_t* vixl_maxps4_preempt = nullptr;
++uint64_t (*vixl_maxps4_preempt_target)(uint64_t pc, uint64_t state) = nullptr;
++volatile uint64_t vixl_maxps4_last_branch = 0;
++volatile uint8_t vixl_maxps4_sample_branches = 0;
++}
++
+ void Simulator::Run() {
+   // Flush any written registers before executing anything, so that
+   // manually-set registers are logged _before_ the first instruction.
+@@ -830,8 +838,25 @@ void Simulator::Run() {
+       }
+     }
+   } else {
++    // Diagnostic samples of instructions actually executed by the simulator.
++    // Keep the normal loop untouched when tracing is disabled.
++    const bool trace = std::getenv("MAXPS4_INSTRUCTION_TRACE") != nullptr;
++    static thread_local uint64_t executed = 0;
++    bool branched = true;  // block entries are only reached by a taken branch
+     while (!IsSimulationFinished()) {
++      if (branched && vixl_maxps4_preempt && *vixl_maxps4_preempt && vixl_maxps4_preempt_target) {
++        if (const uint64_t target = vixl_maxps4_preempt_target(reinterpret_cast<uint64_t>(ReadPc()), ReadXRegister(28)))
++          WritePc(reinterpret_cast<const Instruction*>(target));
++      }
++      const auto* instruction = ReadPc();
+       ExecuteInstruction();
++      branched = pc_modified_;
++      if (branched && vixl_maxps4_sample_branches) vixl_maxps4_last_branch = reinterpret_cast<uint64_t>(ReadPc());
++      if (trace && (++executed <= 256 || executed % 1000000 == 0)) {
++        fprintf(stderr, "EXEC.A64 count=%llu pc=%p bits=%08x\n",
++                static_cast<unsigned long long>(executed),
++                static_cast<const void*>(instruction), instruction->GetInstructionBits());
++      }
+     }
+   }
+ }
+diff --git a/src/aarch64/simulator-aarch64.h b/src/aarch64/simulator-aarch64.h
+index fd8974e..29d4f45 100644
+--- a/src/aarch64/simulator-aarch64.h
++++ b/src/aarch64/simulator-aarch64.h
+@@ -72,6 +72,19 @@ using uint8x16_t = __attribute__((neon_vector_type(16))) uint8_t;
+ #define PROT_MTE 0x20
+ #endif
+ 
++// MaxPS4: preemption at JIT block entries (see FEXCore::MaxPS4). While the
++// byte at vixl_maxps4_preempt is non-zero, the simulator asks
++// vixl_maxps4_preempt_target(pc, x28) before each instruction; a non-zero
++// result is the address to continue at instead.
++extern "C" {
++extern const volatile uint8_t* vixl_maxps4_preempt;
++extern uint64_t (*vixl_maxps4_preempt_target)(uint64_t pc, uint64_t state);
++// MaxPS4 diagnostics: target of the last taken branch (host code address),
++// written only while vixl_maxps4_sample_branches is non-zero.
++extern volatile uint64_t vixl_maxps4_last_branch;
++extern volatile uint8_t vixl_maxps4_sample_branches;
++}
++
+ namespace vixl {
+ namespace aarch64 {
+ 
+@@ -1434,7 +1447,38 @@ class Simulator : public DecoderVisitor {
+     //  3. The Simulator (`this`).
+     // User can add additional visitors at any point, but the Simulator requires
+     // that the ordering above is preserved.
+-    decoder_->Decode(pc_);
++    // MaxPS4: per-address decode cache. A hit (same address and bits) calls
++    // the form's handler directly, skipping the decode tree, the metadata map
++    // and the CPUFeaturesAuditor (the simulator runs with every feature
++    // enabled, so its availability check cannot fail). Disabled while
++    // disassembly tracing needs the PrintDisassembler visitor.
++    if ((trace_parameters_ & LOG_DISASM) == 0) {
++      if (decode_cache_.empty()) decode_cache_.resize(size_t(1) << 18);
++      const Instruction* at = pc_;
++      const uint32_t bits = at->GetInstructionBits();
++      DecodeCacheEntry& entry = decode_cache_[(reinterpret_cast<uintptr_t>(at) >> 2) & (decode_cache_.size() - 1)];
++      if (entry.pc == at && entry.bits == bits && entry.fn != NULL) {
++        form_hash_ = entry.form;
++        // Direct member call when the handler is a plain visitor method
++        // (most forms); otherwise through the std::function.
++        if (entry.method != NULL) (this->*entry.method)(at);
++        else (*entry.fn)(this, at);
++      } else {
++        decoder_->Decode(at);
++        // The auditor ran for this decode: check availability now (a cache
++        // hit skips the auditor, so its last instruction would be stale).
++        VIXL_CHECK(cpu_features_auditor_.InstructionIsAvailable());
++        const FormToVisitorFnMap* fv = GetFormToVisitorFnMap();
++        FormToVisitorFnMap::const_iterator it = fv->find(form_hash_);
++        entry.pc = at; entry.bits = bits; entry.form = form_hash_;
++        entry.fn = it == fv->end() ? NULL : &it->second;
++        const DecodeMethod* method = entry.fn == NULL ? NULL : entry.fn->target<DecodeMethod>();
++        entry.method = method == NULL ? NULL : *method;
++      }
++    } else {
++      decoder_->Decode(pc_);
++      VIXL_CHECK(cpu_features_auditor_.InstructionIsAvailable());
++    }
+ 
+     if (last_instr_was_movprfx) {
+       VIXL_ASSERT(last_instr_ != NULL);
+@@ -1445,8 +1489,6 @@ class Simulator : public DecoderVisitor {
+     IncrementPc();
+     LogAllWrittenRegisters();
+     UpdateBType();
+-
+-    VIXL_CHECK(cpu_features_auditor_.InstructionIsAvailable());
+   }
+ 
+   virtual void Visit(Metadata* metadata,
+@@ -5425,6 +5467,14 @@ class Simulator : public DecoderVisitor {
+   static const FormToVisitorFnMap* GetFormToVisitorFnMap();
+ 
+   uint32_t form_hash_{};
++  using DecodeMethod = void (Simulator::*)(const Instruction*);
++  struct DecodeCacheEntry {
++    const Instruction* pc = NULL;
++    uint32_t bits = 0, form = 0;
++    const std::function<void(Simulator*, const Instruction*)>* fn = NULL;
++    DecodeMethod method = NULL;
++  };
++  std::vector<DecodeCacheEntry> decode_cache_;
+ 
+   static const PACKey kPACKeyIA;
+   static const PACKey kPACKeyIB;

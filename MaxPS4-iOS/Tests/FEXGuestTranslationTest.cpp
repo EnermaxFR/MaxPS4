@@ -32,6 +32,10 @@
 #include <future>
 #include <chrono>
 #include <stdexcept>
+#include <thread>
+#include <atomic>
+#include <csignal>
+#include <sys/mman.h>
 
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); std::abort(); } } while (0)
 class CallRetMemory {
@@ -43,6 +47,25 @@ public:
 private:
     void* ptr_;
 };
+#if !defined(VIXL_SIMULATOR)
+// Native preemption (FEXCore::MaxPS4::NativePreemptCheck): faults on the
+// running thread's read-only interrupt page continue at PreemptTarget.
+static std::atomic<FEXCore::Core::InternalThreadState*> preempt_running{nullptr};
+static void preempt_fault(int, siginfo_t* info, void* context) {
+    auto* thread=preempt_running.load();
+    size_t size=0; auto* page=thread?static_cast<uint8_t*>(FEXCore::MaxPS4::InterruptFaultPage(thread,&size)):nullptr;
+    auto* at=static_cast<uint8_t*>(info->si_addr);
+    if (!page || at<page || at>=page+size) std::abort();
+    ::mprotect(page,size,PROT_READ|PROT_WRITE);
+    auto* uc=static_cast<ucontext_t*>(context);
+#if defined(__APPLE__)
+    auto& pc=uc->uc_mcontext->__ss.__pc; const uint64_t x28=uc->uc_mcontext->__ss.__x[28];
+#else
+    auto& pc=uc->uc_mcontext.pc; const uint64_t x28=uc->uc_mcontext.regs[28];
+#endif
+    if (const uint64_t target=FEXCore::MaxPS4::PreemptTarget(pc,x28)) pc=target;
+}
+#endif
 class Space final : public FEXCore::HLE::SyscallHandler {
 public:
     Space() { OSABI = FEXCore::HLE::SyscallOSABI::OS_GENERIC; }
@@ -171,6 +194,78 @@ int main() {
             CHECK(refusals==10);
             space.ranges.clear();
             std::puts("PASS 10 malformed FEX snapshots refused before decode/JIT; bytes unchanged; no dispatch");
+        }
+        // Time-slice preemption of a guest spin wait. Both guest threads share
+        // this host thread: A spins until B stores the flag, so A must be
+        // stopped (State.rip kept) for B to run. Simulator: the dispatcher /
+        // block-entry request; native: the read-only interrupt page.
+        if (!tso && !lse) {
+            // A: mov rdi,data; mov rbx,L; L: mov eax,[rdi]; test eax,eax; jnz out;
+            //    jmp rbx; out: mov eax,42; hlt. The indirect jump leaves the
+            //    block each turn (a tight loop inside one multiblock region never
+            //    reaches an entry and is not preemptible, as in the simulator).
+            // B: mov rdi,data; mov dword [rdi],1; hlt
+            std::array<uint8_t,0x80> program{};
+            const uint8_t spin[]={0x48,0xbf,0,0,0,0,4,0,0,0, 0x48,0xbb,0x14,0,0x40,0,0,0,0,0,
+                                  0x8b,0x07, 0x85,0xc0, 0x75,0x02, 0xff,0xe3, 0xb8,42,0,0,0, 0xf4};
+            const uint8_t store[]={0x48,0xbf,0,0,0,0,4,0,0,0, 0xc7,0x07,1,0,0,0, 0xf4};
+            std::copy(std::begin(spin),std::end(spin),program.begin());
+            std::copy(std::begin(store),std::end(store),program.begin()+0x40);
+            std::array<uint8_t,64> flag{};
+            space.ranges={{code,reinterpret_cast<uintptr_t>(program.data()),program.size(),5},
+                          {data,reinterpret_cast<uintptr_t>(flag.data()),flag.size(),6}};
+            CHECK(space.ValidateGuestMemoryRanges());
+#if !defined(VIXL_SIMULATOR)
+            FEXCore::MaxPS4::NativePreemptCheck=true;
+            struct sigaction action{}, oldSegv{}, oldBus{};
+            action.sa_sigaction=preempt_fault; action.sa_flags=SA_SIGINFO; sigemptyset(&action.sa_mask);
+            CHECK(sigaction(SIGSEGV,&action,&oldSegv)==0 && sigaction(SIGBUS,&action,&oldBus)==0);
+#endif
+            ctx->ClearCodeCache(thread,false); ctx->ClearCodeCache(second,false);
+            auto run=[&](FEXCore::Core::InternalThreadState* current, uint64_t rip) {
+                auto& cpu=current->CurrentFrame->State;
+                if (rip) cpu.rip=rip;
+                cpu.callret_sp=reinterpret_cast<uintptr_t>(callret.data())+callret.size()/4;
+                FEXCore::Core::GuestMemoryFaultData fault{}; cpu.GuestMemoryFaultRecord=&fault;
+                std::atomic<bool> done{false};
+#if !defined(VIXL_SIMULATOR)
+                preempt_running=current;
+#endif
+                std::thread ticker([&] {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                    if (done) return;
+                    FEXCore::MaxPS4::PreemptRequest=1;
+#if !defined(VIXL_SIMULATOR)
+                    size_t size=0; void* page=FEXCore::MaxPS4::InterruptFaultPage(current,&size);
+                    ::mprotect(page,size,PROT_READ);
+#endif
+                });
+                ctx->ExecuteThread(current); done=true; ticker.join();
+#if !defined(VIXL_SIMULATOR)
+                preempt_running=nullptr;
+                size_t size=0; void* page=FEXCore::MaxPS4::InterruptFaultPage(current,&size);
+                ::mprotect(page,size,PROT_READ|PROT_WRITE);
+#endif
+                FEXCore::MaxPS4::PreemptRequest=0;
+                cpu.GuestMemoryFaultRecord=nullptr;
+                CHECK(!fault.Bytes);
+                return cpu.rip;
+            };
+            thread->CurrentFrame->State.gregs[FEXCore::X86State::REG_RAX]=0;
+            const uint64_t stopped=run(thread,code);
+            CHECK(flag[0]==0 && thread->CurrentFrame->State.gregs[FEXCore::X86State::REG_RAX]==0);
+            CHECK(stopped>=code && stopped<code+sizeof spin);
+            run(second,code+0x40);
+            CHECK(flag[0]==1);
+            run(thread,0);
+            CHECK(thread->CurrentFrame->State.gregs[FEXCore::X86State::REG_RAX]==42);
+#if !defined(VIXL_SIMULATOR)
+            FEXCore::MaxPS4::NativePreemptCheck=false;
+            CHECK(sigaction(SIGSEGV,&oldSegv,nullptr)==0 && sigaction(SIGBUS,&oldBus,nullptr)==0);
+#endif
+            ctx->ClearCodeCache(thread,false); ctx->ClearCodeCache(second,false);
+            space.ranges.clear();
+            std::printf("PASS guest spin wait preempted at rip=0x%llx, second thread ran, first resumed to RAX=42\n",(unsigned long long)stopped);
         }
         // Real synthetic SCE PRX -> relocation -> validated staging -> owned
         // translation -> lease-pinned FEX snapshot. No test byte substitution

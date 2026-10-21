@@ -1,0 +1,328 @@
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -78,6 +78,63 @@
+ #include <unordered_map>
+ #include <utility>
+ #include <xxhash.h>
++#include <map>
++
++namespace FEXCore::MaxPS4 {
++std::atomic<uint8_t> PreemptRequest {0};
++std::atomic<bool> BlockLinking {true};
++// Simulator builds: host entry -> guest RIP of every compiled block, so a
++// pending preemption can stop at the next block entry even inside linked
++// loops. Cleared with the code cache (entries never outlive their buffer).
++std::shared_mutex BlockEntriesMutex;
++std::unordered_map<uint64_t, uint64_t> BlockEntries;
++// Lock-free filter in front of the map: one byte per hash bucket, set for
++// every registered entry, cleared with the map. Most taken branches are not
++// block entries; they return here without touching the lock. A stale zero
++// (registration racing a check) only delays the stop to a later entry.
++constexpr size_t BlockEntryFilterSize = size_t(1) << 20;
++std::atomic<uint8_t> BlockEntryFilter[BlockEntryFilterSize];
++static size_t BlockEntryBucket(uint64_t pc) { return (pc >> 2) & (BlockEntryFilterSize - 1); }
++// Same entries ordered by host address (diagnostics): a host pc inside a
++// block maps to the nearest entry at or below it (blocks are laid out one
++// after another in the code buffer).
++std::map<uint64_t, uint64_t> BlockEntriesOrdered;
++uint64_t GuestOfHost(uint64_t host) {
++  std::shared_lock lk(BlockEntriesMutex);
++  auto it = BlockEntriesOrdered.upper_bound(host);
++  if (it == BlockEntriesOrdered.begin()) return 0;
++  --it;
++  return host - it->first < 0x10000 ? it->second : 0;
++}
++std::atomic<bool> NativePreemptCheck {false};
++void* InterruptFaultPage(FEXCore::Core::InternalThreadState* Thread, size_t* Size) {
++  if (Size) *Size = sizeof(Thread->InterruptFaultPage);
++  return Thread->InterruptFaultPage;
++}
++// Native builds call this from a signal handler, on the faulting thread while
++// it runs JIT code: the registry lock is never held there (it is only taken
++// by compilation and code-cache clearing, outside JIT code).
++uint64_t PreemptTarget(uint64_t pc, uint64_t state) {
++  if (!BlockEntryFilter[BlockEntryBucket(pc)].load(std::memory_order_relaxed)) return 0;
++  uint64_t rip = 0;
++  {
++    std::shared_lock lk(BlockEntriesMutex);
++    auto it = BlockEntries.find(pc);
++    if (it == BlockEntries.end()) return 0;
++    rip = it->second;
++  }
++  auto* Frame = reinterpret_cast<FEXCore::Core::CpuStateFrame*>(state);
++  // Entries are global but code buffers are per thread and can be freed and
++  // reused (exited threads): only stop where this thread's own cache maps the
++  // guest RIP to exactly this host entry; otherwise keep running.
++  auto* Thread = Frame->Thread;
++  if (!Thread || !Thread->LookupCache) return 0;
++  const uintptr_t Host = Thread->LookupCache->FindBlock(Thread, rip);
++  if (!Host || reinterpret_cast<uint64_t>(FEXCore::Allocator::GetExecutableAddress(reinterpret_cast<void*>(Host))) != pc) return 0;
++  Frame->State.rip = rip;
++  return Frame->Pointers.ThreadStopHandlerSpillSRA;
++}
++} // namespace FEXCore::MaxPS4
+ 
+ namespace FEXCore::Context {
+ ContextImpl::ContextImpl(const FEXCore::HostFeatures& Features)
+@@ -493,6 +550,12 @@
+ }
+ 
+ void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, bool NewCodeBuffer) {
++  {
++    std::unique_lock lk_entries(MaxPS4::BlockEntriesMutex);
++    MaxPS4::BlockEntries.clear();
++    MaxPS4::BlockEntriesOrdered.clear();
++    for (auto& b : MaxPS4::BlockEntryFilter) b.store(0, std::memory_order_relaxed);
++  }
+   FEXCORE_PROFILE_INSTANT("ClearCodeCache");
+ 
+   if (NewCodeBuffer) {
+@@ -727,6 +790,19 @@
+         Offset = Emit->WrapNode(Emit->_Constant(static_cast<uint64_t>(static_cast<int64_t>(M->Offset)))); M->Offset = 0;
+          Permissions = 4; break;
+       }
++      case IR::OP_LOADMEMX87SVEOPTPREDICATE:
++      case IR::OP_STOREMEMX87SVEOPTPREDICATE: {
++        // MaxPS4: one 80-bit x87 value, PRED_X87_SVEOPT = 5 x 16-bit lanes.
++        const bool Load = Op->Op == IR::OP_LOADMEMX87SVEOPTPREDICATE;
++        AddrIndex = Load ? IR::IROp_LoadMemX87SVEOptPredicate::Addr_Index : IR::IROp_StoreMemX87SVEOptPredicate::Addr_Index;
++        Bytes = 5 * IR::OpSizeToSize(Op->ElementSize);
++        Permissions = Load ? 4 : 2; break;
++      }
++      case IR::OP_PREFETCH:
++        // MaxPS4: a prefetch is a hint without architectural effect; never let
++        // it reach a host address computed from an untranslated guest pointer.
++        Emit->Remove(Node);
++        continue;
+       case IR::OP_PUSH:
+       case IR::OP_PUSHTWO:
+       case IR::OP_POP:
+@@ -737,14 +813,11 @@
+       case IR::OP_VSTOREVECTORMASKED:
+       case IR::OP_VLOADVECTORGATHERMASKED:
+       case IR::OP_VLOADVECTORGATHERMASKEDQPS:
+-      case IR::OP_STOREMEMX87SVEOPTPREDICATE:
+-      case IR::OP_LOADMEMX87SVEOPTPREDICATE:
+       case IR::OP_CACHELINECLEAR:
+       case IR::OP_CACHELINECLEAN:
+       case IR::OP_CACHELINEZERO:
+-      case IR::OP_PREFETCH:
+       case IR::OP_VALIDATECODE:
+-        throw std::runtime_error("Unsupported translated guest memory operation");
++        throw std::runtime_error(std::string("Unsupported translated guest memory operation: ") + std::string(IR::GetName(Op->Op)));
+       default: break;
+       }
+       if (AddrIndex != 255) {
+@@ -1136,6 +1209,20 @@
+   FEXCORE_PROFILE_INSTANT_INCREMENT(Thread, AccumulatedJITCount, 1);
+ 
+   auto [CompiledCode, DebugData, StartAddr, Length, NeedsAddGuestCodeRanges] = CompileCode(Thread, GuestRIP, MaxInst);
++#ifdef VIXL_SIMULATOR
++  if (DebugData) {
++#else
++  if (DebugData && MaxPS4::NativePreemptCheck.load(std::memory_order_relaxed)) {
++#endif
++    std::unique_lock lk_entries(MaxPS4::BlockEntriesMutex);
++    for (const auto& [EntryRIP, EntryHost] : CompiledCode.EntryPoints)
++      if (EntryHost) {
++        const uint64_t Host = reinterpret_cast<uint64_t>(FEXCore::Allocator::GetExecutableAddress(EntryHost));
++        MaxPS4::BlockEntries[Host] = EntryRIP;
++        MaxPS4::BlockEntriesOrdered[Host] = EntryRIP;
++        MaxPS4::BlockEntryFilter[MaxPS4::BlockEntryBucket(Host)].store(1, std::memory_order_relaxed);
++      }
++  }
+   auto CodePtr = CompiledCode.EntryPoints[GuestRIP];
+   if (CodePtr == nullptr) {
+     return 0;
+--- a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
+@@ -187,6 +187,13 @@
+   ldrb(TMP1, STATE_PTR(CpuStateFrame, State.flags[X86State::RFLAG_TF_RAW_LOC]));
+   (void)cbnz(ARMEmitter::Size::i32Bit, TMP1, &CompileSingleStep);
+ 
++  // MaxPS4 preemption point: State.rip is current and static registers hold
++  // the guest state, so the stop handler can spill them and return.
++  ARMEmitter::ForwardLabel MaxPS4Preempt;
++  LoadConstant(ARMEmitter::Size::i64Bit, TMP1, reinterpret_cast<uint64_t>(&FEXCore::MaxPS4::PreemptRequest));
++  ldrb(TMP1, TMP1, 0);
++  (void)cbnz(ARMEmitter::Size::i32Bit, TMP1, &MaxPS4Preempt);
++
+   ARMEmitter::ForwardLabel NoBlock;
+ 
+   if (DisableL2Cache()) {
+@@ -253,6 +260,7 @@
+ 
+   {
+     ThreadStopHandlerAddressSpillSRA = GetCursorAddress<uint64_t>();
++    (void)Bind(&MaxPS4Preempt);
+     SpillStaticRegs(TMP1);
+ 
+     ThreadStopHandlerAddress = GetCursorAddress<uint64_t>();
+@@ -672,6 +680,8 @@
+ 
+ #ifdef VIXL_SIMULATOR
+ void Dispatcher::ExecuteDispatch(FEXCore::Core::CpuStateFrame* Frame) {
++  vixl_maxps4_preempt = reinterpret_cast<const volatile uint8_t*>(&FEXCore::MaxPS4::PreemptRequest);
++  vixl_maxps4_preempt_target = &FEXCore::MaxPS4::PreemptTarget;
+   Simulator.WriteXRegister(0, reinterpret_cast<int64_t>(Frame));
+   Simulator.WriteXRegister(1, 0);
+   Simulator.RunFrom(reinterpret_cast< const vixl::aarch64::Instruction*>(DispatchPtr));
+--- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+@@ -559,8 +559,9 @@
+   uintptr_t HostCode {};
+   auto GuestRip = Record->GuestRIP;
+ 
+-  if (TFSet) {
++  if (TFSet || !FEXCore::MaxPS4::BlockLinking.load(std::memory_order_relaxed)) {
+     // If TF is set, the cache must be skipped as different code needs to be generated.
++    // MaxPS4: without block linking every exit returns to the dispatcher (preemption point).
+     Frame->State.rip = GuestRip;
+     return Frame->Pointers.DispatcherLoopTop;
+   } else {
+@@ -867,6 +868,19 @@
+ }
+ 
+ void Arm64JITCore::EmitEntryPoint(ARMEmitter::BackwardLabel& HeaderLabel, bool CheckTF) {
++#ifndef VIXL_SIMULATOR
++  if (FEXCore::MaxPS4::NativePreemptCheck.load(std::memory_order_relaxed)) {
++    // MaxPS4 preemption point, first instruction of the entry (see Context.h):
++    // faults while the embedder keeps this thread's interrupt page read-only.
++    constexpr size_t InterruptPageOffset =
++      offsetof(FEXCore::Core::InternalThreadState, InterruptFaultPage) - offsetof(FEXCore::Core::InternalThreadState, BaseFrameState);
++    if constexpr (InterruptPageOffset <= 32760) {
++      str(ARMEmitter::XReg::zr, STATE, InterruptPageOffset);
++    } else {
++      str(ARMEmitter::QReg::q0, STATE, InterruptPageOffset);
++    }
++  }
++#endif
+   // Get the address of the JITCodeHeader and store in to the core state.
+   // Two instruction cost, each 1 cycle.
+   adr_OrRestart(TMP1, &HeaderLabel);
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -3229,6 +3229,38 @@
+     // Offset the pointer
+     Ref TailDest = LoadGPRRegister(X86State::REG_RDI);
+     StoreGPRRegister(X86State::REG_RDI, OffsetByDir(TailDest, IR::OpSizeToSize(Size)));
++  } else if (CTX->SyscallHandler && CTX->SyscallHandler->UsesGuestMemoryTranslation()) {
++    // MaxPS4 translated guest memory: MemSet has no translated lowering. Emit
++    // the architectural loop instead; every element store is translated and
++    // permission-checked individually (no host pointer escapes).
++    CalculateDeferredFlags();
++    ForeachDirection([this, Op, Size](int32_t PtrDir) {
++      auto JumpStart = Jump();
++      auto LoopStart = CreateNewCodeBlockAfter(GetCurrentBlock());
++      SetJumpTarget(JumpStart, LoopStart);
++      SetCurrentCodeBlock(LoopStart);
++      StartNewBlock();
++      Ref Counter = LoadGPRRegister(X86State::REG_RCX);
++      auto CondJump_ = CondJump(Counter, CondClass::EQ);
++      auto LoopTail = CreateNewCodeBlockAfter(LoopStart);
++      SetFalseJumpTarget(CondJump_, LoopTail);
++      SetCurrentCodeBlock(LoopTail);
++      StartNewBlock();
++      {
++        Ref Src = LoadSourceGPR(Op, Op->Src[0], Op->Flags, {.AllowUpperGarbage = true});
++        Ref Dest = MakeSegmentAddress(X86State::REG_RDI, 0, X86Tables::DecodeFlags::FLAG_ES_PREFIX, true);
++        _StoreMemGPRAutoTSO(Size, Dest, Src, Size);
++        Ref TailCounter = Sub(OpSize::i64Bit, LoadGPRRegister(X86State::REG_RCX), 1);
++        StoreGPRRegister(X86State::REG_RCX, TailCounter);
++        Ref TailDest = Add(OpSize::i64Bit, LoadGPRRegister(X86State::REG_RDI), PtrDir * static_cast<int32_t>(IR::OpSizeToSize(Size)));
++        StoreGPRRegister(X86State::REG_RDI, TailDest);
++        Jump(LoopStart);
++      }
++      auto LoopEnd = CreateNewCodeBlockAfter(LoopTail);
++      SetTrueJumpTarget(CondJump_, LoopEnd);
++      SetCurrentCodeBlock(LoopEnd);
++      StartNewBlock();
++    });
+   } else {
+     // FEX doesn't support partial faulting REP instructions.
+     // Converting this to a `MemSet` IR op optimizes this quite significantly in our codegen.
+@@ -3257,7 +3289,40 @@
+   // RA now can handle these to be here, to avoid DF accesses
+   const auto Size = OpSizeFromSrc(Op);
+ 
+-  if (Op->Flags & (FEXCore::X86Tables::DecodeFlags::FLAG_REP_PREFIX | FEXCore::X86Tables::DecodeFlags::FLAG_REPNE_PREFIX)) {
++  const bool Repeat = (Op->Flags & (FEXCore::X86Tables::DecodeFlags::FLAG_REP_PREFIX | FEXCore::X86Tables::DecodeFlags::FLAG_REPNE_PREFIX)) != 0;
++  if (Repeat && CTX->SyscallHandler && CTX->SyscallHandler->UsesGuestMemoryTranslation()) {
++    // MaxPS4 translated guest memory: MemCpy has no translated lowering. Emit
++    // the architectural element loop; each load/store is translated/checked.
++    CalculateDeferredFlags();
++    ForeachDirection([this, Op, Size](int32_t PtrDir) {
++      auto JumpStart = Jump();
++      auto LoopStart = CreateNewCodeBlockAfter(GetCurrentBlock());
++      SetJumpTarget(JumpStart, LoopStart);
++      SetCurrentCodeBlock(LoopStart);
++      StartNewBlock();
++      Ref Counter = LoadGPRRegister(X86State::REG_RCX);
++      auto CondJump_ = CondJump(Counter, CondClass::EQ);
++      auto LoopTail = CreateNewCodeBlockAfter(LoopStart);
++      SetFalseJumpTarget(CondJump_, LoopTail);
++      SetCurrentCodeBlock(LoopTail);
++      StartNewBlock();
++      {
++        Ref RSI = MakeSegmentAddress(X86State::REG_RSI, Op->Flags, X86Tables::DecodeFlags::FLAG_DS_PREFIX);
++        Ref RDI = MakeSegmentAddress(X86State::REG_RDI, 0, X86Tables::DecodeFlags::FLAG_ES_PREFIX, true);
++        auto Value = _LoadMemGPRAutoTSO(Size, RSI, Size);
++        _StoreMemGPRAutoTSO(Size, RDI, Value, Size);
++        const int32_t Step = PtrDir * static_cast<int32_t>(IR::OpSizeToSize(Size));
++        StoreGPRRegister(X86State::REG_RCX, Sub(OpSize::i64Bit, LoadGPRRegister(X86State::REG_RCX), 1));
++        StoreGPRRegister(X86State::REG_RSI, Add(OpSize::i64Bit, LoadGPRRegister(X86State::REG_RSI), Step));
++        StoreGPRRegister(X86State::REG_RDI, Add(OpSize::i64Bit, LoadGPRRegister(X86State::REG_RDI), Step));
++        Jump(LoopStart);
++      }
++      auto LoopEnd = CreateNewCodeBlockAfter(LoopTail);
++      SetTrueJumpTarget(CondJump_, LoopEnd);
++      SetCurrentCodeBlock(LoopEnd);
++      StartNewBlock();
++    });
++  } else if (Repeat) {
+     auto SrcAddr = LoadGPRRegister(X86State::REG_RSI);
+     auto DstAddr = LoadGPRRegister(X86State::REG_RDI);
+     auto Counter = LoadGPRRegister(X86State::REG_RCX);
+--- a/FEXCore/include/FEXCore/Core/Context.h
++++ b/FEXCore/include/FEXCore/Core/Context.h
+@@ -1,5 +1,6 @@
+ // SPDX-License-Identifier: MIT
+ #pragma once
++#include <atomic>
+ #include <functional>
+ #include <stdint.h>
+ 
+@@ -20,6 +21,33 @@
+ class ThunkHandler;
+ } // namespace FEXCore
+ 
++// MaxPS4: preemption for an embedder that schedules several guest threads on
++// one host thread. With BlockLinking false, every block exit returns to the
++// dispatcher loop top, where a set PreemptRequest makes ExecuteThread return
++// (static registers spilled, State.rip = next guest instruction). The
++// embedder clears the request and resumes the thread later at State.rip.
++namespace FEXCore::Core {
++struct InternalThreadState;
++} // namespace FEXCore::Core
++
++namespace FEXCore::MaxPS4 {
++FEX_DEFAULT_VISIBILITY extern std::atomic<uint8_t> PreemptRequest;
++FEX_DEFAULT_VISIBILITY extern std::atomic<bool> BlockLinking;
++// Continuation address for a pending preemption at host code 'pc' (a block
++// entry), or 0; 'state' is the guest CpuStateFrame (x28). Simulator builds
++// ask it at every block entry; native builds from the fault handler below.
++FEX_DEFAULT_VISIBILITY uint64_t PreemptTarget(uint64_t pc, uint64_t state);
++// Native builds: when set before code is compiled, every block entry starts
++// with a store to its thread's InterruptFaultPage. The embedder preempts a
++// running thread by making that page read-only; its SIGSEGV/SIGBUS handler
++// restores the page and continues at PreemptTarget(pc, x28) when non-zero.
++FEX_DEFAULT_VISIBILITY extern std::atomic<bool> NativePreemptCheck;
++FEX_DEFAULT_VISIBILITY void* InterruptFaultPage(FEXCore::Core::InternalThreadState* Thread, size_t* Size);
++// Diagnostics (simulator builds): guest RIP of the block whose host entry is
++// exactly 'host', or 0.
++FEX_DEFAULT_VISIBILITY uint64_t GuestOfHost(uint64_t host);
++} // namespace FEXCore::MaxPS4
++
+ namespace FEXCore::Core {
+ struct CPUState;
+ struct InternalThreadState;

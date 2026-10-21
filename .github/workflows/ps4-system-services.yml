@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'patches/fexcore-guest-memory.patch'
+      - 'patches/fexcore-maxps4-local.patch'
+      - 'patches/vixl-maxps4-local.patch'
       - 'MaxPS4-iOS/Tests/FEXGuestTranslationTest.cpp'
       - 'MaxPS4-iOS/Native/PS4PFS*'
       - 'MaxPS4-iOS/Native/PS4PKG*'
@@ -20,9 +22,11 @@ on:
       - 'cmake/FEXCoreLinkedTests.cmake'
       - '.github/workflows/ps4-system-services.yml'
   push:
-    branches: ['codex/ps4-memory-translation-contract']
+    branches: ['codex/ps4-memory-translation-contract', 'experiment/keroblaster-iphone-m53']
     paths:
       - 'patches/fexcore-guest-memory.patch'
+      - 'patches/fexcore-maxps4-local.patch'
+      - 'patches/vixl-maxps4-local.patch'
       - 'MaxPS4-iOS/Tests/FEXGuestTranslationTest.cpp'
       - 'MaxPS4-iOS/Native/PS4PFS*'
       - 'MaxPS4-iOS/Native/PS4PKG*'

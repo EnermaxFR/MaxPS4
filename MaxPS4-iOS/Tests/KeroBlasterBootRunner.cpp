@@ -35,6 +35,44 @@
 #include <execinfo.h>
 #include <pthread.h>
 #include <mutex>
+#if !defined(VIXL_SIMULATOR)
+// Native preemption (FEXCore::MaxPS4::NativePreemptCheck): the ticker makes
+// the running thread's interrupt page read-only; the next block entry faults
+// here and continues at the thread stop handler (State.rip = that block).
+namespace {
+std::atomic<FEXCore::Core::InternalThreadState*> nativeRunning{nullptr};
+std::atomic<bool> nativePageLocked{false};
+struct sigaction previousSegv{}, previousBus{};
+void nativePageAccess(FEXCore::Core::InternalThreadState* thread, int protection) {
+    size_t size = 0; void* page = FEXCore::MaxPS4::InterruptFaultPage(thread, &size);
+    ::mprotect(page, size, protection);
+}
+void nativePreemptFault(int sig, siginfo_t* info, void* context) {
+    if (auto* thread = nativeRunning.load(std::memory_order_acquire)) {
+        size_t size = 0;
+        auto* page = static_cast<uint8_t*>(FEXCore::MaxPS4::InterruptFaultPage(thread, &size));
+        auto* at = static_cast<uint8_t*>(info->si_addr);
+        if (at >= page && at < page + size) {
+            ::mprotect(page, size, PROT_READ | PROT_WRITE); nativePageLocked = false;
+            auto* uc = static_cast<ucontext_t*>(context);
+#if defined(__APPLE__)
+            auto& pc = uc->uc_mcontext->__ss.__pc; const uint64_t x28 = uc->uc_mcontext->__ss.__x[28];
+#else
+            auto& pc = uc->uc_mcontext.pc; const uint64_t x28 = uc->uc_mcontext.regs[28];
+#endif
+            // Not a validated block entry: the store simply runs again.
+            if (const uint64_t target = FEXCore::MaxPS4::PreemptTarget(pc, x28)) pc = target;
+            return;
+        }
+    }
+    const auto& previous = sig == SIGBUS ? previousBus : previousSegv;
+    if (previous.sa_flags & SA_SIGINFO) { previous.sa_sigaction(sig, info, context); return; }
+    if (previous.sa_handler == SIG_IGN) return;
+    if (previous.sa_handler != SIG_DFL) { previous.sa_handler(sig); return; }
+    std::signal(sig, SIG_DFL); std::raise(sig);
+}
+} // namespace
+#endif
 // vixl simulator diagnostics (patches/fexcore-vixl-mission64-*): last taken branch target.
 extern "C" { extern volatile uint64_t vixl_maxps4_last_branch; extern volatile uint8_t vixl_maxps4_sample_branches; }
 
@@ -380,11 +418,26 @@ int main(int argc, char** argv) {
     // Linked loops are interrupted at block entries (simulator registry); MAXPS4_NO_BLOCK_LINKS
     // forces every exit through the dispatcher instead.
     FEXCore::MaxPS4::BlockLinking = !std::getenv("MAXPS4_NO_BLOCK_LINKS");
+#if !defined(VIXL_SIMULATOR)
+    // Native builds: block entries carry the interrupt-page store (set before
+    // any guest code is compiled) and faults on that page preempt.
+    FEXCore::MaxPS4::NativePreemptCheck = preemption;
+    if (preemption) {
+        struct sigaction action{}; action.sa_sigaction = nativePreemptFault; action.sa_flags = SA_SIGINFO | SA_ONSTACK;
+        sigemptyset(&action.sa_mask);
+        sigaction(SIGSEGV, &action, &previousSegv); sigaction(SIGBUS, &action, &previousBus);
+    }
+#endif
     std::atomic<size_t> guestCount{0}; uint64_t preemptions = 0;
     std::thread ticker([&] {
         while (preemption && !stopWatch) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            if (running.load() && guestCount.load() > 1) FEXCore::MaxPS4::PreemptRequest = 1;
+            if (running.load() && guestCount.load() > 1) {
+                FEXCore::MaxPS4::PreemptRequest = 1;
+#if !defined(VIXL_SIMULATOR)
+                if (auto* thread = nativeRunning.load()) { nativePageLocked = true; nativePageAccess(thread, PROT_READ); }
+#endif
+            }
         }
     });
     // MAXPS4_GUEST_SAMPLES=1: 1 kHz samples of the guest block last branched
@@ -467,11 +520,18 @@ int main(int argc, char** argv) {
         FEXCore::Core::GuestMemoryFaultData fault{}; state.GuestMemoryFaultRecord = &fault;
         services.currentThread = g.handle;
         space.preemptible = guests.size() > 1; space.sliceStartNs = OrbisV4SystemServices::nowNs();
+#if !defined(VIXL_SIMULATOR)
+        if (nativePageLocked.exchange(false)) for (auto& other : guests) nativePageAccess(other->fex, PROT_READ | PROT_WRITE);
+        nativeRunning = g.fex;
+#endif
         running = g.fex;
         guestCount = guests.size();
         ctx->ExecuteThread(g.fex);
         const bool preempted = FEXCore::MaxPS4::PreemptRequest.exchange(0) != 0;
         running = nullptr;
+#if !defined(VIXL_SIMULATOR)
+        nativeRunning = nullptr;
+#endif
         state.GuestMemoryFaultRecord = nullptr;
         auto resumeAfterStub = [&](uint64_t value) { g.resume = true; g.resumeValue = value; g.resumeRsp = space.stop.rsp; g.resumeRip = space.stop.rip + 2; };
         if (space.stop.deferred) {

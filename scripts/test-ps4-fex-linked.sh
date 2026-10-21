@@ -26,6 +26,15 @@ python3 -B "$ROOT/MaxPS4-iOS/Tests/FEXDispatcherInitPatchTest.py" "$FEX"
 python3 -B "$ROOT/scripts/patch-fexcore-dispatcher-init.py" "$FEX"
 python3 -B "$ROOT/MaxPS4-iOS/Tests/FEXGuestTranslationPatchTest.py" "$FEX"
 python3 -B "$ROOT/scripts/patch-fexcore-memory-translation.py" "$FEX"
+# MaxPS4 FEX/vixl changes beyond the two patches above (preemption, native
+# preemption check, translated x87/prefetch, diagnostics), exact diffs of the
+# pinned trees. Skipped when already applied (repeated local invocations).
+if patch -p1 --dry-run -s -f -d "$FEX" < "$ROOT/patches/fexcore-maxps4-local.patch" >/dev/null 2>&1; then
+  patch -p1 -s -f -d "$FEX" < "$ROOT/patches/fexcore-maxps4-local.patch"
+fi
+if [ -d "$FEX/External/vixl/src" ] && patch -p1 --dry-run -s -f -d "$FEX/External/vixl" < "$ROOT/patches/vixl-maxps4-local.patch" >/dev/null 2>&1; then
+  patch -p1 -s -f -d "$FEX/External/vixl" < "$ROOT/patches/vixl-maxps4-local.patch"
+fi
 cmake -S "$FEX" -B "$OUT" -G Ninja \
   -DCMAKE_C_COMPILER="${CC:-clang}" -DCMAKE_CXX_COMPILER="${CXX:-clang++}" \
   -DCMAKE_BUILD_TYPE=Debug -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
