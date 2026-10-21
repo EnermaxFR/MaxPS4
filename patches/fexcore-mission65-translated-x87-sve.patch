@@ -1,0 +1,27 @@
+Apply after fexcore-guest-memory.patch and fexcore-mission61-translated-prefetch.patch
+(FEXCore/Source/Interface/Core/Core.cpp, TranslateGuestOperands). With
+MAXPS4_MAXINST=32, Sonic Mania's blocks reach the x87 SVE load/store
+optimization and the pass threw "Unsupported translated guest memory operation:
+LoadMemX87SVEOptPredicate". Each op moves one 80-bit x87 value through
+PRED_X87_SVEOPT (ptrue VL5, 16-bit lanes) at a plain register address, so the
+address is translated like any other single access of 10 bytes.
+
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@
++      case IR::OP_LOADMEMX87SVEOPTPREDICATE:
++      case IR::OP_STOREMEMX87SVEOPTPREDICATE: {
++        // MaxPS4: one 80-bit x87 value, PRED_X87_SVEOPT = 5 x 16-bit lanes.
++        const bool Load = Op->Op == IR::OP_LOADMEMX87SVEOPTPREDICATE;
++        AddrIndex = Load ? IR::IROp_LoadMemX87SVEOptPredicate::Addr_Index : IR::IROp_StoreMemX87SVEOptPredicate::Addr_Index;
++        Bytes = 5 * IR::OpSizeToSize(Op->ElementSize);
++        Permissions = Load ? 4 : 2; break;
++      }
+       case IR::OP_PREFETCH:
+         // MaxPS4: a prefetch is a hint without architectural effect; never let
+         // it reach a host address computed from an untranslated guest pointer.
+@@
+       case IR::OP_VLOADVECTORGATHERMASKEDQPS:
+-      case IR::OP_STOREMEMX87SVEOPTPREDICATE:
+-      case IR::OP_LOADMEMX87SVEOPTPREDICATE:
+       case IR::OP_CACHELINECLEAR:

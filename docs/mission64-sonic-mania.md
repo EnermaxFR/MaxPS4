@@ -61,8 +61,17 @@ présenter des images mais n'a ouvert aucun fichier depuis : la scène suivante 
 - `MAXPS4_TSO=0` désactive l'ordre mémoire x86 (sans risque : tous les threads invités tournent sur
   un seul thread hôte). Mesure sur 10 min, un run seul par réglage : 123 images contre 111, écart par
   image 3,07 s contre 3,13 s, aucun plantage. Gain dans le bruit, le défaut reste TSO activé.
-- Essayé puis écarté : `MAXPS4_MAXINST=32` plante (`LoadMemX87SVEOptPredicate` n'est pas géré par
-  la traduction mémoire), et SVE ne peut pas être désactivé (chemin AVX-256 défectueux connu).
+- `MAXPS4_MAXINST=32` plantait (`LoadMemX87SVEOptPredicate` non géré par la traduction mémoire) :
+  corrigé par `patches/fexcore-mission65-translated-x87-sve.patch`. Mesure sur 10 min, un run seul :
+  122 images contre 111, démarrage plus court, mais écart par image 3,31 s contre 3,13 s (bruit).
+  Le défaut reste 16 : la boucle de rendu RSDK tient déjà dans un bloc.
+- Essayé puis écarté : SVE ne peut pas être désactivé (chemin AVX-256 défectueux connu).
+
+## Après le logo
+
+Le jeu ne bloque pas : il charge la scène suivante depuis `Data.rsdk`, déjà lu en mémoire (aucune
+ouverture de fichier). L'écran titre commence à l'image 560 (~50 min de run, MAXINST 16) : la bande
+rouge à pierre jaune du bas du logo Sonic Mania apparaît en fondu, nette à l'image 582.
 
 ## Lancement
 
