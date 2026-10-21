@@ -57,8 +57,8 @@
 +void ArmPreempt(FEXCore::Core::InternalThreadState* Thread, bool Pending) {
 +  // The JIT entry loads this pointer with a scaled 64-bit immediate (JIT.cpp).
 +  static_assert(offsetof(FEXCore::Core::InternalThreadState, InterruptFaultPage) -
-+                offsetof(FEXCore::Core::InternalThreadState, BaseFrameState) <= 32760);
-+  __atomic_store_n(reinterpret_cast<uint8_t**>(Thread->InterruptFaultPage), PreemptPage(Pending), __ATOMIC_RELEASE);
++                offsetof(FEXCore::Core::InternalThreadState, BaseFrameState) + PreemptSlotOffset <= 32760);
++  __atomic_store_n(reinterpret_cast<uint8_t**>(Thread->InterruptFaultPage + PreemptSlotOffset), PreemptPage(Pending), __ATOMIC_RELEASE);
 +}
 +bool IsPreemptFault(const void* Address) {
 +  const auto* Guard = PreemptPage(true);
@@ -225,10 +225,10 @@
 +    // MaxPS4 preemption point, first two instructions of the entry (see
 +    // Context.h): the second load faults while the thread is armed. TMP1 is
 +    // free here (the entry code below overwrites it).
-+    constexpr size_t InterruptPageOffset =
-+      offsetof(FEXCore::Core::InternalThreadState, InterruptFaultPage) - offsetof(FEXCore::Core::InternalThreadState, BaseFrameState);
-+    static_assert(InterruptPageOffset <= 32760 && InterruptPageOffset % 8 == 0);
-+    ldr(TMP1, STATE, InterruptPageOffset);
++    constexpr size_t SlotOffset = offsetof(FEXCore::Core::InternalThreadState, InterruptFaultPage) -
++                                  offsetof(FEXCore::Core::InternalThreadState, BaseFrameState) + FEXCore::MaxPS4::PreemptSlotOffset;
++    static_assert(SlotOffset <= 32760 && SlotOffset % 8 == 0);
++    ldr(TMP1, STATE, SlotOffset);
 +    ldr(TMP1.W(), TMP1, 0);
 +  }
 +#endif
@@ -327,7 +327,7 @@
  #include <functional>
  #include <stdint.h>
  
-@@ -20,6 +21,38 @@
+@@ -20,6 +21,40 @@
  class ThunkHandler;
  } // namespace FEXCore
  
@@ -348,14 +348,16 @@
 +// ask it at every block entry; native builds from the fault handler below.
 +FEX_DEFAULT_VISIBILITY uint64_t PreemptTarget(uint64_t pc, uint64_t state);
 +// Native builds: when set before code is compiled, every block entry starts
-+// by loading a pointer from its thread's (otherwise unused) InterruptFaultPage
-+// and then loading through it. ArmPreempt(Thread, true) points it at a guard
++// by loading a pointer from its thread's InterruptFaultPage (at
++// PreemptSlotOffset: FEX's deferred-signal paths write its first bytes) and
++// then loading through it. ArmPreempt(Thread, true) points it at a guard
 +// page with no access (works with 4 KiB and 16 KiB host pages, no syscall);
 +// the embedder's SIGSEGV/SIGBUS handler sees IsPreemptFault(si_addr), calls
 +// ArmPreempt(Thread, false) and continues at PreemptTarget(pc - 4, x28), or
 +// at pc - 4 (the entry again) when that is zero. Threads are disarmed when
 +// created; the embedder disarms a thread before running it.
 +FEX_DEFAULT_VISIBILITY extern std::atomic<bool> NativePreemptCheck;
++constexpr size_t PreemptSlotOffset = 64;
 +FEX_DEFAULT_VISIBILITY void ArmPreempt(FEXCore::Core::InternalThreadState* Thread, bool Pending);
 +FEX_DEFAULT_VISIBILITY bool IsPreemptFault(const void* Address);
 +// Diagnostics (simulator builds): guest RIP of the block whose host entry is
