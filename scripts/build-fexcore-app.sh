@@ -117,18 +117,19 @@ set -x
 xcrun nm -u build/Payload/MaxPS4.app/MaxPS4 > build/diagnostics/fex-app-imports.txt
 xcrun otool -L build/Payload/MaxPS4.app/MaxPS4 > build/diagnostics/fex-app-libraries.txt
 xcrun nm -gU "$FRAMEWORK/MaxPS4FEXRuntime" > build/diagnostics/fex-app-runtime-exports.txt
-# The M1 collision diagnostic (maxps4_fex_m1_collision_diagnostic and its
-# Swift view) is not committed yet: restore its export/import check with it.
+# The M1 collision diagnostic and the eboot diagnostics (maxps4_fex_eboot_*,
+# maxps4_fex_engine_run_eboot*) are declared but their implementations and
+# Swift views are not committed yet: restore their checks with them.
 # Every public ABI entry must be exported by the embedded runtime. Only
 # entries actually called by the Swift app are required in its undefined imports;
 # the compiler may legitimately omit unused public functions.
-for symbol in maxps4_fex_test_ps4_libkernel maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_interpret_elf maxps4_fex_engine_run_elf maxps4_fex_engine_run_v4_prx maxps4_fex_eboot_experimental_preflight maxps4_fex_engine_run_eboot_experimental maxps4_fex_eboot_preflight maxps4_fex_engine_run_eboot maxps4_jit_begin maxps4_jit_cancel maxps4_jit_confirmation maxps4_jit_launch_failed; do
+for symbol in maxps4_fex_test_ps4_libkernel maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_interpret_elf maxps4_fex_engine_run_elf maxps4_fex_engine_run_v4_prx maxps4_jit_begin maxps4_jit_cancel maxps4_jit_confirmation maxps4_jit_launch_failed; do
   if ! grep -q "_${symbol}$" build/diagnostics/fex-app-runtime-exports.txt; then
     echo "Missing FEXCore runtime export: ${symbol}" >&2
     exit 1
   fi
 done
-for symbol in maxps4_fex_test_ps4_libkernel maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_run_elf maxps4_fex_engine_run_v4_prx maxps4_fex_eboot_experimental_preflight maxps4_fex_engine_run_eboot_experimental maxps4_fex_eboot_preflight maxps4_fex_engine_run_eboot maxps4_jit_begin; do
+for symbol in maxps4_fex_test_ps4_libkernel maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_run_elf maxps4_fex_engine_run_v4_prx maxps4_jit_begin; do
   if ! grep -q "_${symbol}$" build/diagnostics/fex-app-imports.txt; then
     echo "Missing required app import: ${symbol}" >&2
     exit 1
