@@ -445,7 +445,7 @@ int main() {
                 {{{"compat-app.prx",{path}},app.data(),app.size()},0x400000},
                 {{{path,{}},provider.data(),provider.size()},bias}}, {},image,error,32*1024*1024,&linked));
             CHECK(linked.committed && linked.resolvedImports==(errorDialog ? 4U : common ? 1U : 5U));
-            maxps4::OrbisPRXFEXBridge bridge;CHECK(bridge.map(image));
+            maxps4::OrbisPRXFEXBridge bridge;if(!bridge.map(image))std::fprintf(stderr,"bridge.map: %s\n",bridge.diagnostic().c_str());CHECK(bridge.memory());
             auto owner=bridge.make_translation([&]{ctx->ClearCodeCache(thread,false);ctx->ClearCodeCache(second,false);});
             constexpr uint64_t stack=0x700000000ULL;
             CHECK(owner->reserve(stack,page)==0 && owner->map(stack,page,6)==0);
@@ -555,7 +555,7 @@ int main() {
                 {{{"np-app.prx",{path}},app.data(),app.size()},0x400000},
                 {{{path,{}},provider.data(),provider.size()},bias}}, {},image,error,32*1024*1024,&linked));
             CHECK(linked.committed && linked.resolvedImports==nids.size());
-            maxps4::OrbisPRXFEXBridge bridge;CHECK(bridge.map(image));
+            maxps4::OrbisPRXFEXBridge bridge;if(!bridge.map(image))std::fprintf(stderr,"bridge.map: %s\n",bridge.diagnostic().c_str());CHECK(bridge.memory());
             auto owner=bridge.make_translation([&]{ctx->ClearCodeCache(thread,false);ctx->ClearCodeCache(second,false);});
             constexpr uint64_t stack=0x700000000ULL;
             const uint64_t output=stack+16*page;
@@ -661,7 +661,7 @@ int main() {
                 CHECK(maxps4::OrbisLinker::link({
                     {{{"local-app.prx",{module.path()}},app.data(),app.size()},0x400000},
                     {{{module.path(),{}},provider.data(),provider.size()},maxps4::OrbisV4LocalServices::bias(mi)}}, {},image,error));
-                maxps4::OrbisPRXFEXBridge bridge;CHECK(bridge.map(image));
+                maxps4::OrbisPRXFEXBridge bridge;if(!bridge.map(image))std::fprintf(stderr,"bridge.map: %s\n",bridge.diagnostic().c_str());CHECK(bridge.memory());
                 auto owner=bridge.make_translation([&]{ctx->ClearCodeCache(thread,false);ctx->ClearCodeCache(second,false);});
                 constexpr uint64_t stack=0x700000000ULL;const uint64_t output=stack+16*page;
                 CHECK(owner->reserve(stack,page)==0 && owner->map(stack,page,6)==0);
@@ -763,7 +763,7 @@ int main() {
                 {{{"trophy-app.prx",{T::path}},app.data(),app.size()},0x400000},
                 {{{T::path,{}},provider.data(),provider.size()},T::bias}}, {},image,error,32*1024*1024,&linked));
             CHECK(linked.committed && linked.resolvedImports==4);
-            maxps4::OrbisPRXFEXBridge bridge;CHECK(bridge.map(image));
+            maxps4::OrbisPRXFEXBridge bridge;if(!bridge.map(image))std::fprintf(stderr,"bridge.map: %s\n",bridge.diagnostic().c_str());CHECK(bridge.memory());
             auto owner=bridge.make_translation([&]{ctx->ClearCodeCache(thread,false);ctx->ClearCodeCache(second,false);});
             constexpr uint64_t stack=0x700000000ULL;
             const uint64_t output=stack+16*page;
@@ -846,7 +846,7 @@ int main() {
                 {{{"np-app.prx",{NP::path}},app.data(),app.size()},0x400000},
                 {{{NP::path,{}},provider.data(),provider.size()},NP::bias}}, {},image,error,32*1024*1024,&linked));
             CHECK(linked.committed && linked.resolvedImports==2);
-            maxps4::OrbisPRXFEXBridge bridge;CHECK(bridge.map(image));
+            maxps4::OrbisPRXFEXBridge bridge;if(!bridge.map(image))std::fprintf(stderr,"bridge.map: %s\n",bridge.diagnostic().c_str());CHECK(bridge.memory());
             auto owner=bridge.make_translation([&]{ctx->ClearCodeCache(thread,false);ctx->ClearCodeCache(second,false);});
             constexpr uint64_t stack=0x700000000ULL;
             const uint64_t output=stack+16*page;
@@ -920,7 +920,7 @@ int main() {
                 {{{"gnm-app.prx",{Gnm::path}},app.data(),app.size()},0x400000},
                 {{{Gnm::path,{}},provider.data(),provider.size()},Gnm::bias}}, {},image,error,32*1024*1024,&linked));
             CHECK(linked.committed && linked.resolvedImports==4);
-            maxps4::OrbisPRXFEXBridge bridge;CHECK(bridge.map(image));
+            maxps4::OrbisPRXFEXBridge bridge;if(!bridge.map(image))std::fprintf(stderr,"bridge.map: %s\n",bridge.diagnostic().c_str());CHECK(bridge.memory());
             auto owner=bridge.make_translation([&]{ctx->ClearCodeCache(thread,false);ctx->ClearCodeCache(second,false);});
             constexpr uint64_t stack=0x700000000ULL;
             const uint64_t output=stack+16*page;
