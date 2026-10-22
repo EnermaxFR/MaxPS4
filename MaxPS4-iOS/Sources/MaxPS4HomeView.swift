@@ -1028,10 +1028,16 @@ struct MaxPS4HomeView: View {
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
 
-                        Text(isPKG ? "PKG PS4 • Analyse seule" : game.fileName)
-                            .font(.caption2)
-                            .lineLimit(1)
-                            .foregroundStyle(.white.opacity(0.56))
+                        Group {
+                            if isPKG {
+                                MaxPS4PKGSubtitleView(path: game.localPath)
+                            } else {
+                                Text(game.fileName)
+                            }
+                        }
+                        .font(.caption2)
+                        .lineLimit(1)
+                        .foregroundStyle(.white.opacity(0.56))
                     }
                     .padding(14)
                 }
@@ -1535,6 +1541,34 @@ private struct MaxPS4Background: View {
                 .blur(radius: 70)
                 .offset(x: -180, y: 280)
         }
+    }
+}
+
+/// Card subtitle such as "CUSA12345 • v01.23 • Jeu", read once per file and cached
+/// for the session so scrolling the library never rereads the PKG.
+private struct MaxPS4PKGSubtitleView: View {
+    let path: String
+    private static let cache = NSCache<NSString, NSString>()
+    @State private var subtitle: String?
+
+    var body: some View {
+        Text(subtitle ?? "PKG PS4")
+            .task(id: path) {
+                let url = URL(fileURLWithPath: path)
+                let text = await Task.detached(priority: .utility) { () -> String in
+                    // A file replaced under the same name gets a new modification date.
+                    let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                        .contentModificationDate?.timeIntervalSince1970 ?? 0
+                    let key = "\(url.path)|\(modified)" as NSString
+                    if let cached = Self.cache.object(forKey: key) { return cached as String }
+                    let info = MaxPS4PKGInspector.titleInfo(url: url)
+                    let parts = [info?.titleID, info?.appVersion.map { "v" + $0 }, info?.categoryName].compactMap { $0 }
+                    let text = parts.isEmpty ? "PKG PS4" : parts.joined(separator: " • ")
+                    Self.cache.setObject(text as NSString, forKey: key)
+                    return text
+                }.value
+                subtitle = text
+            }
     }
 }
 
