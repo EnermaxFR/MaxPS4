@@ -63,8 +63,16 @@ public:
             // the service; arguments follow SysV (RCX already moved to R10). No
             // seventh stack argument is forwarded: guest_rsp 0 makes it fault.
             const auto orbis = static_cast<maxps4::PS4KernelService>(r[x86::REG_RAX]);
-            const maxps4::PS4KernelCall call{r[x86::REG_RDI],r[x86::REG_RSI],r[x86::REG_RDX],
-                r[x86::REG_R10],r[x86::REG_R8],r[x86::REG_R9],0};
+            // Admitted code builds pointers with RIP-relative LEA, i.e. rebased host
+            // addresses. libkernel works on logical PS4 addresses and re-checks
+            // permissions, so translate any argument that lies in the image arena.
+            auto logical = [&](uint64_t value) {
+                uint64_t guest = 0;
+                return image->guest_address(value, guest) ? guest : value;
+            };
+            const maxps4::PS4KernelCall call{logical(r[x86::REG_RDI]),logical(r[x86::REG_RSI]),
+                logical(r[x86::REG_RDX]),logical(r[x86::REG_R10]),logical(r[x86::REG_R8]),
+                logical(r[x86::REG_R9]),0};
             result = kernel->invoke(orbis,call,1);
             ++calls;
             r[x86::REG_RAX] = static_cast<uint64_t>(result);

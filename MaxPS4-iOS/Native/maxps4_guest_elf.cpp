@@ -262,7 +262,8 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                 if (!code) return -EFAULT;
                 const uint8_t op = code[0];
                 refusal_opcode = op;
-                size_t width = op == 0xb8 || op == 0xb9 || op == 0xba || op == 0xbb || op == 0x05 || op == 0x25 || op == 0x0d ? 5 :
+                size_t width = op == 0xb8 || op == 0xb9 || op == 0xba || op == 0xbb || op == 0xbe || op == 0xbf ||
+                    op == 0x05 || op == 0x25 || op == 0x0d ? 5 :
                     op == 0xff || op == 0x8b || op == 0x81 ? 6 :
                     op == 0xc7 ? 10 : op == 0x64 ? 8 : op == 0x48 ? 7 : op == 0xc1 || op == 0x0f ? 3 :
                     op == 0x01 || op == 0x29 || op == 0x39 || op == 0x89 ? 2 : 1;
@@ -304,6 +305,9 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                     ecx_initialized = true;
                 } else if (op == 0xba || op == 0xbb) {
                     if (op == 0xba) edx_initialized = true; else ebx_initialized = true;
+                } else if (op == 0xbe || op == 0xbf) {
+                    // MOV ESI/EDI,imm32: integer arguments for HLE calls.
+                    if (op == 0xbe) esi_initialized = true;
                 } else if (op == 0x89 && code[1] == 0xc6) {
                     if (!initialized) return -ENOTSUP;
                     esi_initialized = true;
@@ -383,6 +387,16 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                     const int64_t disp = static_cast<int32_t>(number(code+2,4));
                     const uint64_t target = static_cast<uint64_t>(static_cast<int64_t>(pc+10)+disp);
                     if (!copy.translate(target,4,2) || copy.translate(target,4,1)) return -EFAULT;
+                } else if (op == 0x48 && code[1] == 0x8d) {
+                    // LEA RDI/RSI/RDX,[RIP+rel32] (48 8D 3D/35/15): pointer argument for an
+                    // HLE call. It may only point into mapped, non-executable guest data;
+                    // the callee still checks permissions and length on every access.
+                    if (code[2] != 0x3d && code[2] != 0x35 && code[2] != 0x15) return -ENOTSUP;
+                    const uint64_t target = static_cast<uint64_t>(static_cast<int64_t>(pc+7) +
+                        static_cast<int32_t>(number(code+3,4)));
+                    if (!copy.translate(target,1,4) || copy.translate(target,1,1)) return -EFAULT;
+                    if (code[2] == 0x35) esi_initialized = true;
+                    if (code[2] == 0x15) edx_initialized = true;
                 } else if (op == 0x48) {
                     // MOV RAX,[RIP+rel32] (48 8B 05): initial-exec GOT load of a TPOFF64
                     // value. The slot must be read-only at run time (RELRO after

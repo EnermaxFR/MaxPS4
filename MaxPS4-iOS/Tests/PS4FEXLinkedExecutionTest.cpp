@@ -289,6 +289,35 @@ int main(int argc, char** argv) {
             (unsigned long long)observed,cpu);
         maxps4_fex_engine_close(process);
     }
+    for (uint32_t clock : {4U, 99U}) {
+        // Pointer argument: sceKernelClockGettime(clock, &timespec) writes guest
+        // memory through the translated pointer. Clock 99 must fail, not write.
+        auto app = orbis_execution::make_clock_app(clock);
+        const maxps4_orbis_module modules[] = {
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,nullptr,0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        char diagnostic[512]{};
+        const int prepared = maxps4_fex_engine_prepare_orbis(process,modules,1,"app.elf",10,diagnostic,sizeof(diagnostic));
+        if (prepared) std::fprintf(stderr,"prepare: %s\n",diagnostic);
+        CHECK(prepared==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        uint64_t observed=0, logical_entry=0; uint32_t cpu=0;
+        CHECK(maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry)==0);
+        uint8_t wire[16]{};
+        CHECK(maxps4_fex_engine_read_ps4(process,orbis_execution::timespec_address,wire,sizeof(wire))==0);
+        uint64_t seconds=0, nanoseconds=0;
+        std::memcpy(&seconds,wire,8); std::memcpy(&nanoseconds,wire+8,8);
+        if (clock == 4) {
+            CHECK(observed==2 && nanoseconds<1000000000ULL && (seconds || nanoseconds));
+            std::printf("PASS SCE ELF -> LEA RSI pointer -> libkernel HLE sceKernelClockGettime -> guest timespec %llu.%09llu s, RAX=%llu backend=%u\n",
+                (unsigned long long)seconds,(unsigned long long)nanoseconds,(unsigned long long)observed,cpu);
+        } else {
+            CHECK(observed!=2 && !seconds && !nanoseconds);
+            std::printf("PASS invalid clock rejected by libkernel HLE: RAX=0x%llx, timespec untouched\n",(unsigned long long)observed);
+        }
+        maxps4_fex_engine_close(process);
+    }
     maxps4_fex_engine* engine = nullptr;
     std::puts("BEGIN real FEX context and linked Orbis execution");
     CHECK(maxps4_fex_engine_open(&engine) == 0 && engine);

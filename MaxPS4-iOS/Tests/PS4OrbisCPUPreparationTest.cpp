@@ -128,6 +128,21 @@ int main() {
         const auto syscall=reinterpret_cast<uintptr_t>(image.translate(thunk+8,2,5));
         CHECK(image.hle_gate(syscall,token) && !image.hle_gate(syscall,token+1) && !image.hle_gate(syscall+1,token));
         CHECK(!image.hle_gate(reinterpret_cast<uintptr_t>(image.translate(entry,1,5)),token));
+        // Pointer argument: LEA into non-executable data is admitted; the HLE gate
+        // maps the rebased host pointer back to the logical PS4 address.
+        const uint32_t clockToken=static_cast<uint32_t>(maxps4::PS4KernelService::clock_gettime);
+        auto clockApp=make_clock_app();
+        const maxps4::OrbisLinker::Input clockAlone{{{"app.elf",{}},clockApp.data(),clockApp.size()},app_bias};
+        CHECK(maxps4::OrbisLinker::link({clockAlone},{{kernel_identity("QBi7HCK03hw"),0,clockToken}},linked,reason));
+        CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==0);
+        uint64_t logical=0;
+        CHECK(image.guest_address(reinterpret_cast<uintptr_t>(image.translate(timespec_address,16,6)),logical) &&
+              logical==timespec_address);
+        CHECK(!image.guest_address(reinterpret_cast<uintptr_t>(&logical),logical));
+        clockApp=make_clock_app(4,0x4000); // LEA into executable code: refused.
+        const maxps4::OrbisLinker::Input codePointer{{{"app.elf",{}},clockApp.data(),clockApp.size()},app_bias};
+        CHECK(maxps4::OrbisLinker::link({codePointer},{{kernel_identity("QBi7HCK03hw"),0,clockToken}},linked,reason));
+        CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==-EFAULT && image.segments().empty());
     }
     tls=make_tls_app(0); // Reading the TCB self-pointer is allowed.
     CHECK(maxps4::OrbisLinker::link({input("app.elf",tls,false),input("provider.prx",provider,true)}, {},linked,reason));

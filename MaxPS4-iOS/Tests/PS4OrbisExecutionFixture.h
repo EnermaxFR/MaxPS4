@@ -88,16 +88,33 @@ inline std::vector<uint8_t> make_tls_initial_exec_app(bool relro=true, uint32_t 
 // The app alone, importing scePthreadSelf (public NID aI+OeCz8xrQ) from the
 // system libkernel instead of the fixture PRX: CALL [GOT]; ADD EAX,2; store; HLT.
 // Thread 1 is the only PS4 thread, so a real HLE call returns 1 + 2 = 3.
-inline std::vector<uint8_t> make_kernel_app() {
+inline std::vector<uint8_t> make_kernel_app(const char* nid="aI+OeCz8xrQ") {
     auto b=make(false);
     using orbis_fixture::put;
     std::fill(b.begin()+0x601,b.begin()+0x640,0);
-    const char strings[]="libkernel\0libkernel\0aI+OeCz8xrQ#B#B";
+    char strings[]="libkernel\0libkernel\0aI+OeCz8xrQ#B#B";
+    std::copy(nid,nid+11,strings+20);
     std::copy(std::begin(strings),std::end(strings),b.begin()+0x601);
     orbis_fixture::setTag(b,0x61000037,1+sizeof(strings));
     orbis_fixture::setTag(b,0x61000015,1|(uint64_t{1}<<32)|(uint64_t{1}<<48));
     orbis_fixture::setTag(b,0x6100000f,11|(uint64_t{1}<<32)|(uint64_t{1}<<48));
     put(b,0x818,21,4);
+    return b;
+}
+// sceKernelClockGettime (public NID QBi7HCK03hw) with a pointer argument:
+// MOV EDI,clock; LEA RSI,[RIP+timespec]; CALL [GOT]; ADD EAX,2; HLT.
+// The 16-byte timespec lands in app data at 0x8010; success returns 0 + 2.
+constexpr uint64_t timespec_address=data+0x10;
+inline std::vector<uint8_t> make_clock_app(uint32_t clock=4, int32_t lea_target=0x8010) {
+    auto b=make_kernel_app("QBi7HCK03hw");
+    using orbis_fixture::put;
+    const uint8_t code[]={0xbf,0,0,0,0, 0x48,0x8d,0x35,0,0,0,0, 0xff,0x15,0,0,0,0, 0x05,2,0,0,0, 0xf4};
+    std::fill(b.begin()+0x200,b.begin()+0x300,0);
+    std::copy(std::begin(code),std::end(code),b.begin()+0x200);
+    put(b,0x201,clock,4);
+    put(b,0x208,uint32_t(lea_target-(0x4000+12)),4);
+    put(b,0x20e,0x8000-(0x4000+18),4);
+    put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
     return b;
 }
 inline maxps4::OrbisLinker::Identity kernel_identity(const char* nid="aI+OeCz8xrQ") {
