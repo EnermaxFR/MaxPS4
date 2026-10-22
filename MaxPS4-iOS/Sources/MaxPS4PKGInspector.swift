@@ -57,6 +57,51 @@ enum MaxPS4PKGInspector {
     }
 
 
+    /// Display-only identity read from the plaintext param.sfo; nil when unreadable.
+    struct TitleInfo: Equatable {
+        var title: String?
+        var titleID: String?
+        var contentID: String?
+        var appVersion: String?
+        var version: String?
+        var category: String?
+
+        /// PS4 CATEGORY codes, shown in plain French; unknown codes stay raw.
+        var categoryName: String? {
+            switch category {
+            case "gd": return "Jeu"
+            case "gp": return "Mise à jour"
+            case "ac": return "Contenu additionnel"
+            case let other?: return other
+            case nil: return nil
+            }
+        }
+    }
+
+    static func titleInfo(url: URL) -> TitleInfo? {
+        var output = [CChar](repeating: 0, count: 32 * 1024)
+        let result = url.path.withCString { path in
+            output.withUnsafeMutableBufferPointer { maxps4_pkg_read_title_info(path, $0.baseAddress, $0.count) }
+        }
+        guard result == 0 else { return nil }
+        var info = TitleInfo()
+        let text = output.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
+        for line in text.split(separator: "\n") {
+            guard let separator = line.firstIndex(of: "=") else { continue }
+            let value = String(line[line.index(after: separator)...])
+            switch line[..<separator] {
+            case "TITLE": info.title = value
+            case "TITLE_ID": info.titleID = value
+            case "CONTENT_ID": info.contentID = value
+            case "APP_VER": info.appVersion = value
+            case "VERSION": info.version = value
+            case "CATEGORY": info.category = value
+            default: break
+            }
+        }
+        return info == TitleInfo() ? nil : info
+    }
+
     static func artwork(url: URL, entryID: UInt32) -> Data? {
         var length = 0
         let query = url.path.withCString {

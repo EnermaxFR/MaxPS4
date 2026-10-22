@@ -248,7 +248,9 @@ final class MaxPS4Emulator: ObservableObject {
             .replacingOccurrences(of: "_", with: " ")
             .replacingOccurrences(of: "-", with: " ")
 
-        let displayName = prettyName // Library label only; metadata comes from the checked report.
+        // Library label only: the vetted param.sfo TITLE when readable, else the file name.
+        let sfoTitle = isPKG ? MaxPS4PKGInspector.titleInfo(url: destination)?.title : nil
+        let displayName = sfoTitle ?? prettyName
         let game = MaxPS4Game(
             id: UUID(),
             name: displayName,

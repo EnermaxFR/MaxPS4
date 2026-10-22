@@ -405,3 +405,54 @@ int maxps4_pkg_read_artwork(const char* path, unsigned int entry_id,
     close(fd);
     return result;
 }
+
+int maxps4_pkg_read_title_info(const char* path, char* output, size_t capacity) {
+    if (!output || !capacity) return -EINVAL;
+    output[0] = 0;
+    if (!path) return -EINVAL;
+    const int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) return -errno;
+    struct Close { int fd; ~Close() { close(fd); } } closeSource{fd};
+    try {
+        struct stat before{};
+        if (fstat(fd, &before) || !S_ISREG(before.st_mode) || before.st_size < 0) return -EINVAL;
+        const uint64_t fileSize = static_cast<uint64_t>(before.st_size);
+        auto read = [&](uint64_t offset, uint8_t* bytes, size_t count) {
+            if (!maxps4::PS4PKGInventory::range(offset, count, fileSize) ||
+                offset > static_cast<uint64_t>(std::numeric_limits<off_t>::max()) ||
+                (count && uint64_t(count-1) > uint64_t(std::numeric_limits<off_t>::max())-offset)) return false;
+            size_t done = 0;
+            while (done < count) {
+                const ssize_t n = pread(fd, bytes + done, count - done, static_cast<off_t>(offset + done));
+                if (n < 0 && errno == EINTR) continue;
+                if (n <= 0) return false;
+                done += static_cast<size_t>(n);
+            }
+            return true;
+        };
+        maxps4::PS4PKGInventory pkg;
+        if (!pkg.parse(fileSize, read)) return -EINVAL;
+        const auto entry = std::find_if(pkg.entries.begin(), pkg.entries.end(),
+            [](const auto& e) { return e.id == 0x1000; });
+        if (entry == pkg.entries.end()) return -ENOENT;
+        std::vector<uint8_t> bytes;
+        std::string why;
+        maxps4::PS4SFO sfo;
+        if (!pkg.extract(size_t(entry - pkg.entries.begin()), read, bytes, why) || !sfo.parse(bytes)) return -ENOENT;
+        struct stat after{};
+        if (fstat(fd, &after) || !sameSource(before, after)) return -EAGAIN;
+        std::string text;
+        for (const auto* key : {"TITLE", "TITLE_ID", "CONTENT_ID", "APP_VER", "VERSION", "CATEGORY"}) {
+            const auto value = sfo.strings.find(key);
+            if (value == sfo.strings.end() || value->second.empty()) continue;
+            // Same identity checks as the inventory report; never trust a malformed ID.
+            if ((std::strcmp(key, "TITLE_ID") == 0 && !pkg.validTitleID(value->second)) ||
+                (std::strcmp(key, "CONTENT_ID") == 0 && !pkg.validContentID(value->second))) continue;
+            text += key; text += '='; text += value->second; text += '\n';
+        }
+        const size_t count = std::min(text.size(), capacity - 1);
+        std::memcpy(output, text.data(), count);
+        output[count] = 0;
+        return count == text.size() ? 0 : -ENOSPC;
+    } catch (const std::bad_alloc&) { output[0] = 0; return -ENOMEM; }
+}

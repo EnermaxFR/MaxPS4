@@ -18,6 +18,11 @@ int maxps4_pkg_pfs_read_file(const char* path, const char* selected,
 // Query with output=null to get required length; no PFS/decryption.
 int maxps4_pkg_read_artwork(const char* path, unsigned int entry_id,
                            unsigned char* output, size_t capacity, size_t* length);
+// Display metadata from the vetted plaintext param.sfo descriptor as
+// "KEY=value" lines (TITLE, TITLE_ID, CONTENT_ID, APP_VER, VERSION, CATEGORY);
+// absent or invalid keys are omitted. Always NUL-terminates when capacity > 0.
+// -ENOENT: no readable param.sfo; -ENOSPC: truncated. No PFS/decryption.
+int maxps4_pkg_read_title_info(const char* path, char* output, size_t capacity);
 #ifdef __cplusplus
 }
 #endif
