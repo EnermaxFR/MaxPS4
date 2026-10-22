@@ -1027,14 +1027,21 @@ struct MaxPS4HomeView: View {
             .buttonStyle(.plain)
 
             HStack {
-                Button {
-                    if isPKG {
+                if isPKG {
+                    Button {
                         selectedGameDetails = game
-                    } else {
-                        emulator.launch(game)
+                    } label: {
+                        Label("Infos", systemImage: "info.circle")
+                            .font(.caption.weight(.semibold))
                     }
+                }
+
+                // Always offered; when the game cannot start, the alert gives the exact blocker.
+                Button {
+                    emulator.launch(game)
+                    inspectionReport = emulator.status
                 } label: {
-                    Label(isPKG ? "Infos" : "Ouvrir", systemImage: isPKG ? "info.circle" : "play.fill")
+                    Label("Jouer", systemImage: "play.fill")
                         .font(.caption.weight(.semibold))
                 }
 
