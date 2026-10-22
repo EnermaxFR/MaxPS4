@@ -88,6 +88,22 @@ int main() {
     tls=make_tls_register_app(); tls[0x205]=1; // FS:[1] is not the self-pointer load.
     CHECK(maxps4::OrbisLinker::link({input("app.elf",tls,false),input("provider.prx",provider,true)}, {},linked,reason));
     CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==-ENOTSUP);
+    // Initial-exec: the linker writes TPOFF64 = -8 into a RELRO GOT slot,
+    // which is read-only once mapped; the FS read uses that offset.
+    tls=make_tls_initial_exec_app();
+    CHECK(maxps4::OrbisLinker::link({input("app.elf",tls,false),input("provider.prx",provider,true)}, {},linked,reason));
+    {
+        const auto* got=linked.translate(tls_got,8,4); int64_t offset=0;
+        CHECK(got && !linked.translate(tls_got,8,2)); std::memcpy(&offset,got,8); CHECK(offset==-8);
+    }
+    CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==0 && image.thread_pointer_host());
+    CHECK(image.translate(tls_got,8,4) && !image.translate(tls_got,8,2));
+    tls=make_tls_initial_exec_app(false); // Writable GOT slot: offset could change at run time.
+    CHECK(maxps4::OrbisLinker::link({input("app.elf",tls,false),input("provider.prx",provider,true)}, {},linked,reason));
+    CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==-EFAULT && image.segments().empty());
+    tls=make_tls_initial_exec_app(true,0x1234,true); // NOP between: RAX no longer the GOT offset.
+    CHECK(maxps4::OrbisLinker::link({input("app.elf",tls,false),input("provider.prx",provider,true)}, {},linked,reason));
+    CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==-ENOTSUP && image.segments().empty());
     tls=make_tls_app(0); // Reading the TCB self-pointer is allowed.
     CHECK(maxps4::OrbisLinker::link({input("app.elf",tls,false),input("provider.prx",provider,true)}, {},linked,reason));
     CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==0);

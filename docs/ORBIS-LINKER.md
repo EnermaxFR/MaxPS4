@@ -94,10 +94,19 @@ Exécution (chemin borné `GuestELF::prepare_orbis` + FEX) : une région RW, non
 exécutable, est créée après une page de garde. Elle contient les blocs, alignés
 sur au moins 16 octets et initialisés depuis les images TLS (reste à zéro), puis
 un TCB de 16 octets au pointeur de thread, dont le mot 0 contient sa propre
-adresse hôte. FEX reçoit cette adresse dans `fs_cached`. Une seule forme d'accès
-est admise : `MOV EAX, FS:[disp32]` (modèle « local-exec »), uniquement si les
-4 octets lus sont dans les blocs ou le TCB. Limites actuelles : un seul thread,
-pas de `__tls_get_addr`, pas d'accès TLS via un registre ni d'écriture TLS. Les autres tags dynamiques, même certains tags standard usuels, sont
+adresse hôte. FEX reçoit cette adresse dans `fs_cached`. Formes d'accès admises,
+toujours si les 4 octets lus sont dans les blocs ou le TCB :
+
+| Modèle | Séquence |
+| --- | --- |
+| local-exec direct | `MOV EAX, FS:[disp32]` |
+| local-exec via registre | `MOV RAX, FS:[0]` puis, immédiatement, `MOV EAX, [RAX+disp8/32]` |
+| initial-exec | `MOV RAX, [RIP+GOT]` puis, immédiatement, `MOV EAX, FS:[RAX]` |
+
+Pour initial-exec, le slot GOT (rempli par TPOFF64) doit être en lecture seule à
+l'exécution, c'est-à-dire dans un segment SCE RELRO : aucune écriture admise ne
+peut alors modifier le décalage. Limites actuelles : un seul thread, pas de
+`__tls_get_addr` (general/local-dynamic) ni d'écriture TLS. Les autres tags dynamiques, même certains tags standard usuels, sont
 refusés tant que leur sémantique n'est pas implémentée et testée. Ce sous-ensemble
 ne prétend donc pas accepter arbitrairement tous les PRX réels ou les ELF Linux.
 
