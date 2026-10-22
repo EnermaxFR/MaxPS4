@@ -289,6 +289,28 @@ int main(int argc, char** argv) {
             (unsigned long long)observed,cpu);
         maxps4_fex_engine_close(process);
     }
+    {
+        // Dynamic startup through FEX: stub CALLs DT_INIT then DT_INIT_ARRAY, JMPs to
+        // the entry. 40 (init_1) + 2 (init_2) + 2 (entry) = 44 proves the order.
+        auto app = orbis_execution::make_init_app();
+        const maxps4_orbis_module modules[] = {
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,nullptr,0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        char diagnostic[512]{};
+        const int prepared = maxps4_fex_engine_prepare_orbis(process,modules,1,"app.elf",20,diagnostic,sizeof(diagnostic));
+        if (prepared) std::fprintf(stderr,"prepare: %s\n",diagnostic);
+        CHECK(prepared==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        uint64_t observed=0, logical_entry=0; uint32_t cpu=0;
+        for (int repeat=0;repeat<2;++repeat) {
+            CHECK(maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry)==0);
+            CHECK(observed==44 && logical_entry==orbis_execution::entry);
+        }
+        std::printf("PASS SCE ELF -> startup stub -> DT_INIT -> DT_INIT_ARRAY -> entry via FEX: RAX=%llu backend=%u\n",
+            (unsigned long long)observed,cpu);
+        maxps4_fex_engine_close(process);
+    }
     for (uint64_t offset : {0ULL, 8ULL}) {
         // General-dynamic TLS through libkernel HLE __tls_get_addr. Offset 8 is
         // past the 8-byte block: the gate refuses it and the run fails cleanly.

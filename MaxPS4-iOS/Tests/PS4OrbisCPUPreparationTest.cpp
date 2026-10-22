@@ -154,6 +154,25 @@ int main() {
         const maxps4::OrbisLinker::Input noTLSAlone{{{"app.elf",{}},noTLS.data(),noTLS.size()},app_bias};
         CHECK(maxps4::OrbisLinker::link({noTLSAlone},{{kernel_identity("vNe1w4diLCs"),0,tlsToken}},linked,reason));
         CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==-EFAULT);
+        // Dynamic startup: DT_INIT then DT_INIT_ARRAY (relocated), then the entry.
+        auto initApp=make_init_app();
+        const std::vector<maxps4::OrbisLinker::HLE> kernelHLE{{kernel_identity(),0,token}};
+        auto initInput=[&]{ return std::vector<maxps4::OrbisLinker::Input>{{{{"app.elf",{}},initApp.data(),initApp.size()},app_bias}}; };
+        CHECK(maxps4::OrbisLinker::link(initInput(),kernelHLE,linked,reason));
+        CHECK(linked.initializers.size()==2 && linked.initializers[0]==entry+0xc && linked.initializers[1]==entry+0x18);
+        CHECK(image.prepare_orbis(linked,"app.elf",20,reason)==0);
+        CHECK(image.entry()==entry && image.start()!=entry && image.start()%0x1000==0);
+        const auto* stub=image.translate(image.start(),15,5);
+        CHECK(stub && stub[0]==0xe8 && stub[5]==0xe8 && stub[10]==0xe9 && !image.translate(image.start(),1,2));
+        CHECK(image.prepare_orbis(linked,"app.elf",3,reason)==-E2BIG); // Initializers count against the budget.
+        orbis_fixture::setTag(initApp,12,0x8010); // DT_INIT into data.
+        CHECK(!maxps4::OrbisLinker::link(initInput(),kernelHLE,linked,reason) &&
+              reason.find("DT_INIT outside")!=std::string::npos);
+        initApp=make_init_app(); orbis_fixture::setTag(initApp,27,7);
+        CHECK(!maxps4::OrbisLinker::link(initInput(),kernelHLE,linked,reason) &&
+              reason.find("DT_INIT_ARRAY size")!=std::string::npos);
+        initApp=make_init_app(); orbis_fixture::put(initApp,0x928,0x8010); // Array entry -> data.
+        CHECK(!maxps4::OrbisLinker::link(initInput(),kernelHLE,linked,reason));
         clockApp=make_clock_app(4,0x4000); // LEA into executable code: refused.
         const maxps4::OrbisLinker::Input codePointer{{{"app.elf",{}},clockApp.data(),clockApp.size()},app_bias};
         CHECK(maxps4::OrbisLinker::link({codePointer},{{kernel_identity("QBi7HCK03hw"),0,clockToken}},linked,reason));
