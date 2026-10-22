@@ -238,6 +238,7 @@ inline std::vector<uint8_t> make_general_app(uint32_t cell=7) {
 //   0: MOV EAX,[RSP+0x1000] - past the stack top, in its guard page (SIGSEGV)
 //   1: MOV DWORD [RIP-10],0 - a store into its own read-only code (SIGSEGV)
 //   2: UD2                  - invalid opcode (SIGILL)
+//   3: JMP $                - endless loop (needs a time limit)
 // Each is followed by HLT, which must never be reached.
 inline std::vector<uint8_t> make_general_fault_app(int kind) {
     auto b=make(false);
@@ -245,7 +246,8 @@ inline std::vector<uint8_t> make_general_fault_app(int kind) {
     std::vector<uint8_t> code;
     if (kind == 0) code={0x8b,0x84,0x24,0x00,0x10,0,0, 0xf4};
     else if (kind == 1) code={0xc7,0x05,0xf6,0xff,0xff,0xff,0,0,0,0, 0xf4};
-    else code={0x0f,0x0b, 0xf4};
+    else if (kind == 2) code={0x0f,0x0b, 0xf4};
+    else code={0xeb,0xfe, 0xf4};
     std::fill(b.begin()+0x200,b.begin()+0x300,0);
     std::copy(code.begin(),code.end(),b.begin()+0x200);
     put(b,64+32,code.size()); put(b,64+40,code.size());
