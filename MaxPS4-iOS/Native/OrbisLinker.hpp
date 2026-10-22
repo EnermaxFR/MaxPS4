@@ -70,6 +70,11 @@ public:
         std::vector<TLSBlock> tls;
         uint64_t staticTLSSize = 0, staticTLSAlignment = 1;
         std::vector<Thunk> thunks; // In module "<hle>", an RX segment after all modules.
+        // Startup order: for each module in load order (dependencies first),
+        // DT_INIT then DT_INIT_ARRAY entries (after relocation; 0 and -1 skipped).
+        // Guest addresses of file-backed code in that module. DT_FINI* are only
+        // validated: nothing runs at exit yet.
+        std::vector<uint64_t> initializers;
         // A backend must copy/map these bytes at their guest addresses and apply
         // the advertised permissions. No identity mapping is implied.
         std::vector<Mapping> mappings() const {
@@ -130,6 +135,7 @@ private:
         std::vector<Symbol> symbols; std::vector<Rela> relas;
         std::vector<Descriptor> imports, exports, importLibraries, exportLibraries;
         std::vector<std::string> needed;
+        uint64_t init = 0, fini = 0, initArray = 0, finiArray = 0, initArraySize = 0, finiArraySize = 0;
     };
     static Dynamic parse(const Input& input, const Module& m, uint64_t tlsMemory, size_t& symbolBudget, size_t& relocationBudget) {
         const auto* bytes = input.file.bytes; const auto size = input.file.size;
@@ -159,7 +165,9 @@ private:
             switch (tag) {
             case 0x61000035: case 0x61000037: case 0x61000039: case 0x6100003b: case 0x6100003f:
             case 0x6100002f: case 0x61000031: case 0x61000033:
-            case 0x61000029: case 0x6100002b: case 0x6100002d: break;
+            case 0x61000029: case 0x6100002b: case 0x6100002d:
+            // DT_INIT/DT_FINI and their arrays (module-relative addresses).
+            case 12: case 13: case 25: case 26: case 27: case 28: break;
             default: throw Failure("unsupported dynamic tag " + std::to_string(tag));
             }
             require(tags.emplace(tag, value).second, "duplicate dynamic tag");
@@ -257,6 +265,12 @@ private:
         };
         relocations(0x6100002f, 0x61000031, 0x61000033, 24);
         relocations(0x61000029, 0x6100002d, 0x6100002b, 7); // DT_RELA
+        auto optional = [&](uint64_t tag) { auto it = tags.find(tag); return it == tags.end() ? uint64_t{0} : it->second; };
+        out.init = optional(12); out.fini = optional(13);
+        out.initArray = optional(25); out.finiArray = optional(26);
+        out.initArraySize = optional(27); out.finiArraySize = optional(28);
+        require(!out.initArray == !out.initArraySize && !out.finiArray == !out.finiArraySize,
+                "DT_INIT_ARRAY/DT_FINI_ARRAY need both address and size");
         return out;
     }
     static void build(const std::vector<Input>& inputs, const std::vector<HLE>& hle, Image& out, size_t budget, Report& report) {
@@ -516,6 +530,36 @@ private:
         }
         report.phase = "memory permissions";
         for (const auto& w : writes) for (size_t i = 0; i < 8; ++i) w.target[i] = uint8_t(w.value >> (i * 8));
+        report.phase = "initializers";
+        // Initializer arrays are read after relocation (RELATIVE fills them).
+        for (size_t i = 0; i < dynamic.size(); ++i) {
+            const auto& d = dynamic[i]; const auto& m = out.modules[i];
+            auto code = [&](uint64_t address, const char* what) {
+                bool backed = false;
+                if (address >= m.bias) for (const auto& s : m.image.segments) {
+                    if ((s.header.flags & 5) != 5 || address - m.bias < s.header.address) continue;
+                    backed |= address - m.bias - s.header.address < s.header.fileSize;
+                }
+                require(backed, m.path + ": " + what + " outside file-backed module code");
+            };
+            auto array = [&](uint64_t start, uint64_t size, const char* what, bool collect) {
+                if (!start) return;
+                require(size % 8 == 0 && size / 8 <= 256, m.path + ": " + what + " size");
+                const auto* entries = m.image.translate(start, static_cast<size_t>(size), 4);
+                require(entries, m.path + ": " + what + " outside readable module memory");
+                for (uint64_t k = 0; k < size; k += 8) {
+                    const auto entry = read(entries + k, 8);
+                    if (!entry || entry == UINT64_MAX) continue; // ELF sentinels
+                    code(entry, what);
+                    if (collect) out.initializers.push_back(entry);
+                }
+            };
+            if (d.init) { code(add(m.bias, d.init), "DT_INIT"); out.initializers.push_back(add(m.bias, d.init)); }
+            if (d.fini) code(add(m.bias, d.fini), "DT_FINI");
+            array(d.initArray, d.initArraySize, "DT_INIT_ARRAY", true);
+            array(d.finiArray, d.finiArraySize, "DT_FINI_ARRAY", false);
+            require(out.initializers.size() <= 256, "initializer budget (256)");
+        }
         // RELRO may be writable while linking, then becomes read-only for the backend.
         for (auto& m : out.modules) for (auto& s : m.image.segments)
             if (s.header.type == 0x61000010) s.header.flags &= ~2U;

@@ -125,6 +125,31 @@ inline std::vector<uint8_t> make_tls_get_addr_app(uint32_t initial=0x4242, uint6
     orbis_fixture::setTag(b,0x61000031,3*24);
     return b;
 }
+// Dynamic startup: DT_INIT (0x400C) stores 40 at 0x8010; the DT_INIT_ARRAY entry
+// (0x8030, filled by RELATIVE) adds 2; the entry loads it and adds 2. 44 proves
+// both ran in ELF order before the entry (reversed order would give 42).
+constexpr uint64_t init_value=data+0x10;
+inline std::vector<uint8_t> make_init_app() {
+    auto b=make_kernel_app();
+    using orbis_fixture::put;
+    const uint8_t code[]={
+        0x8b,0x05,0,0,0,0, 0x05,2,0,0,0, 0xf4,                       // entry  0x4000
+        0xb8,40,0,0,0, 0x89,0x05,0,0,0,0, 0xc3,                      // init_1 0x400C
+        0x8b,0x05,0,0,0,0, 0x05,2,0,0,0, 0x89,0x05,0,0,0,0, 0xc3};   // init_2 0x4018
+    std::fill(b.begin()+0x200,b.begin()+0x300,0);
+    std::copy(std::begin(code),std::end(code),b.begin()+0x200);
+    put(b,0x202,0x8010-0x4006,4);
+    put(b,0x213,0x8010-0x4017,4);
+    put(b,0x21a,0x8010-0x401e,4);
+    put(b,0x225,0x8010-0x4029,4);
+    put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
+    orbis_fixture::appendTag(b,12,0x400c);
+    orbis_fixture::appendTag(b,25,0x8030);
+    orbis_fixture::appendTag(b,27,8);
+    put(b,0x918,0x8030); put(b,0x920,8); put(b,0x928,0x4018); // RELATIVE -> init_2
+    orbis_fixture::setTag(b,0x61000031,2*24);
+    return b;
+}
 // sceKernelClockGettime (public NID QBi7HCK03hw) with a pointer argument:
 // MOV EDI,clock; LEA RSI,[RIP+timespec]; CALL [GOT]; ADD EAX,2; HLT.
 // The 16-byte timespec lands in app data at 0x8010; success returns 0 + 2.

@@ -78,7 +78,7 @@ void GuestELF::clear() {
     if (arena) ::munmap(arena, arena_size);
     arena = nullptr;
     arena_size = 0;
-    guest_base = guest_entry = thread_pointer = 0;
+    guest_base = guest_entry = thread_pointer = start_address = 0;
     thunks.clear();
     tls_blocks.clear();
     blockers = 0;
@@ -202,11 +202,37 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                 highest = std::max(highest, module.bias + segment.header.address + segment.header.memorySize);
         }
         if (!entry) return fail(-ENOEXEC, "root has no process entry");
-        // Static TLS (variant II): one RW region after a guard page, blocks
-        // ending at the thread pointer, then a 16-byte TCB at TP.
         const long host_page = ::sysconf(_SC_PAGESIZE);
         if (host_page <= 0) return fail(-EIO, "host page size unavailable");
         const uint64_t page = static_cast<uint64_t>(host_page);
+        // Dynamic startup: an RX stub "CALL init_1 ... CALL init_n; JMP entry"
+        // after a guard page. Admission starts at the stub, so every initializer
+        // is admitted as a function and the entry as the process body.
+        uint64_t start = entry;
+        if (!copy.initializers.empty()) {
+            start = (highest + page - 1) / page * page + page;
+            const uint64_t size = 5 * (copy.initializers.size() + 1);
+            if (start > (uint64_t{1} << 47) - size) return fail(-E2BIG, "startup stub outside user range");
+            std::vector<uint8_t> stub(static_cast<size_t>(size));
+            auto branch = [&](size_t at, uint8_t opcode, uint64_t target) {
+                const int64_t relative = static_cast<int64_t>(target) - static_cast<int64_t>(start + at + 5);
+                if (relative < INT32_MIN || relative > INT32_MAX) return false;
+                stub[at] = opcode;
+                for (size_t b = 0; b < 4; ++b) stub[at + 1 + b] = uint8_t(uint64_t(relative) >> (8 * b));
+                return true;
+            };
+            for (size_t k = 0; k < copy.initializers.size(); ++k)
+                if (!branch(5 * k, 0xe8, copy.initializers[k])) return fail(-EOVERFLOW, "initializer CALL displacement overflow");
+            if (!branch(5 * copy.initializers.size(), 0xe9, entry)) return fail(-EOVERFLOW, "entry JMP displacement overflow");
+            OrbisLinker::Module module {"<start>", start, 0, PS4ExecutableImage{}};
+            PS4ExecutableImage::Header header {1, 5, 0, 0, size, size, page};
+            module.image.headers.push_back(header);
+            module.image.segments.push_back({header, std::move(stub)});
+            copy.modules.push_back(std::move(module));
+            highest = start + size;
+        }
+        // Static TLS (variant II): one RW region after a guard page, blocks
+        // ending at the thread pointer, then a 16-byte TCB at TP.
         uint64_t tls_low = 0, tp = 0;
         std::vector<uint8_t> tls_bytes;
         if (copy.tls.size() != static_cast<size_t>(std::count_if(copy.modules.begin(), copy.modules.end(),
@@ -267,7 +293,7 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                 size_t width = op == 0xb8 || op == 0xb9 || op == 0xba || op == 0xbb || op == 0xbe || op == 0xbf ||
                     op == 0x05 || op == 0x25 || op == 0x0d ? 5 :
                     op == 0xff || op == 0x8b || op == 0x81 ? 6 :
-                    op == 0xc7 ? 10 : op == 0x64 ? 8 : op == 0x48 ? 7 : op == 0xc1 || op == 0x0f ? 3 :
+                    op == 0xc7 ? 10 : op == 0xe8 || op == 0xe9 ? 5 : op == 0x64 ? 8 : op == 0x48 ? 7 : op == 0xc1 || op == 0x0f ? 3 :
                     op == 0x01 || op == 0x29 || op == 0x39 || op == 0x89 ? 2 : 1;
                 // TLS forms are told apart by their second byte.
                 if ((op == 0x8b || op == 0x64) && fetch(pc,2)) {
@@ -397,6 +423,17 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                         if (error) return error;
                     }
                     patches.push_back({code,static_cast<uint32_t>(relative)});
+                } else if (op == 0xe8) {
+                    // CALL rel32 (startup stub): the target is admitted as a function.
+                    const uint64_t target = static_cast<uint64_t>(static_cast<int64_t>(pc+5) +
+                        static_cast<int32_t>(number(code+1,4)));
+                    const int error = admit(target,true,depth+1);
+                    if (error) return error;
+                } else if (op == 0xe9) {
+                    // JMP rel32 (startup stub -> entry): admission continues at the
+                    // target in the same context; loops exhaust the budget.
+                    pc = static_cast<uint64_t>(static_cast<int64_t>(pc+5) + static_cast<int32_t>(number(code+1,4)));
+                    continue;
                 } else if (op == 0xc7) {
                     width = 10;
                     if (!fetch(pc,width) || code[1] != 5) return -ENOTSUP;
@@ -448,7 +485,7 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
             }
             return -E2BIG;
         };
-        const int admitted = admit(entry,false,0);
+        const int admitted = admit(start,false,0);
         if (admitted) {
             const char* cause = admitted == -EFAULT ? "invalid guest memory range" :
                 admitted == -ELOOP ? "recursive call or depth limit" :
@@ -482,6 +519,7 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
         for (const auto& module : copy.modules) for (const auto& segment : module.image.segments)
             regions[i++].file_size = segment.header.fileSize;
         thunks = copy.thunks;
+        start_address = start;
         if (tp) tls_blocks = copy.tls;
         if (tp) {
             // x86-64 TCB word 0 is its own address, as FEX will see it (host).

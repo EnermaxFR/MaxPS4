@@ -78,6 +78,10 @@ public:
         return true;
     }
     const uint8_t* entry_pointer() const { return translate(guest_entry, 1, 5); }
+    // Where execution begins: the dynamic startup stub when the image has
+    // initializers (prepare_orbis), otherwise the entry itself.
+    uint64_t start() const { return start_address ? start_address : guest_entry; }
+    const uint8_t* start_pointer() const { return translate(start(), 1, 5); }
     const std::vector<Segment>& segments() const { return regions; }
 private:
     friend class PS4DynamicLinker;
@@ -87,7 +91,7 @@ private:
     std::vector<Segment> regions;
     void* arena = nullptr;
     size_t arena_size = 0;
-    uint64_t guest_base = 0, guest_entry = 0, thread_pointer = 0;
+    uint64_t guest_base = 0, guest_entry = 0, thread_pointer = 0, start_address = 0;
     std::vector<OrbisLinker::Thunk> thunks;
     std::vector<OrbisLinker::TLSBlock> tls_blocks;
 };

@@ -118,6 +118,21 @@ Limites actuelles : un seul thread, pas d'écriture TLS. Les autres tags dynamiq
 refusés tant que leur sémantique n'est pas implémentée et testée. Ce sous-ensemble
 ne prétend donc pas accepter arbitrairement tous les PRX réels ou les ELF Linux.
 
+### Démarrage dynamique
+
+`DT_INIT`, `DT_FINI`, `DT_INIT_ARRAY(SZ)` et `DT_FINI_ARRAY(SZ)` sont acceptés.
+Chaque fonction doit être du code présent dans le fichier du même module ; les
+tableaux (taille multiple de 8, 256 entrées au plus) sont lus **après** les
+relocations, et les sentinelles 0 et −1 sont ignorées. `Image::initializers`
+donne l'ordre : modules dans l'ordre de chargement (dépendances d'abord), puis
+`DT_INIT` avant les entrées de `DT_INIT_ARRAY`. `prepare_orbis` génère un stub RX
+`CALL init₁ … CALL initₙ ; JMP entrée`, après une page de garde, et l'admission
+commence par ce stub : chaque initialiseur est admis comme fonction, dans le
+même budget. FEX démarre au stub (`GuestELF::start()`), `entry()` reste le
+point d'entrée du module. Les `DT_FINI*` sont seulement validés : rien ne
+s'exécute à la sortie. Le `module_start` des PRX (point d'entrée ELF d'un PRX)
+n'est pas encore appelé.
+
 ## Transactions et contrat mémoire/FEX
 
 `OrbisLinker::link(inputs, hle, output, diagnostic, budget)` conserve intégralement
