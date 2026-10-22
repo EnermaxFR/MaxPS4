@@ -1,6 +1,7 @@
 #include "maxps4_guest_elf.h"
 #include "maxps4_guest_range.h"
 #include "maxps4_ps4_guest_memory.h"
+#include "maxps4_ps4_libkernel.h"
 #include "PS4ExecutableImage.hpp"
 #include <algorithm>
 #include <cerrno>
@@ -79,6 +80,7 @@ void GuestELF::clear() {
     arena_size = 0;
     guest_base = guest_entry = thread_pointer = 0;
     thunks.clear();
+    tls_blocks.clear();
     blockers = 0;
     regions.clear();
 }
@@ -246,7 +248,7 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
         std::map<uint64_t,size_t> instruction_ranges;
         bool initialized = false;
         bool edx_initialized = false, ebx_initialized = false, esi_initialized = false, ecx_initialized = false, compared = false;
-        bool rax_tp = false, rax_tpoff = false;
+        bool rax_tp = false, rax_tpoff = false, rax_tls_pointer = false;
         int64_t tpoff = 0;
         uint32_t remaining = budget;
         uint64_t refusal_pc = entry;
@@ -270,14 +272,15 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                 // TLS forms are told apart by their second byte.
                 if ((op == 0x8b || op == 0x64) && fetch(pc,2)) {
                     if (op == 0x8b && code[1] == 0x40) width = 3;
+                    if (op == 0x8b && code[1] == 0x00) width = 2;
                     if (op == 0x64 && code[1] == 0x48) width = 9;
                     if (op == 0x64 && code[1] == 0x8b && fetch(pc,3) && code[2] == 0x00) width = 3;
                 }
                 if (!fetch(pc,width)) return -EFAULT;
                 // RAX holds the thread pointer (or a GOT TLS offset) only for the
                 // instruction right after the load; anything in between invalidates it.
-                const bool tp_in_rax = rax_tp, tpoff_in_rax = rax_tpoff;
-                rax_tp = rax_tpoff = false;
+                const bool tp_in_rax = rax_tp, tpoff_in_rax = rax_tpoff, tls_pointer_in_rax = rax_tls_pointer;
+                rax_tp = rax_tpoff = rax_tls_pointer = false;
                 if (op == 0x89 && code[1] != 0xc3 && code[1] != 0xc6) {
                     width = 6;
                     if (!fetch(pc,width)) return -EFAULT;
@@ -314,6 +317,11 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                 } else if (op == 0x89 && code[1] == 0xc3) {
                     if (!initialized) return -ENOTSUP;
                     ebx_initialized = true; // MOV EBX,EAX
+                } else if (op == 0x8b && code[1] == 0x00) {
+                    // MOV EAX,[RAX] right after CALL __tls_get_addr. The returned pointer
+                    // is at most TP-1, so a 4-byte read ends before the TCB's end.
+                    if (!tls_pointer_in_rax) return -ENOTSUP;
+                    initialized = true; compared = false;
                 } else if (op == 0x8b && (code[1] == 0x40 || code[1] == 0x80)) {
                     // MOV EAX,[RAX+disp8/disp32] with RAX = thread pointer: TLS read.
                     if (!tp_in_rax) return -ENOTSUP;
@@ -372,10 +380,18 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                     // A linker-synthesized HLE trampoline is engine code, not guest
                     // code: it is not admitted instruction by instruction. It returns
                     // in EAX; SYSCALL clobbers RCX (and R11, which is not tracked).
-                    const bool system = std::any_of(copy.thunks.begin(), copy.thunks.end(),
-                        [&](const auto& thunk) { return thunk.address == target; });
+                    const auto thunk = std::find_if(copy.thunks.begin(), copy.thunks.end(),
+                        [&](const auto& t) { return t.address == target; });
+                    const bool system = thunk != copy.thunks.end();
                     if (system) {
                         initialized = true; ecx_initialized = false; compared = false;
+                        // __tls_get_addr returns a pointer inside the static TLS region
+                        // (the gate validates tls_index at run time and never returns
+                        // anything else), usable by the very next instruction.
+                        if (thunk->token == static_cast<uint32_t>(PS4KernelService::tls_get_addr)) {
+                            if (!tp) return -EFAULT;
+                            rax_tls_pointer = true;
+                        }
                     } else {
                         const int error = admit(target,true,depth+1);
                         if (error) return error;
@@ -466,6 +482,7 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
         for (const auto& module : copy.modules) for (const auto& segment : module.image.segments)
             regions[i++].file_size = segment.header.fileSize;
         thunks = copy.thunks;
+        if (tp) tls_blocks = copy.tls;
         if (tp) {
             // x86-64 TCB word 0 is its own address, as FEX will see it (host).
             thread_pointer = tp;

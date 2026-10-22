@@ -73,7 +73,19 @@ public:
             const maxps4::PS4KernelCall call{logical(r[x86::REG_RDI]),logical(r[x86::REG_RSI]),
                 logical(r[x86::REG_RDX]),logical(r[x86::REG_R10]),logical(r[x86::REG_R8]),
                 logical(r[x86::REG_R9]),0};
-            result = kernel->invoke(orbis,call,1);
+            if (orbis == maxps4::PS4KernelService::tls_get_addr) {
+                // __tls_get_addr(&tls_index{module, offset}): the guest may have changed
+                // tls_index, so validate it now. The admitted next instruction reads
+                // through RAX, so never return an invalid pointer: on failure return the
+                // (mapped) TCB and fail the run once FEX returns.
+                uint64_t index[2]{};
+                const uint8_t* address = memory->read(call.rdi,index,sizeof(index)) ?
+                    image->tls_address(index[0],index[1]) : nullptr;
+                if (!address) { callback_error = -EFAULT; address = image->thread_pointer_host(); }
+                result = static_cast<int64_t>(reinterpret_cast<uintptr_t>(address));
+            } else {
+                result = kernel->invoke(orbis,call,1);
+            }
             ++calls;
             r[x86::REG_RAX] = static_cast<uint64_t>(result);
             state.rip += 2;

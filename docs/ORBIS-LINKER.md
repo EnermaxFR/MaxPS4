@@ -105,8 +105,16 @@ toujours si les 4 octets lus sont dans les blocs ou le TCB :
 
 Pour initial-exec, le slot GOT (rempli par TPOFF64) doit être en lecture seule à
 l'exécution, c'est-à-dire dans un segment SCE RELRO : aucune écriture admise ne
-peut alors modifier le décalage. Limites actuelles : un seul thread, pas de
-`__tls_get_addr` (general/local-dynamic) ni d'écriture TLS. Les autres tags dynamiques, même certains tags standard usuels, sont
+peut alors modifier le décalage.
+
+General-dynamic : `LEA RDI,[RIP+tls_index]` (rempli par DTPMOD64/DTPOFF64), puis
+`CALL [GOT]` vers la trampoline HLE de `__tls_get_addr` (NID `vNe1w4diLCs`,
+libkernel v1, d'après shadPS4), puis immédiatement `MOV EAX,[RAX]`. `tls_index`
+étant modifiable par le jeu, le gate FEX le relit et le revalide à chaque appel
+(module existant, décalage < `p_memsz`). Il ne renvoie jamais de pointeur
+invalide : en cas d'échec, il renvoie le TCB et l'exécution échoue avec
+`-EFAULT`. L'admission refuse l'appel si l'image n'a aucun bloc TLS.
+Limites actuelles : un seul thread, pas d'écriture TLS. Les autres tags dynamiques, même certains tags standard usuels, sont
 refusés tant que leur sémantique n'est pas implémentée et testée. Ce sous-ensemble
 ne prétend donc pas accepter arbitrairement tous les PRX réels ou les ELF Linux.
 

@@ -58,6 +58,15 @@ public:
         return false;
     }
     bool has_hle() const { return !thunks.empty(); }
+    // __tls_get_addr for the single static-TLS thread: host address of byte
+    // `offset` of module `module`'s block, or null if the module has no block
+    // or the offset is outside it. Never returns memory outside the TLS region.
+    const uint8_t* tls_address(uint64_t module, uint64_t offset) const {
+        for (const auto& block : tls_blocks)
+            if (block.id == module)
+                return offset < block.memorySize ? translate(thread_pointer - block.offset + offset, 1, 6) : nullptr;
+        return nullptr;
+    }
     // FEX runs the admitted code at rebased host addresses. Map a host address
     // inside this image's arena back to its logical PS4 address (for HLE
     // pointer arguments); false outside the arena. Permissions are checked
@@ -80,6 +89,7 @@ private:
     size_t arena_size = 0;
     uint64_t guest_base = 0, guest_entry = 0, thread_pointer = 0;
     std::vector<OrbisLinker::Thunk> thunks;
+    std::vector<OrbisLinker::TLSBlock> tls_blocks;
 };
 // Admission guarantees a finite sequence: MOV EAX,imm32; ADD EAX,imm32;
 // NOP; terminal HLT. The ELF loader also admits C7 05 disp32 imm32 stores
