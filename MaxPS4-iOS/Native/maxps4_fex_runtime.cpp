@@ -71,8 +71,8 @@ public:
         if (!linker && image && kernel && memory && r[x86::REG_RAX] <= UINT32_MAX &&
             image->hle_gate(state.rip, static_cast<uint32_t>(r[x86::REG_RAX]))) {
             // Orbis path: SYSCALL from a linker-synthesized trampoline. The token is
-            // the service; arguments follow SysV (RCX already moved to R10). No
-            // seventh stack argument is forwarded: guest_rsp 0 makes it fault.
+            // the service; arguments follow SysV (RCX already moved to R10). The
+            // seventh (stack) argument is readable for general images only.
             const auto orbis = static_cast<maxps4::PS4KernelService>(r[x86::REG_RAX]);
             // Admitted code builds pointers with RIP-relative LEA, i.e. rebased host
             // addresses. libkernel works on logical PS4 addresses and re-checks
@@ -83,7 +83,11 @@ public:
             };
             const maxps4::PS4KernelCall call{logical(r[x86::REG_RDI]),logical(r[x86::REG_RSI]),
                 logical(r[x86::REG_RDX]),logical(r[x86::REG_R10]),logical(r[x86::REG_R8]),
-                logical(r[x86::REG_R9]),0};
+                logical(r[x86::REG_R9]),
+                // A general image's stack is guest memory: stack arguments (the
+                // seventh, at RSP+8 past the trampoline's return address) are
+                // readable. Bounded images keep 0, which makes them fault.
+                image->general() ? r[x86::REG_RSP] : 0};
             if (orbis == maxps4::PS4KernelService::tls_get_addr) {
                 // __tls_get_addr(&tls_index{module, offset}): the guest may have changed
                 // tls_index, so validate it now. The admitted next instruction reads

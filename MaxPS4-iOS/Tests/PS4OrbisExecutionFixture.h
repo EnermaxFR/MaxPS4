@@ -253,6 +253,31 @@ inline std::vector<uint8_t> make_general_fault_app(int kind) {
     put(b,64+32,code.size()); put(b,64+40,code.size());
     return b;
 }
+// sceKernelMmap (public NID PGhQHd-dzv8) from general code, seventh argument
+// on the stack: mmap(0, 0x4000, READ|WRITE, ANON|PRIVATE, -1, 0, &out) with
+// `out` at app data 0x8010. On success the guest stores 0x1234 at out+0x100
+// through the returned pointer, loads it back and returns 0x1236; on failure
+// it returns the libkernel error.
+constexpr uint64_t mmap_out=data+0x10;
+inline std::vector<uint8_t> make_general_mmap_app() {
+    auto b=make_kernel_app("PGhQHd-dzv8");
+    using orbis_fixture::put;
+    const uint8_t code[]={
+        0x31,0xff, 0xbe,0,0x40,0,0, 0xba,3,0,0,0,            // 0x00 XOR EDI,EDI; MOV ESI,0x4000; MOV EDX,3
+        0xb9,0x02,0x10,0,0, 0x41,0xb8,0xff,0xff,0xff,0xff,  // 0x0c MOV ECX,0x1002; MOV R8D,-1
+        0x45,0x31,0xc9, 0x48,0x8d,0x05,0,0,0,0, 0x50,        // 0x17 XOR R9D,R9D; LEA RAX,[out]; PUSH RAX
+        0xff,0x15,0,0,0,0, 0x59, 0x85,0xc0, 0x75,0x1c,       // 0x22 CALL [GOT]; POP RCX; TEST EAX,EAX; JNZ end
+        0x48,0x8b,0x05,0,0,0,0,                              // 0x2d MOV RAX,[out]
+        0xc7,0x80,0,1,0,0,0x34,0x12,0,0,                     // 0x34 MOV DWORD [RAX+0x100],0x1234
+        0x8b,0x80,0,1,0,0, 0x05,2,0,0,0, 0xf4};              // 0x3e MOV EAX,[RAX+0x100]; ADD EAX,2; end: HLT
+    std::fill(b.begin()+0x200,b.begin()+0x300,0);
+    std::copy(std::begin(code),std::end(code),b.begin()+0x200);
+    put(b,0x21d,0x8010-0x4021,4);
+    put(b,0x224,0x8000-0x4028,4);
+    put(b,0x230,0x8010-0x4034,4);
+    put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
+    return b;
+}
 // sceKernelClockGettime(clock, RSP buffer): the timespec lives on the guest
 // stack, then is copied to app data at 0x8010. Returns the HLE result.
 inline std::vector<uint8_t> make_general_clock_app(uint32_t clock=4) {

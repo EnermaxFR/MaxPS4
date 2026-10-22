@@ -192,8 +192,13 @@ Limites actuelles, à traiter avant tout code non fiable :
   dispatcher, il arrête le thread comme une faute (`-ETIMEDOUT`). Un appel long
   dans le C++ de FEX ou d'un HLE n'est pas interrompu : l'arrêt a lieu à la
   reprise du code invité. Test : `JMP $` arrêté après 200 ms.
-- La mémoire allouée par `sceKernelMmap` reste logique (non identité) : le code
-  invité ne peut pas encore la déréférencer.
+- **`sceKernelMmap` en mémoire hôte** : une fenêtre de 32 Mio suit la pile
+  (après une page de garde) dans la réservation, `PROT_NONE` jusqu'à
+  l'allocation. `PS4VirtualMemory` y place les mappings anonymes à leur propre
+  adresse et applique `mprotect` ; `munmap` remplace les pages (remises à zéro).
+  Le code invité déréférence donc directement le pointeur rendu. Le septième
+  argument (sur la pile) est lu à `RSP+8` pour les images générales. Les pages
+  exécutables restent de la donnée hôte : FEX ne les exécute pas encore.
 - Un seul thread, pas d'arrêt du processus (`HLT` sert de fin dans les tests),
   ni de SYSCALL hors trampoline (l'exécution échoue avec `-EPERM`).
 
