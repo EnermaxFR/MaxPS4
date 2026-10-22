@@ -57,6 +57,19 @@ typedef struct maxps4_fex_cpu_report {
 } maxps4_fex_cpu_report;
 int32_t maxps4_fex_engine_last_cpu_report(const maxps4_fex_engine *engine,
                                         maxps4_fex_cpu_report *report);
+// Guest fault that ended the last execution: a SIGSEGV/SIGBUS (run returned
+// -EFAULT) or SIGILL/SIGTRAP (-EILSEQ) raised by FEX-generated code or its
+// guest-signal stubs, contained on ARM64 hosts (not under the VIXL simulator).
+// address is the faulting address (identity-mapped images: a guest address);
+// rip is the guest RIP FEX last stored, at block granularity. Returns -ENOENT
+// when the last execution did not fault.
+typedef struct maxps4_fex_guest_fault {
+    int32_t signal;
+    uint32_t reserved;
+    uint64_t address, rip;
+} maxps4_fex_guest_fault;
+int32_t maxps4_fex_engine_last_guest_fault(const maxps4_fex_engine *engine,
+                                           maxps4_fex_guest_fault *fault);
 int32_t maxps4_fex_engine_cpuid(maxps4_fex_engine *engine, uint32_t leaf,
                               uint32_t subleaf, uint32_t out[4]);
 // Compatibility synthetic ELF fixture routed through run_elf; no host syscalls.
@@ -128,8 +141,10 @@ int32_t maxps4_fex_engine_prepare_orbis(maxps4_fex_engine *engine,
 // the image and NO instruction admission: FEX runs the code unmodified, with
 // branches, loops, stack and absolute pointers. *relocation is added to every
 // requested load_bias (a multiple of 1 MiB). Then run with run_orbis.
-// Guest faults are not contained yet: an invalid access ends the host
-// process. Not for untrusted code; the app does not call it.
+// On ARM64 hosts a guest fault in generated code ends the run with -EFAULT
+// or -EILSEQ (see last_guest_fault); faults inside FEX or HLE C++ code, and
+// any fault under the VIXL simulator, still end the host process. There is
+// no time limit yet. Not for untrusted code; the app does not call it.
 int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine *engine,
     const maxps4_orbis_module *modules, size_t count, const char *root,
     uint64_t *relocation, char *diagnostic, size_t capacity);

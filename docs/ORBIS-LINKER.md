@@ -166,10 +166,28 @@ pointeur RELATIVE, appel GOT non patché vers un PRX, store BSS (résultat
 110 + cellule + valeur du PRX, deux valeurs différentes) et
 `sceKernelClockGettime` écrivant sur la pile invitée.
 
+**Fautes confinées (hôte ARM64).** Pendant `ExecuteThread`, un gestionnaire
+`SIGSEGV`/`SIGBUS`/`SIGILL`/`SIGTRAP` reconnaît une faute levée par le code
+généré par FEX (`IsAddressInCodeBuffer`) ou par les stubs de signal invité du
+dispatcher. Il remet la pile hôte sur `ReturningStackLocation` et place le PC
+sur le gestionnaire d'arrêt de thread de FEX (`ThreadStopHandlerAddressSpillSRA`
+depuis le code JIT, qui sauvegarde d'abord les registres invités) :
+`ExecuteThread` revient normalement. L'exécution renvoie `-EFAULT` (accès
+mémoire) ou `-EILSEQ` (instruction invalide) et
+`maxps4_fex_engine_last_guest_fault` donne le signal, l'adresse fautive et le
+RIP invité (à la granularité du bloc). Toute autre faute est transmise au
+gestionnaire précédent. Tests ARM64 natif : lecture de la page de garde
+au-dessus de la pile, écriture dans le code, `UD2`, puis exécution normale sur
+le même moteur.
+
 Limites actuelles, à traiter avant tout code non fiable :
 
-- **Fautes non confinées** : un accès invalide du code invité termine le
-  processus hôte. L'application ne propose donc pas ce mode.
+- **Fautes encore fatales** : une faute dans le code C++ de FEX ou d'un HLE, et
+  toute faute sous le simulateur VIXL (job x86), termine le processus. Sur
+  iPhone, un débogueur attaché (JIT via StikDebug) peut intercepter l'exception
+  Mach avant le signal. L'application ne propose donc pas encore ce mode.
+- **Pas de limite de temps** : une boucle infinie du code invité bloque
+  l'appelant.
 - La mémoire allouée par `sceKernelMmap` reste logique (non identité) : le code
   invité ne peut pas encore la déréférencer.
 - Un seul thread, pas d'arrêt du processus (`HLT` sert de fin dans les tests),
