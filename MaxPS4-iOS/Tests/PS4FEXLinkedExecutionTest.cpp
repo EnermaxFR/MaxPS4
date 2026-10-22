@@ -369,6 +369,63 @@ int main(int argc, char** argv) {
         }
         maxps4_fex_engine_close(process);
     }
+    for (uint32_t provided : {40U, 7U}) {
+        // General execution: identity-mapped image, no instruction list. A loop, a
+        // local CALL with a stack frame, an absolute pointer filled by RELATIVE, an
+        // unpatched GOT CALL into provider.prx and a BSS store, all run by FEX.
+        auto app = orbis_execution::make_general_app(9);
+        auto provider = orbis_execution::make(true, provided);
+        const char* dependency[] = {"provider.prx"};
+        const maxps4_orbis_module modules[] = {
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,dependency,1},
+            {"provider.prx",provider.data(),provider.size(),orbis_execution::provider_bias,nullptr,0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        char diagnostic[512]{};
+        CHECK(maxps4_fex_engine_prepare_orbis(process,modules,2,"app.elf",65536,diagnostic,sizeof(diagnostic))!=0);
+        uint64_t relocation=0;
+        const int prepared = maxps4_fex_engine_prepare_orbis_general(process,modules,2,"app.elf",&relocation,diagnostic,sizeof(diagnostic));
+        if (prepared) std::fprintf(stderr,"prepare: %s\n",diagnostic);
+        CHECK(prepared==0 && relocation && relocation%(1024*1024)==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        const uint64_t expected = 110 + 9 + provided;
+        uint64_t observed=0, logical_entry=0; uint32_t cpu=0;
+        for (int repeat=0;repeat<2;++repeat) {
+            CHECK(maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry)==0);
+            CHECK(observed==expected && logical_entry==orbis_execution::entry+relocation);
+            uint8_t stored[4]{};
+            CHECK(maxps4_fex_engine_read_ps4(process,orbis_execution::general_store+relocation,stored,sizeof(stored))==0);
+            CHECK((stored[0]|stored[1]<<8|stored[2]<<16|uint32_t(stored[3])<<24)==expected);
+        }
+        std::printf("PASS general FEX execution (identity mapping, relocation=0x%llx): loop + stack CALL + absolute pointer + GOT CALL + BSS store -> RAX=%llu backend=%u\n",
+            (unsigned long long)relocation,(unsigned long long)observed,cpu);
+        maxps4_fex_engine_close(process);
+    }
+    {
+        // HLE with a pointer to the guest stack: the timespec is written there by
+        // libkernel, then copied by guest code to app data.
+        auto app = orbis_execution::make_general_clock_app();
+        const maxps4_orbis_module modules[] = {
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,nullptr,0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        char diagnostic[512]{};
+        uint64_t relocation=0;
+        const int prepared = maxps4_fex_engine_prepare_orbis_general(process,modules,1,"app.elf",&relocation,diagnostic,sizeof(diagnostic));
+        if (prepared) std::fprintf(stderr,"prepare: %s\n",diagnostic);
+        CHECK(prepared==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        uint64_t observed=99, logical_entry=0; uint32_t cpu=0;
+        CHECK(maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry)==0 && observed==0);
+        uint8_t wire[16]{};
+        CHECK(maxps4_fex_engine_read_ps4(process,orbis_execution::timespec_address+relocation,wire,sizeof(wire))==0);
+        uint64_t seconds=0, nanoseconds=0;
+        std::memcpy(&seconds,wire,8); std::memcpy(&nanoseconds,wire+8,8);
+        CHECK(nanoseconds<1000000000ULL && (seconds || nanoseconds));
+        std::printf("PASS general FEX execution -> libkernel HLE sceKernelClockGettime(RSP buffer) -> %llu.%09llu s backend=%u\n",
+            (unsigned long long)seconds,(unsigned long long)nanoseconds,cpu);
+        maxps4_fex_engine_close(process);
+    }
     maxps4_fex_engine* engine = nullptr;
     std::puts("BEGIN real FEX context and linked Orbis execution");
     CHECK(maxps4_fex_engine_open(&engine) == 0 && engine);

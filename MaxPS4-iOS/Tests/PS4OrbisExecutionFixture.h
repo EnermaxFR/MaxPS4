@@ -204,6 +204,56 @@ inline std::vector<uint8_t> make_clock_app(uint32_t clock=4, int32_t lea_target=
     put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
     return b;
 }
+// General execution (identity mapping, no instruction list). The bounded
+// admission refuses this code (JNZ, PUSH/POP, local CALL, absolute loads):
+//   EDX = 1+..+10 (loop); EAX = twice(EDX) via CALL rel32 with a frame;
+//   EDX += *[slot], slot filled by RELATIVE with the address of `cell`;
+//   PUSH RDX; CALL [GOT] -> provider.prx (unpatched); POP RDX; EAX += EDX;
+//   store EAX in BSS (0x8100); HLT. Result: 110 + cell + provider value.
+constexpr uint64_t general_slot=data+0x10, general_cell=data+0x20, general_store=data+0x100;
+inline std::vector<uint8_t> make_general_app(uint32_t cell=7) {
+    auto b=make(false);
+    using orbis_fixture::put;
+    const uint8_t code[]={
+        0x31,0xd2, 0xb9,10,0,0,0,                 // 0x00 XOR EDX,EDX; MOV ECX,10
+        0x01,0xca, 0xff,0xc9, 0x75,0xfa,          // 0x07 loop: ADD EDX,ECX; DEC ECX; JNZ loop
+        0x89,0xd7, 0xe8,0x1c,0,0,0,               // 0x0d MOV EDI,EDX; CALL twice (0x30)
+        0x89,0xc2, 0x48,0x8b,0x05,0,0,0,0,        // 0x14 MOV EDX,EAX; MOV RAX,[RIP+slot]
+        0x03,0x10, 0x52, 0xff,0x15,0,0,0,0,       // 0x1d ADD EDX,[RAX]; PUSH RDX; CALL [GOT]
+        0x5a, 0x01,0xd0, 0x89,0x05,0,0,0,0, 0xf4, // 0x26 POP RDX; ADD EAX,EDX; MOV [store],EAX; HLT
+        0x55, 0x48,0x89,0xe5, 0x89,0xf8,          // 0x30 twice: PUSH RBP; MOV RBP,RSP; MOV EAX,EDI
+        0x01,0xc0, 0x5d, 0xc3};                   // 0x36 ADD EAX,EAX; POP RBP; RET
+    std::fill(b.begin()+0x200,b.begin()+0x300,0);
+    std::copy(std::begin(code),std::end(code),b.begin()+0x200);
+    put(b,0x219,0x8010-0x401d,4);
+    put(b,0x222,0x8000-0x4026,4);
+    put(b,0x22b,0x8100-0x402f,4);
+    put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
+    put(b,0x320,cell,4);
+    put(b,0x918,0x8010); put(b,0x920,8); put(b,0x928,0x8020); // RELATIVE -> cell
+    orbis_fixture::setTag(b,0x61000031,2*24);
+    return b;
+}
+// sceKernelClockGettime(clock, RSP buffer): the timespec lives on the guest
+// stack, then is copied to app data at 0x8010. Returns the HLE result.
+inline std::vector<uint8_t> make_general_clock_app(uint32_t clock=4) {
+    auto b=make_kernel_app("QBi7HCK03hw");
+    using orbis_fixture::put;
+    const uint8_t code[]={
+        0xbf,0,0,0,0, 0x48,0x83,0xec,0x10, 0x48,0x89,0xe6, // MOV EDI,clock; SUB RSP,16; MOV RSI,RSP
+        0xff,0x15,0,0,0,0,                                  // 0x0c CALL [GOT]
+        0x48,0x8b,0x14,0x24, 0x48,0x89,0x15,0,0,0,0,        // 0x12 MOV RDX,[RSP]; MOV [0x8010],RDX
+        0x48,0x8b,0x54,0x24,0x08, 0x48,0x89,0x15,0,0,0,0,   // 0x1d MOV RDX,[RSP+8]; MOV [0x8018],RDX
+        0x48,0x83,0xc4,0x10, 0xf4};                         // 0x29 ADD RSP,16; HLT
+    std::fill(b.begin()+0x200,b.begin()+0x300,0);
+    std::copy(std::begin(code),std::end(code),b.begin()+0x200);
+    put(b,0x201,clock,4);
+    put(b,0x20e,0x8000-0x4012,4);
+    put(b,0x219,0x8010-0x401d,4);
+    put(b,0x225,0x8018-0x4029,4);
+    put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
+    return b;
+}
 inline maxps4::OrbisLinker::Identity kernel_identity(const char* nid="aI+OeCz8xrQ") {
     return {nid,"libkernel","libkernel",1,1,2};
 }

@@ -393,7 +393,12 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     engine->cpu_report = {};
     uint64_t initial_rsp = 0;
     const uint64_t initial_rip = reinterpret_cast<uintptr_t>(entry_pointer);
-    const int stack_status = maxps4::initialize_guest_stack(stack_base, page, initial_rip, page, initial_rsp);
+    // A general image owns its stack inside guest memory, so stack buffers are
+    // valid HLE pointer arguments; the bounded paths keep the private page.
+    size_t guest_stack_size = page;
+    uint8_t* guest_stack = image.stack_host(guest_stack_size);
+    if (!guest_stack) { guest_stack = stack_base; guest_stack_size = page; }
+    const int stack_status = maxps4::initialize_guest_stack(guest_stack, guest_stack_size, initial_rip, page, initial_rsp);
     if (stack_status) return stack_status;
     auto* thread = engine->context->CreateThread(initial_rip, initial_rsp);
     if (!thread) return -ENOMEM;
@@ -539,6 +544,62 @@ extern "C" int32_t maxps4_fex_engine_run_linked_ps4(maxps4_fex_engine* engine,
     *calls = engine->probe.calls;
     return 0;
 }
+namespace {
+// Validates the C module table into linker inputs; libkernel is provided by
+// HLE: one synthesized trampoline per implemented NID, identity
+// libkernel/libkernel version 1 (as resolve_libkernel).
+int orbisInputs(const maxps4_orbis_module* modules, size_t count,
+    std::vector<maxps4::OrbisLinker::Input>& inputs, std::vector<maxps4::OrbisLinker::HLE>& hle) {
+    for (size_t i=0;i<count;++i) {
+        const auto& m = modules[i];
+        if (!m.path || !m.bytes || m.dependency_count > 128 ||
+            (m.dependency_count && !m.dependencies)) return -EINVAL;
+        if (::strnlen(m.path,256)>255 || m.size>32*1024*1024) return -E2BIG;
+        maxps4::OrbisLinker::Input in{{{m.path,{}},m.bytes,m.size},m.load_bias};
+        for (size_t j=0;j<m.dependency_count;++j) {
+            if (!m.dependencies[j] || ::strnlen(m.dependencies[j],256)>255) return -EINVAL;
+            in.file.request.dependencies.emplace_back(m.dependencies[j]);
+        }
+        inputs.push_back(std::move(in));
+    }
+    size_t exported = 0;
+    const auto* kernel_exports = maxps4::libkernel_exports(exported);
+    for (size_t i=0;i<exported;++i) {
+        maxps4::OrbisLinker::Identity id{kernel_exports[i].nid,"libkernel","libkernel",1,1,2};
+        hle.push_back({id,0,static_cast<uint32_t>(kernel_exports[i].service)});
+    }
+    return 0;
+}
+}
+extern "C" int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine* engine,
+    const maxps4_orbis_module* modules, size_t count, const char* root,
+    uint64_t* relocation, char* diagnostic, size_t capacity) {
+    if (diagnostic && capacity) diagnostic[0] = 0;
+    if (relocation) *relocation = 0;
+    if (!engine) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    engine->libkernel.reset(); engine->dynamic_ps4.reset(); engine->linker.reset();
+    engine->staged_ps4.clear(); engine->orbis_admitted = false; engine->frame = {}; engine->frame_sequence = 0; engine->frame_code_cached = false;
+    auto message = [&](const std::string& text) {
+        if (diagnostic && capacity) std::snprintf(diagnostic,capacity,"%s",text.c_str());
+    };
+    if (!modules || !count || count > 128 || !root || !relocation || !diagnostic || capacity < 2)
+        return -EINVAL;
+    if (::strnlen(root,256)>255) return -E2BIG;
+    try {
+        std::vector<maxps4::OrbisLinker::Input> inputs;
+        std::vector<maxps4::OrbisLinker::HLE> hle;
+        const int collected = orbisInputs(modules,count,inputs,hle);
+        if (collected) return collected;
+        std::string reason;
+        uint64_t moved = 0;
+        const int status = engine->staged_ps4.prepare_orbis_general(inputs,hle,root,reason,moved);
+        message(status ? reason : "SCE image linked and identity-mapped; execution not attempted");
+        engine->orbis_admitted = status == 0;
+        if (!status) *relocation = moved;
+        return status;
+    } catch (const std::bad_alloc&) { message("Orbis allocation failed"); return -ENOMEM; }
+}
 extern "C" int32_t maxps4_fex_engine_prepare_orbis(maxps4_fex_engine* engine,
     const maxps4_orbis_module* modules, size_t count, const char* root,
     uint32_t budget, char* diagnostic, size_t capacity) {
@@ -555,27 +616,9 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis(maxps4_fex_engine* engine,
     if (::strnlen(root,256)>255) return -E2BIG;
     try {
         std::vector<maxps4::OrbisLinker::Input> inputs;
-        for (size_t i=0;i<count;++i) {
-            const auto& m = modules[i];
-            if (!m.path || !m.bytes || m.dependency_count > 128 ||
-                (m.dependency_count && !m.dependencies)) return -EINVAL;
-            if (::strnlen(m.path,256)>255 || m.size>32*1024*1024) return -E2BIG;
-            maxps4::OrbisLinker::Input in{{{m.path,{}},m.bytes,m.size},m.load_bias};
-            for (size_t j=0;j<m.dependency_count;++j) {
-                if (!m.dependencies[j] || ::strnlen(m.dependencies[j],256)>255) return -EINVAL;
-                in.file.request.dependencies.emplace_back(m.dependencies[j]);
-            }
-            inputs.push_back(std::move(in));
-        }
-        // libkernel is provided by HLE: one synthesized trampoline per implemented
-        // NID, identity libkernel/libkernel version 1 (as resolve_libkernel).
         std::vector<maxps4::OrbisLinker::HLE> hle;
-        size_t exported = 0;
-        const auto* kernel_exports = maxps4::libkernel_exports(exported);
-        for (size_t i=0;i<exported;++i) {
-            maxps4::OrbisLinker::Identity id{kernel_exports[i].nid,"libkernel","libkernel",1,1,2};
-            hle.push_back({id,0,static_cast<uint32_t>(kernel_exports[i].service)});
-        }
+        const int collected = orbisInputs(modules,count,inputs,hle);
+        if (collected) return collected;
         maxps4::OrbisLinker::Image linked;
         std::string reason;
         if (!maxps4::OrbisLinker::link(inputs,hle,linked,reason)) {

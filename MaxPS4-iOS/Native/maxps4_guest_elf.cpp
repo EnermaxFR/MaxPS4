@@ -79,6 +79,8 @@ void GuestELF::clear() {
     arena = nullptr;
     arena_size = 0;
     guest_base = guest_entry = thread_pointer = start_address = 0;
+    identity = false;
+    stack_address = stack_bytes = 0;
     thunks.clear();
     tls_blocks.clear();
     blockers = 0;
@@ -188,10 +190,81 @@ int GuestELF::interpret(uint32_t budget, Execution& out) {
 int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string& root,
     uint32_t budget, std::string& diagnostic) {
     clear(); diagnostic.clear();
+    return prepare_linked(linked, root, budget, diagnostic, false);
+}
+int GuestELF::prepare_orbis_general(const std::vector<OrbisLinker::Input>& inputs,
+    const std::vector<OrbisLinker::HLE>& hle, const std::string& root,
+    std::string& diagnostic, uint64_t& relocation) {
+    clear(); diagnostic.clear(); relocation = 0;
+    auto fail = [&](int error, const std::string& message) {
+        clear(); diagnostic = message; return error;
+    };
+    try {
+        OrbisLinker::Image measured;
+        if (!OrbisLinker::link(inputs, hle, measured, diagnostic)) return fail(-ENOEXEC, diagnostic);
+        const long host_page = ::sysconf(_SC_PAGESIZE);
+        if (host_page <= 0) return fail(-EIO, "host page size unavailable");
+        const uint64_t page = static_cast<uint64_t>(host_page);
+        uint64_t low = UINT64_MAX, high = 0;
+        for (const auto& module : measured.modules) {
+            // An ET_SCE_EXEC has absolute addresses fixed at link time: it cannot move.
+            if (module.image.type == 0xfe00)
+                return fail(-ENOEXEC, module.path + ": ET_SCE_EXEC is not relocatable (identity mapping needs ET_SCE_DYNEXEC or PRX)");
+            for (const auto& segment : module.image.segments) {
+                low = std::min(low, module.bias + segment.header.address);
+                high = std::max(high, module.bias + segment.header.address + segment.header.memorySize);
+            }
+        }
+        if (low >= high) return fail(-ENOEXEC, "image has no loadable segment");
+        // After the image: startup stub, static TLS and stack, each behind a guard
+        // page (see prepare_linked), page rounding, a guard page after the stack
+        // and base alignment.
+        low &= ~(generalAlignment - 1);
+        const uint64_t tail = 10 * page + OrbisLinker::tlsBudget + 2 * 4096 + generalStack;
+        if (high - low > generalSpan - tail - generalAlignment)
+            return fail(-E2BIG, "image span exceeds the general address-space reservation");
+        const auto size = static_cast<size_t>(high - low + tail + generalAlignment);
+        // x86-64 user addresses end at 2^47, but an ARM64 host (Linux 48-bit
+        // layout) places mappings above it. Try the default placement, then
+        // hints below the limit; without MAP_FIXED no mapping is ever replaced.
+        constexpr uint64_t user_end = uint64_t{1} << 47;
+        auto reserve = [&](uint64_t hint) -> void* {
+            void* mapped = ::mmap(reinterpret_cast<void*>(hint), size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            if (mapped == MAP_FAILED || reinterpret_cast<uintptr_t>(mapped) <= user_end - size) return mapped;
+            ::munmap(mapped, size);
+            return MAP_FAILED;
+        };
+        void* reserved = reserve(0);
+        for (uint64_t hint = uint64_t{1} << 36; reserved == MAP_FAILED && hint <= user_end - size; hint <<= 1)
+            reserved = reserve(hint);
+        if (reserved == MAP_FAILED) return fail(-ENOMEM, "general address-space reservation failed below 2^47");
+        // Owned from here: clear() releases it on every later failure. Guest and
+        // host addresses coincide inside it (translate is the identity).
+        arena = reserved; arena_size = size;
+        guest_base = reinterpret_cast<uintptr_t>(reserved);
+        const uint64_t base = (guest_base + generalAlignment - 1) & ~(generalAlignment - 1);
+        if (base + (high - low) + tail > (uint64_t{1} << 47))
+            return fail(-E2BIG, "general reservation outside the user address range");
+        auto moved = inputs;
+        for (auto& input : moved) {
+            // bias - low + base: the same layout, shifted by a multiple of the alignment.
+            if (input.bias < low && low - input.bias > base) return fail(-ENOEXEC, "load bias below the image");
+            input.bias = input.bias - low + base;
+        }
+        OrbisLinker::Image linked;
+        if (!OrbisLinker::link(moved, hle, linked, diagnostic)) return fail(-ENOEXEC, diagnostic);
+        relocation = base - low;
+        const int status = prepare_linked(linked, root, 0, diagnostic, true);
+        if (status) relocation = 0;
+        return status;
+    } catch (const std::bad_alloc&) { clear(); relocation = 0; return -ENOMEM; }
+}
+int GuestELF::prepare_linked(const OrbisLinker::Image& linked, const std::string& root,
+    uint32_t budget, std::string& diagnostic, bool mapped_identity) {
     auto fail = [&](int error, const char* message) {
         clear(); diagnostic = message; return error;
     };
-    if (!budget || budget > 65536) return fail(-EINVAL, "invalid Orbis CPU budget");
+    if (!mapped_identity && (!budget || budget > 65536)) return fail(-EINVAL, "invalid Orbis CPU budget");
     try {
         // Patch only our private copy. Linker's logical relocations stay intact.
         auto copy = linked;
@@ -258,6 +331,12 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                 if (block.fileSize && !source) return fail(-EFAULT, "TLS template unreadable");
                 if (block.fileSize) std::memcpy(tls_bytes.data() + (blocks - block.offset), source, block.fileSize);
             }
+        }
+        // General mode: a zeroed RW stack after a guard page, last in the image.
+        uint64_t stack_low = 0;
+        if (mapped_identity) {
+            const uint64_t after = tp ? tp + 16 : highest;
+            stack_low = (after + page - 1) / page * page + page;
         }
         // Local-exec read through FS must stay inside the blocks or the TCB.
         auto tls_readable = [&](int64_t displacement, uint64_t bytes) {
@@ -498,7 +577,9 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
             }
             return -E2BIG;
         };
-        const int admitted = admit(start,false,0);
+        // General mode admits no instruction list and rewrites nothing: GOT slots
+        // already hold host (= guest) addresses, so CALL [GOT] runs as is.
+        const int admitted = mapped_identity ? 0 : admit(start,false,0);
         if (admitted) {
             const char* cause = admitted == -EFAULT ? "invalid guest memory range" :
                 admitted == -ELOOP ? "recursive call or depth limit" :
@@ -522,9 +603,13 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
             parsed.push_back({module.bias+h.address,h.offset,h.memorySize,h.memorySize,h.flags});
             sources.push_back(segment.bytes.data());
         }
-        if (tp) { // Last region: RW, never executable.
+        if (tp) { // RW, never executable.
             parsed.push_back({tls_low,0,tls_bytes.size(),tls_bytes.size(),6});
             sources.push_back(tls_bytes.data());
+        }
+        if (stack_low) { // Zero-filled: no file bytes to copy.
+            parsed.push_back({stack_low,0,0,generalStack,6});
+            sources.push_back(nullptr);
         }
         const int mapped = map_segments(std::move(parsed),sources,entry);
         if (mapped) return fail(mapped,"Orbis page mapping refused (page overlap, span or protection)");
@@ -542,7 +627,11 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
             const uint64_t self = reinterpret_cast<uintptr_t>(tcb);
             std::memcpy(tcb,&self,sizeof(self));
         }
-        blockers = 4; // Restricted rebasing never establishes general PS4 addressing.
+        if (stack_low) { stack_address = stack_low; stack_bytes = generalStack; }
+        identity = mapped_identity;
+        // Restricted rebasing never establishes general PS4 addressing; the
+        // identity mapping does.
+        blockers = mapped_identity ? 0 : 4;
         return 0;
     } catch (const std::bad_alloc&) { clear(); return -ENOMEM; }
 }
@@ -590,6 +679,8 @@ int GuestELF::map_segments(std::vector<Segment> parsed,
     const long host_page = ::sysconf(_SC_PAGESIZE);
     if (host_page <= 0) return -EIO;
     const uint64_t page = static_cast<uint64_t>(host_page);
+    const bool reserved = arena != nullptr;
+    const uint64_t span = reserved ? arena_size : limit;
     uint64_t begin = UINT64_MAX, end = 0;
     for (size_t i = 0; i < parsed.size(); ++i) {
         const auto& s = parsed[i];
@@ -604,25 +695,31 @@ int GuestELF::map_segments(std::vector<Segment> parsed,
             if (low < old_high && old_low < high) return -ENOEXEC;
         }
         begin = std::min(begin, low); end = std::max(end, high);
-        if (end - begin > limit) return -E2BIG;
+        if (end - begin > span) return -E2BIG;
     }
     if (parsed.empty() || sources.size() != parsed.size()) return -ENOEXEC;
-    arena_size = static_cast<size_t>(end - begin);
-    void* mapped = ::mmap(nullptr, arena_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (mapped == MAP_FAILED) { arena_size = 0; return -errno; }
-    arena = mapped;
-    guest_base = begin;
+    if (reserved) {
+        // Every page must lie inside the reservation, which keeps guard pages free.
+        if (begin < guest_base || end - guest_base > arena_size) return -E2BIG;
+    } else {
+        arena_size = static_cast<size_t>(end - begin);
+        void* mapped = ::mmap(nullptr, arena_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (mapped == MAP_FAILED) { arena_size = 0; return -errno; }
+        arena = mapped;
+        guest_base = begin;
+    }
     guest_entry = entry;
     regions = std::move(parsed);
     for (size_t i = 0; i < regions.size(); ++i) {
         const auto& s = regions[i];
-        const size_t low = static_cast<size_t>(s.address / page * page - begin);
-        const size_t bytes = static_cast<size_t>((s.address + s.memory_size + page - 1) / page * page - begin - low);
+        const size_t low = static_cast<size_t>(s.address / page * page - guest_base);
+        const size_t bytes = static_cast<size_t>((s.address + s.memory_size + page - 1) / page * page - guest_base - low);
         auto* destination = static_cast<uint8_t*>(arena) + low;
         if (::mprotect(destination, bytes, PROT_READ | PROT_WRITE) != 0) {
             const int error = -errno; clear(); return error;
         }
-        std::memcpy(static_cast<uint8_t*>(arena) + (s.address - begin), sources[i], s.file_size);
+        if (s.file_size)
+            std::memcpy(static_cast<uint8_t*>(arena) + (s.address - guest_base), sources[i], s.file_size);
         const int protection = PROT_READ | ((s.permissions & 2) ? PROT_WRITE : 0);
         if (::mprotect(destination, bytes, protection) != 0) {
             const int error = -errno; clear(); return error;
