@@ -42,7 +42,7 @@ Error host_error(int e) {
 namespace maxps4 {
 using namespace ps4;
 namespace {
-struct Binding { const char* name; const char* nid; PS4KernelService service; };
+using Binding = PS4KernelExport;
 // ABI metadata checked against shadPS4 kernel/file_system.{h,cpp}; original
 // implementation below. Only sceKernel variants, not POSIX errno/TLS variants.
 constexpr Binding bindings[] = {
@@ -78,6 +78,10 @@ public:
     HostFD& operator=(const HostFD&) = delete;
     int fd;
 };
+}
+const PS4KernelExport* libkernel_exports(size_t& count) {
+    count = sizeof(bindings) / sizeof(bindings[0]);
+    return bindings;
 }
 PS4KernelService resolve_libkernel(std::string_view symbol, std::string_view library,
                                    std::string_view module, uint32_t version) {

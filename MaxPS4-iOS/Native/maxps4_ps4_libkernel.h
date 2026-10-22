@@ -15,6 +15,9 @@ enum class PS4KernelService : uint32_t {
     mmap, munmap, mprotect, clock_gettime, clock_getres, gettimeofday, process_time,
     thread_self, mutex_init, mutex_trylock, mutex_unlock, mutex_destroy
 };
+// Implemented libkernel functions (name, NID, service), e.g. for an HLE registry.
+struct PS4KernelExport { const char* name; const char* nid; PS4KernelService service; };
+const PS4KernelExport* libkernel_exports(size_t& count);
 // Library/module/version are decoded by an ELF/PRX loader before resolution.
 // This resolver deliberately does not guess the meaning of encoded # IDs.
 PS4KernelService resolve_libkernel(std::string_view symbol,

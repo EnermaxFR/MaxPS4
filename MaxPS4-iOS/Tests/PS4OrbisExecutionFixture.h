@@ -85,6 +85,24 @@ inline std::vector<uint8_t> make_tls_initial_exec_app(bool relro=true, uint32_t 
     orbis_fixture::setTag(b,0x61000031,2*24);
     return b;
 }
+// The app alone, importing scePthreadSelf (public NID aI+OeCz8xrQ) from the
+// system libkernel instead of the fixture PRX: CALL [GOT]; ADD EAX,2; store; HLT.
+// Thread 1 is the only PS4 thread, so a real HLE call returns 1 + 2 = 3.
+inline std::vector<uint8_t> make_kernel_app() {
+    auto b=make(false);
+    using orbis_fixture::put;
+    std::fill(b.begin()+0x601,b.begin()+0x640,0);
+    const char strings[]="libkernel\0libkernel\0aI+OeCz8xrQ#B#B";
+    std::copy(std::begin(strings),std::end(strings),b.begin()+0x601);
+    orbis_fixture::setTag(b,0x61000037,1+sizeof(strings));
+    orbis_fixture::setTag(b,0x61000015,1|(uint64_t{1}<<32)|(uint64_t{1}<<48));
+    orbis_fixture::setTag(b,0x6100000f,11|(uint64_t{1}<<32)|(uint64_t{1}<<48));
+    put(b,0x818,21,4);
+    return b;
+}
+inline maxps4::OrbisLinker::Identity kernel_identity(const char* nid="aI+OeCz8xrQ") {
+    return {nid,"libkernel","libkernel",1,1,2};
+}
 inline maxps4::OrbisLinker::Input input(const char* path,const std::vector<uint8_t>& b,bool provider) {
     return {{{path,provider ? std::vector<std::string>{} : std::vector<std::string>{"provider.prx"}},b.data(),b.size()},
             provider ? provider_bias : app_bias};

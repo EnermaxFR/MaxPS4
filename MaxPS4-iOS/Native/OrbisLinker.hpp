@@ -48,7 +48,14 @@ public:
             return out.str();
         }
     };
-    struct HLE { Identity identity; uint64_t guestAddress; }; // Guest trampoline, never host function pointer.
+    // Guest trampoline, never a host function pointer. guestAddress=0 with a
+    // non-zero token asks the linker to synthesize a trampoline (see Thunk).
+    struct HLE { Identity identity; uint64_t guestAddress; uint32_t token = 0; };
+    // Synthesized trampoline: MOV R10,RCX; MOV EAX,token; SYSCALL; RET. The
+    // runtime gate accepts a SYSCALL only at `address + syscallOffset` with
+    // that exact token; the token is the HLE service number.
+    struct Thunk { uint64_t address; uint32_t token; };
+    static constexpr uint64_t thunkSize = 11, syscallOffset = 8;
     struct Input { PS4PKGRuntimePlan::ModuleBytes file; uint64_t bias = 0; };
     struct Module { std::string path; uint64_t bias = 0, entry = 0; PS4ExecutableImage image; };
     struct Mapping { uint64_t address, size; uint32_t permissions; const uint8_t* data; };
@@ -62,6 +69,7 @@ public:
         std::vector<Module> modules;
         std::vector<TLSBlock> tls;
         uint64_t staticTLSSize = 0, staticTLSAlignment = 1;
+        std::vector<Thunk> thunks; // In module "<hle>", an RX segment after all modules.
         // A backend must copy/map these bytes at their guest addresses and apply
         // the advertised permissions. No identity mapping is implied.
         std::vector<Mapping> mappings() const {
@@ -359,6 +367,14 @@ private:
         for (size_t i = 0; i < dynamic.size(); ++i) {
             const auto& deps = requests[order[i]].dependencies;
             auto validateDescriptor = [&](const Descriptor& required, bool library) {
+                // A system library/module implemented by the HLE registry needs no
+                // PRX file, as long as no supplied module also claims that name.
+                bool offeredByModule = false;
+                for (const auto& d : dynamic) for (const auto& offered : library ? d.exportLibraries : d.exports)
+                    offeredByModule |= offered.name == required.name;
+                if (!offeredByModule) for (const auto& h : hle)
+                    if ((library ? h.identity.library : h.identity.module) == required.name &&
+                        (library ? h.identity.libraryVersion : h.identity.moduleVersion) == required.version) return;
                 size_t named = 0, compatible = 0, declared = 0;
                 for (size_t j = 0; j < dynamic.size(); ++j) {
                     const auto& offeredDescriptors = library ? dynamic[j].exportLibraries : dynamic[j].exports;
@@ -392,9 +408,43 @@ private:
         for (size_t i = 0; i < dynamic.size(); ++i) for (const auto& s : dynamic[i].symbols) if (s.defined && !s.local)
             require(exports.emplace(s.identity, Export{s.type == 6 ? s.value : add(out.modules[i].bias, s.value), i}).second,
                     "duplicate or ambiguous export: " + s.identity.nid);
+        // Synthesized trampolines live in one RX module after every supplied
+        // module, separated by a 16 KiB guard (iOS page size).
+        size_t synthesized = 0;
         for (const auto& h : hle) {
-            require(h.identity.type == 2 && out.translate(h.guestAddress, 1, 5), "HLE requires mapped executable guest trampoline");
-            require(exports.emplace(h.identity, Export{h.guestAddress, SIZE_MAX}).second, "ambiguous HLE/export");
+            require(!h.guestAddress || !h.token, "HLE entry has both an address and a token");
+            require(h.guestAddress || h.token, "HLE entry needs an address or a token");
+            synthesized += !h.guestAddress;
+        }
+        uint64_t thunkBase = 0;
+        if (synthesized) {
+            uint64_t highest = 0;
+            for (const auto& m : out.modules) for (const auto& s : m.image.segments)
+                highest = std::max(highest, add(add(m.bias, s.header.address), s.header.memorySize));
+            constexpr uint64_t page = 0x4000;
+            thunkBase = add(add(highest, page - 1) & ~(page - 1), page);
+            const auto size = synthesized * thunkSize;
+            require(add(thunkBase, size) <= (uint64_t{1} << 47), "non-canonical HLE trampoline address");
+            Module thunks {"<hle>", thunkBase, 0, PS4ExecutableImage{}};
+            thunks.image.type = 0xfe18;
+            PS4ExecutableImage::Header header {1, 5, 0, 0, size, size, page};
+            std::vector<uint8_t> code(static_cast<size_t>(size));
+            size_t k = 0;
+            for (const auto& h : hle) if (!h.guestAddress) {
+                const uint8_t body[thunkSize] = {0x49,0x89,0xca,0xb8,uint8_t(h.token),uint8_t(h.token>>8),
+                    uint8_t(h.token>>16),uint8_t(h.token>>24),0x0f,0x05,0xc3};
+                std::copy(std::begin(body), std::end(body), code.begin() + k * thunkSize);
+                out.thunks.push_back({thunkBase + k * thunkSize, h.token}); ++k;
+            }
+            thunks.image.headers.push_back(header);
+            thunks.image.segments.push_back({header, std::move(code)});
+            out.modules.push_back(std::move(thunks));
+        }
+        size_t k = 0;
+        for (const auto& h : hle) {
+            const auto address = h.guestAddress ? h.guestAddress : thunkBase + (k++) * thunkSize;
+            require(h.identity.type == 2 && out.translate(address, 1, 5), "HLE requires mapped executable guest trampoline");
+            require(exports.emplace(h.identity, Export{address, SIZE_MAX}).second, "ambiguous HLE/export");
         }
         // Resolve every import (including unreferenced/weak imports) before writes.
         std::vector<std::vector<uint64_t>> resolved(dynamic.size());

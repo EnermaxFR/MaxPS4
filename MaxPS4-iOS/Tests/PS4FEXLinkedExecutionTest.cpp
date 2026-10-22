@@ -266,6 +266,29 @@ int main(int argc, char** argv) {
             form == 2 ? "MOV RAX,FS:[0]; MOV EAX,[RAX-8]" : "MOV EAX,FS:[-8]", (unsigned long long)observed,cpu);
         maxps4_fex_engine_close(process);
     }
+    {
+        // System call: the app imports scePthreadSelf from libkernel (no PRX file).
+        // The engine registers libkernel HLE; FEX runs CALL -> trampoline SYSCALL
+        // -> host PS4Libkernel -> RET, and the guest adds 2 to the thread ID (1).
+        auto app = orbis_execution::make_kernel_app();
+        const maxps4_orbis_module modules[] = {
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,nullptr,0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        char diagnostic[512]{};
+        const int prepared = maxps4_fex_engine_prepare_orbis(process,modules,1,"app.elf",10,diagnostic,sizeof(diagnostic));
+        if (prepared) std::fprintf(stderr,"prepare: %s\n",diagnostic);
+        CHECK(prepared==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        uint64_t observed=0, logical_entry=0; uint32_t cpu=0;
+        for (int repeat=0;repeat<2;++repeat) {
+            CHECK(maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry)==0);
+            CHECK(observed==3 && logical_entry==orbis_execution::entry);
+        }
+        std::printf("PASS SCE ELF -> libkernel HLE scePthreadSelf via SYSCALL trampoline -> FEX ADD: RAX=%llu backend=%u\n",
+            (unsigned long long)observed,cpu);
+        maxps4_fex_engine_close(process);
+    }
     maxps4_fex_engine* engine = nullptr;
     std::puts("BEGIN real FEX context and linked Orbis execution");
     CHECK(maxps4_fex_engine_open(&engine) == 0 && engine);
