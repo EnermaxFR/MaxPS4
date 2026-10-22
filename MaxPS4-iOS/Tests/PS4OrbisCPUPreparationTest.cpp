@@ -219,6 +219,14 @@ int main() {
             const auto* words=image.translate(params,32,4);
             uint64_t argv0=0; std::memcpy(&argv0,words+8,8);
             CHECK(words[0]==1 && argv0==params+32 && !std::memcmp(image.translate(argv0,10,4),"eboot.bin",10));
+            // Then the thread-return trampoline: MOV RDI,RAX; MOV EAX,thread_exit;
+            // SYSCALL (an HLE gate site); HLT, where every child thread ends.
+            const uint64_t back=image.thread_return();
+            CHECK(back==image.start()+48 && image.thread_halt()==back+10);
+            const auto* ret=image.translate(back,14,5);
+            CHECK(ret && ret[0]==0x48 && ret[1]==0x89 && ret[2]==0xc7 && ret[3]==0xb8 &&
+                  ret[8]==0x0f && ret[9]==0x05 && ret[10]==0xf4);
+            CHECK(image.hle_gate(back+8,static_cast<uint32_t>(maxps4::PS4KernelService::thread_exit)));
         }
         const auto* code=image.translate(entry+moved,0x3a,5);
         CHECK(code && reinterpret_cast<uintptr_t>(code)==entry+moved);   // Identity mapping.
@@ -254,6 +262,60 @@ int main() {
             CHECK(vm.map(0,maxps4::GuestELF::generalHeap,3,0x1002,-1,0,tooLarge)==maxps4::ps4::nomem);
             vm.reset();
             CHECK(!vm.translate(first,1,4) && !vm.allocated());
+        }
+        {
+            // Child thread slots after the mmap window: guarded RW stacks (no
+            // PT_TLS in this image, so no thread pointer).
+            constexpr uint64_t slotStack=maxps4::GuestELF::generalStack;
+            uint64_t top=0, tp=1, last=0, lastTP=0;
+            CHECK(image.prepare_thread(0,top,tp) && top%16==0 && !tp);
+            CHECK(top-slotStack>=window+windowBytes+4096 && image.translate(top-slotStack,slotStack,6));
+            CHECK(!image.translate(top-slotStack-1,1,4) && !image.translate(top,1,4) && !image.translate(top-8,8,1));
+            CHECK(image.prepare_thread(maxps4::GuestELF::generalThreads-1,last,lastTP) && last>top);
+            CHECK(!image.prepare_thread(maxps4::GuestELF::generalThreads,last,lastTP) && !last);
+        }
+        {
+            // With PT_TLS, each slot gets a private copy of the template and its
+            // own TCB; preparing it again restores the template.
+            auto tlsGeneral=make_tls_app(-8,0x1234);
+            const std::vector<maxps4::OrbisLinker::Input> tlsInputs{input("app.elf",tlsGeneral,false),input("provider.prx",target,true)};
+            uint64_t tlsMoved=0;
+            CHECK(image.prepare_orbis_general(tlsInputs,{},"app.elf",reason,tlsMoved)==0);
+            const auto mainTP=reinterpret_cast<uintptr_t>(image.thread_pointer_host());
+            uint64_t top=0, tp=0, word=0;
+            uint32_t value=0;
+            CHECK(mainTP && image.prepare_thread(1,top,tp) && tp && tp!=mainTP && tp>=top && tp%16==0);
+            std::memcpy(&word,image.translate(tp,8,4),8);
+            std::memcpy(&value,image.translate(tp-8,4,4),4);
+            CHECK(word==tp && value==0x1234);
+            *const_cast<uint32_t*>(reinterpret_cast<const uint32_t*>(image.translate(tp-8,4,2)))=0x9999;
+            std::memcpy(&value,image.translate(mainTP-8,4,4),4);
+            CHECK(value==0x1234); // The main thread's TLS is separate.
+            CHECK(image.prepare_thread(1,top,tp));
+            std::memcpy(&value,image.translate(tp-8,4,4),4);
+            CHECK(value==0x1234);
+            CHECK(image.prepare_orbis_general(inputs,{},"app.elf",reason,moved)==0);
+        }
+        {
+            // The two-thread fixture binds its four libkernel imports to HLE thunks.
+            using Service=maxps4::PS4KernelService;
+            auto threadsApp=make_general_threads_app();
+            const std::pair<const char*,Service> imports[]={{"6UgtwV+0zb4",Service::thread_create},
+                {"onNY9Byn-W8",Service::thread_join},{"3kg7rT0NQIs",Service::thread_exit},{"aI+OeCz8xrQ",Service::thread_self}};
+            std::vector<maxps4::OrbisLinker::HLE> hle;
+            for (const auto& import : imports) hle.push_back({kernel_identity(import.first),0,static_cast<uint32_t>(import.second)});
+            const std::vector<maxps4::OrbisLinker::Input> threadInputs{
+                {{{"app.elf",{}},threadsApp.data(),threadsApp.size()},app_bias}};
+            uint64_t threadMoved=0;
+            const int threadPrepared=image.prepare_orbis_general(threadInputs,hle,"app.elf",reason,threadMoved);
+            if (threadPrepared) std::fprintf(stderr,"threads: %s\n",reason.c_str());
+            CHECK(threadPrepared==0);
+            for (size_t i=0;i<4;++i) {
+                uint64_t thunk=0;
+                std::memcpy(&thunk,image.translate(data+threadMoved+8*i,8,4),8);
+                CHECK(image.hle_gate(thunk+maxps4::OrbisLinker::syscallOffset,static_cast<uint32_t>(imports[i].second)));
+            }
+            CHECK(image.prepare_orbis_general(inputs,{},"app.elf",reason,moved)==0);
         }
         // A failed general preparation publishes nothing.
         CHECK(image.prepare_orbis_general(inputs,{},"missing",reason,moved)!=0 && !moved && image.segments().empty());

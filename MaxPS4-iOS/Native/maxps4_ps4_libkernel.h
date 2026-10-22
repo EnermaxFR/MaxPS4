@@ -18,7 +18,11 @@ enum class PS4KernelService : uint32_t {
     tls_get_addr,
     // Engine-internal, no NID: the exit function a general image's entry gets
     // in RSI. Served by the FEX Orbis HLE gate, which ends the run.
-    process_exit
+    process_exit,
+    // Guest threads run on FEX: served by its Orbis HLE gate for general
+    // images; invoke() answers ENOSYS. thread_exit is also the service of the
+    // engine's thread-return trampoline.
+    thread_create, thread_join, thread_exit
 };
 // Implemented libkernel functions (name, NID, service), e.g. for an HLE registry.
 struct PS4KernelExport { const char* name; const char* nid; PS4KernelService service; };

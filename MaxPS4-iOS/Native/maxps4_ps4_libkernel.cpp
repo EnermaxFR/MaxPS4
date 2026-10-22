@@ -64,6 +64,10 @@ constexpr Binding bindings[] = {
     {"scePthreadMutexTrylock", "upoVrzMHFeE", PS4KernelService::mutex_trylock},
     {"scePthreadMutexUnlock", "tn3VlD0hG60", PS4KernelService::mutex_unlock},
     {"scePthreadMutexDestroy", "2Of0f+3mhhE", PS4KernelService::mutex_destroy},
+    // NIDs from shadPS4 kernel/threads/pthread.cpp (Orbis variants).
+    {"scePthreadCreate", "6UgtwV+0zb4", PS4KernelService::thread_create},
+    {"scePthreadJoin", "onNY9Byn-W8", PS4KernelService::thread_join},
+    {"scePthreadExit", "3kg7rT0NQIs", PS4KernelService::thread_exit},
     // NID from shadPS4 kernel/threads/tcb.cpp (RegisterRtld).
     {"__tls_get_addr", "vNe1w4diLCs", PS4KernelService::tls_get_addr}
 };

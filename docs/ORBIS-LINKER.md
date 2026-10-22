@@ -114,7 +114,8 @@ libkernel v1, d'après shadPS4), puis immédiatement `MOV EAX,[RAX]`. `tls_index
 (module existant, décalage < `p_memsz`). Il ne renvoie jamais de pointeur
 invalide : en cas d'échec, il renvoie le TCB et l'exécution échoue avec
 `-EFAULT`. L'admission refuse l'appel si l'image n'a aucun bloc TLS.
-Limites actuelles : un seul thread, pas d'écriture TLS. Les autres tags dynamiques, même certains tags standard usuels, sont
+Limites actuelles du chemin borné : un seul thread, pas d'écriture TLS (le mode
+général a des threads, voir plus bas). Les autres tags dynamiques, même certains tags standard usuels, sont
 refusés tant que leur sémantique n'est pas implémentée et testée. Ce sous-ensemble
 ne prétend donc pas accepter arbitrairement tous les PRX réels ou les ELF Linux.
 
@@ -207,8 +208,23 @@ Limites actuelles, à traiter avant tout code non fiable :
   `JMP entry`. La fonction de sortie est une trampoline du moteur (service
   `process_exit`, sans NID) : son appel termine l'exécution, RAX = statut, et
   le rapport CPU indique `exited`/`exit_status`.
-- Un seul thread, ni de SYSCALL hors trampoline (l'exécution échoue avec
-  `-EPERM`).
+- **Threads invités** (mode général) : `scePthreadCreate` (`6UgtwV+0zb4`),
+  `scePthreadJoin` (`onNY9Byn-W8`) et `scePthreadExit` (`3kg7rT0NQIs`) sont
+  servis par la porte HLE de FEX. Chaque thread est un vrai thread hôte avec
+  son propre état FEX : RIP = entrée, RDI = argument, FS = son TCB. Il tourne
+  dans l'un des 8 emplacements placés après la fenêtre mmap. Un emplacement
+  contient une pile de 1 Mio suivie d'une copie privée du TLS statique, entre
+  pages de garde. `[RSP]` (RSP = 8 mod 16) contient une trampoline de retour
+  du moteur (`MOV RDI,RAX` ; service `thread_exit` ; `HLT`). Revenir de
+  l'entrée ou appeler `scePthreadExit` termine donc le thread, et `join` rend
+  sa valeur. Le handle écrit en `*thread` est l'identité PS4 du thread, celle
+  que rend `scePthreadSelf` dans ce thread. Les attributs (taille de pile,
+  priorité, détachement) ne sont pas encore appliqués. Quand l'entrée se
+  termine, les threads restants sont arrêtés (`SIGURG`, comme le chien de
+  garde) puis joints. Une faute confinée dans un thread arrête aussi le thread
+  principal et devient le résultat de l'exécution. Sans confinement (simulateur
+  VIXL), le moteur attend que les threads restants se terminent.
+- Pas de SYSCALL hors trampoline (l'exécution échoue avec `-EPERM`).
 
 ## Transactions et contrat mémoire/FEX
 

@@ -40,6 +40,10 @@ public:
     // sceKernelMmap window after the stack (PS4 16 KiB pages), PROT_NONE in
     // the host until PS4VirtualMemory maps pages in it.
     static constexpr uint64_t generalHeap = 32 * 1024 * 1024, generalHeapPage = 0x4000;
+    // Child thread slots after the mmap window (scePthreadCreate): each a
+    // guarded RW region holding a stack of generalStack bytes with a private
+    // copy of the static TLS (blocks, then the TCB) right above it.
+    static constexpr size_t generalThreads = 8;
     int prepare_orbis_general(const std::vector<OrbisLinker::Input>& inputs,
                               const std::vector<OrbisLinker::HLE>& hle, const std::string& root,
                               std::string& diagnostic, uint64_t& relocation);
@@ -78,9 +82,13 @@ public:
     // `offset` of module `module`'s block, or null if the module has no block
     // or the offset is outside it. Never returns memory outside the TLS region.
     const uint8_t* tls_address(uint64_t module, uint64_t offset) const {
+        return tls_address(thread_pointer, module, offset);
+    }
+    // The same for the thread whose TCB is at `tp` (a slot's, see prepare_thread).
+    const uint8_t* tls_address(uint64_t tp, uint64_t module, uint64_t offset) const {
         for (const auto& block : tls_blocks)
             if (block.id == module)
-                return offset < block.memorySize ? translate(thread_pointer - block.offset + offset, 1, 6) : nullptr;
+                return offset < block.memorySize ? translate(tp - block.offset + offset, 1, 6) : nullptr;
         return nullptr;
     }
     // FEX runs the admitted code at rebased host addresses. Map a host address
@@ -117,6 +125,15 @@ public:
         address = heap_address; bytes = heap_bytes;
         return heap_bytes != 0;
     }
+    // General images: resets child slot `slot` for a new thread. Its TLS gets
+    // the template bytes again and a TCB pointing at itself; returns the top of
+    // its stack (16-byte aligned) and its thread pointer (0 without PT_TLS).
+    bool prepare_thread(size_t slot, uint64_t& stack_top, uint64_t& tp);
+    // General images: the thread-return trampoline after the exit function
+    // (MOV RDI,RAX; SYSCALL thread_exit; HLT), a child's first return address,
+    // and that HLT, where every child thread ends. 0 for other images.
+    uint64_t thread_return() const { return thread_return_address; }
+    uint64_t thread_halt() const { return thread_return_address ? thread_return_address + 10 : 0; }
     const std::vector<Segment>& segments() const { return regions; }
 private:
     friend class PS4DynamicLinker;
@@ -132,10 +149,12 @@ private:
     size_t arena_size = 0;
     bool identity = false;
     uint64_t stack_address = 0, stack_bytes = 0, heap_address = 0, heap_bytes = 0,
-             entry_params_address = 0;
+             entry_params_address = 0, threads_address = 0, thread_slot_bytes = 0,
+             thread_return_address = 0;
     uint64_t guest_base = 0, guest_entry = 0, thread_pointer = 0, start_address = 0;
     std::vector<OrbisLinker::Thunk> thunks;
     std::vector<OrbisLinker::TLSBlock> tls_blocks;
+    std::vector<uint8_t> tls_image; // Static TLS region as initialized (blocks + TCB).
 };
 // Admission guarantees a finite sequence: MOV EAX,imm32; ADD EAX,imm32;
 // NOP; terminal HLT. The ELF loader also admits C7 05 disp32 imm32 stores
