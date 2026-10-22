@@ -29,6 +29,7 @@ struct MaxPS4HomeView: View {
     @State private var detailsReport: String?
     @State private var jitStatusReport: String?
     @State private var showingFEXDiagnostic = false
+    @State private var showingPlayableDemo = false
     @State private var showingMetalDiagnostic = false
     @State private var showingGameDirectory = false
 
@@ -100,6 +101,17 @@ struct MaxPS4HomeView: View {
             Text(inspectionReport ?? "")
         }
         .sheet(isPresented: $showingFEXDiagnostic) { MaxPS4FEXDiagnosticView() }
+        .sheet(isPresented: $showingPlayableDemo) {
+            NavigationStack {
+                MaxPS4PlayableView()
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Fermer") { showingPlayableDemo = false }
+                        }
+                    }
+            }
+            .preferredColorScheme(.dark)
+        }
         .sheet(isPresented: $showingMetalDiagnostic) { MaxPS4MetalDiagnosticView() }
         .sheet(isPresented: $showingGameDirectory) { MaxPS4GameDirectoryView() }
         .sheet(isPresented: $showingDuplicates) {
@@ -362,6 +374,8 @@ struct MaxPS4HomeView: View {
                 heroPanel
 
                 homeQuickActions
+
+                playableDemoCard
 
                 jitActivationCard
 
@@ -768,6 +782,35 @@ struct MaxPS4HomeView: View {
         }
     }
 
+    /// Front-door to the existing playable Orbis demo (real x86-64 run by FEX).
+    /// It is a bundled synthetic program, never presented as a PS4 game.
+    private var playableDemoCard: some View {
+        Button {
+            showingPlayableDemo = true
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 38))
+                    .foregroundStyle(.green)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("DÉMO JOUABLE").font(.headline)
+                    Text("Programme Orbis x86-64 exécuté par FEX • tactile ou manette • JIT requis")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.62))
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.green)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.green.opacity(0.10), in: RoundedRectangle(cornerRadius: 18))
+            .overlay(RoundedRectangle(cornerRadius: 18).stroke(.green.opacity(0.35)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Ouvre la démo jouable intégrée ; ce n’est pas un jeu PS4")
+    }
+
     private var systemOverview: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
             overviewTile(icon: "gamecontroller.fill", title: "Jeux", value: "\(emulator.games.count) importés")
@@ -1028,10 +1071,16 @@ struct MaxPS4HomeView: View {
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
 
-                        Text(isPKG ? "PKG PS4 • Analyse seule" : game.fileName)
-                            .font(.caption2)
-                            .lineLimit(1)
-                            .foregroundStyle(.white.opacity(0.56))
+                        Group {
+                            if isPKG {
+                                MaxPS4PKGSubtitleView(path: game.localPath)
+                            } else {
+                                Text(game.fileName)
+                            }
+                        }
+                        .font(.caption2)
+                        .lineLimit(1)
+                        .foregroundStyle(.white.opacity(0.56))
                     }
                     .padding(14)
                 }
@@ -1535,6 +1584,34 @@ private struct MaxPS4Background: View {
                 .blur(radius: 70)
                 .offset(x: -180, y: 280)
         }
+    }
+}
+
+/// Card subtitle such as "CUSA12345 • v01.23 • Jeu", read once per file and cached
+/// for the session so scrolling the library never rereads the PKG.
+private struct MaxPS4PKGSubtitleView: View {
+    let path: String
+    private static let cache = NSCache<NSString, NSString>()
+    @State private var subtitle: String?
+
+    var body: some View {
+        Text(subtitle ?? "PKG PS4")
+            .task(id: path) {
+                let url = URL(fileURLWithPath: path)
+                let text = await Task.detached(priority: .utility) { () -> String in
+                    // A file replaced under the same name gets a new modification date.
+                    let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                        .contentModificationDate?.timeIntervalSince1970 ?? 0
+                    let key = "\(url.path)|\(modified)" as NSString
+                    if let cached = Self.cache.object(forKey: key) { return cached as String }
+                    let info = MaxPS4PKGInspector.titleInfo(url: url)
+                    let parts = [info?.titleID, info?.appVersion.map { "v" + $0 }, info?.categoryName].compactMap { $0 }
+                    let text = parts.isEmpty ? "PKG PS4" : parts.joined(separator: " • ")
+                    Self.cache.setObject(text as NSString, forKey: key)
+                    return text
+                }.value
+                subtitle = text
+            }
     }
 }
 
