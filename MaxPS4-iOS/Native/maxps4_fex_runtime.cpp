@@ -371,6 +371,8 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     std::fill(std::begin(state.gregs), std::end(state.gregs), uint64_t{});
     state.gregs[FEXCore::X86State::REG_RSP] = initial_rsp;
     state.rip = initial_rip;
+    // Static TLS: FS base is the host address of the image's TCB (variant II).
+    if (const auto* tcb = image.thread_pointer_host()) state.fs_cached = reinterpret_cast<uintptr_t>(tcb);
     auto& observed = engine->cpu_report;
     observed.entry = image.entry();
     observed.rsp_alignment = state.gregs[FEXCore::X86State::REG_RSP] & 15;

@@ -77,7 +77,7 @@ void GuestELF::clear() {
     if (arena) ::munmap(arena, arena_size);
     arena = nullptr;
     arena_size = 0;
-    guest_base = guest_entry = 0;
+    guest_base = guest_entry = thread_pointer = 0;
     blockers = 0;
     regions.clear();
 }
@@ -192,12 +192,43 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
     try {
         // Patch only our private copy. Linker's logical relocations stay intact.
         auto copy = linked;
-        uint64_t entry = 0;
+        uint64_t entry = 0, highest = 0;
         for (const auto& module : copy.modules) {
-            if (module.image.requiresTLS) return fail(-ENOTSUP, "Orbis TLS execution unavailable");
             if (module.path == root) entry = module.entry;
+            for (const auto& segment : module.image.segments)
+                highest = std::max(highest, module.bias + segment.header.address + segment.header.memorySize);
         }
         if (!entry) return fail(-ENOEXEC, "root has no process entry");
+        // Static TLS (variant II): one RW region after a guard page, blocks
+        // ending at the thread pointer, then a 16-byte TCB at TP.
+        const long host_page = ::sysconf(_SC_PAGESIZE);
+        if (host_page <= 0) return fail(-EIO, "host page size unavailable");
+        const uint64_t page = static_cast<uint64_t>(host_page);
+        uint64_t tls_low = 0, tp = 0;
+        std::vector<uint8_t> tls_bytes;
+        if (copy.tls.size() != static_cast<size_t>(std::count_if(copy.modules.begin(), copy.modules.end(),
+                [](const auto& module) { return module.image.requiresTLS; })))
+            return fail(-ENOEXEC, "TLS layout does not match modules");
+        if (!copy.tls.empty()) {
+            const uint64_t align = std::max<uint64_t>(copy.staticTLSAlignment, 16);
+            const uint64_t blocks = (copy.staticTLSSize + align - 1) / align * align;
+            if (blocks > OrbisLinker::tlsBudget + align || highest > UINT64_MAX - 2 * page - blocks - 16)
+                return fail(-E2BIG, "static TLS region too large");
+            tls_low = (highest + page - 1) / page * page + page;
+            tp = tls_low + blocks;
+            tls_bytes.assign(static_cast<size_t>(blocks + 16), 0);
+            for (const auto& block : copy.tls) {
+                const auto* source = block.fileSize ? copy.translate(block.image, block.fileSize, 4) : nullptr;
+                if (block.fileSize && !source) return fail(-EFAULT, "TLS template unreadable");
+                if (block.fileSize) std::memcpy(tls_bytes.data() + (blocks - block.offset), source, block.fileSize);
+            }
+        }
+        // Local-exec read through FS must stay inside the blocks or the TCB.
+        auto tls_readable = [&](int64_t displacement, uint64_t bytes) {
+            if (!tp) return false;
+            const uint64_t target = tp + static_cast<uint64_t>(displacement);
+            return target >= tls_low && target <= tp + 16 - bytes;
+        };
         auto fetch = [&](uint64_t address, size_t count) -> uint8_t* {
             for (auto& module : copy.modules) for (auto& segment : module.image.segments) {
                 const uint64_t begin = module.bias + segment.header.address;
@@ -230,7 +261,7 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                 refusal_opcode = op;
                 size_t width = op == 0xb8 || op == 0xb9 || op == 0xba || op == 0xbb || op == 0x05 || op == 0x25 || op == 0x0d ? 5 :
                     op == 0xff || op == 0x8b || op == 0x81 ? 6 :
-                    op == 0xc7 ? 10 : op == 0xc1 || op == 0x0f ? 3 :
+                    op == 0xc7 ? 10 : op == 0x64 ? 9 : op == 0xc1 || op == 0x0f ? 3 :
                     op == 0x01 || op == 0x29 || op == 0x39 || op == 0x89 ? 2 : 1;
                 if (!fetch(pc,width)) return -EFAULT;
                 if (op == 0x89 && code[1] != 0xc3 && code[1] != 0xc6) {
@@ -323,6 +354,11 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                     const int64_t disp = static_cast<int32_t>(number(code+2,4));
                     const uint64_t target = static_cast<uint64_t>(static_cast<int64_t>(pc+10)+disp);
                     if (!copy.translate(target,4,2) || copy.translate(target,4,1)) return -EFAULT;
+                } else if (op == 0x64) {
+                    // MOV EAX, FS:[disp32] (64 8B 04 25): static TLS local-exec read.
+                    if (code[1] != 0x8b || code[2] != 0x04 || code[3] != 0x25) return -ENOTSUP;
+                    if (!tls_readable(static_cast<int32_t>(number(code+4,4)), 4)) return -EFAULT;
+                    initialized = true; compared = false;
                 } else if (op == 0xc3 || op == 0xf4) {
                     if (!initialized || (function ? op != 0xc3 : op != 0xf4)) return -ENOTSUP;
                     return 0;
@@ -355,11 +391,23 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
             parsed.push_back({module.bias+h.address,h.offset,h.memorySize,h.memorySize,h.flags});
             sources.push_back(segment.bytes.data());
         }
+        if (tp) { // Last region: RW, never executable.
+            parsed.push_back({tls_low,0,tls_bytes.size(),tls_bytes.size(),6});
+            sources.push_back(tls_bytes.data());
+        }
         const int mapped = map_segments(std::move(parsed),sources,entry);
         if (mapped) return fail(mapped,"Orbis page mapping refused (page overlap, span or protection)");
         size_t i=0;
         for (const auto& module : copy.modules) for (const auto& segment : module.image.segments)
             regions[i++].file_size = segment.header.fileSize;
+        if (tp) {
+            // x86-64 TCB word 0 is its own address, as FEX will see it (host).
+            thread_pointer = tp;
+            auto* tcb = const_cast<uint8_t*>(translate(tp,16,6));
+            if (!tcb) return fail(-EFAULT,"TLS thread control block unmapped");
+            const uint64_t self = reinterpret_cast<uintptr_t>(tcb);
+            std::memcpy(tcb,&self,sizeof(self));
+        }
         blockers = 4; // Restricted rebasing never establishes general PS4 addressing.
         return 0;
     } catch (const std::bad_alloc&) { clear(); return -ENOMEM; }

@@ -90,10 +90,14 @@ décalage hors bloc ou une relocation TLS dans un module sans `PT_TLS` sont refu
 L'alignement de l'adresse de l'image (`p_vaddr % p_align`) n'est pas encore
 intégré au calcul de l'offset.
 
-Ce n'est qu'une étape de liaison : aucun bloc TLS n'est créé par thread et
-`prepare_orbis` refuse toujours l'exécution d'un module TLS
-(`Orbis TLS execution unavailable`) tant que le backend ne copie pas ces blocs
-et ne fixe pas le pointeur de thread (`fs`). Les autres tags dynamiques, même certains tags standard usuels, sont
+Exécution (chemin borné `GuestELF::prepare_orbis` + FEX) : une région RW, non
+exécutable, est créée après une page de garde. Elle contient les blocs, alignés
+sur au moins 16 octets et initialisés depuis les images TLS (reste à zéro), puis
+un TCB de 16 octets au pointeur de thread, dont le mot 0 contient sa propre
+adresse hôte. FEX reçoit cette adresse dans `fs_cached`. Une seule forme d'accès
+est admise : `MOV EAX, FS:[disp32]` (modèle « local-exec »), uniquement si les
+4 octets lus sont dans les blocs ou le TCB. Limites actuelles : un seul thread,
+pas de `__tls_get_addr`, pas d'accès TLS via un registre ni d'écriture TLS. Les autres tags dynamiques, même certains tags standard usuels, sont
 refusés tant que leur sémantique n'est pas implémentée et testée. Ce sous-ensemble
 ne prétend donc pas accepter arbitrairement tous les PRX réels ou les ELF Linux.
 

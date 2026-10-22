@@ -53,5 +53,34 @@ int main() {
     orbis_fixture::put(app,0x202,0x8010-(0x4000+6),4);
     CHECK(maxps4::OrbisLinker::link({input("app.elf",app,false),input("provider.prx",provider,true)}, {},linked,reason));
     CHECK(image.prepare_orbis(linked,"app.elf",100,reason)!=0 && image.segments().empty());
+    // Static TLS: region after a guard page, template copied below the TCB,
+    // TCB self-pointer, and FS reads admitted only inside blocks/TCB.
+    provider=make(true);
+    auto tls=make_tls_app();
+    CHECK(maxps4::OrbisLinker::link({input("app.elf",tls,false),input("provider.prx",provider,true)}, {},linked,reason));
+    CHECK(linked.tls.size()==1 && linked.staticTLSSize==8);
+    CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==0);
+    const auto* tcb=image.thread_pointer_host();
+    CHECK(tcb!=nullptr);
+    uint64_t self=0; std::memcpy(&self,tcb,8);
+    CHECK(self==reinterpret_cast<uintptr_t>(tcb));
+    uint32_t variable=0; std::memcpy(&variable,tcb-16,4); // 16-byte aligned blocks: TP-16..TP.
+    uint32_t below=0; std::memcpy(&below,tcb-8,4);
+    CHECK(variable==0 && below==0x1234);
+    CHECK(image.segments().back().permissions==6 && image.segments().back().address>data+0x300);
+    for (int32_t outside : {-24, 16, 13}) {
+        tls=make_tls_app(outside);
+        CHECK(maxps4::OrbisLinker::link({input("app.elf",tls,false),input("provider.prx",provider,true)}, {},linked,reason));
+        CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==-EFAULT && image.segments().empty() && !image.thread_pointer_host());
+    }
+    tls=make_tls_app(0); // Reading the TCB self-pointer is allowed.
+    CHECK(maxps4::OrbisLinker::link({input("app.elf",tls,false),input("provider.prx",provider,true)}, {},linked,reason));
+    CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==0);
+    // Without PT_TLS, any FS read is refused and no TCB exists.
+    app=make(false);
+    const uint8_t fsRead[]={0x64,0x8b,0x04,0x25,0,0,0,0,0xf4};
+    std::copy(std::begin(fsRead),std::end(fsRead),app.begin()+0x200);
+    CHECK(maxps4::OrbisLinker::link({input("app.elf",app,false),input("provider.prx",provider,true)}, {},linked,reason));
+    CHECK(image.prepare_orbis(linked,"app.elf",10,reason)!=0 && !image.thread_pointer_host());
     std::puts("PASS SCE NID/RELA -> owned page mapping -> guest CALL/RET admission; no CPU execution claimed");
 }

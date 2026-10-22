@@ -238,6 +238,27 @@ int main(int argc, char** argv) {
         CHECK(!observed && !cpu && !logical_entry);
         maxps4_fex_engine_close(process);
     }
+    // Static TLS through FEX: the guest reads its PT_TLS variable via FS.
+    // Two template values prove the value comes from the module, not a constant.
+    for (uint32_t initial : {0x1234U, 0x55U}) {
+        auto app = orbis_execution::make_tls_app(-8, initial);
+        auto provider = orbis_execution::make(true);
+        const char* dependency[] = {"provider.prx"};
+        const maxps4_orbis_module modules[] = {
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,dependency,1},
+            {"provider.prx",provider.data(),provider.size(),orbis_execution::provider_bias,nullptr,0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        char diagnostic[512]{};
+        CHECK(maxps4_fex_engine_prepare_orbis(process,modules,2,"app.elf",10,diagnostic,sizeof(diagnostic))==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        uint64_t observed=0, logical_entry=0; uint32_t cpu=0;
+        CHECK(maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry)==0);
+        CHECK(observed==initial+2 && logical_entry==orbis_execution::entry);
+        std::printf("PASS SCE ELF PT_TLS -> static TLS block -> FEX MOV EAX,FS:[-8] -> ADD: RAX=0x%llx backend=%u\n",
+            (unsigned long long)observed,cpu);
+        maxps4_fex_engine_close(process);
+    }
     maxps4_fex_engine* engine = nullptr;
     std::puts("BEGIN real FEX context and linked Orbis execution");
     CHECK(maxps4_fex_engine_open(&engine) == 0 && engine);
