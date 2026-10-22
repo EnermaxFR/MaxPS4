@@ -3,6 +3,7 @@
 #include "PS4OrbisExecutionFixture.h"
 #include "PS4PlayableFixture.h"
 #include <cerrno>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -426,6 +427,56 @@ int main(int argc, char** argv) {
             (unsigned long long)seconds,(unsigned long long)nanoseconds,cpu);
         maxps4_fex_engine_close(process);
     }
+#if (defined(__aarch64__) || defined(__arm64__)) && !defined(VIXL_SIMULATOR)
+    {
+        // Contained guest faults: each run fails with a diagnostic instead of
+        // killing the process, and the same engine then runs a valid image.
+        auto provider = orbis_execution::make(true);
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        maxps4_fex_guest_fault fault{};
+        CHECK(maxps4_fex_engine_last_guest_fault(process,&fault)==-ENOENT && !fault.signal);
+        for (int kind = 0; kind < 3; ++kind) {
+            auto app = orbis_execution::make_general_fault_app(kind);
+            const char* dependency[] = {"provider.prx"};
+            const maxps4_orbis_module modules[] = {
+                {"app.elf",app.data(),app.size(),orbis_execution::app_bias,dependency,1},
+                {"provider.prx",provider.data(),provider.size(),orbis_execution::provider_bias,nullptr,0}};
+            char diagnostic[512]{};
+            uint64_t relocation=0;
+            const int prepared = maxps4_fex_engine_prepare_orbis_general(process,modules,2,"app.elf",&relocation,diagnostic,sizeof(diagnostic));
+            if (prepared) std::fprintf(stderr,"prepare: %s\n",diagnostic);
+            CHECK(prepared==0);
+            const uint64_t code = orbis_execution::entry+relocation;
+            uint64_t observed=99, logical_entry=99; uint32_t cpu=99;
+            const int ran = maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry);
+            CHECK(maxps4_fex_engine_last_guest_fault(process,&fault)==0);
+            std::printf("guest fault kind=%d: status=%d signal=%d address=0x%llx rip=0x%llx code=0x%llx\n",kind,ran,
+                fault.signal,(unsigned long long)fault.address,(unsigned long long)fault.rip,(unsigned long long)code);
+            CHECK(ran==(kind==2 ? -EILSEQ : -EFAULT) && !observed && !cpu && !logical_entry);
+            CHECK(kind==2 ? fault.signal==SIGILL || fault.signal==SIGTRAP : fault.signal==SIGSEGV || fault.signal==SIGBUS);
+            CHECK(fault.rip>=code && fault.rip<code+16);
+            if (kind==1) CHECK(fault.address==code);
+            if (kind==0) CHECK(fault.address>code);
+        }
+        // Recovery: the next image runs normally and clears the fault record.
+        auto app = orbis_execution::make_general_app(9);
+        const char* dependency[] = {"provider.prx"};
+        const maxps4_orbis_module modules[] = {
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,dependency,1},
+            {"provider.prx",provider.data(),provider.size(),orbis_execution::provider_bias,nullptr,0}};
+        char diagnostic[512]{};
+        uint64_t relocation=0, observed=0, logical_entry=0; uint32_t cpu=0;
+        CHECK(maxps4_fex_engine_prepare_orbis_general(process,modules,2,"app.elf",&relocation,diagnostic,sizeof(diagnostic))==0);
+        CHECK(maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry)==0 && observed==110+9+40);
+        CHECK(maxps4_fex_engine_last_guest_fault(process,&fault)==-ENOENT);
+        std::puts("PASS contained guest faults (stack guard read, code write, UD2) -> -EFAULT/-EILSEQ, then a clean run on the same engine");
+        maxps4_fex_engine_close(process);
+    }
+#else
+    std::puts("SKIP guest fault containment: needs native ARM64 JIT code (not the VIXL simulator)");
+#endif
     maxps4_fex_engine* engine = nullptr;
     std::puts("BEGIN real FEX context and linked Orbis execution");
     CHECK(maxps4_fex_engine_open(&engine) == 0 && engine);

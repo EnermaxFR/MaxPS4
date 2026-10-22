@@ -33,6 +33,12 @@
 #include <cerrno>
 #include <mutex>
 #include <new>
+#include <signal.h>
+#if defined(__APPLE__)
+#include <sys/ucontext.h>
+#else
+#include <ucontext.h>
+#endif
 
 extern "C" int maxps4_native_guest_x86_run(const uint8_t*, size_t, uint32_t,
                                            uint64_t*) noexcept;
@@ -172,6 +178,87 @@ public:
     size_t size;
     void* address;
 };
+// Guest fault containment for one ExecuteThread on an ARM64 host. A SIGSEGV,
+// SIGBUS, SIGILL or SIGTRAP raised by this thread's JIT code (or by the
+// dispatcher's guest-signal stubs) ends the run: the host stack is reset to
+// the dispatcher frame and the PC moved to FEX's thread-stop handler, so
+// ExecuteThread returns normally. Any other fault, including one inside FEX
+// or HLE C++ code, chains to the previous handler. Under the VIXL simulator
+// the JIT code is interpreted by C++, so nothing is contained there.
+class GuestFaultGuard final {
+public:
+    GuestFaultGuard(FEXCore::Context::Context* context, FEXCore::Core::InternalThreadState* thread,
+                    const FEXCore::SignalDelegatorConfig& config)
+        : context(context), thread(thread), config(config) {
+#if (defined(__aarch64__) || defined(__arm64__)) && !defined(VIXL_SIMULATOR)
+        struct sigaction action {};
+        action.sa_sigaction = handle;
+        action.sa_flags = SA_SIGINFO;
+        sigemptyset(&action.sa_mask);
+        for (; installed < signals.size(); ++installed)
+            if (::sigaction(signals[installed], &action, &previous[installed]) != 0) break;
+        active = this;
+#endif
+    }
+    ~GuestFaultGuard() {
+        active = nullptr;
+        while (installed) {
+            --installed;
+            if (::sigaction(signals[installed], &previous[installed], nullptr) != 0) std::abort();
+        }
+    }
+    GuestFaultGuard(const GuestFaultGuard&) = delete;
+    GuestFaultGuard& operator=(const GuestFaultGuard&) = delete;
+    int signal = 0;
+    uint64_t address = 0;
+private:
+    static constexpr std::array<int, 4> signals {SIGSEGV, SIGBUS, SIGILL, SIGTRAP};
+    static inline std::array<struct sigaction, 4> previous {};
+    static inline thread_local GuestFaultGuard* active = nullptr;
+    static void handle(int number, siginfo_t* info, void* raw) {
+#if (defined(__aarch64__) || defined(__arm64__)) && !defined(VIXL_SIMULATOR)
+        auto* machine = static_cast<ucontext_t*>(raw);
+#if defined(__APPLE__)
+        auto& pc = machine->uc_mcontext->__ss.__pc;
+        auto& sp = machine->uc_mcontext->__ss.__sp;
+#else
+        auto& pc = machine->uc_mcontext.pc;
+        auto& sp = machine->uc_mcontext.sp;
+#endif
+        auto* guard = active;
+        if (guard && !guard->signal) {
+            // JIT code keeps guest registers in host registers: spill them first.
+            // The dispatcher's guest-signal stubs have already spilled.
+            uint64_t stop = 0;
+            if (guard->context->IsAddressInCodeBuffer(guard->thread, pc))
+                stop = guard->config.ThreadStopHandlerAddressSpillSRA;
+            else if (pc >= guard->config.DispatcherBegin && pc < guard->config.DispatcherEnd)
+                stop = guard->config.ThreadStopHandlerAddress;
+            if (stop) {
+                guard->signal = number;
+                guard->address = reinterpret_cast<uintptr_t>(info->si_addr);
+                sp = guard->thread->CurrentFrame->ReturningStackLocation;
+                pc = stop;
+                return;
+            }
+        }
+#endif
+        for (size_t i = 0; i < signals.size(); ++i) if (signals[i] == number) {
+            const auto& old = previous[i];
+            if (old.sa_handler == SIG_IGN) return;
+            if (old.sa_handler == SIG_DFL) {
+                ::sigaction(number, &old, nullptr);
+                ::raise(number);
+            } else if (old.sa_flags & SA_SIGINFO) old.sa_sigaction(number, info, raw);
+            else old.sa_handler(number);
+            return;
+        }
+    }
+    FEXCore::Context::Context* context;
+    FEXCore::Core::InternalThreadState* thread;
+    FEXCore::SignalDelegatorConfig config;
+    size_t installed = 0;
+};
 }
 struct maxps4_fex_engine {
     // This real FEX configuration holder installs no process signal handlers.
@@ -184,6 +271,7 @@ struct maxps4_fex_engine {
     maxps4::OrbisV4ExecutionGate v4_execution_gate{v4_address_space};
     bool orbis_admitted = false;
     maxps4_fex_cpu_report cpu_report{};
+    maxps4_fex_guest_fault last_fault{};
     maxps4::GuestFrame frame;
     uint64_t frame_sequence = 0;
     bool frame_code_cached = false;
@@ -290,6 +378,15 @@ extern "C" int32_t maxps4_fex_engine_last_cpu_report(const maxps4_fex_engine* en
     std::lock_guard lock(runtime_lock);
     *report = engine->cpu_report;
     return report->completed ? 0 : -EAGAIN;
+}
+extern "C" int32_t maxps4_fex_engine_last_guest_fault(const maxps4_fex_engine* engine,
+    maxps4_fex_guest_fault* fault) {
+    if (!fault) return -EINVAL;
+    *fault = {};
+    if (!engine) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    *fault = engine->last_fault;
+    return fault->signal ? 0 : -ENOENT;
 }
 extern "C" int32_t maxps4_fex_engine_cpuid(maxps4_fex_engine *engine,
                                           uint32_t leaf, uint32_t subleaf,
@@ -443,7 +540,17 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     // without allocating another iOS JIT buffer. All engine execution is locked.
     if (!persistent_frame || !engine->frame_code_cached) engine->context->ClearCodeCache(thread, false);
     engine->frame_code_cached = persistent_frame;
-    engine->context->ExecuteThread(thread);
+    engine->last_fault = {};
+    {
+        GuestFaultGuard guard(engine->context.get(), thread, engine->signals.GetConfig());
+        engine->context->ExecuteThread(thread);
+        if (guard.signal) {
+            // RIP is the guest position FEX last stored (block granularity).
+            engine->last_fault = {guard.signal, 0, guard.address, state.rip};
+            engine->frame_code_cached = false;
+            return guard.signal == SIGSEGV || guard.signal == SIGBUS ? -EFAULT : -EILSEQ;
+        }
+    }
     if (engine->probe.callback_error) return engine->probe.callback_error;
     if (submission) {
         const auto snapshot = maxps4::gpu::snapshotPM4(image, submission->address, submission->count);

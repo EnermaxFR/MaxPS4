@@ -33,8 +33,8 @@ public:
     // moved by `relocation` (a multiple of generalAlignment) into it. No
     // instruction list and no code rewriting: absolute pointers, branches and
     // stack accesses work unmodified. ET_SCE_EXEC (fixed addresses) is refused.
-    // Guest faults are not contained here: the caller must not run untrusted
-    // code without a fault handler.
+    // Guest faults are not contained here: the FEX runtime contains those of
+    // generated code on ARM64 hosts.
     static constexpr uint64_t generalAlignment = 1024 * 1024, generalStack = 1024 * 1024,
                               generalSpan = 256 * 1024 * 1024;
     int prepare_orbis_general(const std::vector<OrbisLinker::Input>& inputs,
