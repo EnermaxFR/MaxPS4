@@ -290,24 +290,28 @@ int main(int argc, char** argv) {
         maxps4_fex_engine_close(process);
     }
     {
-        // Dynamic startup through FEX: stub CALLs DT_INIT then DT_INIT_ARRAY, JMPs to
-        // the entry. 40 (init_1) + 2 (init_2) + 2 (entry) = 44 proves the order.
-        auto app = orbis_execution::make_init_app();
+        // PRX module_start through FEX: the stub calls provider.prx's DT_INIT (stores
+        // 40), then JMPs to the entry (+2). 42 proves the PRX started and that
+        // neither its DT_INIT_ARRAY (+1000) nor the executable's DT_INIT (99) ran.
+        auto app = orbis_execution::make_start_app();
+        auto provider = orbis_execution::make_start_provider();
+        const char* dependency[] = {"provider.prx"};
         const maxps4_orbis_module modules[] = {
-            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,nullptr,0}};
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,dependency,1},
+            {"provider.prx",provider.data(),provider.size(),orbis_execution::provider_bias,nullptr,0}};
         maxps4_fex_engine* process = nullptr;
         CHECK(maxps4_fex_engine_open(&process)==0);
         char diagnostic[512]{};
-        const int prepared = maxps4_fex_engine_prepare_orbis(process,modules,1,"app.elf",20,diagnostic,sizeof(diagnostic));
+        const int prepared = maxps4_fex_engine_prepare_orbis(process,modules,2,"app.elf",20,diagnostic,sizeof(diagnostic));
         if (prepared) std::fprintf(stderr,"prepare: %s\n",diagnostic);
         CHECK(prepared==0);
         CHECK(maxps4_fex_engine_initialize(process)==0);
         uint64_t observed=0, logical_entry=0; uint32_t cpu=0;
         for (int repeat=0;repeat<2;++repeat) {
             CHECK(maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry)==0);
-            CHECK(observed==44 && logical_entry==orbis_execution::entry);
+            CHECK(observed==42 && logical_entry==orbis_execution::entry);
         }
-        std::printf("PASS SCE ELF -> startup stub -> DT_INIT -> DT_INIT_ARRAY -> entry via FEX: RAX=%llu backend=%u\n",
+        std::printf("PASS SCE ELF -> startup stub -> provider.prx module_start(0,NULL,NULL) -> entry via FEX: RAX=%llu backend=%u\n",
             (unsigned long long)observed,cpu);
         maxps4_fex_engine_close(process);
     }

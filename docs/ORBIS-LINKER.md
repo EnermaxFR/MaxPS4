@@ -123,15 +123,20 @@ ne prétend donc pas accepter arbitrairement tous les PRX réels ou les ELF Linu
 `DT_INIT`, `DT_FINI`, `DT_INIT_ARRAY(SZ)` et `DT_FINI_ARRAY(SZ)` sont acceptés.
 Chaque fonction doit être du code présent dans le fichier du même module ; les
 tableaux (taille multiple de 8, 256 entrées au plus) sont lus **après** les
-relocations, et les sentinelles 0 et −1 sont ignorées. `Image::initializers`
-donne l'ordre : modules dans l'ordre de chargement (dépendances d'abord), puis
-`DT_INIT` avant les entrées de `DT_INIT_ARRAY`. `prepare_orbis` génère un stub RX
-`CALL init₁ … CALL initₙ ; JMP entrée`, après une page de garde, et l'admission
-commence par ce stub : chaque initialiseur est admis comme fonction, dans le
-même budget. FEX démarre au stub (`GuestELF::start()`), `entry()` reste le
-point d'entrée du module. Les `DT_FINI*` sont seulement validés : rien ne
-s'exécute à la sortie. Le `module_start` des PRX (point d'entrée ELF d'un PRX)
-n'est pas encore appelé.
+relocations, et les sentinelles 0 et −1 sont ignorées.
+
+Ce qui s'exécute suit shadPS4 (`Module::Start`) : sur PS4, le `DT_INIT` d'un
+PRX **est** son `module_start(args, argp, param)`, et c'est lui qui exécute son
+`DT_INIT_ARRAY`. Un exécutable, lui, exécute ses propres initialiseurs depuis
+son point d'entrée. `Image::initializers` contient donc uniquement le `DT_INIT`
+de chaque PRX (0xfe18), dans l'ordre de chargement (dépendances d'abord).
+`prepare_orbis` génère un stub RX après une page de garde : pour chaque PRX
+`XOR EDI,EDI ; XOR ESI,ESI ; XOR EDX,EDX ; CALL module_start` — soit
+`module_start(0, NULL, NULL)` comme `LoadAndStartModule` — puis `JMP entrée`.
+L'admission commence par ce stub, dans le même budget. FEX démarre au stub
+(`GuestELF::start()`) ; `entry()` reste le point d'entrée du module. Les
+`DT_FINI*` sont seulement validés : rien ne s'exécute à la sortie. La valeur de
+retour de `module_start` n'est pas encore vérifiée.
 
 ## Transactions et contrat mémoire/FEX
 

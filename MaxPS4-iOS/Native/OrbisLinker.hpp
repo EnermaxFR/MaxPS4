@@ -70,10 +70,11 @@ public:
         std::vector<TLSBlock> tls;
         uint64_t staticTLSSize = 0, staticTLSAlignment = 1;
         std::vector<Thunk> thunks; // In module "<hle>", an RX segment after all modules.
-        // Startup order: for each module in load order (dependencies first),
-        // DT_INIT then DT_INIT_ARRAY entries (after relocation; 0 and -1 skipped).
-        // Guest addresses of file-backed code in that module. DT_FINI* are only
-        // validated: nothing runs at exit yet.
+        // module_start of every PRX (0xfe18) in load order (dependencies first):
+        // on PS4 a PRX's DT_INIT is its module_start(args, argp, param), and it
+        // runs its own DT_INIT_ARRAY (shadPS4 Module::Start). Executables get
+        // nothing here: their own startup code runs their initializers from the
+        // entry. All DT_INIT/FINI(_ARRAY) entries are still validated.
         std::vector<uint64_t> initializers;
         // A backend must copy/map these bytes at their guest addresses and apply
         // the advertised permissions. No identity mapping is implied.
@@ -542,7 +543,7 @@ private:
                 }
                 require(backed, m.path + ": " + what + " outside file-backed module code");
             };
-            auto array = [&](uint64_t start, uint64_t size, const char* what, bool collect) {
+            auto array = [&](uint64_t start, uint64_t size, const char* what) {
                 if (!start) return;
                 require(size % 8 == 0 && size / 8 <= 256, m.path + ": " + what + " size");
                 const auto* entries = m.image.translate(start, static_cast<size_t>(size), 4);
@@ -551,13 +552,15 @@ private:
                     const auto entry = read(entries + k, 8);
                     if (!entry || entry == UINT64_MAX) continue; // ELF sentinels
                     code(entry, what);
-                    if (collect) out.initializers.push_back(entry);
                 }
             };
-            if (d.init) { code(add(m.bias, d.init), "DT_INIT"); out.initializers.push_back(add(m.bias, d.init)); }
+            if (d.init) {
+                code(add(m.bias, d.init), "DT_INIT");
+                if (m.image.type == 0xfe18) out.initializers.push_back(add(m.bias, d.init)); // module_start
+            }
             if (d.fini) code(add(m.bias, d.fini), "DT_FINI");
-            array(d.initArray, d.initArraySize, "DT_INIT_ARRAY", true);
-            array(d.finiArray, d.finiArraySize, "DT_FINI_ARRAY", false);
+            array(d.initArray, d.initArraySize, "DT_INIT_ARRAY");
+            array(d.finiArray, d.finiArraySize, "DT_FINI_ARRAY");
             require(out.initializers.size() <= 256, "initializer budget (256)");
         }
         // RELRO may be writable while linking, then becomes read-only for the backend.

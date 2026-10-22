@@ -125,10 +125,9 @@ inline std::vector<uint8_t> make_tls_get_addr_app(uint32_t initial=0x4242, uint6
     orbis_fixture::setTag(b,0x61000031,3*24);
     return b;
 }
-// Dynamic startup: DT_INIT (0x400C) stores 40 at 0x8010; the DT_INIT_ARRAY entry
-// (0x8030, filled by RELATIVE) adds 2; the entry loads it and adds 2. 44 proves
-// both ran in ELF order before the entry (reversed order would give 42).
-constexpr uint64_t init_value=data+0x10;
+// An executable with DT_INIT (0x400C, stores 40 at 0x8010) and a DT_INIT_ARRAY
+// entry (0x8030, filled by RELATIVE, adds 2). The engine validates these but
+// never runs them: an executable's own startup code does, from its entry.
 inline std::vector<uint8_t> make_init_app() {
     auto b=make_kernel_app();
     using orbis_fixture::put;
@@ -148,6 +147,45 @@ inline std::vector<uint8_t> make_init_app() {
     orbis_fixture::appendTag(b,27,8);
     put(b,0x918,0x8030); put(b,0x920,8); put(b,0x928,0x4018); // RELATIVE -> init_2
     orbis_fixture::setTag(b,0x61000031,2*24);
+    return b;
+}
+// module_start: provider.prx DT_INIT (0x4006) stores 40 at its data 0x8010; its
+// DT_INIT_ARRAY entry (0x4012) would add 1000. app.elf DT_INIT (0x400C) would
+// store 99 there; app entry loads it and adds 2. Only the PRX DT_INIT may run
+// (module_start(0, NULL, NULL)), so the result must be exactly 42.
+constexpr uint64_t provider_value=provider_bias+0x8010;
+inline std::vector<uint8_t> make_start_provider() {
+    auto b=make(true);
+    using orbis_fixture::put;
+    const uint8_t code[]={
+        0xb8,40,0,0,0, 0x89,0x05,0,0,0,0, 0xc3,                          // DT_INIT 0x4006
+        0x8b,0x05,0,0,0,0, 0x05,0xe8,0x03,0,0, 0x89,0x05,0,0,0,0, 0xc3}; // array  0x4012
+    std::copy(std::begin(code),std::end(code),b.begin()+0x206);
+    put(b,0x20d,0x8010-0x4011,4);
+    put(b,0x214,0x8010-0x4018,4);
+    put(b,0x21f,0x8010-0x4023,4);
+    put(b,64+32,6+sizeof(code)); put(b,64+40,6+sizeof(code));
+    orbis_fixture::appendTag(b,12,0x4006);
+    orbis_fixture::appendTag(b,25,0x8030);
+    orbis_fixture::appendTag(b,27,8);
+    orbis_fixture::appendTag(b,0x6100002f,0x300);
+    orbis_fixture::appendTag(b,0x61000031,24);
+    orbis_fixture::appendTag(b,0x61000033,24);
+    put(b,0x900,0x8030); put(b,0x908,8); put(b,0x910,0x4012); // RELATIVE -> array function
+    return b;
+}
+inline std::vector<uint8_t> make_start_app() {
+    auto b=make(false);
+    using orbis_fixture::put;
+    const uint8_t code[]={
+        0x8b,0x05,0,0,0,0, 0x05,2,0,0,0, 0xf4,      // entry   0x4000
+        0xb8,99,0,0,0, 0x89,0x05,0,0,0,0, 0xc3};    // DT_INIT 0x400C (must not run)
+    std::fill(b.begin()+0x200,b.begin()+0x300,0);
+    std::copy(std::begin(code),std::end(code),b.begin()+0x200);
+    put(b,0x202,uint32_t(provider_value-(app_bias+0x4006)),4);
+    put(b,0x213,uint32_t(provider_value-(app_bias+0x4017)),4);
+    put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
+    orbis_fixture::appendTag(b,12,0x400c);
     return b;
 }
 // sceKernelClockGettime (public NID QBi7HCK03hw) with a pointer argument:
