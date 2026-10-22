@@ -48,7 +48,10 @@ int main() {
 
     auto elf = ps4ELF();
     r = PS4SELFBlockReport::inspect(elf.data(), elf.size());
-    assert(!r.isSelf && !r.error && r.verdict() == "ELF brut accepté par le staging actuel");
+    assert(!r.isSelf && r.isElf && !r.error && r.verdict() == "ELF brut accepté par le staging actuel");
+    auto other = elf; other[0] = 'M'; other[1] = 'Z'; // Windows PE, archive, image...
+    r = PS4SELFBlockReport::inspect(other.data(), other.size());
+    assert(!r.isSelf && !r.isElf && r.verdict().rfind("Ni ELF ni SELF", 0) == 0);
     for (size_t length = 0; length <= self.size(); ++length) // Every truncation stays bounded.
         (void)PS4SELFBlockReport::inspect(self.data(), length).text();
     assert(PS4SELFBlockReport::inspect(nullptr, 0).error == -EINVAL);

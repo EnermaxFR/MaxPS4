@@ -21,7 +21,7 @@ struct PS4SELFBlockReport {
         uint64_t{0xfff} << 20;
     int error = 0, loadError = 0;
     std::string stage; // SELF.HEADER, ELF.HEADER or empty when every header is readable.
-    bool isSelf = false;
+    bool isSelf = false, isElf = false;
     uint8_t category = 0, programType = 0;
     uint16_t headerSize = 0, metaSize = 0, programHeaders = 0;
     uint32_t fileSize = 0;
@@ -34,6 +34,7 @@ struct PS4SELFBlockReport {
         r.loadError = image.load(file, size);
         if (!file || size < 32) return r.fail(-EINVAL, "SELF.HEADER");
         r.isSelf = read(file, 4) == 0x1d3d154f;
+        r.isElf = !std::memcmp(file, "\177ELF", 4);
         if (!r.isSelf) return r;
         r.category = file[8]; r.programType = file[9];
         r.headerSize = static_cast<uint16_t>(read(file + 12, 2));
@@ -78,6 +79,7 @@ struct PS4SELFBlockReport {
     // Single most relevant explanation; the order puts hard blockers first.
     std::string verdict() const {
         if (error) return "En-tête SELF illisible : aucun bloc caractérisé";
+        if (!isSelf && !isElf) return "Ni ELF ni SELF : ce n'est pas un exécutable PS4 (eboot.bin/PRX attendu)";
         if (!isSelf) return loadError ? "ELF brut refusé par le staging actuel (pas de blocs SELF)" :
             "ELF brut accepté par le staging actuel";
         if (encrypted) return "Blocs chiffrés : un exécutable déjà déchiffré (ELF/fSELF) obtenu légalement depuis "
@@ -94,7 +96,7 @@ struct PS4SELFBlockReport {
     std::string text() const {
         std::string out = "MaxPS4 caractérisation SELF v1\nLecture seule ; aucun déchiffrement, "
             "aucune décompression, aucune vérification de signature\n";
-        out += "Format : " + std::string(isSelf ? "SELF" : "ELF/inconnu") +
+        out += "Format : " + std::string(isSelf ? "SELF" : isElf ? "ELF" : "inconnu") +
             " ; staging=" + std::to_string(loadError) + "\n";
         if (error || !stage.empty())
             out += "Étape bloquante : " + stage + " ; code=" + std::to_string(error) + "\n";
