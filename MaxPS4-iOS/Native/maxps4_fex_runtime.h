@@ -50,10 +50,14 @@ int32_t maxps4_fex_engine_open(maxps4_fex_engine **out);
 void maxps4_fex_engine_close(maxps4_fex_engine *engine);
 int32_t maxps4_fex_engine_stage(const maxps4_fex_engine *engine);
 // CPU entry snapshot from the last successfully completed guest execution.
+// exited: a general image called its entry's exit function (RSI) with
+// exit_status, which is also the returned RAX; 0 when it stopped on HLT.
 typedef struct maxps4_fex_cpu_report {
     uint64_t entry, rax, argc, page_size;
     uint32_t rsp_alignment, zero_integer_registers, entry_matches,
              argv_env_null, auxv_valid, completed;
+    uint32_t exited;
+    int32_t exit_status;
 } maxps4_fex_cpu_report;
 int32_t maxps4_fex_engine_last_cpu_report(const maxps4_fex_engine *engine,
                                         maxps4_fex_cpu_report *report);

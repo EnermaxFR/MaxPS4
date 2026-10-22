@@ -15,7 +15,10 @@ enum class PS4KernelService : uint32_t {
     mmap, munmap, mprotect, clock_gettime, clock_getres, gettimeofday, process_time,
     thread_self, mutex_init, mutex_trylock, mutex_unlock, mutex_destroy,
     // Needs the image's TLS layout: served by the FEX Orbis HLE gate, not invoke().
-    tls_get_addr
+    tls_get_addr,
+    // Engine-internal, no NID: the exit function a general image's entry gets
+    // in RSI. Served by the FEX Orbis HLE gate, which ends the run.
+    process_exit
 };
 // Implemented libkernel functions (name, NID, service), e.g. for an HLE registry.
 struct PS4KernelExport { const char* name; const char* nid; PS4KernelService service; };

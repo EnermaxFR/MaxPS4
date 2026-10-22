@@ -457,6 +457,56 @@ int main(int argc, char** argv) {
             (unsigned long long)observed,cpu);
         maxps4_fex_engine_close(process);
     }
+    {
+        // PS4 process entry: RDI = EntryParams, [RSP] = their copy, RSP = 8 mod 16,
+        // RSI = exit function. Calling it with 42 ends the run cleanly.
+        auto app = orbis_execution::make_general_entry_app();
+        const maxps4_orbis_module modules[] = {
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,nullptr,0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        char diagnostic[512]{};
+        uint64_t relocation=0;
+        const int prepared = maxps4_fex_engine_prepare_orbis_general(process,modules,1,"app.elf",&relocation,diagnostic,sizeof(diagnostic));
+        if (prepared) std::fprintf(stderr,"prepare: %s\n",diagnostic);
+        CHECK(prepared==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        for (int repeat=0;repeat<2;++repeat) {
+            uint64_t observed=0, logical_entry=0; uint32_t cpu=0;
+            CHECK(maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry)==0);
+            maxps4_fex_cpu_report report{};
+            CHECK(maxps4_fex_engine_last_cpu_report(process,&report)==0);
+            std::printf("general PS4 entry: RAX=%llu exited=%u status=%d argc=%llu\n",(unsigned long long)observed,
+                report.exited,report.exit_status,(unsigned long long)report.argc);
+            CHECK(observed==42 && report.exited==1 && report.exit_status==42 && report.argc==1);
+        }
+        std::puts("PASS general FEX execution -> PS4 entry ABI (EntryParams in RDI, copy at RSP, RSP=8 mod 16) -> exit function(42)");
+        maxps4_fex_engine_close(process);
+    }
+    {
+        // module_start under the general entry stub: the PRX's DT_INIT runs with an
+        // aligned stack before the entry; the entry still ends on HLT (not exited).
+        auto app = orbis_execution::make_start_app();
+        auto provider = orbis_execution::make_start_provider();
+        const char* dependency[] = {"provider.prx"};
+        const maxps4_orbis_module modules[] = {
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,dependency,1},
+            {"provider.prx",provider.data(),provider.size(),orbis_execution::provider_bias,nullptr,0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        char diagnostic[512]{};
+        uint64_t relocation=0;
+        const int prepared = maxps4_fex_engine_prepare_orbis_general(process,modules,2,"app.elf",&relocation,diagnostic,sizeof(diagnostic));
+        if (prepared) std::fprintf(stderr,"prepare: %s\n",diagnostic);
+        CHECK(prepared==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        uint64_t observed=0, logical_entry=0; uint32_t cpu=0;
+        CHECK(maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry)==0 && observed==42);
+        maxps4_fex_cpu_report report{};
+        CHECK(maxps4_fex_engine_last_cpu_report(process,&report)==0 && !report.exited);
+        std::puts("PASS general FEX execution -> provider.prx module_start -> PS4 entry stub -> entry (HLT)");
+        maxps4_fex_engine_close(process);
+    }
 #if (defined(__aarch64__) || defined(__arm64__)) && !defined(VIXL_SIMULATOR)
     {
         // Contained guest faults: each run fails with a diagnostic instead of
@@ -492,7 +542,7 @@ int main(int argc, char** argv) {
             CHECK(ran==(kind==3 ? -ETIMEDOUT : kind==2 ? -EILSEQ : -EFAULT) && !observed && !cpu && !logical_entry);
             CHECK(kind==3 ? fault.signal==SIGURG && !fault.address && elapsed>=200 && elapsed<10000 :
                   kind==2 ? fault.signal==SIGILL || fault.signal==SIGTRAP : fault.signal==SIGSEGV || fault.signal==SIGBUS);
-            CHECK(fault.rip>=code && fault.rip<code+16);
+            CHECK(fault.rip>=code); // Entry block, or the startup stub placed after the image.
             if (kind==1) CHECK(fault.address==code);
             if (kind==0) CHECK(fault.address>code);
         }

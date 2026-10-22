@@ -199,8 +199,16 @@ Limites actuelles, à traiter avant tout code non fiable :
   Le code invité déréférence donc directement le pointeur rendu. Le septième
   argument (sur la pile) est lu à `RSP+8` pour les images générales. Les pages
   exécutables restent de la donnée hôte : FEX ne les exécute pas encore.
-- Un seul thread, pas d'arrêt du processus (`HLT` sert de fin dans les tests),
-  ni de SYSCALL hors trampoline (l'exécution échoue avec `-EPERM`).
+- **Entrée de processus PS4** : en mode général, le stub de démarrage existe
+  toujours. Après les `module_start` (pile alignée), il reproduit
+  `RunMainEntry` de shadPS4 : `SUB RSP,8`, RDI = `&EntryParams` (haut de la
+  pile invitée : argc 1, argv[0] `"eboot.bin"`, réécrits à chaque exécution),
+  copie de leurs 16 premiers octets en `[RSP]`, RSI = fonction de sortie, puis
+  `JMP entry`. La fonction de sortie est une trampoline du moteur (service
+  `process_exit`, sans NID) : son appel termine l'exécution, RAX = statut, et
+  le rapport CPU indique `exited`/`exit_status`.
+- Un seul thread, ni de SYSCALL hors trampoline (l'exécution échoue avec
+  `-EPERM`).
 
 ## Transactions et contrat mémoire/FEX
 

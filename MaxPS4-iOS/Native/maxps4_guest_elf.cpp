@@ -80,7 +80,7 @@ void GuestELF::clear() {
     arena_size = 0;
     guest_base = guest_entry = thread_pointer = start_address = 0;
     identity = false;
-    stack_address = stack_bytes = heap_address = heap_bytes = 0;
+    stack_address = stack_bytes = heap_address = heap_bytes = entry_params_address = 0;
     thunks.clear();
     tls_blocks.clear();
     blockers = 0;
@@ -283,11 +283,18 @@ int GuestELF::prepare_linked(const OrbisLinker::Image& linked, const std::string
         // order, module_start(0, NULL, NULL): XOR EDI,EDI; XOR ESI,ESI;
         // XOR EDX,EDX; CALL init. Then JMP entry. Admission starts at the stub,
         // so every module_start is admitted as a function, the entry as the body.
-        constexpr uint64_t call_block = 11;
+        // General images always get the stub and enter like a PS4 process (as
+        // shadPS4 RunMainEntry): after the module_start calls, SUB RSP,8; RDI =
+        // &EntryParams; PUSH [RDI+8]; PUSH [RDI]; RSI = exit function; JMP
+        // entry. The exit function follows: an engine trampoline (SYSCALL at
+        // +8 like the linker's) whose HLT ends the run.
+        constexpr uint64_t call_block = 11, entry_block = 34, exit_block = 14;
         uint64_t start = entry;
-        if (!copy.initializers.empty()) {
+        size_t stub_module = SIZE_MAX, entry_at = 0;
+        if (!copy.initializers.empty() || mapped_identity) {
             start = (highest + page - 1) / page * page + page;
-            const uint64_t size = call_block * copy.initializers.size() + 5;
+            entry_at = static_cast<size_t>(call_block * copy.initializers.size());
+            const uint64_t size = entry_at + (mapped_identity ? entry_block + exit_block : 5);
             if (start > (uint64_t{1} << 47) - size) return fail(-E2BIG, "startup stub outside user range");
             std::vector<uint8_t> stub(static_cast<size_t>(size));
             auto branch = [&](size_t at, uint8_t opcode, uint64_t target) {
@@ -303,8 +310,25 @@ int GuestELF::prepare_linked(const OrbisLinker::Image& linked, const std::string
                 std::copy(std::begin(zero), std::end(zero), stub.begin() + at);
                 if (!branch(at + 6, 0xe8, copy.initializers[k])) return fail(-EOVERFLOW, "module_start CALL displacement overflow");
             }
-            if (!branch(static_cast<size_t>(call_block * copy.initializers.size()), 0xe9, entry))
+            size_t jump = entry_at;
+            if (mapped_identity) {
+                // SUB RSP,8; MOV RDI,imm64; PUSH [RDI+8]; PUSH [RDI]; MOV RSI,imm64;
+                // both immediates are patched once the stack is placed.
+                const uint8_t enter[] = {0x48,0x83,0xec,0x08, 0x48,0xbf,0,0,0,0,0,0,0,0,
+                    0xff,0x77,0x08, 0xff,0x37, 0x48,0xbe,0,0,0,0,0,0,0,0};
+                std::copy(std::begin(enter), std::end(enter), stub.begin() + entry_at);
+                jump = entry_at + sizeof(enter);
+                // Exit function: MOV R10,RCX; MOV EAX,token; SYSCALL; HLT; (padding).
+                const uint32_t token = static_cast<uint32_t>(PS4KernelService::process_exit);
+                const uint8_t leave[] = {0x49,0x89,0xca, 0xb8,uint8_t(token),uint8_t(token>>8),
+                    uint8_t(token>>16),uint8_t(token>>24), 0x0f,0x05, 0xf4, 0xcc,0xcc,0xcc};
+                static_assert(sizeof(enter) + 5 == entry_block && sizeof(leave) == exit_block, "stub layout");
+                std::copy(std::begin(leave), std::end(leave), stub.begin() + entry_at + entry_block);
+                copy.thunks.push_back({start + entry_at + entry_block, token});
+            }
+            if (!branch(jump, 0xe9, entry))
                 return fail(-EOVERFLOW, "entry JMP displacement overflow");
+            stub_module = copy.modules.size();
             OrbisLinker::Module module {"<start>", start, 0, PS4ExecutableImage{}};
             PS4ExecutableImage::Header header {1, 5, 0, 0, size, size, page};
             module.image.headers.push_back(header);
@@ -338,6 +362,15 @@ int GuestELF::prepare_linked(const OrbisLinker::Image& linked, const std::string
         if (mapped_identity) {
             const uint64_t after = tp ? tp + 16 : highest;
             stack_low = (after + page - 1) / page * page + page;
+            // EntryParams sit at the top of the stack; the stub points RDI at
+            // them and RSI at its exit function.
+            const uint64_t params = stack_low + generalStack - entryParamsBytes;
+            const uint64_t exit_function = start + entry_at + entry_block;
+            auto& bytes = copy.modules[stub_module].image.segments[0].bytes;
+            for (size_t b = 0; b < 8; ++b) {
+                bytes[entry_at + 6 + b] = uint8_t(params >> (8 * b));
+                bytes[entry_at + 21 + b] = uint8_t(exit_function >> (8 * b));
+            }
         }
         // Local-exec read through FS must stay inside the blocks or the TCB.
         auto tls_readable = [&](int64_t displacement, uint64_t bytes) {
@@ -630,6 +663,7 @@ int GuestELF::prepare_linked(const OrbisLinker::Image& linked, const std::string
         }
         if (stack_low) {
             stack_address = stack_low; stack_bytes = generalStack;
+            entry_params_address = stack_low + generalStack - entryParamsBytes;
             // sceKernelMmap window: after a guard page, PROT_NONE until mapped.
             heap_address = (stack_low + generalStack + page + generalHeapPage - 1) / generalHeapPage * generalHeapPage;
             heap_bytes = generalHeap;
@@ -643,6 +677,18 @@ int GuestELF::prepare_linked(const OrbisLinker::Image& linked, const std::string
         blockers = mapped_identity ? 0 : 4;
         return 0;
     } catch (const std::bad_alloc&) { clear(); return -ENOMEM; }
+}
+uint64_t GuestELF::write_entry_params() {
+    // EntryParams {int argc; u32 pad; const char* argv[3]} then argv[0].
+    if (!entry_params_address) return 0;
+    auto* params = const_cast<uint8_t*>(translate(entry_params_address, entryParamsBytes, 6));
+    if (!params) return 0;
+    static constexpr char program[] = "eboot.bin";
+    const uint64_t words[4] = {1, entry_params_address + 32, 0, 0};
+    std::memset(params, 0, entryParamsBytes);
+    std::memcpy(params, words, sizeof(words));
+    std::memcpy(params + 32, program, sizeof(program));
+    return entry_params_address;
 }
 int GuestELF::stage_ps4(const uint8_t* file, size_t length) {
     clear();

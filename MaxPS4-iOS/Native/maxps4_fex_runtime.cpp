@@ -61,6 +61,8 @@ public:
     size_t private_stack_size = 0;
     uint32_t calls = 0;
     int callback_error = 0;
+    bool exited = false;
+    int32_t exit_status = 0;
     uint64_t HandleSyscall(FEXCore::Core::CpuStateFrame* frame, FEXCore::HLE::SyscallArguments*) override {
         namespace x86 = FEXCore::X86State;
         auto& state = frame->State;
@@ -98,6 +100,12 @@ public:
                     image->tls_address(index[0],index[1]) : nullptr;
                 if (!address) { callback_error = -EFAULT; address = image->thread_pointer_host(); }
                 result = static_cast<int64_t>(reinterpret_cast<uintptr_t>(address));
+            } else if (orbis == maxps4::PS4KernelService::process_exit) {
+                // The entry's exit function: the status (EDI) becomes RAX, and the
+                // HLT that follows this SYSCALL ends the run.
+                exited = true;
+                exit_status = static_cast<int32_t>(r[x86::REG_RDI]);
+                result = exit_status;
             } else {
                 result = kernel->invoke(orbis,call,1);
             }
@@ -541,11 +549,21 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     const uint64_t initial_rip = reinterpret_cast<uintptr_t>(entry_pointer);
     // A general image owns its stack inside guest memory, so stack buffers are
     // valid HLE pointer arguments; the bounded paths keep the private page.
-    size_t guest_stack_size = page;
-    uint8_t* guest_stack = image.stack_host(guest_stack_size);
-    if (!guest_stack) { guest_stack = stack_base; guest_stack_size = page; }
-    const int stack_status = maxps4::initialize_guest_stack(guest_stack, guest_stack_size, initial_rip, page, initial_rsp);
-    if (stack_status) return stack_status;
+    // Its startup stub then lays out the PS4 entry stack from EntryParams at
+    // the stack top, as shadPS4 does; the bounded paths keep the SysV auxv.
+    const bool ps4_entry = image.general();
+    if (ps4_entry) {
+        initial_rsp = image.write_entry_params();
+        if (!initial_rsp) return -EFAULT;
+    } else {
+        size_t guest_stack_size = page;
+        uint8_t* guest_stack = image.stack_host(guest_stack_size);
+        if (!guest_stack) { guest_stack = stack_base; guest_stack_size = page; }
+        const int stack_status = maxps4::initialize_guest_stack(guest_stack, guest_stack_size, initial_rip, page, initial_rsp);
+        if (stack_status) return stack_status;
+    }
+    engine->probe.exited = false;
+    engine->probe.exit_status = 0;
     auto* thread = engine->context->CreateThread(initial_rip, initial_rsp);
     if (!thread) return -ENOMEM;
     struct DestroyThread {
@@ -566,13 +584,19 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     observed.zero_integer_registers = 1;
     for (size_t i = 0; i < std::size(state.gregs); ++i)
         if (i != FEXCore::X86State::REG_RSP && state.gregs[i]) observed.zero_integer_registers = 0;
-    uint64_t stack_words[9]{};
-    std::memcpy(stack_words, reinterpret_cast<const void*>(initial_rsp), sizeof(stack_words));
-    observed.argc = stack_words[0];
-    observed.argv_env_null = stack_words[1] == 0 && stack_words[2] == 0;
-    observed.page_size = stack_words[4];
-    observed.auxv_valid = stack_words[3] == 6 && stack_words[5] == 9 &&
-        stack_words[6] == state.rip && stack_words[7] == 0 && stack_words[8] == 0;
+    if (ps4_entry) {
+        uint32_t argc = 0;
+        std::memcpy(&argc, reinterpret_cast<const void*>(initial_rsp), sizeof(argc));
+        observed.argc = argc; // EntryParams; no SysV argv/envp/auxv.
+    } else {
+        uint64_t stack_words[9]{};
+        std::memcpy(stack_words, reinterpret_cast<const void*>(initial_rsp), sizeof(stack_words));
+        observed.argc = stack_words[0];
+        observed.argv_env_null = stack_words[1] == 0 && stack_words[2] == 0;
+        observed.page_size = stack_words[4];
+        observed.auxv_valid = stack_words[3] == 6 && stack_words[5] == 9 &&
+            stack_words[6] == state.rip && stack_words[7] == 0 && stack_words[8] == 0;
+    }
     thread->CallRetStackBase = callret_base;
     state.callret_sp = reinterpret_cast<uintptr_t>(callret_base) + callret_size / 4;
     state.segment_arrays[FEXCore::Core::CPUState::SEGMENT_ARRAY_INDEX_GDT] = gdt.data();
@@ -610,6 +634,8 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     }
     *result = state.gregs[FEXCore::X86State::REG_RAX];
     observed.rax = *result;
+    observed.exited = engine->probe.exited ? 1 : 0;
+    observed.exit_status = engine->probe.exit_status;
     observed.completed = 1;
 #if defined(VIXL_SIMULATOR)
     *backend = MAXPS4_CPU_FEX_ARM64_SIMULATOR;

@@ -204,7 +204,22 @@ int main() {
         uint64_t moved=0;
         CHECK(image.prepare_orbis_general(inputs,{},"app.elf",reason,moved)==0);
         CHECK(moved && moved%maxps4::GuestELF::generalAlignment==0 && image.general() && image.ps4_blockers()==0);
-        CHECK(image.entry()==entry+moved && image.start()==entry+moved);
+        CHECK(image.entry()==entry+moved && image.start()!=entry+moved);
+        {
+            // PS4 entry stub: SUB RSP,8; MOV RDI,&EntryParams; PUSH [RDI+8]; PUSH [RDI];
+            // MOV RSI,exit; JMP entry; then the exit trampoline (SYSCALL at +8).
+            const auto* stub=image.translate(image.start(),48,5);
+            CHECK(stub && stub[0]==0x48 && stub[1]==0x83 && stub[4]==0x48 && stub[5]==0xbf && stub[29]==0xe9);
+            uint64_t params=0, leave=0;
+            std::memcpy(&params,stub+6,8); std::memcpy(&leave,stub+21,8);
+            CHECK(leave==image.start()+34 && stub[34+8]==0x0f && stub[34+9]==0x05 && stub[34+10]==0xf4);
+            size_t stackBytes=0; auto* stackLow=image.stack_host(stackBytes);
+            CHECK(params==reinterpret_cast<uintptr_t>(stackLow)+stackBytes-maxps4::GuestELF::entryParamsBytes);
+            CHECK(image.write_entry_params()==params);
+            const auto* words=image.translate(params,32,4);
+            uint64_t argv0=0; std::memcpy(&argv0,words+8,8);
+            CHECK(words[0]==1 && argv0==params+32 && !std::memcmp(image.translate(argv0,10,4),"eboot.bin",10));
+        }
         const auto* code=image.translate(entry+moved,0x3a,5);
         CHECK(code && reinterpret_cast<uintptr_t>(code)==entry+moved);   // Identity mapping.
         CHECK(!std::memcmp(code,general.data()+0x200,0x3a));             // GOT CALL not rewritten.
