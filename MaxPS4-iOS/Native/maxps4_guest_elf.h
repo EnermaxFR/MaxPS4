@@ -23,7 +23,8 @@ public:
     // instruction admission or execution. Guest addresses remain logical;
     // absolute addressing requires an address-space backend before execution.
     // Copies a linked SCE image into owned pages; admits finite, acyclic GOT
-    // calls to bounded guest functions. No TLS, arbitrary addressing or HLE.
+    // calls to bounded guest functions. Static TLS only (local-exec reads via
+    // FS); no dynamic TLS, arbitrary addressing or HLE.
     int prepare_orbis(const OrbisLinker::Image& linked, const std::string& root,
                       uint32_t budget, std::string& diagnostic);
     int stage_ps4(const uint8_t* file, size_t length);
@@ -42,6 +43,12 @@ public:
         return translate(address, bytes, permissions);
     }
     uint64_t entry() const { return guest_entry; }
+    // Static TLS for prepare_orbis images (variant II): host address of the
+    // thread control block that FS must point to, or null without PT_TLS.
+    // TCB word 0 holds its own host address; blocks sit just below it.
+    const uint8_t* thread_pointer_host() const {
+        return thread_pointer ? translate(thread_pointer, 16, 6) : nullptr;
+    }
     const uint8_t* entry_pointer() const { return translate(guest_entry, 1, 5); }
     const std::vector<Segment>& segments() const { return regions; }
 private:
@@ -52,7 +59,7 @@ private:
     std::vector<Segment> regions;
     void* arena = nullptr;
     size_t arena_size = 0;
-    uint64_t guest_base = 0, guest_entry = 0;
+    uint64_t guest_base = 0, guest_entry = 0, thread_pointer = 0;
 };
 // Admission guarantees a finite sequence: MOV EAX,imm32; ADD EAX,imm32;
 // NOP; terminal HLT. The ELF loader also admits C7 05 disp32 imm32 stores

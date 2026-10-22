@@ -23,6 +23,7 @@ public:
         size_t validatedModules = 0, segments = 0, memoryBytes = 0;
         size_t dependencies = 0, imports = 0, resolvedImports = 0;
         size_t relocations = 0, validatedRelocations = 0, ignoredRelocations = 0;
+        size_t tlsModules = 0; uint64_t staticTLSBytes = 0;
         bool committed = false;
         std::string text() const {
             std::ostringstream out;
@@ -36,6 +37,8 @@ public:
                 << " ; différées : " << (committed ? 0 : validatedRelocations)
                 << " ; refusées : " << (relocations - validatedRelocations) << "\n"
                 << "Relocations NONE ignorées (aucune écriture) : " << ignoredRelocations << "\n"
+                << "TLS statique : " << tlsModules << " module(s) ; " << staticTLSBytes
+                << " octets par thread (disposition calculée, blocs non créés)\n"
                 << "Mémoire : " << memoryBytes << " octets validés ; "
                 << (committed ? "image engagée" : "image non engagée, allocations provisoires libérées") << "\n";
             if (!failure.empty()) out << "Refus : " << failure << "\n";
@@ -49,8 +52,16 @@ public:
     struct Input { PS4PKGRuntimePlan::ModuleBytes file; uint64_t bias = 0; };
     struct Module { std::string path; uint64_t bias = 0, entry = 0; PS4ExecutableImage image; };
     struct Mapping { uint64_t address, size; uint32_t permissions; const uint8_t* data; };
+    // Static TLS, x86-64 variant II (FreeBSD/Orbis): each block ends at or below
+    // the thread pointer, at TP - offset. Module IDs start at 1 in load order.
+    // A backend must copy fileSize template bytes from guest address `image`,
+    // zero the rest of memorySize, per thread. Nothing here creates threads.
+    struct TLSBlock { size_t module; uint64_t id, image, fileSize, memorySize, alignment, offset; };
+    static constexpr uint64_t tlsBudget = 1024 * 1024;
     struct Image {
         std::vector<Module> modules;
+        std::vector<TLSBlock> tls;
+        uint64_t staticTLSSize = 0, staticTLSAlignment = 1;
         // A backend must copy/map these bytes at their guest addresses and apply
         // the advertised permissions. No identity mapping is implied.
         std::vector<Mapping> mappings() const {
@@ -105,14 +116,14 @@ private:
         std::string out; do { out.insert(out.begin(), alphabet[id & 63]); id >>= 6; } while (id); return out;
     }
     struct Descriptor { std::string name; uint16_t version; };
-    struct Symbol { Identity identity; uint64_t value = 0, size = 0; bool defined = false, local = false; };
+    struct Symbol { Identity identity; uint64_t value = 0, size = 0; uint8_t type = 0; bool defined = false, local = false; };
     struct Rela { uint64_t offset, info, addend; };
     struct Dynamic {
         std::vector<Symbol> symbols; std::vector<Rela> relas;
         std::vector<Descriptor> imports, exports, importLibraries, exportLibraries;
         std::vector<std::string> needed;
     };
-    static Dynamic parse(const Input& input, const Module& m, size_t& symbolBudget, size_t& relocationBudget) {
+    static Dynamic parse(const Input& input, const Module& m, uint64_t tlsMemory, size_t& symbolBudget, size_t& relocationBudget) {
         const auto* bytes = input.file.bytes; const auto size = input.file.size;
         const PS4ExecutableImage::Header *dyn = nullptr, *data = nullptr;
         for (const auto& h : m.image.headers) {
@@ -195,11 +206,14 @@ private:
             Symbol s; const auto name = stringAt(read(p, 4));
             const uint8_t bind = p[4] >> 4, type = p[4] & 15;
             const auto section = read(p + 6, 2);
-            s.value = read(p + 8, 8); s.size = read(p + 16, 8); s.defined = section != 0; s.local = bind == 0;
+            s.value = read(p + 8, 8); s.size = read(p + 16, 8); s.defined = section != 0; s.local = bind == 0; s.type = type;
             if (!i) { require(read(p, 8) == 0 && s.value == 0 && s.size == 0, "invalid null symbol"); out.symbols.push_back(s); continue; }
-            require(bind <= 2 && (type == 0 || type == 1 || type == 2) && p[5] == 0 && section < 0xff00,
+            require(bind <= 2 && (type == 0 || type == 1 || type == 2 || type == 6) && p[5] == 0 && section < 0xff00,
                     "unsupported symbol binding/type/visibility/section");
-            if (s.defined) require(m.image.translate(s.value, s.size ? s.size : 1, type == 2 ? 5 : 4), "export outside valid segment");
+            // STT_TLS values are offsets inside the module's TLS block, not addresses.
+            if (s.defined && type == 6) require(tlsMemory && s.value <= tlsMemory && s.size <= tlsMemory - s.value,
+                                                "TLS symbol outside module TLS block");
+            else if (s.defined) require(m.image.translate(s.value, s.size ? s.size : 1, type == 2 ? 5 : 4), "export outside valid segment");
             else require(s.value == 0 && !s.local, "invalid undefined symbol");
             if (s.defined && type == 2) {
                 bool backed = false;
@@ -282,8 +296,36 @@ private:
             require(PS4PKGRuntimePlan::prepareStandalone(in.file.request.logicalPath, in.file.bytes, in.file.size,
                     in.file.request.dependencies, staged, error), error);
             ++report.validatedModules;
-            require(!staged.image.requiresTLS, "TLS not supported");
             Module m {staged.logicalPath, in.bias, 0, std::move(staged.image)};
+            uint64_t tlsMemory = 0;
+            const PS4ExecutableImage::Header* tls = nullptr;
+            for (const auto& h : m.image.headers) if (h.type == 7) { require(!tls, "duplicate PT_TLS"); tls = &h; }
+            if (tls) {
+                report.phase = "TLS";
+                const auto alignment = tls->alignment ? tls->alignment : 1;
+                require(!(alignment & (alignment - 1)) && alignment <= 4096, "invalid PT_TLS alignment");
+                require(tls->memorySize && tls->fileSize <= tls->memorySize && tls->memorySize <= tlsBudget,
+                        "invalid PT_TLS size");
+                // The initialization image must lie in loaded, readable, file-backed bytes.
+                bool backed = !tls->fileSize;
+                for (const auto& region : m.image.segments) {
+                    if (!(region.header.flags & 4) || tls->address < region.header.address) continue;
+                    const auto offset = tls->address - region.header.address;
+                    backed |= offset < region.header.fileSize && tls->fileSize <= region.header.fileSize - offset;
+                }
+                require(backed, "TLS template outside file-backed segment");
+                // Variant II: blocks are stacked downward from the thread pointer.
+                const auto end = add(out.staticTLSSize, tls->memorySize);
+                const auto offset = add(end, (alignment - end % alignment) % alignment);
+                require(offset <= tlsBudget, "static TLS budget exceeded");
+                out.tls.push_back({out.modules.size(), out.tls.size() + 1, add(m.bias, tls->address),
+                                   tls->fileSize, tls->memorySize, alignment, offset});
+                out.staticTLSSize = offset;
+                out.staticTLSAlignment = std::max(out.staticTLSAlignment, alignment);
+                tlsMemory = tls->memorySize;
+                ++report.tlsModules; report.staticTLSBytes = offset;
+                report.phase = "ELF/segments";
+            }
             for (const auto& h : m.image.headers) {
                 require(h.type == 0 || h.type == 1 || h.type == 2 || h.type == 4 || h.type == 6 ||
                         h.type == 7 || h.type == 0x61000000 || h.type == 0x61000010,
@@ -309,7 +351,7 @@ private:
                 require(valid, "invalid module entry"); m.entry = add(m.bias, m.image.entry);
             }
             report.phase = "dynamic metadata";
-            dynamic.push_back(parse(in, m, symbolBudget, relocationBudget)); out.modules.push_back(std::move(m));
+            dynamic.push_back(parse(in, m, tlsMemory, symbolBudget, relocationBudget)); out.modules.push_back(std::move(m));
         }
         report.phase = "PRX dependencies";
         // Validate even unused module descriptors: symbols alone cannot prove a
@@ -346,8 +388,9 @@ private:
         report.phase = "NID imports";
         struct Export { uint64_t address; size_t owner; };
         std::map<Identity, Export> exports;
+        // TLS exports carry their block offset; the owner gives the TLS module.
         for (size_t i = 0; i < dynamic.size(); ++i) for (const auto& s : dynamic[i].symbols) if (s.defined && !s.local)
-            require(exports.emplace(s.identity, Export{add(out.modules[i].bias, s.value), i}).second,
+            require(exports.emplace(s.identity, Export{s.type == 6 ? s.value : add(out.modules[i].bias, s.value), i}).second,
                     "duplicate or ambiguous export: " + s.identity.nid);
         for (const auto& h : hle) {
             require(h.identity.type == 2 && out.translate(h.guestAddress, 1, 5), "HLE requires mapped executable guest trampoline");
@@ -355,10 +398,11 @@ private:
         }
         // Resolve every import (including unreferenced/weak imports) before writes.
         std::vector<std::vector<uint64_t>> resolved(dynamic.size());
+        std::vector<std::vector<size_t>> owners(dynamic.size()); // Defining module, for TLS module IDs.
         for (size_t i = 0; i < dynamic.size(); ++i) {
             for (size_t j = 0; j < dynamic[i].symbols.size(); ++j) {
-                const auto& s = dynamic[i].symbols[j]; uint64_t address = 0;
-                if (s.defined) address = add(out.modules[i].bias, s.value);
+                const auto& s = dynamic[i].symbols[j]; uint64_t address = 0; size_t definer = i;
+                if (s.defined) address = s.type == 6 ? s.value : add(out.modules[i].bias, s.value);
                 else if (j) {
                     ++report.imports;
                     const auto it = exports.find(s.identity);
@@ -370,11 +414,15 @@ private:
                         require(std::find(deps.begin(), deps.end(), out.modules[owner].path) != deps.end(), "import provider missing explicit dependency");
                         require(owner < i, "import provider not loaded first");
                     }
-                    address = it->second.address; ++report.resolvedImports;
+                    address = it->second.address; definer = owner; ++report.resolvedImports;
                 }
-                resolved[i].push_back(address);
+                resolved[i].push_back(address); owners[i].push_back(definer);
             }
         }
+        auto tlsBlock = [&](size_t module) -> const TLSBlock& {
+            for (const auto& block : out.tls) if (block.module == module) return block;
+            throw Failure(out.modules[module].path + ": TLS relocation without PT_TLS");
+        };
         report.phase = "relocations";
         struct Write { uint8_t* target; uint64_t value; };
         std::vector<Write> writes;
@@ -387,8 +435,14 @@ private:
                 // symbol/addend is used, and it cannot overlap a real write.
                 if (type == 0) { ++report.ignoredRelocations; continue; }
                 ++report.relocations;
-                require(type == 1 || type == 6 || type == 7 || type == 8, "unsupported x86-64 relocation " + std::to_string(type));
-                require(symbol < resolved[i].size() && (type != 8 || symbol == 0) && (type == 8 || symbol != 0), "invalid relocation symbol");
+                require(type == 1 || type == 6 || type == 7 || type == 8 || (type >= 16 && type <= 18),
+                        "unsupported x86-64 relocation " + std::to_string(type));
+                const bool tlsRelocation = type >= 16;
+                // TLS relocations may use symbol 0 (local-dynamic: this module, offset = A).
+                require(symbol < resolved[i].size() && (type != 8 || symbol == 0) && (type == 8 || tlsRelocation || symbol != 0),
+                        "invalid relocation symbol");
+                const bool tlsSymbol = symbol && dynamic[i].symbols[symbol].type == 6;
+                require(tlsRelocation ? (!symbol || tlsSymbol) : !tlsSymbol, "TLS symbol/relocation kind mismatch");
                 auto* target = const_cast<uint8_t*>(m.image.translate(r.offset, 8, 6));
                 require(target && !m.image.translate(r.offset, 8, 1), "relocation target outside RW/non-X guest segment");
                 auto next = targets.lower_bound(r.offset);
@@ -396,7 +450,17 @@ private:
                         (next == targets.begin() || r.offset - *std::prev(next) >= 8), "overlapping relocation writes");
                 targets.insert(r.offset);
                 // GLOB_DAT/JUMP_SLOT = S; 64 = S+A; RELATIVE = B+A (AMD64 ABI).
-                const auto value = type == 8 ? signedAdd(m.bias, r.addend) : type == 1 ? signedAdd(resolved[i][symbol], r.addend) : resolved[i][symbol];
+                // DTPMOD64 = module ID; DTPOFF64 = S+A in the block; TPOFF64 = S+A-offset,
+                // a negative thread-pointer offset in variant II.
+                uint64_t value;
+                if (tlsRelocation) {
+                    const auto& block = tlsBlock(symbol ? owners[i][symbol] : i);
+                    const auto inBlock = signedAdd(symbol ? resolved[i][symbol] : 0, r.addend);
+                    require(inBlock <= block.memorySize, "TLS offset outside module TLS block");
+                    value = type == 16 ? block.id : type == 17 ? inBlock : inBlock - block.offset; // Intentional two's complement.
+                } else {
+                    value = type == 8 ? signedAdd(m.bias, r.addend) : type == 1 ? signedAdd(resolved[i][symbol], r.addend) : resolved[i][symbol];
+                }
                 writes.push_back({target, value}); ++report.validatedRelocations;
             }
         }

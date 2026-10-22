@@ -57,4 +57,30 @@ inline void setTag(std::vector<uint8_t>& b, uint64_t tag, uint64_t value) {
     }
     throw std::runtime_error("fixture tag missing");
 }
+// Both modules get a PT_TLS block (0x10 template bytes at 0x2080, 0x20 bytes per
+// thread, 8-byte aligned). The provider exports TLS symbol 2 at block offset 8;
+// the consumer imports it and carries DTPMOD64/DTPOFF64/TPOFF64 relocations.
+inline std::vector<uint8_t> makeTLS(bool provider) {
+    auto b = make(provider);
+    put(b,56,5,2);
+    const size_t p = 64 + 4 * 56;
+    put(b,p,7,4); put(b,p+4,4,4); put(b,p+8,0x380); put(b,p+16,0x2080);
+    put(b,p+32,0x10); put(b,p+40,0x20); put(b,p+48,8);
+    for (size_t i = 0; i < 0x10; ++i) b[0x380 + i] = uint8_t(0xa0 + i);
+    // Second symbol name after the existing strings, then grow the tables.
+    const char name[] = "BBBBBBBBBBB#B#B";
+    for (size_t i = 0; i < sizeof(name); ++i) b[0x62e + i] = uint8_t(name[i]);
+    setTag(b,0x61000037,0x2e + sizeof(name));
+    setTag(b,0x6100003f,72);
+    put(b,0x830,0x2e,4); b[0x834] = 0x16; put(b,0x836,provider ? 1 : 0,2);
+    put(b,0x838,provider ? 8 : 0); put(b,0x840,provider ? 8 : 0);
+    if (!provider) {
+        auto rela = [&](size_t index, uint64_t offset, uint64_t symbol, uint32_t type, uint64_t addend) {
+            put(b,0x900+index*24,offset); put(b,0x908+index*24,(symbol<<32)|type); put(b,0x910+index*24,addend);
+        };
+        rela(1,0x2008,2,16,0); rela(2,0x2010,2,17,4); rela(3,0x2018,0,18,4); rela(4,0x2020,0,16,0);
+        setTag(b,0x61000031,5*24);
+    }
+    return b;
+}
 }

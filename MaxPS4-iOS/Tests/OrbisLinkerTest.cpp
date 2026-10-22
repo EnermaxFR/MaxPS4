@@ -126,7 +126,43 @@ int main(int argc, char** argv) {
     put(provider,64+40,0x200); put(provider,0x820,0x10ff); put(provider,0x828,2);
     reject(batch(),"function export outside file-backed code"); provider=make(true);
     put(provider,0x820,0x3000); reject(batch(), "export outside valid segment"); provider=make(true);
-    put(consumer,64+3*56,7,4); reject(batch(), "TLS not supported"); consumer=original;
+    put(consumer,64+3*56,7,4); reject(batch(), "TLS template outside file-backed segment"); consumer=original;
+    {
+        // Static TLS, variant II: provider loads first (ID 1, block at TP-0x20),
+        // consumer second (ID 2, block at TP-0x40).
+        auto tlsProvider = makeTLS(true), tlsConsumer = makeTLS(false);
+        auto tlsBatch = [&] { return std::vector<Linker::Input>{input("app.elf",tlsConsumer,0x100000,{"provider.prx"}),
+                                                                input("provider.prx",tlsProvider,0x200000,{})}; };
+        Linker::Image tlsImage; Linker::Report tlsReport;
+        check(Linker::link(tlsBatch(),{},tlsImage,diagnostic,64*1024*1024,&tlsReport),diagnostic.c_str());
+        check(tlsImage.tls.size()==2 && tlsImage.staticTLSSize==0x40 && tlsImage.staticTLSAlignment==8,"static TLS layout");
+        check(tlsImage.tls[0].id==1 && tlsImage.tls[0].offset==0x20 && tlsImage.tls[0].image==0x202080 &&
+              tlsImage.tls[0].fileSize==0x10 && tlsImage.tls[0].memorySize==0x20,"provider TLS block");
+        check(tlsImage.tls[1].id==2 && tlsImage.tls[1].offset==0x40 && tlsImage.tls[1].image==0x102080,"consumer TLS block");
+        check(value(tlsImage,0x102000)==0x201000,"non-TLS JUMP_SLOT unchanged by TLS");
+        check(value(tlsImage,0x102008)==1,"DTPMOD64 imported symbol -> provider module ID");
+        check(value(tlsImage,0x102010)==0xc,"DTPOFF64 = S + A inside provider block");
+        check(value(tlsImage,0x102018)==uint64_t(4)-0x40,"TPOFF64 local = A - block offset (negative)");
+        check(value(tlsImage,0x102020)==2,"DTPMOD64 symbol 0 -> own module ID");
+        check(tlsReport.tlsModules==2 && tlsReport.text().find("TLS statique : 2 module(s) ; 64 octets")!=std::string::npos,
+              "TLS report line");
+        auto tlsReject = [&](const std::string& expected) {
+            Linker::Image unchanged = tlsImage;
+            check(!Linker::link(tlsBatch(),{},tlsImage,diagnostic),"expected TLS rejection");
+            check(diagnostic.find(expected)!=std::string::npos,diagnostic.c_str());
+            check(tlsImage.tls.size()==unchanged.tls.size() && value(tlsImage,0x102008)==1,"output unchanged on TLS failure");
+        };
+        const auto tlsOriginal = tlsConsumer;
+        put(tlsConsumer,0x908,(uint64_t{2}<<32)|7); tlsReject("TLS symbol/relocation kind mismatch"); tlsConsumer=tlsOriginal;
+        put(tlsConsumer,0x910+2*24,0x100); tlsReject("TLS offset outside module TLS block"); tlsConsumer=tlsOriginal;
+        put(tlsConsumer,64+4*56+48,3); tlsReject("invalid PT_TLS alignment"); tlsConsumer=tlsOriginal;
+        put(tlsConsumer,64+4*56+16,0x3000); tlsReject("TLS template outside file-backed segment"); tlsConsumer=tlsOriginal;
+        put(tlsConsumer,64+4*56+40,0x8); tlsReject("invalid PT_TLS size"); tlsConsumer=tlsOriginal;
+        put(tlsProvider,0x838,0x20); tlsReject("TLS symbol outside module TLS block"); tlsProvider=makeTLS(true);
+        // A TLS relocation in a module without PT_TLS fails closed.
+        auto plainTLS = makeTLS(false); put(plainTLS,56,4,2);
+        tlsConsumer = plainTLS; tlsReject("without PT_TLS"); tlsConsumer=tlsOriginal;
+    }
     put(consumer,64+56+40,33*1024*1024); reject(batch(), "chargeur"); consumer=original;
     // Overflow in S+A, independently of segment-address overflow.
     put(consumer,0x908,(uint64_t{1}<<32)|1); put(consumer,0x910,INT64_MAX);
