@@ -150,8 +150,11 @@ binaires réels). Côté exécution, un `CALL [GOT]` vers une trampoline est adm
 sans admettre son `SYSCALL` comme code invité ; FEX n'appelle `PS4Libkernel`
 que si le `SYSCALL` est exactement celui d'une trampoline avec le même jeton.
 Arguments SysV (RDI, RSI, RDX, R10, R8, R9) ; pas de 7ᵉ argument sur la pile.
-Les pointeurs passés sont des adresses hôte rebasées : les services qui lisent
-ou écrivent la mémoire invitée ne sont pas encore utilisables par ce chemin.
+Arguments admis : `MOV EDI/ESI, imm32` et `LEA RDI/RSI/RDX, [RIP+rel32]` vers
+des données invitées non exécutables. FEX exécutant à des adresses hôte
+rebasées, chaque argument situé dans l'arène de l'image est retraduit en
+adresse PS4 logique avant l'appel ; libkernel revérifie ensuite permissions et
+longueurs (ex. `sceKernelClockGettime` écrit son `timespec` en mémoire invitée).
 
 Le registre HLE C++ est explicite et vide par défaut. Une entrée contient
 l'identité exacte et une adresse de trampoline **invité** déjà cartographié RX.

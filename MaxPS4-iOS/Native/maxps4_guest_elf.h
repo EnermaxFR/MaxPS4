@@ -58,6 +58,16 @@ public:
         return false;
     }
     bool has_hle() const { return !thunks.empty(); }
+    // FEX runs the admitted code at rebased host addresses. Map a host address
+    // inside this image's arena back to its logical PS4 address (for HLE
+    // pointer arguments); false outside the arena. Permissions are checked
+    // later by whoever dereferences the logical address.
+    bool guest_address(uint64_t host, uint64_t& guest) const {
+        const auto base = reinterpret_cast<uintptr_t>(arena);
+        if (!arena || host < base || host - base >= arena_size) return false;
+        guest = guest_base + (host - base);
+        return true;
+    }
     const uint8_t* entry_pointer() const { return translate(guest_entry, 1, 5); }
     const std::vector<Segment>& segments() const { return regions; }
 private:
