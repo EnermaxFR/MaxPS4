@@ -3,6 +3,7 @@
 #include "../Native/PS4PKGBridge.h"
 #include "PS4ExecutableFixture.h"
 #include <cassert>
+#include <cerrno>
 #include <cstdio>
 #include <filesystem>
 
@@ -135,6 +136,17 @@ int main(int argc, char** argv) {
     assert(text.find("TITLE_ID (param.sfo) : CUSA12345") != std::string::npos);
     assert(text.find("Référence : sce_module/libdemo.sprx") != std::string::npos);
     assert(text.find("référence seule, données exécutables non admises") != std::string::npos);
+    // Library title info: exact key=value lines, bounded and NUL-terminated.
+    std::vector<char> info(4096, 'x');
+    assert(maxps4_pkg_read_title_info(path.c_str(), info.data(), info.size()) == 0);
+    assert(std::string(info.data()) == "TITLE=Diagnostic synthétique\nTITLE_ID=CUSA12345\n"
+        "CONTENT_ID=EP0000-CUSA12345_00-SYNTHETIC0000000\nAPP_VER=01.23\nVERSION=01.00\nCATEGORY=gd\n");
+    assert(maxps4_pkg_read_title_info(path.c_str(), info.data(), 8) == -ENOSPC && std::string(info.data()) == "TITLE=D");
+    assert(maxps4_pkg_read_title_info(path.c_str(), nullptr, 0) == -EINVAL);
+    assert(maxps4_pkg_read_title_info((folder / "missing.pkg").c_str(), info.data(), info.size()) == -ENOENT && !info[0]);
+    put(bytes, 0x5c8, 0x80000000, 4); write(path, bytes); // Encrypted SFO descriptor: never read.
+    assert(maxps4_pkg_read_title_info(path.c_str(), info.data(), info.size()) == -ENOENT && !info[0]);
+    bytes = original;
     put(bytes, 0x5c8, 0x80000000, 4); write(folder / "synthetic-encrypted-sfo.pkg", bytes);
     write(path, bytes); assert(!maxps4_pkg_inventory_report(path.c_str(), report.data(), report.size()));
     assert(std::string(report.data()).find("APP_VER (param.sfo) : indisponible") != std::string::npos);

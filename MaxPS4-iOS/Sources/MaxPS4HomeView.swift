@@ -25,6 +25,7 @@ struct MaxPS4HomeView: View {
     @State private var renamedGameTitle = ""
     @State private var inspectionReport: String?
     @State private var selectedGameDetails: MaxPS4Game?
+    @State private var selectedTitleInfo: MaxPS4PKGInspector.TitleInfo?
     @State private var detailsReport: String?
     @State private var jitStatusReport: String?
     @State private var showingFEXDiagnostic = false
@@ -201,11 +202,11 @@ struct MaxPS4HomeView: View {
                 }
             }
         }
-        .sheet(item: $selectedGameDetails, onDismiss: { detailsReport = nil }) { game in
+        .sheet(item: $selectedGameDetails, onDismiss: { detailsReport = nil; selectedTitleInfo = nil }) { game in
             NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        Text(game.fileName.uppercased().contains("KEROBLASTER") ? "Kero Blaster" : (game.fileName.uppercased().contains("SONICMANIA") ? "Sonic Mania" : game.name))
+                        Text(game.name)
                             .font(.title2.bold())
                             .lineLimit(2)
                             .minimumScaleFactor(0.75)
@@ -233,6 +234,17 @@ struct MaxPS4HomeView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
+                        if let info = selectedTitleInfo {
+                            MaxPS4TitleInfoView(info: info)
+                            // Older imports were named after the file; offer the real title once.
+                            if let title = info.title, title != game.name {
+                                Button("Renommer en « \(title) »") {
+                                    emulator.rename(game, to: title)
+                                    selectedGameDetails = emulator.games.first { $0.id == game.id }
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
                         Text(game.fileName.lowercased().hasSuffix(".pkg") ? "Format : PKG PS4" : "Format : ELF / SELF")
                         if let attributes = try? FileManager.default.attributesOfItem(atPath: game.localPath),
                            let value = attributes[.size] as? NSNumber {
@@ -308,6 +320,13 @@ struct MaxPS4HomeView: View {
                 }
                 .navigationTitle("Fiche du jeu")
                 .navigationBarTitleDisplayMode(.inline)
+                .task(id: game.id) {
+                    guard game.fileName.lowercased().hasSuffix(".pkg") else { selectedTitleInfo = nil; return }
+                    let url = URL(fileURLWithPath: game.localPath)
+                    selectedTitleInfo = await Task.detached(priority: .userInitiated) {
+                        MaxPS4PKGInspector.titleInfo(url: url)
+                    }.value
+                }
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Fermer") {
@@ -1515,6 +1534,41 @@ private struct MaxPS4Background: View {
                 .frame(width: 260, height: 260)
                 .blur(radius: 70)
                 .offset(x: -180, y: 280)
+        }
+    }
+}
+
+private struct MaxPS4TitleInfoView: View {
+    let info: MaxPS4PKGInspector.TitleInfo
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Informations du jeu (param.sfo)")
+                .font(.headline)
+            row("Titre", info.title)
+            row("Identifiant", info.titleID)
+            row("Catégorie", info.categoryName)
+            row("Version de l’application", info.appVersion)
+            row("Version du contenu", info.version)
+            row("Content ID", info.contentID)
+            Text("Lu depuis le PKG ; authenticité non vérifiée.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    @ViewBuilder
+    private func row(_ label: String, _ value: String?) -> some View {
+        if let value {
+            HStack(alignment: .firstTextBaseline) {
+                Text(label).foregroundStyle(.secondary)
+                Spacer()
+                Text(value).multilineTextAlignment(.trailing).textSelection(.enabled)
+            }
+            .font(.subheadline)
         }
     }
 }
