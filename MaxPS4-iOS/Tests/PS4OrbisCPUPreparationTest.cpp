@@ -154,17 +154,24 @@ int main() {
         const maxps4::OrbisLinker::Input noTLSAlone{{{"app.elf",{}},noTLS.data(),noTLS.size()},app_bias};
         CHECK(maxps4::OrbisLinker::link({noTLSAlone},{{kernel_identity("vNe1w4diLCs"),0,tlsToken}},linked,reason));
         CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==-EFAULT);
-        // Dynamic startup: DT_INIT then DT_INIT_ARRAY (relocated), then the entry.
+        // An executable's DT_INIT/DT_INIT_ARRAY are validated, never run by the engine.
         auto initApp=make_init_app();
         const std::vector<maxps4::OrbisLinker::HLE> kernelHLE{{kernel_identity(),0,token}};
         auto initInput=[&]{ return std::vector<maxps4::OrbisLinker::Input>{{{{"app.elf",{}},initApp.data(),initApp.size()},app_bias}}; };
         CHECK(maxps4::OrbisLinker::link(initInput(),kernelHLE,linked,reason));
-        CHECK(linked.initializers.size()==2 && linked.initializers[0]==entry+0xc && linked.initializers[1]==entry+0x18);
+        CHECK(linked.initializers.empty());
+        CHECK(image.prepare_orbis(linked,"app.elf",20,reason)==0 && image.start()==entry);
+        // PRX module_start: only the provider's DT_INIT, called as (0, NULL, NULL).
+        auto startApp=make_start_app(), startProvider=make_start_provider();
+        const std::vector<maxps4::OrbisLinker::Input> startInputs{input("app.elf",startApp,false),input("provider.prx",startProvider,true)};
+        CHECK(maxps4::OrbisLinker::link(startInputs,{},linked,reason));
+        CHECK(linked.initializers.size()==1 && linked.initializers[0]==provider_bias+0x4006);
         CHECK(image.prepare_orbis(linked,"app.elf",20,reason)==0);
         CHECK(image.entry()==entry && image.start()!=entry && image.start()%0x1000==0);
-        const auto* stub=image.translate(image.start(),15,5);
-        CHECK(stub && stub[0]==0xe8 && stub[5]==0xe8 && stub[10]==0xe9 && !image.translate(image.start(),1,2));
-        CHECK(image.prepare_orbis(linked,"app.elf",3,reason)==-E2BIG); // Initializers count against the budget.
+        const uint8_t zero[]={0x31,0xff,0x31,0xf6,0x31,0xd2,0xe8};
+        const auto* stub=image.translate(image.start(),16,5);
+        CHECK(stub && !std::memcmp(stub,zero,sizeof(zero)) && stub[11]==0xe9 && !image.translate(image.start(),1,2));
+        CHECK(image.prepare_orbis(linked,"app.elf",3,reason)==-E2BIG); // module_start counts against the budget.
         orbis_fixture::setTag(initApp,12,0x8010); // DT_INIT into data.
         CHECK(!maxps4::OrbisLinker::link(initInput(),kernelHLE,linked,reason) &&
               reason.find("DT_INIT outside")!=std::string::npos);

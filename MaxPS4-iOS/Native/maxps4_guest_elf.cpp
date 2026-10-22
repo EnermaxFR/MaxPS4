@@ -205,13 +205,15 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
         const long host_page = ::sysconf(_SC_PAGESIZE);
         if (host_page <= 0) return fail(-EIO, "host page size unavailable");
         const uint64_t page = static_cast<uint64_t>(host_page);
-        // Dynamic startup: an RX stub "CALL init_1 ... CALL init_n; JMP entry"
-        // after a guard page. Admission starts at the stub, so every initializer
-        // is admitted as a function and the entry as the process body.
+        // Dynamic startup: an RX stub after a guard page. For each PRX, in load
+        // order, module_start(0, NULL, NULL): XOR EDI,EDI; XOR ESI,ESI;
+        // XOR EDX,EDX; CALL init. Then JMP entry. Admission starts at the stub,
+        // so every module_start is admitted as a function, the entry as the body.
+        constexpr uint64_t call_block = 11;
         uint64_t start = entry;
         if (!copy.initializers.empty()) {
             start = (highest + page - 1) / page * page + page;
-            const uint64_t size = 5 * (copy.initializers.size() + 1);
+            const uint64_t size = call_block * copy.initializers.size() + 5;
             if (start > (uint64_t{1} << 47) - size) return fail(-E2BIG, "startup stub outside user range");
             std::vector<uint8_t> stub(static_cast<size_t>(size));
             auto branch = [&](size_t at, uint8_t opcode, uint64_t target) {
@@ -221,9 +223,14 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                 for (size_t b = 0; b < 4; ++b) stub[at + 1 + b] = uint8_t(uint64_t(relative) >> (8 * b));
                 return true;
             };
-            for (size_t k = 0; k < copy.initializers.size(); ++k)
-                if (!branch(5 * k, 0xe8, copy.initializers[k])) return fail(-EOVERFLOW, "initializer CALL displacement overflow");
-            if (!branch(5 * copy.initializers.size(), 0xe9, entry)) return fail(-EOVERFLOW, "entry JMP displacement overflow");
+            for (size_t k = 0; k < copy.initializers.size(); ++k) {
+                const size_t at = static_cast<size_t>(call_block * k);
+                const uint8_t zero[] = {0x31,0xff,0x31,0xf6,0x31,0xd2};
+                std::copy(std::begin(zero), std::end(zero), stub.begin() + at);
+                if (!branch(at + 6, 0xe8, copy.initializers[k])) return fail(-EOVERFLOW, "module_start CALL displacement overflow");
+            }
+            if (!branch(static_cast<size_t>(call_block * copy.initializers.size()), 0xe9, entry))
+                return fail(-EOVERFLOW, "entry JMP displacement overflow");
             OrbisLinker::Module module {"<start>", start, 0, PS4ExecutableImage{}};
             PS4ExecutableImage::Header header {1, 5, 0, 0, size, size, page};
             module.image.headers.push_back(header);
@@ -294,7 +301,7 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                     op == 0x05 || op == 0x25 || op == 0x0d ? 5 :
                     op == 0xff || op == 0x8b || op == 0x81 ? 6 :
                     op == 0xc7 ? 10 : op == 0xe8 || op == 0xe9 ? 5 : op == 0x64 ? 8 : op == 0x48 ? 7 : op == 0xc1 || op == 0x0f ? 3 :
-                    op == 0x01 || op == 0x29 || op == 0x39 || op == 0x89 ? 2 : 1;
+                    op == 0x01 || op == 0x29 || op == 0x31 || op == 0x39 || op == 0x89 ? 2 : 1;
                 // TLS forms are told apart by their second byte.
                 if ((op == 0x8b || op == 0x64) && fetch(pc,2)) {
                     if (op == 0x8b && code[1] == 0x40) width = 3;
@@ -423,6 +430,12 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                         if (error) return error;
                     }
                     patches.push_back({code,static_cast<uint32_t>(relative)});
+                } else if (op == 0x31) {
+                    // XOR EDI,EDI / ESI,ESI / EDX,EDX: zero arguments (startup stub).
+                    if (code[1] != 0xff && code[1] != 0xf6 && code[1] != 0xd2) return -ENOTSUP;
+                    if (code[1] == 0xf6) esi_initialized = true;
+                    if (code[1] == 0xd2) edx_initialized = true;
+                    compared = false;
                 } else if (op == 0xe8) {
                     // CALL rel32 (startup stub): the target is admitted as a function.
                     const uint64_t target = static_cast<uint64_t>(static_cast<int64_t>(pc+5) +
