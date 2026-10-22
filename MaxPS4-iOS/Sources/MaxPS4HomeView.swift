@@ -29,6 +29,7 @@ struct MaxPS4HomeView: View {
     @State private var detailsReport: String?
     @State private var jitStatusReport: String?
     @State private var showingFEXDiagnostic = false
+    @State private var showingPlayableDemo = false
     @State private var showingMetalDiagnostic = false
     @State private var showingGameDirectory = false
 
@@ -100,6 +101,17 @@ struct MaxPS4HomeView: View {
             Text(inspectionReport ?? "")
         }
         .sheet(isPresented: $showingFEXDiagnostic) { MaxPS4FEXDiagnosticView() }
+        .sheet(isPresented: $showingPlayableDemo) {
+            NavigationStack {
+                MaxPS4PlayableView()
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Fermer") { showingPlayableDemo = false }
+                        }
+                    }
+            }
+            .preferredColorScheme(.dark)
+        }
         .sheet(isPresented: $showingMetalDiagnostic) { MaxPS4MetalDiagnosticView() }
         .sheet(isPresented: $showingGameDirectory) { MaxPS4GameDirectoryView() }
         .sheet(isPresented: $showingDuplicates) {
@@ -362,6 +374,8 @@ struct MaxPS4HomeView: View {
                 heroPanel
 
                 homeQuickActions
+
+                playableDemoCard
 
                 jitActivationCard
 
@@ -766,6 +780,35 @@ struct MaxPS4HomeView: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    /// Front-door to the existing playable Orbis demo (real x86-64 run by FEX).
+    /// It is a bundled synthetic program, never presented as a PS4 game.
+    private var playableDemoCard: some View {
+        Button {
+            showingPlayableDemo = true
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 38))
+                    .foregroundStyle(.green)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("DÉMO JOUABLE").font(.headline)
+                    Text("Programme Orbis x86-64 exécuté par FEX • tactile ou manette • JIT requis")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.62))
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.green)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.green.opacity(0.10), in: RoundedRectangle(cornerRadius: 18))
+            .overlay(RoundedRectangle(cornerRadius: 18).stroke(.green.opacity(0.35)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Ouvre la démo jouable intégrée ; ce n’est pas un jeu PS4")
     }
 
     private var systemOverview: some View {
