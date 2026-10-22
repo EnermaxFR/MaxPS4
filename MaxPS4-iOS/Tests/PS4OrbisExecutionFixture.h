@@ -61,6 +61,29 @@ inline std::vector<uint8_t> make_tls_register_app(int32_t disp=-8, bool disp32=f
     orbis_fixture::put(b,64+32,code.size()); orbis_fixture::put(b,64+40,code.size());
     return b;
 }
+// Initial-exec model: a GOT slot at 0xA000 receives TPOFF64 (sym 0, A=0 -> -8)
+// from the linker; MOV RAX,[RIP+slot]; MOV EAX,FS:[RAX]; ADD EAX,2; HLT.
+// With `relro`, the slot lives in a PT_SCE_RELRO segment that becomes read-only
+// after linking; otherwise it is an ordinary RW PT_LOAD and must be refused.
+constexpr uint64_t tls_got=app_bias+0xa000;
+inline std::vector<uint8_t> make_tls_initial_exec_app(bool relro=true, uint32_t initial=0x1234, bool gap=false) {
+    auto b=make_tls_app(-8,initial);
+    using orbis_fixture::put;
+    std::vector<uint8_t> code={0x48,0x8b,0x05,0,0,0,0};
+    if (gap) code.push_back(0x90);
+    code.insert(code.end(),{0x64,0x8b,0x00,0x05,2,0,0,0,0xf4});
+    std::fill(b.begin()+0x200,b.begin()+0x300,0);
+    std::copy(code.begin(),code.end(),b.begin()+0x200);
+    put(b,0x203,0xa000-(0x4000+7),4);
+    put(b,64+32,code.size()); put(b,64+40,code.size());
+    put(b,56,6,2);
+    const size_t p=64+5*56;
+    put(b,p,relro ? 0x61000010 : 1,4); put(b,p+4,6,4); put(b,p+8,0x3c0); put(b,p+16,0xa000);
+    put(b,p+32,8); put(b,p+40,8); put(b,p+48,1);
+    put(b,0x918,0xa000); put(b,0x920,18); put(b,0x928,0); // TPOFF64, symbol 0, A=0.
+    orbis_fixture::setTag(b,0x61000031,2*24);
+    return b;
+}
 inline maxps4::OrbisLinker::Input input(const char* path,const std::vector<uint8_t>& b,bool provider) {
     return {{{path,provider ? std::vector<std::string>{} : std::vector<std::string>{"provider.prx"}},b.data(),b.size()},
             provider ? provider_bias : app_bias};

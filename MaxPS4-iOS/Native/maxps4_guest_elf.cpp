@@ -245,7 +245,8 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
         std::map<uint64_t,size_t> instruction_ranges;
         bool initialized = false;
         bool edx_initialized = false, ebx_initialized = false, esi_initialized = false, ecx_initialized = false, compared = false;
-        bool rax_tp = false;
+        bool rax_tp = false, rax_tpoff = false;
+        int64_t tpoff = 0;
         uint32_t remaining = budget;
         uint64_t refusal_pc = entry;
         uint8_t refusal_opcode = 0;
@@ -262,18 +263,19 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                 refusal_opcode = op;
                 size_t width = op == 0xb8 || op == 0xb9 || op == 0xba || op == 0xbb || op == 0x05 || op == 0x25 || op == 0x0d ? 5 :
                     op == 0xff || op == 0x8b || op == 0x81 ? 6 :
-                    op == 0xc7 ? 10 : op == 0x64 ? 8 : op == 0xc1 || op == 0x0f ? 3 :
+                    op == 0xc7 ? 10 : op == 0x64 ? 8 : op == 0x48 ? 7 : op == 0xc1 || op == 0x0f ? 3 :
                     op == 0x01 || op == 0x29 || op == 0x39 || op == 0x89 ? 2 : 1;
                 // TLS forms are told apart by their second byte.
                 if ((op == 0x8b || op == 0x64) && fetch(pc,2)) {
                     if (op == 0x8b && code[1] == 0x40) width = 3;
                     if (op == 0x64 && code[1] == 0x48) width = 9;
+                    if (op == 0x64 && code[1] == 0x8b && fetch(pc,3) && code[2] == 0x00) width = 3;
                 }
                 if (!fetch(pc,width)) return -EFAULT;
-                // RAX holds the thread pointer only for the instruction right
-                // after MOV RAX,FS:[0]; anything else in between invalidates it.
-                const bool tp_in_rax = rax_tp;
-                rax_tp = false;
+                // RAX holds the thread pointer (or a GOT TLS offset) only for the
+                // instruction right after the load; anything in between invalidates it.
+                const bool tp_in_rax = rax_tp, tpoff_in_rax = rax_tpoff;
+                rax_tp = rax_tpoff = false;
                 if (op == 0x89 && code[1] != 0xc3 && code[1] != 0xc6) {
                     width = 6;
                     if (!fetch(pc,width)) return -EFAULT;
@@ -371,6 +373,22 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                     const int64_t disp = static_cast<int32_t>(number(code+2,4));
                     const uint64_t target = static_cast<uint64_t>(static_cast<int64_t>(pc+10)+disp);
                     if (!copy.translate(target,4,2) || copy.translate(target,4,1)) return -EFAULT;
+                } else if (op == 0x48) {
+                    // MOV RAX,[RIP+rel32] (48 8B 05): initial-exec GOT load of a TPOFF64
+                    // value. The slot must be read-only at run time (RELRO after
+                    // linking), so no admitted store can change the offset later.
+                    if (code[1] != 0x8b || code[2] != 0x05) return -ENOTSUP;
+                    const uint64_t slot = static_cast<uint64_t>(static_cast<int64_t>(pc+7) +
+                        static_cast<int32_t>(number(code+3,4)));
+                    const auto* value = copy.translate(slot,8,4);
+                    if (!value || copy.translate(slot,8,2) || copy.translate(slot,8,1)) return -EFAULT;
+                    rax_tpoff = true; tpoff = static_cast<int64_t>(number(value,8));
+                    initialized = true; compared = false;
+                } else if (op == 0x64 && code[1] == 0x8b && code[2] == 0x00) {
+                    // MOV EAX,FS:[RAX] (64 8B 00) right after the GOT load.
+                    if (!tpoff_in_rax) return -ENOTSUP;
+                    if (!tls_readable(tpoff, 4)) return -EFAULT;
+                    initialized = true; compared = false;
                 } else if (op == 0x64 && code[1] == 0x48) {
                     // MOV RAX, FS:[0] (64 48 8B 04 25 00000000): load the thread pointer
                     // from the TCB self-pointer.
