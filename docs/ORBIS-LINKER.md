@@ -62,12 +62,38 @@ Formules [AMD64 System V ABI, relocations](https://gitlab.com/x86-psABIs/x86-64-
 | R_X86_64_GLOB_DAT (6) | S |
 | R_X86_64_JUMP_SLOT (7) | S |
 | R_X86_64_RELATIVE (8) | B + A, symbole nul requis |
+| R_X86_64_DTPMOD64 (16) | ID du module TLS qui définit S (symbole nul : module courant) |
+| R_X86_64_DTPOFF64 (17) | S + A, décalage dans le bloc TLS du module |
+| R_X86_64_TPOFF64 (18) | S + A − décalage du bloc (valeur négative, variante II) |
 
 `S` est l'adresse invitée du symbole, `A` l'addend signé explicite RELA, `B` le
 biais invité choisi par le demandeur. Les dépassements et sous-dépassements sont
-refusés, sans wraparound. Le biais ne réécrit pas les métadonnées module-locales.
-Aucun type inconnu (y compris TLS, COPY, IFUNC, PC32, REL) n'est silencieusement
-ignoré. Les autres tags dynamiques, même certains tags standard usuels, sont
+refusés, sans wraparound, sauf la valeur volontairement négative de TPOFF64.
+Le biais ne réécrit pas les métadonnées module-locales.
+Aucun type inconnu (COPY, IFUNC, PC32, REL, TLS dynamique…) n'est silencieusement
+ignoré.
+
+### TLS statique
+
+Un module peut avoir un seul `PT_TLS` : alignement puissance de deux ≤ 4096,
+`p_filesz ≤ p_memsz`, 1 Mio au plus, image d'initialisation dans des octets
+chargés, lisibles et présents dans le fichier. Les modules TLS reçoivent les ID
+1, 2… dans l'ordre de chargement. Disposition x86-64 « variante II »
+(FreeBSD/Orbis) : chaque bloc se termine sous le pointeur de thread, à
+`TP − offset`, avec `offset = arrondi(offset précédent + p_memsz, alignement)`.
+`Image::tls` expose ID, adresse invitée de l'image, tailles, alignement et
+offset ; `staticTLSSize` est la taille totale par thread (1 Mio au plus).
+
+Les symboles `STT_TLS` portent un décalage dans le bloc de leur module, borné
+par `p_memsz`. Une relocation TLS sur un symbole non TLS (ou l'inverse), un
+décalage hors bloc ou une relocation TLS dans un module sans `PT_TLS` sont refusés.
+L'alignement de l'adresse de l'image (`p_vaddr % p_align`) n'est pas encore
+intégré au calcul de l'offset.
+
+Ce n'est qu'une étape de liaison : aucun bloc TLS n'est créé par thread et
+`prepare_orbis` refuse toujours l'exécution d'un module TLS
+(`Orbis TLS execution unavailable`) tant que le backend ne copie pas ces blocs
+et ne fixe pas le pointeur de thread (`fs`). Les autres tags dynamiques, même certains tags standard usuels, sont
 refusés tant que leur sémantique n'est pas implémentée et testée. Ce sous-ensemble
 ne prétend donc pas accepter arbitrairement tous les PRX réels ou les ELF Linux.
 
