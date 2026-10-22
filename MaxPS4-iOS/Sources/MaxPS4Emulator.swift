@@ -130,8 +130,10 @@ final class MaxPS4Emulator: ObservableObject {
 
     func importGame(from url: URL) {
         let access = url.startAccessingSecurityScopedResource()
+        // A background PKG copy takes over the security scope and releases it when done.
+        var scopeHandedOff = false
         defer {
-            if access { url.stopAccessingSecurityScopedResource() }
+            if access && !scopeHandedOff { url.stopAccessingSecurityScopedResource() }
         }
 
         let name = url.lastPathComponent.lowercased()
@@ -141,8 +143,9 @@ final class MaxPS4Emulator: ObservableObject {
         }
 
         let isPKG = name.hasSuffix(".pkg")
-        // Prevent importing the same filename twice (case-insensitive).
-        if games.contains(where: { $0.fileName.caseInsensitiveCompare(url.lastPathComponent) == .orderedSame }) {
+        // Prevent importing the same filename twice (case-insensitive), including in-flight copies.
+        if games.contains(where: { $0.fileName.caseInsensitiveCompare(url.lastPathComponent) == .orderedSame }) ||
+            pendingImports.contains(name) {
             status = "Fichier déjà présent dans la bibliothèque : \(url.lastPathComponent)"
             return
         }
@@ -181,29 +184,82 @@ final class MaxPS4Emulator: ObservableObject {
         do {
             let folder = try importFolder()
             let destination = uniqueDestination(for: url.lastPathComponent, in: folder)
+            if isPKG {
+                // Multi-GB packages: copy off the main actor so the UI stays responsive.
+                scopeHandedOff = true
+                copyPKGInBackground(from: url, to: destination, key: name, scoped: access)
+                return
+            }
             try fileManager.copyItem(at: url, to: destination)
-
-            let prettyName = destination
-                .deletingPathExtension()
-                .lastPathComponent
-                .replacingOccurrences(of: "_", with: " ")
-                .replacingOccurrences(of: "-", with: " ")
-
-            let displayName = prettyName // Library label only; metadata comes from the checked report.
-            let game = MaxPS4Game(
-                id: UUID(),
-                name: displayName,
-                fileName: destination.lastPathComponent,
-                localPath: destination.path,
-                importedAt: Date()
-            )
-
-            games.insert(game, at: 0)
-            try saveLibrary()
-            status = isPKG ? "PKG PS4 importé (non exécutable) : \(destination.lastPathComponent)" : "Importé : \(destination.lastPathComponent)"
+            try addImportedGame(at: destination, isPKG: false)
         } catch {
             status = "Import impossible : \(error.localizedDescription)"
         }
+    }
+
+    /// Names of PKG copies still running, lowercased, to reject a second import of the same file.
+    private var pendingImports: Set<String> = []
+
+    private func copyPKGInBackground(from url: URL, to destination: URL, key: String, scoped: Bool) {
+        pendingImports.insert(key)
+        let total = Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        status = Self.copyProgress(copied: 0, total: total, name: destination.lastPathComponent)
+        Task {
+            // copyItem gives no callback; the destination size is a cheap progress signal.
+            let progress = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    let attributes = try? FileManager.default.attributesOfItem(atPath: destination.path)
+                    let copied = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
+                    if !Task.isCancelled {
+                        self?.status = Self.copyProgress(copied: copied, total: total, name: destination.lastPathComponent)
+                    }
+                }
+            }
+            let result = await Task.detached(priority: .userInitiated) {
+                Result { try FileManager.default.copyItem(at: url, to: destination) }
+            }.value
+            progress.cancel()
+            if scoped { url.stopAccessingSecurityScopedResource() }
+            pendingImports.remove(key)
+            switch result {
+            case .success:
+                do { try addImportedGame(at: destination, isPKG: true) }
+                catch { status = "Import impossible : \(error.localizedDescription)" }
+            case .failure(let error):
+                // Only our own fresh, partial destination is removed; the source is never touched.
+                try? fileManager.removeItem(at: destination)
+                status = "Import impossible : \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private static func copyProgress(copied: Int64, total: Int64, name: String) -> String {
+        func format(_ bytes: Int64) -> String { ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) }
+        guard total > 0 else { return "Copie du PKG en cours : \(name) (\(format(copied)))" }
+        let percent = min(100, Int(Double(copied) * 100 / Double(total)))
+        return "Copie du PKG en cours : \(name) — \(percent) % (\(format(copied)) / \(format(total)))"
+    }
+
+    private func addImportedGame(at destination: URL, isPKG: Bool) throws {
+        let prettyName = destination
+            .deletingPathExtension()
+            .lastPathComponent
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+
+        let displayName = prettyName // Library label only; metadata comes from the checked report.
+        let game = MaxPS4Game(
+            id: UUID(),
+            name: displayName,
+            fileName: destination.lastPathComponent,
+            localPath: destination.path,
+            importedAt: Date()
+        )
+
+        games.insert(game, at: 0)
+        try saveLibrary()
+        status = isPKG ? "PKG PS4 importé (non exécutable) : \(destination.lastPathComponent)" : "Importé : \(destination.lastPathComponent)"
     }
 
     /// Report possible duplicate imports without deleting any user files.
@@ -585,23 +641,23 @@ final class MaxPS4Emulator: ObservableObject {
     func launchReadinessReport(for game: MaxPS4Game) -> String {
         let fileURL = URL(fileURLWithPath: game.localPath)
         guard fileManager.fileExists(atPath: fileURL.path) else {
-            return "Fichier introuvable : \\(game.fileName). Vérifie les données importées."
+            return "Fichier introuvable : \(game.fileName). Vérifie les données importées."
         }
         if fileURL.pathExtension.lowercased() == "pkg" {
-            return "\(game.name) : PKG reconnu et conservé. Lancement bloqué : eboot.bin, modules PRX et ressources du PFS ne sont pas accessibles par cet import. Fournir un dossier obtenu par une voie autorisée avec des ELF/PRX en clair et maxps4.json, puis utiliser « Importer et exécuter un dossier Orbis compatible » dans le diagnostic FEXCore. Aucun jeu lancé depuis ce PKG."
+            return "\(game.name) ne peut pas encore être lancé.\n\nPKG reconnu et conservé, mais le jeu ne se lance pas depuis un PKG : eboot.bin, modules PRX et ressources du PFS (généralement chiffré) ne sont pas accessibles par cet import, et MaxPS4 ne déchiffre pas.\n\nPour essayer : fournir un dossier obtenu par une voie autorisée avec des ELF/PRX en clair et maxps4.json, puis utiliser « Importer et exécuter un dossier Orbis compatible » dans le diagnostic FEXCore. Aucun jeu lancé depuis ce PKG."
         }
         guard let nativeEngine else {
             let cpuProbeStatus = maxps4NativeAetherCPUProbe() == 1 ? "réussi" : "échoué"
-            return "\\(game.name) : bibliothèque native ABI \\(maxps4NativeABIVersion()) liée ; lancement PS4 indisponible (capacités : \\(maxps4NativeCapabilities())) ; test CPU AetherPS4 : \\(cpuProbeStatus)."
+            return "\(game.name) : bibliothèque native ABI \(maxps4NativeABIVersion()) liée ; lancement PS4 indisponible (capacités : \(maxps4NativeCapabilities())) ; test CPU AetherPS4 : \(cpuProbeStatus)."
         }
         guard nativeEngine.isReady else {
-            return "\\(game.name) : moteur natif détecté, mais pas prêt à exécuter un jeu."
+            return "\(game.name) : moteur natif détecté, mais pas prêt à exécuter un jeu."
         }
         if let backend = nativeEngine as? any MaxPS4ShadPS4Backend,
            !backend.capabilities.canLaunchPS4Game {
-            return "\\(game.name) : moteur PS4 incomplet. " + backend.capabilities.diagnostic
+            return "\(game.name) : moteur PS4 incomplet. " + backend.capabilities.diagnostic
         }
-        return "\\(game.name) : moteur déclaré prêt. Le lancement reste expérimental."
+        return "\(game.name) : moteur déclaré prêt. Le lancement reste expérimental."
     }
 
     func launch(_ game: MaxPS4Game) {

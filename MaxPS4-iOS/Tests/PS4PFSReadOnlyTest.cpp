@@ -22,8 +22,14 @@ int main(int argc,char** argv) {
     PFS pfs;
     assert(pfs.inspect(b.size(),read));
     assert(pfs.status==PFS::Status::accessible && pfs.files.size()==1 && pfs.files[0].path=="eboot.bin");
+    assert(reads==4); // Superblock, whole inode table, root and uroot directories.
     std::vector<uint8_t> output; std::string why;
     assert(pfs.extract("eboot.bin",read,output,why) && std::string(output.begin(),output.end())=="hello");
+    // Direct extraction requires the exact size and never reads otherwise.
+    uint8_t direct[5]{}; const auto beforeDirect=reads;
+    assert(!pfs.extractTo("eboot.bin",read,direct,4,why) && reads==beforeDirect);
+    assert(!pfs.extractTo("keystone",read,direct,5,why) && reads==beforeDirect);
+    assert(pfs.extractTo("eboot.bin",read,direct,5,why) && !std::memcmp(direct,"hello",5) && reads==beforeDirect+1);
     for (const auto* path:{"../eboot.bin","/eboot.bin","uroot/../eboot.bin","eboot.bin/","missing","keystone","sce_sys/license.dat"}) {
         const auto before=reads;
         assert(!pfs.extract(path,read,output,why) && output.empty() && reads==before);

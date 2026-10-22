@@ -37,7 +37,7 @@ int main() {
     std::string why;
     auto parse = [&]() { return pkg.parse(f.size(), read); };
     assert(parse() && pkg.entries.size() == 2);
-    assert(reads == 3 && bytesRead == PKG::headerSize + 64); // No payload read during inventory.
+    assert(reads == 2 && bytesRead == PKG::headerSize + 64); // Header + one table read; no payload.
     assert(pkg.entries[0].access == Access::plaintext);
     assert(pkg.extract(1, read, output, why) && output.size() == 16 && output[1] == 'P');
     const auto original = f;
@@ -108,7 +108,7 @@ int main() {
     // Exact source I/O failures also reject atomically; extraction clears stale data.
     assert(!pkg.parse(f.size(), [](uint64_t, uint8_t*, size_t) { return false; }));
     assert(!pkg.parse(f.size(), [&](uint64_t off, uint8_t* p, size_t n) {
-        return off != 0x5c0 && read(off, p, n);
+        return off != 0x5a0 && read(off, p, n); // The single descriptor table read fails.
     }) && pkg.entries.empty());
     assert(parse()); output.assign(8, 42);
     assert(!pkg.extract(0, [](uint64_t, uint8_t*, size_t) { return false; }, output, why) && output.empty());
@@ -128,7 +128,7 @@ int main() {
         put(f, PKG::headerSize + i * 32, 0x2000 + i, 4);
     reads = bytesRead = 0;
     assert(parse() && pkg.entries.size() == PKG::maxEntries);
-    assert(reads == PKG::maxEntries + 1 && bytesRead == f.size());
+    assert(reads == 2 && bytesRead == f.size()); // 4096 descriptors, still one table read.
     // Deterministic malformed-descriptor sweep; any accepted inventory still
     // enforces a 1 MiB extraction cap and exact range checks.
     uint32_t seed = 0x162;
@@ -226,7 +226,7 @@ int main() {
         put(f,at+16,e.offset,4); put(f,at+20,e.size,4);
     }
     reads=bytesRead=0; assert(parse());
-    assert(pkg.pfsSize==8650752 && reads==27 && bytesRead==PKG::headerSize+26*32);
+    assert(pkg.pfsSize==8650752 && reads==2 && bytesRead==PKG::headerSize+26*32);
     const auto observedAccess=[&](Access access) { return std::count_if(pkg.entries.begin(),pkg.entries.end(),[&](const auto& e){ return e.access==access; }); };
     assert(observedAccess(Access::plaintext)==3 && observedAccess(Access::encrypted)==5 &&
         observedAccess(Access::unsupported)==4 && observedAccess(Access::unknown)==13 && observedAccess(Access::invalid)==1);
