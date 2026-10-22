@@ -194,5 +194,35 @@ int main() {
     std::copy(std::begin(fsRead),std::end(fsRead),app.begin()+0x200);
     CHECK(maxps4::OrbisLinker::link({input("app.elf",app,false),input("provider.prx",provider,true)}, {},linked,reason));
     CHECK(image.prepare_orbis(linked,"app.elf",10,reason)!=0 && !image.thread_pointer_host());
+    {
+        // General mode: guest = host addresses, nothing admitted or rewritten.
+        auto general=make_general_app(), target=make(true);
+        const std::vector<maxps4::OrbisLinker::Input> inputs{input("app.elf",general,false),input("provider.prx",target,true)};
+        CHECK(maxps4::OrbisLinker::link(inputs,{},linked,reason));
+        CHECK(image.prepare_orbis(linked,"app.elf",65536,reason)!=0); // JNZ is outside the bounded list.
+        uint64_t moved=0;
+        CHECK(image.prepare_orbis_general(inputs,{},"app.elf",reason,moved)==0);
+        CHECK(moved && moved%maxps4::GuestELF::generalAlignment==0 && image.general() && image.ps4_blockers()==0);
+        CHECK(image.entry()==entry+moved && image.start()==entry+moved);
+        const auto* code=image.translate(entry+moved,0x3a,5);
+        CHECK(code && reinterpret_cast<uintptr_t>(code)==entry+moved);   // Identity mapping.
+        CHECK(!std::memcmp(code,general.data()+0x200,0x3a));             // GOT CALL not rewritten.
+        uint64_t pointer=0, got=0;
+        std::memcpy(&pointer,image.translate(general_slot+moved,8,4),8);
+        std::memcpy(&got,image.translate(data+moved,8,4),8);
+        CHECK(pointer==general_cell+moved && *reinterpret_cast<const uint32_t*>(pointer)==7);
+        CHECK(got==provider_bias+0x4000+moved && reinterpret_cast<const uint8_t*>(got)[0]==0xb8);
+        size_t bytes=0; auto* stack=image.stack_host(bytes);
+        CHECK(stack && bytes==maxps4::GuestELF::generalStack);
+        const auto low=reinterpret_cast<uintptr_t>(stack);
+        CHECK(!image.translate(low-1,1,4) && !image.translate(low+bytes,1,4)); // Guard pages.
+        CHECK(image.translate(low,bytes,6) && !image.translate(low,1,1));
+        // A failed general preparation publishes nothing.
+        CHECK(image.prepare_orbis_general(inputs,{},"missing",reason,moved)!=0 && !moved && image.segments().empty());
+        auto fixed=orbis_fixture::makeStatic();
+        const std::vector<maxps4::OrbisLinker::Input> absolute{{{{"static.elf",{}},fixed.data(),fixed.size()},0x400000}};
+        CHECK(image.prepare_orbis_general(absolute,{},"static.elf",reason,moved)==-ENOEXEC);
+        CHECK(reason.find("ET_SCE_EXEC")!=std::string::npos && !moved && image.segments().empty() && !image.general());
+    }
     std::puts("PASS SCE NID/RELA -> owned page mapping -> guest CALL/RET admission; no CPU execution claimed");
 }

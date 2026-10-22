@@ -138,6 +138,43 @@ L'admission commence par ce stub, dans le même budget. FEX démarre au stub
 `DT_FINI*` sont seulement validés : rien ne s'exécute à la sortie. La valeur de
 retour de `module_start` n'est pas encore vérifiée.
 
+### Exécution générale (adressage identité, expérimental)
+
+Le chemin borné prouve chaque instruction parce que FEX exécute à des adresses
+hôte rebasées alors que les pointeurs absolus (RELATIVE, GOT, TLS) contiennent
+des adresses PS4 logiques. `GuestELF::prepare_orbis_general` supprime cette
+divergence : les adresses PS4 **sont** les adresses hôte.
+
+1. Une première liaison mesure l'image (modules et trampolines HLE).
+2. Une réservation `PROT_NONE` couvre cette étendue, plus le stub de démarrage,
+   le TLS statique et une pile, chacun après une page de garde (256 Mio au plus).
+3. Une seconde liaison déplace chaque `loadBias` de `relocation`, multiple de
+   1 Mio, ce qui préserve les alignements de segments et du TLS, vers la
+   réservation. Toutes les relocations visent donc directement des adresses hôte.
+4. Les segments sont copiés à leur propre adresse ; `translate` est l'identité.
+   Une pile RW de 1 Mio, encadrée de gardes, appartient à l'image : un pointeur
+   vers un tampon de pile est un argument HLE valide.
+
+Aucune liste d'instructions n'est appliquée et rien n'est réécrit : `CALL [GOT]`
+s'exécute tel quel, comme les branchements, boucles, PUSH/POP, appels locaux et
+déréférencements de pointeurs absolus. Un `ET_SCE_EXEC` (adresses fixes, non
+relogeable) est refusé : l'adresse 0x400000 tombe dans `__PAGEZERO` sur iOS.
+
+API C : `maxps4_fex_engine_prepare_orbis_general`, puis
+`maxps4_fex_engine_run_orbis`. Tests FEX : boucle 1..10, appel local avec cadre,
+pointeur RELATIVE, appel GOT non patché vers un PRX, store BSS (résultat
+110 + cellule + valeur du PRX, deux valeurs différentes) et
+`sceKernelClockGettime` écrivant sur la pile invitée.
+
+Limites actuelles, à traiter avant tout code non fiable :
+
+- **Fautes non confinées** : un accès invalide du code invité termine le
+  processus hôte. L'application ne propose donc pas ce mode.
+- La mémoire allouée par `sceKernelMmap` reste logique (non identité) : le code
+  invité ne peut pas encore la déréférencer.
+- Un seul thread, pas d'arrêt du processus (`HLT` sert de fin dans les tests),
+  ni de SYSCALL hors trampoline (l'exécution échoue avec `-EPERM`).
+
 ## Transactions et contrat mémoire/FEX
 
 `OrbisLinker::link(inputs, hle, output, diagnostic, budget)` conserve intégralement

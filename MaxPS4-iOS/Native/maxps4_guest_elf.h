@@ -27,6 +27,19 @@ public:
     // FS); no dynamic TLS, arbitrary addressing or HLE.
     int prepare_orbis(const OrbisLinker::Image& linked, const std::string& root,
                       uint32_t budget, std::string& diagnostic);
+    // General execution: PS4 addresses ARE host addresses. Links `inputs` once
+    // to measure the image, reserves that span (plus startup stub, static TLS
+    // and a guarded stack) in the host, then links again with every load bias
+    // moved by `relocation` (a multiple of generalAlignment) into it. No
+    // instruction list and no code rewriting: absolute pointers, branches and
+    // stack accesses work unmodified. ET_SCE_EXEC (fixed addresses) is refused.
+    // Guest faults are not contained here: the caller must not run untrusted
+    // code without a fault handler.
+    static constexpr uint64_t generalAlignment = 1024 * 1024, generalStack = 1024 * 1024,
+                              generalSpan = 256 * 1024 * 1024;
+    int prepare_orbis_general(const std::vector<OrbisLinker::Input>& inputs,
+                              const std::vector<OrbisLinker::HLE>& hle, const std::string& root,
+                              std::string& diagnostic, uint64_t& relocation);
     int stage_ps4(const uint8_t* file, size_t length);
     // Admission for the bounded rebased FEX path only. Does not remove the
     // general PS4 address-space blocker or authorize arbitrary instructions.
@@ -82,15 +95,28 @@ public:
     // initializers (prepare_orbis), otherwise the entry itself.
     uint64_t start() const { return start_address ? start_address : guest_entry; }
     const uint8_t* start_pointer() const { return translate(start(), 1, 5); }
+    // General images own their RW stack inside the image (so HLE pointer
+    // arguments to stack buffers are guest memory); null otherwise.
+    uint8_t* stack_host(size_t& bytes) {
+        bytes = static_cast<size_t>(stack_bytes);
+        return stack_bytes ? const_cast<uint8_t*>(translate(stack_address, bytes, 6)) : nullptr;
+    }
+    bool general() const { return identity; }
     const std::vector<Segment>& segments() const { return regions; }
 private:
     friend class PS4DynamicLinker;
+    int prepare_linked(const OrbisLinker::Image& linked, const std::string& root,
+                       uint32_t budget, std::string& diagnostic, bool mapped_identity);
+    // With an arena already reserved (general mode), segments are placed in it
+    // at their own addresses; otherwise a new arena is mapped for them.
     int map_segments(std::vector<Segment> parsed, const std::vector<const uint8_t*>& sources,
                      uint64_t entry);
     uint32_t blockers = 0;
     std::vector<Segment> regions;
     void* arena = nullptr;
     size_t arena_size = 0;
+    bool identity = false;
+    uint64_t stack_address = 0, stack_bytes = 0;
     uint64_t guest_base = 0, guest_entry = 0, thread_pointer = 0, start_address = 0;
     std::vector<OrbisLinker::Thunk> thunks;
     std::vector<OrbisLinker::TLSBlock> tls_blocks;
