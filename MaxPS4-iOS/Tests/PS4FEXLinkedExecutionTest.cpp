@@ -240,8 +240,12 @@ int main(int argc, char** argv) {
     }
     // Static TLS through FEX: the guest reads its PT_TLS variable via FS.
     // Two template values prove the value comes from the module, not a constant.
-    for (uint32_t initial : {0x1234U, 0x55U}) {
-        auto app = orbis_execution::make_tls_app(-8, initial);
+    // Third case: the compiler-style form, RAX = FS:[0] then [RAX-8].
+    for (int form = 0; form < 3; ++form) {
+        const uint32_t initial = form == 1 ? 0x55U : 0x1234U;
+        auto app = form == 2 ? orbis_execution::make_tls_register_app(-8, false, 0x77U)
+                             : orbis_execution::make_tls_app(-8, initial);
+        const uint32_t expected = form == 2 ? 0x77U : initial;
         auto provider = orbis_execution::make(true);
         const char* dependency[] = {"provider.prx"};
         const maxps4_orbis_module modules[] = {
@@ -254,9 +258,9 @@ int main(int argc, char** argv) {
         CHECK(maxps4_fex_engine_initialize(process)==0);
         uint64_t observed=0, logical_entry=0; uint32_t cpu=0;
         CHECK(maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry)==0);
-        CHECK(observed==initial+2 && logical_entry==orbis_execution::entry);
-        std::printf("PASS SCE ELF PT_TLS -> static TLS block -> FEX MOV EAX,FS:[-8] -> ADD: RAX=0x%llx backend=%u\n",
-            (unsigned long long)observed,cpu);
+        CHECK(observed==expected+2 && logical_entry==orbis_execution::entry);
+        std::printf("PASS SCE ELF PT_TLS -> static TLS block -> FEX %s -> ADD: RAX=0x%llx backend=%u\n",
+            form == 2 ? "MOV RAX,FS:[0]; MOV EAX,[RAX-8]" : "MOV EAX,FS:[-8]", (unsigned long long)observed,cpu);
         maxps4_fex_engine_close(process);
     }
     maxps4_fex_engine* engine = nullptr;
