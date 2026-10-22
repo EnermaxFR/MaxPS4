@@ -46,24 +46,27 @@ public:
                 return reject(Status::malformed,"PFS : tailles, compteurs ou table inode invalides");
             std::vector<Inode> inodes;
             std::vector<std::pair<uint64_t,uint64_t>> extents;
+            // Inodes never straddle a block; read the whole table span once
+            // (at most 4096 inodes, about 720 KiB) instead of once per inode.
+            const uint64_t perBlock=blockSize/0xa8, last=count-1;
+            std::vector<uint8_t> table(size_t((last/perBlock)*blockSize+(last%perBlock+1)*0xa8));
+            exact(read,blockSize,table.data(),table.size());
             for (uint64_t i=0;i<count;++i) {
-                std::array<uint8_t,0xa8> b{};
-                const auto at=blockSize+(i/(blockSize/0xa8))*blockSize+(i%(blockSize/0xa8))*0xa8;
-                exact(read,at,b.data(),b.size());
-                Inode n{uint16_t(le(b.data(),2)),le(b.data()+8,8),le(b.data()+0x60,4),le(b.data()+0x64,4)};
+                const uint8_t* b=table.data()+(i/perBlock)*blockSize+(i%perBlock)*0xa8;
+                Inode n{uint16_t(le(b,2)),le(b+8,8),le(b+0x60,4),le(b+0x64,4)};
                 const auto kind=n.mode & 0xf000;
-                if ((kind!=0x4000 && kind!=0x8000) || (le(b.data()+4,4)&~uint64_t(0x20010)) ||
-                    le(b.data()+0x10,8)!=n.size)
+                if ((kind!=0x4000 && kind!=0x8000) || (le(b+4,4)&~uint64_t(0x20010)) ||
+                    le(b+0x10,8)!=n.size)
                     throw Failure(Status::unsupported,"PFS : inode spécial, comprimé ou flags inconnus refusé");
                 if (n.blocks!=(n.size/blockSize+(n.size%blockSize!=0)) ||
                     (kind==0x4000 && !n.size) || (n.blocks && (n.start<=tableBlocks ||
                     !PS4PKGInventory::range(n.start,n.blocks,blocks))))
                     throw Failure(Status::malformed,"PFS : étendue inode invalide");
                 for (size_t j=1;j<12;++j) {
-                    const auto p=le(b.data()+0x64+j*4,4);
+                    const auto p=le(b+0x64+j*4,4);
                     if (p && p!=0xffffffffU) throw Failure(Status::unsupported,"PFS : blocs non contigus refusés");
                 }
-                for (size_t j=0;j<5;++j) if (le(b.data()+0x94+j*4,4))
+                for (size_t j=0;j<5;++j) if (le(b+0x94+j*4,4))
                     throw Failure(Status::unsupported,"PFS : blocs indirects refusés");
                 for (const auto& e:extents) if (n.blocks && n.start<e.first+e.second && e.first<n.start+n.blocks)
                     throw Failure(Status::malformed,"PFS : étendues inode chevauchantes");
@@ -143,15 +146,24 @@ public:
     bool extract(const std::string& path,const PS4PKGInventory::Reader& read,
                  std::vector<uint8_t>& out,std::string& why) const {
         out.clear(); why.clear();
-        if (status!=Status::accessible || !allowedSelection(path)) { why="PFS non accessible"; return false; }
-        const auto it=std::find_if(files.begin(),files.end(),[&](const auto& f){return f.path==path;});
-        if (it==files.end() || it->size>64*1024*1024 ||
-            !PS4PKGInventory::range(it->offset,it->size,imageSize)) { why="Fichier absent ou supérieur à 64 Mio"; return false; }
+        const File* file=selection(path,why);
+        if (!file) return false;
         try {
-            std::vector<uint8_t> pending(size_t(it->size));
-            if (it->size && !read(it->offset,pending.data(),pending.size())) { why="Lecture incomplète"; return false; }
+            std::vector<uint8_t> pending(size_t(file->size));
+            if (!extractTo(path,read,pending.data(),pending.size(),why)) return false;
             out=std::move(pending); return true;
         } catch (const std::bad_alloc&) { why="Budget mémoire indisponible"; return false; }
+    }
+    // Same checks as extract, but reads straight into a caller buffer of the
+    // exact file size: no intermediate copy of up to 64 MiB.
+    bool extractTo(const std::string& path,const PS4PKGInventory::Reader& read,
+                   uint8_t* out,size_t capacity,std::string& why) const {
+        why.clear();
+        const File* file=selection(path,why);
+        if (!file) return false;
+        if (capacity!=file->size || (!out && capacity)) { why="Tampon de sortie de taille incorrecte"; return false; }
+        if (file->size && !read(file->offset,out,capacity)) { why="Lecture incomplète"; return false; }
+        return true;
     }
     static bool allowedSelection(const std::string& path) {
         if (path.empty() || path.size()>4096) return false;
@@ -180,6 +192,13 @@ private:
         return n!="." && n!=".." && !n.empty() && std::all_of(n.begin(),n.end(),[](unsigned char c){
             return c>=32 && c<127 && c!='/' && c!='\\' && c!=':';
         });
+    }
+    const File* selection(const std::string& path,std::string& why) const {
+        if (status!=Status::accessible || !allowedSelection(path)) { why="PFS non accessible"; return nullptr; }
+        const auto it=std::find_if(files.begin(),files.end(),[&](const auto& f){return f.path==path;});
+        if (it==files.end() || it->size>64*1024*1024 ||
+            !PS4PKGInventory::range(it->offset,it->size,imageSize)) { why="Fichier absent ou supérieur à 64 Mio"; return nullptr; }
+        return &*it;
     }
     bool reject(Status s,const std::string& why) { files.clear(); status=s; diagnostic=why; return false; }
     void exact(const PS4PKGInventory::Reader& read,uint64_t at,uint8_t* p,size_t n) {

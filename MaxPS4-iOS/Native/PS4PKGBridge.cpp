@@ -331,13 +331,17 @@ int maxps4_pkg_pfs_read_file(const char* path, const char* selected, unsigned ch
         if (it->size>64*1024*1024) return -E2BIG;
         *length=size_t(it->size);
         if (capacity<*length || (!output && *length)) return -ENOSPC;
-        std::vector<uint8_t> bytes; std::string why;
-        if (!pfs.extract(name,slice,bytes,why)) { *length=0; return -EIO; }
-        struct stat after{};
-        if (fstat(fd,&after) || !sameSource(st,after)) {
+        std::string why;
+        if (!pfs.extractTo(name,slice,output,*length,why)) {
+            if (*length) std::memset(output,0,*length); // No partial file escapes.
             *length=0; return -EIO;
         }
-        if (!bytes.empty()) std::memcpy(output,bytes.data(),bytes.size());
+        struct stat after{};
+        if (fstat(fd,&after) || !sameSource(st,after)) {
+            // Never leave bytes from a source that changed during the read.
+            if (*length) std::memset(output,0,*length);
+            *length=0; return -EIO;
+        }
         return 0;
     } catch (const std::bad_alloc&) { *length=0; return -ENOMEM; }
 }

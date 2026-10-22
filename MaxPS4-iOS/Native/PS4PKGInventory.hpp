@@ -189,13 +189,16 @@ private:
         if (!range(bodyOffset, bodySize, fileSize) || (bodySize && bodyOffset < headerSize)) return fail("Corps PKG hors limites");
         if (!range(pfsOffset, pfsSize, fileSize) || (pfsSize && pfsOffset < headerSize)) return fail("Image PFS hors limites");
         entries.reserve(static_cast<size_t>(count));
+        // One bounded read (at most 128 KiB) instead of one per descriptor:
+        // slow document providers pay per request, not per byte.
+        std::vector<uint8_t> table(static_cast<size_t>(count) * 32);
+        if (!read(tableOffset, table.data(), table.size())) return fail("Table PKG : lecture incomplète");
         for (size_t i = 0; i < count; ++i) {
-            std::array<uint8_t, 32> item{};
-            if (!read(tableOffset + i * 32, item.data(), item.size())) return fail("Table PKG : lecture incomplète");
-            Entry e {static_cast<uint32_t>(be(item.data(), 4)), static_cast<uint32_t>(be(item.data()+4, 4)),
-                static_cast<uint32_t>(be(item.data()+8, 4)), static_cast<uint32_t>(be(item.data()+12, 4)),
-                static_cast<uint32_t>(be(item.data()+16, 4)), static_cast<uint32_t>(be(item.data()+20, 4)),
-                be(item.data()+24, 8), Access::unknown, {}};
+            const uint8_t* item = table.data() + i * 32;
+            Entry e {static_cast<uint32_t>(be(item, 4)), static_cast<uint32_t>(be(item+4, 4)),
+                static_cast<uint32_t>(be(item+8, 4)), static_cast<uint32_t>(be(item+12, 4)),
+                static_cast<uint32_t>(be(item+16, 4)), static_cast<uint32_t>(be(item+20, 4)),
+                be(item+24, 8), Access::unknown, {}};
             const uint64_t end = uint64_t(e.offset) + e.size;
             if (!range(e.offset, e.size, fileSize) || (e.size && (e.offset < headerSize ||
                 (e.offset < uint64_t(tableOffset) + count * 32 && tableOffset < end)))) {
