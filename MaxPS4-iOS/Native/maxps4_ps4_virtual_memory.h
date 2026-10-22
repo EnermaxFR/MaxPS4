@@ -10,8 +10,11 @@ public:
     virtual const uint8_t* translate(uint64_t address, size_t length, uint32_t permissions) const = 0;
     virtual size_t contiguous(uint64_t address, size_t limit, uint32_t permissions) const = 0;
 };
-// Logical PS4 anonymous mappings. x86 executable bytes remain host DATA; this
-// is not an iOS executable-code allocator or a FEX address-space backend.
+// PS4 anonymous mappings. For a general (identity-mapped) image they are host
+// pages inside the image's mmap window, at their own addresses, so guest code
+// dereferences the returned pointer directly; otherwise they are logical
+// buffers from `base`. x86 executable bytes remain host DATA (FEX does not
+// run them yet); this is not an iOS executable-code allocator.
 // Owner serializes access and resets this object whenever it restages the ELF.
 class PS4VirtualMemory final : public PS4DynamicMemory {
 public:
@@ -25,12 +28,14 @@ public:
     ps4::Error protect(uint64_t address, uint64_t length, uint32_t protection);
     const uint8_t* translate(uint64_t address, size_t length, uint32_t permissions) const override;
     size_t contiguous(uint64_t address, size_t limit, uint32_t permissions) const override;
-    void reset() { regions_.clear(); used_ = 0; }
+    void reset();
     size_t allocated() const { return used_; }
 private:
     struct Region {
         uint64_t address;
-        std::vector<uint8_t> bytes;
+        uint64_t size;
+        uint8_t* data; // bytes.data(), or the host pages at `address`.
+        std::vector<uint8_t> bytes; // Empty for host pages.
         // ELF-style permissions R=4/W=2/X=1; 0xff denotes an unmapped page.
         std::vector<uint8_t> pages;
     };
@@ -40,5 +45,8 @@ private:
     static ps4::Error permissions(uint32_t protection, uint8_t& result);
     static bool rounded(uint64_t length, uint64_t& result);
     Region* range(uint64_t address, uint64_t length);
+    // Host pages of the current image's mmap window (general images only).
+    bool hosted(const Region& region) const;
+    static bool host_protect(uint64_t address, uint64_t length, uint8_t permission);
 };
 } // namespace maxps4

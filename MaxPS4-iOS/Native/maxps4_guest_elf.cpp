@@ -80,7 +80,7 @@ void GuestELF::clear() {
     arena_size = 0;
     guest_base = guest_entry = thread_pointer = start_address = 0;
     identity = false;
-    stack_address = stack_bytes = 0;
+    stack_address = stack_bytes = heap_address = heap_bytes = 0;
     thunks.clear();
     tls_blocks.clear();
     blockers = 0;
@@ -220,7 +220,8 @@ int GuestELF::prepare_orbis_general(const std::vector<OrbisLinker::Input>& input
         // page (see prepare_linked), page rounding, a guard page after the stack
         // and base alignment.
         low &= ~(generalAlignment - 1);
-        const uint64_t tail = 10 * page + OrbisLinker::tlsBudget + 2 * 4096 + generalStack;
+        const uint64_t tail = 10 * page + OrbisLinker::tlsBudget + 2 * 4096 + generalStack +
+            2 * generalHeapPage + generalHeap;
         if (high - low > generalSpan - tail - generalAlignment)
             return fail(-E2BIG, "image span exceeds the general address-space reservation");
         const auto size = static_cast<size_t>(high - low + tail + generalAlignment);
@@ -627,7 +628,15 @@ int GuestELF::prepare_linked(const OrbisLinker::Image& linked, const std::string
             const uint64_t self = reinterpret_cast<uintptr_t>(tcb);
             std::memcpy(tcb,&self,sizeof(self));
         }
-        if (stack_low) { stack_address = stack_low; stack_bytes = generalStack; }
+        if (stack_low) {
+            stack_address = stack_low; stack_bytes = generalStack;
+            // sceKernelMmap window: after a guard page, PROT_NONE until mapped.
+            heap_address = (stack_low + generalStack + page + generalHeapPage - 1) / generalHeapPage * generalHeapPage;
+            heap_bytes = generalHeap;
+            // A guard page must follow it inside the reservation.
+            if (heap_address + heap_bytes + page > guest_base + arena_size)
+                return fail(-E2BIG,"mmap window outside the general reservation");
+        }
         identity = mapped_identity;
         // Restricted rebasing never establishes general PS4 addressing; the
         // identity mapping does.

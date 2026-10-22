@@ -1,6 +1,7 @@
 #include "../Native/maxps4_guest_elf.h"
 #include "PS4OrbisExecutionFixture.h"
 #include "../Native/maxps4_ps4_libkernel.h"
+#include "../Native/maxps4_ps4_virtual_memory.h"
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
@@ -217,6 +218,28 @@ int main() {
         const auto low=reinterpret_cast<uintptr_t>(stack);
         CHECK(!image.translate(low-1,1,4) && !image.translate(low+bytes,1,4)); // Guard pages.
         CHECK(image.translate(low,bytes,6) && !image.translate(low,1,1));
+        // sceKernelMmap window: host pages at their own address, after the stack.
+        uint64_t window=0, windowBytes=0;
+        CHECK(image.heap(window,windowBytes) && windowBytes==maxps4::GuestELF::generalHeap);
+        CHECK(window>=low+bytes+4096 && window%0x4000==0 && !image.translate(window,1,4));
+        {
+            maxps4::PS4VirtualMemory vm(image);
+            uint64_t first=0, second=0;
+            CHECK(vm.map(0,0x4000,3,0x1002,-1,0,first)==maxps4::ps4::ok && first==window);
+            CHECK(vm.map(0,0x8000,1,0x1002,-1,0,second)==maxps4::ps4::ok && second==window+0x4000);
+            auto* bytesRW=const_cast<uint8_t*>(vm.translate(first,16,2));
+            CHECK(bytesRW && reinterpret_cast<uintptr_t>(bytesRW)==first && !bytesRW[0]);
+            bytesRW[0]=0x5a; // A real host store at the guest address.
+            CHECK(*reinterpret_cast<const uint8_t*>(first)==0x5a && !vm.translate(second,1,2));
+            CHECK(vm.protect(first,0x4000,1)==maxps4::ps4::ok && !vm.translate(first,1,2) && vm.translate(first,1,4));
+            CHECK(vm.unmap(first,0x4000)==maxps4::ps4::ok && !vm.translate(first,1,4));
+            CHECK(vm.map(0,0x4000,3,0x1002,-1,0,first)==maxps4::ps4::ok && first==window);
+            CHECK(!vm.translate(first,1,4)[0]); // Unmapped pages come back zeroed.
+            uint64_t tooLarge=0;
+            CHECK(vm.map(0,maxps4::GuestELF::generalHeap,3,0x1002,-1,0,tooLarge)==maxps4::ps4::nomem);
+            vm.reset();
+            CHECK(!vm.translate(first,1,4) && !vm.allocated());
+        }
         // A failed general preparation publishes nothing.
         CHECK(image.prepare_orbis_general(inputs,{},"missing",reason,moved)!=0 && !moved && image.segments().empty());
         auto fixed=orbis_fixture::makeStatic();
