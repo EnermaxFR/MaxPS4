@@ -70,6 +70,13 @@ typedef struct maxps4_fex_guest_fault {
 } maxps4_fex_guest_fault;
 int32_t maxps4_fex_engine_last_guest_fault(const maxps4_fex_engine *engine,
                                            maxps4_fex_guest_fault *fault);
+// Wall-clock limit for each later FEX execution of this engine (0: none, at
+// most one hour). When it expires while the guest runs generated code, the
+// run ends with -ETIMEDOUT and last_guest_fault reports signal SIGURG,
+// address 0. Time spent in FEX or HLE C++ code is not interrupted; the next
+// guest instruction is. -ENOTSUP for a nonzero limit where faults cannot be
+// contained (non-ARM64 host or VIXL simulator).
+int32_t maxps4_fex_engine_set_time_limit(maxps4_fex_engine *engine, uint32_t milliseconds);
 int32_t maxps4_fex_engine_cpuid(maxps4_fex_engine *engine, uint32_t leaf,
                               uint32_t subleaf, uint32_t out[4]);
 // Compatibility synthetic ELF fixture routed through run_elf; no host syscalls.

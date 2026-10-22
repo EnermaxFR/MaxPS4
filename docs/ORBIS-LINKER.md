@@ -186,8 +186,12 @@ Limites actuelles, à traiter avant tout code non fiable :
   toute faute sous le simulateur VIXL (job x86), termine le processus. Sur
   iPhone, un débogueur attaché (JIT via StikDebug) peut intercepter l'exception
   Mach avant le signal. L'application ne propose donc pas encore ce mode.
-- **Pas de limite de temps** : une boucle infinie du code invité bloque
-  l'appelant.
+- **Limite de temps partielle** : `maxps4_fex_engine_set_time_limit` borne
+  chaque exécution (ARM64 natif). À l'échéance, un chien de garde envoie
+  `SIGURG` au thread toutes les millisecondes ; reçu dans le code généré ou le
+  dispatcher, il arrête le thread comme une faute (`-ETIMEDOUT`). Un appel long
+  dans le C++ de FEX ou d'un HLE n'est pas interrompu : l'arrêt a lieu à la
+  reprise du code invité. Test : `JMP $` arrêté après 200 ms.
 - La mémoire allouée par `sceKernelMmap` reste logique (non identité) : le code
   invité ne peut pas encore la déréférencer.
 - Un seul thread, pas d'arrêt du processus (`HLT` sert de fin dans les tests),

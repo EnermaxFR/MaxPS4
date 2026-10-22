@@ -33,6 +33,11 @@
 #include <cerrno>
 #include <mutex>
 #include <new>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <thread>
+#include <pthread.h>
 #include <signal.h>
 #if defined(__APPLE__)
 #include <sys/ucontext.h>
@@ -185,12 +190,22 @@ public:
 // ExecuteThread returns normally. Any other fault, including one inside FEX
 // or HLE C++ code, chains to the previous handler. Under the VIXL simulator
 // the JIT code is interpreted by C++, so nothing is contained there.
+// Time limit: after `limit_ms`, a watchdog sends SIGURG to the executing thread
+// every millisecond until it is stopped the same way, from JIT or dispatcher
+// code (signal SIGURG). While the thread is in FEX or HLE C++ code the signal
+// chains (SIGURG is ignored by default) and the next one retries.
 class GuestFaultGuard final {
 public:
-    GuestFaultGuard(FEXCore::Context::Context* context, FEXCore::Core::InternalThreadState* thread,
-                    const FEXCore::SignalDelegatorConfig& config)
-        : context(context), thread(thread), config(config) {
+    static constexpr bool available =
 #if (defined(__aarch64__) || defined(__arm64__)) && !defined(VIXL_SIMULATOR)
+        true;
+#else
+        false;
+#endif
+    GuestFaultGuard(FEXCore::Context::Context* context, FEXCore::Core::InternalThreadState* thread,
+                    const FEXCore::SignalDelegatorConfig& config, uint32_t limit_ms)
+        : context(context), thread(thread), config(config) {
+        if (!available) return;
         struct sigaction action {};
         action.sa_sigaction = handle;
         action.sa_flags = SA_SIGINFO;
@@ -198,9 +213,24 @@ public:
         for (; installed < signals.size(); ++installed)
             if (::sigaction(signals[installed], &action, &previous[installed]) != 0) break;
         active = this;
-#endif
+        if (limit_ms && installed == signals.size()) {
+            const pthread_t target = ::pthread_self();
+            watchdog = std::thread([this, target, limit_ms] {
+                std::unique_lock lock(watch_lock);
+                if (watch.wait_for(lock, std::chrono::milliseconds(limit_ms), [this] { return finished; })) return;
+                while (!finished && !signal.load()) {
+                    ::pthread_kill(target, SIGURG);
+                    watch.wait_for(lock, std::chrono::milliseconds(1), [this] { return finished; });
+                }
+            });
+        }
     }
     ~GuestFaultGuard() {
+        if (watchdog.joinable()) {
+            { std::lock_guard lock(watch_lock); finished = true; }
+            watch.notify_all();
+            watchdog.join();
+        }
         active = nullptr;
         while (installed) {
             --installed;
@@ -209,11 +239,11 @@ public:
     }
     GuestFaultGuard(const GuestFaultGuard&) = delete;
     GuestFaultGuard& operator=(const GuestFaultGuard&) = delete;
-    int signal = 0;
+    std::atomic<int> signal {0};
     uint64_t address = 0;
 private:
-    static constexpr std::array<int, 4> signals {SIGSEGV, SIGBUS, SIGILL, SIGTRAP};
-    static inline std::array<struct sigaction, 4> previous {};
+    static constexpr std::array<int, 5> signals {SIGSEGV, SIGBUS, SIGILL, SIGTRAP, SIGURG};
+    static inline std::array<struct sigaction, 5> previous {};
     static inline thread_local GuestFaultGuard* active = nullptr;
     static void handle(int number, siginfo_t* info, void* raw) {
 #if (defined(__aarch64__) || defined(__arm64__)) && !defined(VIXL_SIMULATOR)
@@ -226,7 +256,7 @@ private:
         auto& sp = machine->uc_mcontext.sp;
 #endif
         auto* guard = active;
-        if (guard && !guard->signal) {
+        if (guard && !guard->signal.load()) {
             // JIT code keeps guest registers in host registers: spill them first.
             // The dispatcher's guest-signal stubs have already spilled.
             uint64_t stop = 0;
@@ -235,8 +265,8 @@ private:
             else if (pc >= guard->config.DispatcherBegin && pc < guard->config.DispatcherEnd)
                 stop = guard->config.ThreadStopHandlerAddress;
             if (stop) {
-                guard->signal = number;
-                guard->address = reinterpret_cast<uintptr_t>(info->si_addr);
+                guard->address = number == SIGURG ? 0 : reinterpret_cast<uintptr_t>(info->si_addr);
+                guard->signal.store(number);
                 sp = guard->thread->CurrentFrame->ReturningStackLocation;
                 pc = stop;
                 return;
@@ -245,7 +275,9 @@ private:
 #endif
         for (size_t i = 0; i < signals.size(); ++i) if (signals[i] == number) {
             const auto& old = previous[i];
-            if (old.sa_handler == SIG_IGN) return;
+            // SIGURG's default action is to ignore it: keep this handler installed
+            // so the watchdog's next signal is still seen.
+            if (old.sa_handler == SIG_IGN || (number == SIGURG && old.sa_handler == SIG_DFL)) return;
             if (old.sa_handler == SIG_DFL) {
                 ::sigaction(number, &old, nullptr);
                 ::raise(number);
@@ -258,6 +290,10 @@ private:
     FEXCore::Core::InternalThreadState* thread;
     FEXCore::SignalDelegatorConfig config;
     size_t installed = 0;
+    std::thread watchdog;
+    std::mutex watch_lock;
+    std::condition_variable watch;
+    bool finished = false;
 };
 }
 struct maxps4_fex_engine {
@@ -272,6 +308,7 @@ struct maxps4_fex_engine {
     bool orbis_admitted = false;
     maxps4_fex_cpu_report cpu_report{};
     maxps4_fex_guest_fault last_fault{};
+    uint32_t time_limit_ms = 0; // 0: no limit.
     maxps4::GuestFrame frame;
     uint64_t frame_sequence = 0;
     bool frame_code_cached = false;
@@ -387,6 +424,14 @@ extern "C" int32_t maxps4_fex_engine_last_guest_fault(const maxps4_fex_engine* e
     std::lock_guard lock(runtime_lock);
     *fault = engine->last_fault;
     return fault->signal ? 0 : -ENOENT;
+}
+extern "C" int32_t maxps4_fex_engine_set_time_limit(maxps4_fex_engine* engine,
+    uint32_t milliseconds) {
+    if (!engine || milliseconds > 3600 * 1000) return -EINVAL;
+    if (milliseconds && !GuestFaultGuard::available) return -ENOTSUP;
+    std::lock_guard lock(runtime_lock);
+    engine->time_limit_ms = milliseconds;
+    return 0;
 }
 extern "C" int32_t maxps4_fex_engine_cpuid(maxps4_fex_engine *engine,
                                           uint32_t leaf, uint32_t subleaf,
@@ -542,13 +587,14 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     engine->frame_code_cached = persistent_frame;
     engine->last_fault = {};
     {
-        GuestFaultGuard guard(engine->context.get(), thread, engine->signals.GetConfig());
+        GuestFaultGuard guard(engine->context.get(), thread, engine->signals.GetConfig(), engine->time_limit_ms);
         engine->context->ExecuteThread(thread);
-        if (guard.signal) {
+        if (const int signal = guard.signal.load()) {
             // RIP is the guest position FEX last stored (block granularity).
-            engine->last_fault = {guard.signal, 0, guard.address, state.rip};
+            engine->last_fault = {signal, 0, guard.address, state.rip};
             engine->frame_code_cached = false;
-            return guard.signal == SIGSEGV || guard.signal == SIGBUS ? -EFAULT : -EILSEQ;
+            return signal == SIGURG ? -ETIMEDOUT :
+                signal == SIGSEGV || signal == SIGBUS ? -EFAULT : -EILSEQ;
         }
     }
     if (engine->probe.callback_error) return engine->probe.callback_error;
