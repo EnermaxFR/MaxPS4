@@ -45,6 +45,22 @@ inline std::vector<uint8_t> make_tls_app(int32_t disp=-8, uint32_t initial=0x123
     put(b,0x380,initial,4);
     return b;
 }
+// Same module, compiler-style access: MOV RAX,FS:[0]; MOV EAX,[RAX+disp]
+// (disp8 or disp32 encoding); ADD EAX,2; HLT. `gap` inserts a NOP between the
+// two loads, which must invalidate RAX as the thread pointer.
+inline std::vector<uint8_t> make_tls_register_app(int32_t disp=-8, bool disp32=false,
+                                                  uint32_t initial=0x1234, bool gap=false) {
+    auto b=make_tls_app(-8,initial);
+    std::vector<uint8_t> code={0x64,0x48,0x8b,0x04,0x25,0,0,0,0};
+    if (gap) code.push_back(0x90);
+    if (disp32) { code.insert(code.end(),{0x8b,0x80}); for (int i=0;i<4;++i) code.push_back(uint8_t(uint32_t(disp)>>(8*i))); }
+    else code.insert(code.end(),{0x8b,0x40,uint8_t(int8_t(disp))});
+    code.insert(code.end(),{0x05,2,0,0,0,0xf4});
+    std::fill(b.begin()+0x200,b.begin()+0x300,0);
+    std::copy(code.begin(),code.end(),b.begin()+0x200);
+    orbis_fixture::put(b,64+32,code.size()); orbis_fixture::put(b,64+40,code.size());
+    return b;
+}
 inline maxps4::OrbisLinker::Input input(const char* path,const std::vector<uint8_t>& b,bool provider) {
     return {{{path,provider ? std::vector<std::string>{} : std::vector<std::string>{"provider.prx"}},b.data(),b.size()},
             provider ? provider_bias : app_bias};

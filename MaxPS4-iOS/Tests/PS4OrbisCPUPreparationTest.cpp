@@ -73,6 +73,21 @@ int main() {
         CHECK(maxps4::OrbisLinker::link({input("app.elf",tls,false),input("provider.prx",provider,true)}, {},linked,reason));
         CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==-EFAULT && image.segments().empty() && !image.thread_pointer_host());
     }
+    // Compiler-style access through RAX = FS:[0], disp8 and disp32 encodings.
+    for (bool disp32 : {false, true}) {
+        tls=make_tls_register_app(-8,disp32);
+        CHECK(maxps4::OrbisLinker::link({input("app.elf",tls,false),input("provider.prx",provider,true)}, {},linked,reason));
+        CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==0 && image.thread_pointer_host());
+        tls=make_tls_register_app(16,disp32); // Past the TCB.
+        CHECK(maxps4::OrbisLinker::link({input("app.elf",tls,false),input("provider.prx",provider,true)}, {},linked,reason));
+        CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==-EFAULT && image.segments().empty());
+    }
+    tls=make_tls_register_app(-8,false,0x1234,true); // NOP between: RAX no longer trusted.
+    CHECK(maxps4::OrbisLinker::link({input("app.elf",tls,false),input("provider.prx",provider,true)}, {},linked,reason));
+    CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==-ENOTSUP && image.segments().empty());
+    tls=make_tls_register_app(); tls[0x205]=1; // FS:[1] is not the self-pointer load.
+    CHECK(maxps4::OrbisLinker::link({input("app.elf",tls,false),input("provider.prx",provider,true)}, {},linked,reason));
+    CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==-ENOTSUP);
     tls=make_tls_app(0); // Reading the TCB self-pointer is allowed.
     CHECK(maxps4::OrbisLinker::link({input("app.elf",tls,false),input("provider.prx",provider,true)}, {},linked,reason));
     CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==0);
