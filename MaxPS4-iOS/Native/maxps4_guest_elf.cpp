@@ -261,7 +261,7 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                 refusal_opcode = op;
                 size_t width = op == 0xb8 || op == 0xb9 || op == 0xba || op == 0xbb || op == 0x05 || op == 0x25 || op == 0x0d ? 5 :
                     op == 0xff || op == 0x8b || op == 0x81 ? 6 :
-                    op == 0xc7 ? 10 : op == 0x64 ? 9 : op == 0xc1 || op == 0x0f ? 3 :
+                    op == 0xc7 ? 10 : op == 0x64 ? 8 : op == 0xc1 || op == 0x0f ? 3 :
                     op == 0x01 || op == 0x29 || op == 0x39 || op == 0x89 ? 2 : 1;
                 if (!fetch(pc,width)) return -EFAULT;
                 if (op == 0x89 && code[1] != 0xc3 && code[1] != 0xc6) {
