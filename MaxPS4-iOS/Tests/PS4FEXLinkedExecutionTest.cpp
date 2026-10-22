@@ -289,6 +289,31 @@ int main(int argc, char** argv) {
             (unsigned long long)observed,cpu);
         maxps4_fex_engine_close(process);
     }
+    for (uint64_t offset : {0ULL, 8ULL}) {
+        // General-dynamic TLS through libkernel HLE __tls_get_addr. Offset 8 is
+        // past the 8-byte block: the gate refuses it and the run fails cleanly.
+        auto app = orbis_execution::make_tls_get_addr_app(0x4242, offset);
+        const maxps4_orbis_module modules[] = {
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,nullptr,0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        char diagnostic[512]{};
+        const int prepared = maxps4_fex_engine_prepare_orbis(process,modules,1,"app.elf",10,diagnostic,sizeof(diagnostic));
+        if (prepared) std::fprintf(stderr,"prepare: %s\n",diagnostic);
+        CHECK(prepared==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        uint64_t observed=0, logical_entry=0; uint32_t cpu=0;
+        const int ran = maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry);
+        if (!offset) {
+            CHECK(ran==0 && observed==0x4242+2);
+            std::printf("PASS SCE ELF -> DTPMOD64/DTPOFF64 tls_index -> libkernel HLE __tls_get_addr -> FEX MOV EAX,[RAX]: RAX=0x%llx backend=%u\n",
+                (unsigned long long)observed,cpu);
+        } else {
+            CHECK(ran==-EFAULT);
+            std::puts("PASS __tls_get_addr offset outside the TLS block refused at run time (no invalid pointer)");
+        }
+        maxps4_fex_engine_close(process);
+    }
     for (uint32_t clock : {4U, 99U}) {
         // Pointer argument: sceKernelClockGettime(clock, &timespec) writes guest
         // memory through the translated pointer. Clock 99 must fail, not write.

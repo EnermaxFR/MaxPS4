@@ -88,8 +88,14 @@ inline std::vector<uint8_t> make_tls_initial_exec_app(bool relro=true, uint32_t 
 // The app alone, importing scePthreadSelf (public NID aI+OeCz8xrQ) from the
 // system libkernel instead of the fixture PRX: CALL [GOT]; ADD EAX,2; store; HLT.
 // Thread 1 is the only PS4 thread, so a real HLE call returns 1 + 2 = 3.
+inline void use_libkernel(std::vector<uint8_t>& b, const char* nid);
 inline std::vector<uint8_t> make_kernel_app(const char* nid="aI+OeCz8xrQ") {
     auto b=make(false);
+    use_libkernel(b,nid);
+    return b;
+}
+// Rewrites the fixture's single import to come from the system libkernel.
+inline void use_libkernel(std::vector<uint8_t>& b, const char* nid) {
     using orbis_fixture::put;
     std::fill(b.begin()+0x601,b.begin()+0x640,0);
     char strings[]="libkernel\0libkernel\0aI+OeCz8xrQ#B#B";
@@ -99,6 +105,24 @@ inline std::vector<uint8_t> make_kernel_app(const char* nid="aI+OeCz8xrQ") {
     orbis_fixture::setTag(b,0x61000015,1|(uint64_t{1}<<32)|(uint64_t{1}<<48));
     orbis_fixture::setTag(b,0x6100000f,11|(uint64_t{1}<<32)|(uint64_t{1}<<48));
     put(b,0x818,21,4);
+}
+// General-dynamic TLS: tls_index {module, offset} at 0x8020 filled by DTPMOD64
+// and DTPOFF64 (symbol 0, A = `offset`); LEA RDI,[RIP+tls_index];
+// CALL [GOT] -> __tls_get_addr (NID vNe1w4diLCs); MOV EAX,[RAX]; ADD EAX,2; HLT.
+constexpr uint64_t tls_index_address=data+0x20;
+inline std::vector<uint8_t> make_tls_get_addr_app(uint32_t initial=0x4242, uint64_t offset=0) {
+    auto b=make_tls_app(-8,initial);
+    use_libkernel(b,"vNe1w4diLCs");
+    using orbis_fixture::put;
+    const uint8_t code[]={0x48,0x8d,0x3d,0,0,0,0, 0xff,0x15,0,0,0,0, 0x8b,0x00, 0x05,2,0,0,0, 0xf4};
+    std::fill(b.begin()+0x200,b.begin()+0x300,0);
+    std::copy(std::begin(code),std::end(code),b.begin()+0x200);
+    put(b,0x203,0x8020-(0x4000+7),4);
+    put(b,0x209,0x8000-(0x4000+13),4);
+    put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
+    put(b,0x918,0x8020); put(b,0x920,16); put(b,0x928,0);      // DTPMOD64 -> module ID
+    put(b,0x930,0x8028); put(b,0x938,17); put(b,0x940,offset); // DTPOFF64 -> offset
+    orbis_fixture::setTag(b,0x61000031,3*24);
     return b;
 }
 // sceKernelClockGettime (public NID QBi7HCK03hw) with a pointer argument:

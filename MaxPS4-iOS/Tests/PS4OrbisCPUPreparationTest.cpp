@@ -139,6 +139,21 @@ int main() {
         CHECK(image.guest_address(reinterpret_cast<uintptr_t>(image.translate(timespec_address,16,6)),logical) &&
               logical==timespec_address);
         CHECK(!image.guest_address(reinterpret_cast<uintptr_t>(&logical),logical));
+        // __tls_get_addr: tls_index filled by DTPMOD64/DTPOFF64; MOV EAX,[RAX] only
+        // right after the call; the gate resolves module 1 / offset 0 to TP-8.
+        const uint32_t tlsToken=static_cast<uint32_t>(maxps4::PS4KernelService::tls_get_addr);
+        auto tlsApp=make_tls_get_addr_app();
+        const maxps4::OrbisLinker::Input tlsAlone{{{"app.elf",{}},tlsApp.data(),tlsApp.size()},app_bias};
+        CHECK(maxps4::OrbisLinker::link({tlsAlone},{{kernel_identity("vNe1w4diLCs"),0,tlsToken}},linked,reason));
+        uint64_t ti[2]{}; std::memcpy(ti,linked.translate(tls_index_address,16,4),16);
+        CHECK(ti[0]==1 && ti[1]==0);
+        CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==0);
+        CHECK(image.tls_address(1,0)==image.thread_pointer_host()-8 && image.tls_address(1,8)==nullptr &&
+              image.tls_address(2,0)==nullptr && image.tls_address(0,0)==nullptr);
+        auto noTLS=make_kernel_app("vNe1w4diLCs"); // __tls_get_addr without any PT_TLS: refused.
+        const maxps4::OrbisLinker::Input noTLSAlone{{{"app.elf",{}},noTLS.data(),noTLS.size()},app_bias};
+        CHECK(maxps4::OrbisLinker::link({noTLSAlone},{{kernel_identity("vNe1w4diLCs"),0,tlsToken}},linked,reason));
+        CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==-EFAULT);
         clockApp=make_clock_app(4,0x4000); // LEA into executable code: refused.
         const maxps4::OrbisLinker::Input codePointer{{{"app.elf",{}},clockApp.data(),clockApp.size()},app_bias};
         CHECK(maxps4::OrbisLinker::link({codePointer},{{kernel_identity("QBi7HCK03hw"),0,clockToken}},linked,reason));

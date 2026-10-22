@@ -63,7 +63,9 @@ constexpr Binding bindings[] = {
     {"scePthreadMutexInit", "cmo1RIYva9o", PS4KernelService::mutex_init},
     {"scePthreadMutexTrylock", "upoVrzMHFeE", PS4KernelService::mutex_trylock},
     {"scePthreadMutexUnlock", "tn3VlD0hG60", PS4KernelService::mutex_unlock},
-    {"scePthreadMutexDestroy", "2Of0f+3mhhE", PS4KernelService::mutex_destroy}
+    {"scePthreadMutexDestroy", "2Of0f+3mhhE", PS4KernelService::mutex_destroy},
+    // NID from shadPS4 kernel/threads/tcb.cpp (RegisterRtld).
+    {"__tls_get_addr", "vNe1w4diLCs", PS4KernelService::tls_get_addr}
 };
 uint64_t monotonic_us() {
     timespec t{};

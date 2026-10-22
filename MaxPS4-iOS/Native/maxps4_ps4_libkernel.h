@@ -13,7 +13,9 @@ struct PS4KernelCall { uint64_t rdi = 0, rsi = 0, rdx = 0, rcx = 0, r8 = 0, r9 =
 enum class PS4KernelService : uint32_t {
     unresolved, open, read, close, lseek, stat, fstat,
     mmap, munmap, mprotect, clock_gettime, clock_getres, gettimeofday, process_time,
-    thread_self, mutex_init, mutex_trylock, mutex_unlock, mutex_destroy
+    thread_self, mutex_init, mutex_trylock, mutex_unlock, mutex_destroy,
+    // Needs the image's TLS layout: served by the FEX Orbis HLE gate, not invoke().
+    tls_get_addr
 };
 // Implemented libkernel functions (name, NID, service), e.g. for an HLE registry.
 struct PS4KernelExport { const char* name; const char* nid; PS4KernelService service; };
