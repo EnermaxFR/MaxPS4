@@ -49,6 +49,15 @@ public:
     const uint8_t* thread_pointer_host() const {
         return thread_pointer ? translate(thread_pointer, 16, 6) : nullptr;
     }
+    // HLE gate for the FEX SYSCALL callback: true only when the host RIP is
+    // exactly the SYSCALL of a linker-synthesized trampoline carrying `token`.
+    bool hle_gate(uint64_t host_rip, uint32_t token) const {
+        for (const auto& t : thunks)
+            if (t.token == token && reinterpret_cast<uintptr_t>(
+                    translate(t.address + OrbisLinker::syscallOffset, 2, 5)) == host_rip) return true;
+        return false;
+    }
+    bool has_hle() const { return !thunks.empty(); }
     const uint8_t* entry_pointer() const { return translate(guest_entry, 1, 5); }
     const std::vector<Segment>& segments() const { return regions; }
 private:
@@ -60,6 +69,7 @@ private:
     void* arena = nullptr;
     size_t arena_size = 0;
     uint64_t guest_base = 0, guest_entry = 0, thread_pointer = 0;
+    std::vector<OrbisLinker::Thunk> thunks;
 };
 // Admission guarantees a finite sequence: MOV EAX,imm32; ADD EAX,imm32;
 // NOP; terminal HLT. The ELF loader also admits C7 05 disp32 imm32 stores

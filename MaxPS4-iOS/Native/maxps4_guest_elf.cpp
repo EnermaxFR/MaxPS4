@@ -78,6 +78,7 @@ void GuestELF::clear() {
     arena = nullptr;
     arena_size = 0;
     guest_base = guest_entry = thread_pointer = 0;
+    thunks.clear();
     blockers = 0;
     regions.clear();
 }
@@ -364,8 +365,17 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
                     if (target >= (uint64_t{1}<<47) || pc >= (uint64_t{1}<<47)) return -EFAULT;
                     const int64_t relative = static_cast<int64_t>(target)-static_cast<int64_t>(pc+5);
                     if (relative < INT32_MIN || relative > INT32_MAX) return -EOVERFLOW;
-                    const int error = admit(target,true,depth+1);
-                    if (error) return error;
+                    // A linker-synthesized HLE trampoline is engine code, not guest
+                    // code: it is not admitted instruction by instruction. It returns
+                    // in EAX; SYSCALL clobbers RCX (and R11, which is not tracked).
+                    const bool system = std::any_of(copy.thunks.begin(), copy.thunks.end(),
+                        [&](const auto& thunk) { return thunk.address == target; });
+                    if (system) {
+                        initialized = true; ecx_initialized = false; compared = false;
+                    } else {
+                        const int error = admit(target,true,depth+1);
+                        if (error) return error;
+                    }
                     patches.push_back({code,static_cast<uint32_t>(relative)});
                 } else if (op == 0xc7) {
                     width = 10;
@@ -441,6 +451,7 @@ int GuestELF::prepare_orbis(const OrbisLinker::Image& linked, const std::string&
         size_t i=0;
         for (const auto& module : copy.modules) for (const auto& segment : module.image.segments)
             regions[i++].file_size = segment.header.fileSize;
+        thunks = copy.thunks;
         if (tp) {
             // x86-64 TCB word 0 is its own address, as FEX will see it (host).
             thread_pointer = tp;

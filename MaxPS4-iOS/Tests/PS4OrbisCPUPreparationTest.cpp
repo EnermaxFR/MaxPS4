@@ -1,5 +1,7 @@
 #include "../Native/maxps4_guest_elf.h"
 #include "PS4OrbisExecutionFixture.h"
+#include "../Native/maxps4_ps4_libkernel.h"
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x); std::exit(1); } } while(0)
@@ -104,6 +106,29 @@ int main() {
     tls=make_tls_initial_exec_app(true,0x1234,true); // NOP between: RAX no longer the GOT offset.
     CHECK(maxps4::OrbisLinker::link({input("app.elf",tls,false),input("provider.prx",provider,true)}, {},linked,reason));
     CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==-ENOTSUP && image.segments().empty());
+    {
+        // System call through a linker-synthesized HLE trampoline: libkernel needs
+        // no PRX file; the GOT slot receives the trampoline; the CALL is admitted
+        // without admitting the trampoline's SYSCALL as guest code.
+        const uint32_t token=static_cast<uint32_t>(maxps4::PS4KernelService::thread_self);
+        auto kernelApp=make_kernel_app();
+        const maxps4::OrbisLinker::Input alone{{{"app.elf",{}},kernelApp.data(),kernelApp.size()},app_bias};
+        CHECK(!maxps4::OrbisLinker::link({alone},{},linked,reason) && reason.find("libkernel")!=std::string::npos);
+        CHECK(!maxps4::OrbisLinker::link({alone},{{kernel_identity(),0x1000,token}},linked,reason));
+        CHECK(maxps4::OrbisLinker::link({alone},{{kernel_identity(),0,token}},linked,reason));
+        CHECK(linked.thunks.size()==1 && linked.thunks[0].token==token && linked.modules.back().path=="<hle>");
+        const uint64_t thunk=linked.thunks[0].address;
+        CHECK(thunk%0x4000==0 && thunk>=data+0x300+0x4000);
+        uint64_t slot=0; std::memcpy(&slot,linked.translate(data,8,4),8); CHECK(slot==thunk);
+        CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==0 && image.has_hle());
+        CHECK(image.translate(entry,6,5)[0]==0xe8);
+        const uint8_t expected[]={0x49,0x89,0xca,0xb8,uint8_t(token),0,0,0,0x0f,0x05,0xc3};
+        const auto* code=image.translate(thunk,sizeof(expected),5);
+        CHECK(code && !std::memcmp(code,expected,sizeof(expected)) && !image.translate(thunk,1,2));
+        const auto syscall=reinterpret_cast<uintptr_t>(image.translate(thunk+8,2,5));
+        CHECK(image.hle_gate(syscall,token) && !image.hle_gate(syscall,token+1) && !image.hle_gate(syscall+1,token));
+        CHECK(!image.hle_gate(reinterpret_cast<uintptr_t>(image.translate(entry,1,5)),token));
+    }
     tls=make_tls_app(0); // Reading the TCB self-pointer is allowed.
     CHECK(maxps4::OrbisLinker::link({input("app.elf",tls,false),input("provider.prx",provider,true)}, {},linked,reason));
     CHECK(image.prepare_orbis(linked,"app.elf",10,reason)==0);

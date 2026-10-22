@@ -57,6 +57,20 @@ public:
         maxps4::PS4KernelService service{};
         const uint64_t rsp = r[x86::REG_RSP];
         int64_t result = maxps4::ps4::kernel_error(maxps4::ps4::nosys);
+        if (!linker && image && kernel && memory && r[x86::REG_RAX] <= UINT32_MAX &&
+            image->hle_gate(state.rip, static_cast<uint32_t>(r[x86::REG_RAX]))) {
+            // Orbis path: SYSCALL from a linker-synthesized trampoline. The token is
+            // the service; arguments follow SysV (RCX already moved to R10). No
+            // seventh stack argument is forwarded: guest_rsp 0 makes it fault.
+            const auto orbis = static_cast<maxps4::PS4KernelService>(r[x86::REG_RAX]);
+            const maxps4::PS4KernelCall call{r[x86::REG_RDI],r[x86::REG_RSI],r[x86::REG_RDX],
+                r[x86::REG_R10],r[x86::REG_R8],r[x86::REG_R9],0};
+            result = kernel->invoke(orbis,call,1);
+            ++calls;
+            r[x86::REG_RAX] = static_cast<uint64_t>(result);
+            state.rip += 2;
+            return static_cast<uint64_t>(result);
+        }
         if (!image || !linker || !kernel || !memory || r[x86::REG_RAX] > UINT32_MAX ||
             !linker->gate(*image,state.rip,static_cast<uint32_t>(r[x86::REG_RAX]),service)) {
             callback_error = -EPERM;
@@ -342,8 +356,9 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     std::array<FEXCore::Core::CPUState::gdt_segment, 32> gdt {};
     engine->probe.image = &image;
     engine->probe.linker = linked ? &engine->linker : nullptr;
-    engine->probe.kernel = linked ? &engine->libkernel : nullptr;
-    engine->probe.memory = linked ? &engine->system_memory : nullptr;
+    // Orbis images with synthesized HLE trampolines also reach libkernel.
+    engine->probe.kernel = linked || image.has_hle() ? &engine->libkernel : nullptr;
+    engine->probe.memory = linked || image.has_hle() ? &engine->system_memory : nullptr;
     engine->probe.private_stack = reinterpret_cast<uintptr_t>(stack_base);
     engine->probe.private_stack_size = page;
     engine->probe.calls = 0;
@@ -532,9 +547,18 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis(maxps4_fex_engine* engine,
             }
             inputs.push_back(std::move(in));
         }
+        // libkernel is provided by HLE: one synthesized trampoline per implemented
+        // NID, identity libkernel/libkernel version 1 (as resolve_libkernel).
+        std::vector<maxps4::OrbisLinker::HLE> hle;
+        size_t exported = 0;
+        const auto* kernel_exports = maxps4::libkernel_exports(exported);
+        for (size_t i=0;i<exported;++i) {
+            maxps4::OrbisLinker::Identity id{kernel_exports[i].nid,"libkernel","libkernel",1,1,2};
+            hle.push_back({id,0,static_cast<uint32_t>(kernel_exports[i].service)});
+        }
         maxps4::OrbisLinker::Image linked;
         std::string reason;
-        if (!maxps4::OrbisLinker::link(inputs,{},linked,reason)) {
+        if (!maxps4::OrbisLinker::link(inputs,hle,linked,reason)) {
             message(reason); return -ENOEXEC;
         }
         const int status = engine->staged_ps4.prepare_orbis(linked,root,budget,reason);

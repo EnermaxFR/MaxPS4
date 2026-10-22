@@ -137,6 +137,22 @@ les permissions. Les bytes hôte sont des vecteurs ordinaires, jamais PROT_EXEC.
 Les points d'entrée non nuls doivent désigner du code file-backed ; un PRX peut
 ne pas avoir d'entrée. Les consultations échouées ne modifient pas les sorties.
 
+**Trampolines HLE synthétisées.** Une entrée HLE avec `guestAddress = 0` et un
+`token` non nul demande au linker d'écrire la trampoline
+`MOV R10,RCX ; MOV EAX,token ; SYSCALL ; RET` (11 octets) dans un module `<hle>`
+RX, placé après tous les modules et une garde de 16 Kio (`Image::thunks`).
+Une bibliothèque/un module importé que seul le registre HLE fournit (même nom
+et même version) n'exige pas de fichier PRX ni de dépendance déclarée ; si un
+module fourni porte le même nom, la règle explicite habituelle s'applique.
+`maxps4_fex_engine_prepare_orbis` enregistre ainsi chaque NID implémenté de
+`libkernel` (identité libkernel/libkernel, versions 1 — à confirmer sur des
+binaires réels). Côté exécution, un `CALL [GOT]` vers une trampoline est admis
+sans admettre son `SYSCALL` comme code invité ; FEX n'appelle `PS4Libkernel`
+que si le `SYSCALL` est exactement celui d'une trampoline avec le même jeton.
+Arguments SysV (RDI, RSI, RDX, R10, R8, R9) ; pas de 7ᵉ argument sur la pile.
+Les pointeurs passés sont des adresses hôte rebasées : les services qui lisent
+ou écrivent la mémoire invitée ne sont pas encore utilisables par ce chemin.
+
 Le registre HLE C++ est explicite et vide par défaut. Une entrée contient
 l'identité exacte et une adresse de trampoline **invité** déjà cartographié RX.
 Un pointeur de fonction hôte n'est pas un binding HLE. Les collisions HLE/export,
