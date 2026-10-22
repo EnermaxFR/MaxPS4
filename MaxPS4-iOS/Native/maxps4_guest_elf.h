@@ -105,6 +105,12 @@ public:
         return stack_bytes ? const_cast<uint8_t*>(translate(stack_address, bytes, 6)) : nullptr;
     }
     bool general() const { return identity; }
+    // General images enter like a PS4 process: RDI = &EntryParams (top of the
+    // guest stack, argc 1, argv[0] "eboot.bin"), RSI = an exit function that
+    // ends the run (service process_exit). Rewrites them and returns their
+    // address, which is also the initial RSP; 0 for other images.
+    static constexpr uint64_t entryParamsBytes = 64;
+    uint64_t write_entry_params();
     // General images: the sceKernelMmap window (guest = host addresses);
     // false otherwise. Not part of segments(): translate() ignores it.
     bool heap(uint64_t& address, uint64_t& bytes) const {
@@ -125,7 +131,8 @@ private:
     void* arena = nullptr;
     size_t arena_size = 0;
     bool identity = false;
-    uint64_t stack_address = 0, stack_bytes = 0, heap_address = 0, heap_bytes = 0;
+    uint64_t stack_address = 0, stack_bytes = 0, heap_address = 0, heap_bytes = 0,
+             entry_params_address = 0;
     uint64_t guest_base = 0, guest_entry = 0, thread_pointer = 0, start_address = 0;
     std::vector<OrbisLinker::Thunk> thunks;
     std::vector<OrbisLinker::TLSBlock> tls_blocks;

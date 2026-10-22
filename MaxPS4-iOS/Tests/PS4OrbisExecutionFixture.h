@@ -278,6 +278,25 @@ inline std::vector<uint8_t> make_general_mmap_app() {
     put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
     return b;
 }
+// PS4 process entry (general mode): checks RDI -> EntryParams {argc 1,
+// argv[0] "eboot.bin"}, its first 8 bytes copied at [RSP], RSP = 8 (mod 16),
+// then calls the exit function in RSI with argc+41 = 42 (7 if a check fails).
+inline std::vector<uint8_t> make_general_entry_app() {
+    auto b=make_kernel_app();
+    using orbis_fixture::put;
+    const uint8_t code[]={
+        0x8b,0x07, 0x48,0x8b,0x57,0x08, 0x48,0x8b,0x12,            // 0x00 EAX=argc; RDX=*argv[0]
+        0x48,0xb9,'e','b','o','o','t','.','b','i',                 // 0x09 MOV RCX,"eboot.bi"
+        0x48,0x39,0xca, 0x75,0x1a,                                 // 0x13 CMP RDX,RCX; JNZ bad
+        0x48,0x8b,0x0c,0x24, 0x48,0x3b,0x0f, 0x75,0x11,            // 0x18 CMP [RSP],[RDI]; JNZ bad
+        0x48,0x89,0xe1, 0x83,0xe1,0x0f, 0x83,0xf9,0x08, 0x75,0x06, // 0x21 RSP%16==8 or bad
+        0x8d,0x78,0x29, 0xff,0xd6, 0xf4,                           // 0x2c EDI=argc+41; CALL RSI; HLT
+        0xbf,7,0,0,0, 0xff,0xd6, 0xf4};                            // 0x32 bad: EDI=7; CALL RSI; HLT
+    std::fill(b.begin()+0x200,b.begin()+0x300,0);
+    std::copy(std::begin(code),std::end(code),b.begin()+0x200);
+    put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
+    return b;
+}
 // sceKernelClockGettime(clock, RSP buffer): the timespec lives on the guest
 // stack, then is copied to app data at 0x8010. Returns the HLE result.
 inline std::vector<uint8_t> make_general_clock_app(uint32_t clock=4) {
