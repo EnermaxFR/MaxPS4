@@ -3,6 +3,9 @@ on:
   pull_request:
     paths:
       - 'MaxPS4-iOS/Native/PS4ExecutableImage.hpp'
+      - 'MaxPS4-iOS/Native/PS4SELFBlockReport.hpp'
+      - 'MaxPS4-iOS/Tests/PS4SELFBlockReportTest.cpp'
+      - 'MaxPS4-iOS/Tools/ps4-self-inspect.cpp'
       - 'MaxPS4-iOS/Native/maxps4_guest_elf.*'
       - 'MaxPS4-iOS/Tests/PS4GuestStagingTest.cpp'
       - 'MaxPS4-iOS/Tests/PS4ExecutableFixture.h'
@@ -24,6 +27,9 @@ jobs:
           /tmp/ps4-segments-test
           c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Native/maxps4_guest_elf.cpp MaxPS4-iOS/Tests/PS4GuestStagingTest.cpp -o /tmp/ps4-stage-test
           /tmp/ps4-stage-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PS4SELFBlockReportTest.cpp -o /tmp/ps4-self-report-test
+          /tmp/ps4-self-report-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic MaxPS4-iOS/Tools/ps4-self-inspect.cpp -o /tmp/ps4-self-inspect
   ios-compile:
     runs-on: macos-latest
     steps:
@@ -35,7 +41,10 @@ jobs:
           /tmp/ps4-segments-test
           xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic MaxPS4-iOS/Native/maxps4_guest_elf.cpp MaxPS4-iOS/Tests/PS4GuestStagingTest.cpp -o /tmp/ps4-stage-test
           /tmp/ps4-stage-test
+          xcrun clang++ -std=c++17 -Wall -Wextra -Werror -pedantic MaxPS4-iOS/Tests/PS4SELFBlockReportTest.cpp -o /tmp/ps4-self-report-test
+          /tmp/ps4-self-report-test
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/PS4ExecutableImageTest.cpp -o /tmp/ps4-segments-ios.o
           xcrun lipo -archs /tmp/ps4-segments-ios.o | grep -w arm64
           xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Native/maxps4_guest_elf.cpp -o /tmp/ps4-stage-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -pedantic -target arm64-apple-ios18.0 -isysroot "$SDK" -c MaxPS4-iOS/Tests/PS4SELFBlockReportTest.cpp -o /tmp/ps4-self-report-ios.o
