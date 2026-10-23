@@ -25,7 +25,7 @@ int main() {
     assert(call(S::thread_self) == 1 && call(S::thread_self, 0, second) == int64_t(second));
     assert(call(S::thread_self, 0, 99) == kernel_error(inval));
     assert(call(S::mutex_init, 0x1000) == kernel_error(fault));
-    assert(kernel.invoke(S::mutex_init, {0x10000, 1}) == kernel_error(notsup));
+    assert(kernel.invoke(S::mutex_init, {0x10000, 1}) == kernel_error(fault)); // Attribute object address.
     assert(kernel.invoke(S::mutex_init, {0x10000, 0, UINT64_MAX}) == kernel_error(fault));
     assert(call(S::mutex_init) == 0 && call(S::mutex_init) == kernel_error(busy));
     uint8_t wire[8]; assert(memory.read(0x10000, wire, sizeof(wire)));
@@ -98,7 +98,10 @@ int main() {
     assert(resolve_libkernel("9UK1vLZQft4", "libkernel", "libkernel", 1) == S::mutex_lock);
     assert(resolve_libkernel("scePthreadCondWait", "libkernel", "libkernel", 1) == S::cond_wait);
     assert(resolve_libkernel("BmMjYxmew1w", "libkernel", "libkernel", 1) == S::cond_timedwait);
-    for (const char* unsupported : {"scePthreadDetach", "scePthreadMutexattrInit", "scePthreadAttrSetstacksize"})
+    assert(resolve_libkernel("4qGrR6eoP9Y", "libkernel", "libkernel", 1) == S::thread_detach);
+    assert(resolve_libkernel("scePthreadMutexattrSettype", "libkernel", "libkernel", 1) == S::mutexattr_settype);
+    assert(resolve_libkernel("UTXzJbWhhTE", "libkernel", "libkernel", 1) == S::attr_set_stack);
+    for (const char* unsupported : {"scePthreadCancel", "scePthreadSetprio", "scePthreadAttrSetstack"})
         assert(resolve_libkernel(unsupported, "libkernel", "libkernel", 1) == S::unresolved);
     std::puts("PS4 guest thread identity, mutex and libkernel lock checks passed");
 }

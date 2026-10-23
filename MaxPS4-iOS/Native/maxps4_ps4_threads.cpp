@@ -58,15 +58,151 @@ PS4Threads::Mutex* PS4Threads::acquire(uint64_t slot, Error& error) {
     if (next_mutex_ == UINT64_MAX) { error = again; return nullptr; }
     for (auto& mutex : mutexes_) if (!mutex.token) {
         if (!write_token(slot, next_mutex_)) { error = fault; return nullptr; }
-        mutex = {next_mutex_++, 0, slot};
+        mutex = {next_mutex_++, 0, slot, token == adaptive_initializer ? adaptive : error_check, 0};
         return &mutex;
     }
     error = again;
     return nullptr;
 }
+bool PS4Threads::write_output(uint64_t address, uint64_t value, size_t width) {
+    uint8_t wire[8]; put_le(wire, 0, value, width);
+    return address && memory_.write(address, wire, width);
+}
+// Attribute objects: initializing a slot again (common for an attribute on
+// the stack) replaces its object instead of failing.
+PS4Threads::Attr* PS4Threads::find_attr(uint64_t slot, Error& error) {
+    uint64_t token = 0;
+    if (!slot || !read_token(slot, token)) { error = fault; return nullptr; }
+    for (auto& attr : attrs_) if (token && attr.token == token) return &attr;
+    error = inval;
+    return nullptr;
+}
+PS4Threads::MutexAttr* PS4Threads::find_mutexattr(uint64_t slot, Error& error) {
+    uint64_t token = 0;
+    if (!slot || !read_token(slot, token)) { error = fault; return nullptr; }
+    for (auto& attr : mutexattrs_) if (token && attr.token == token) return &attr;
+    error = inval;
+    return nullptr;
+}
+template <typename Table> Error PS4Threads::create(Table& table, uint64_t slot) {
+    if (!writable(slot)) return fault;
+    if (next_mutex_ == UINT64_MAX) return again;
+    auto entry = std::find_if(table.begin(), table.end(), [slot](const auto& e) { return e.token && e.slot == slot; });
+    if (entry == table.end())
+        entry = std::find_if(table.begin(), table.end(), [](const auto& e) { return !e.token; });
+    if (entry == table.end()) return nomem;
+    if (!write_token(slot, next_mutex_)) return fault;
+    *entry = {};
+    entry->token = next_mutex_++;
+    entry->slot = slot;
+    return ok;
+}
+template <typename Table> Error PS4Threads::remove(Table& table, uint64_t slot) {
+    if (!writable(slot)) return fault;
+    uint64_t token = 0;
+    if (!read_token(slot, token)) return fault;
+    const auto entry = std::find_if(table.begin(), table.end(),
+        [token](const auto& e) { return e.token && e.token == token; });
+    if (entry == table.end()) return inval;
+    if (!write_token(slot, destroyed)) return fault;
+    *entry = {};
+    return ok;
+}
+Error PS4Threads::attr_init(uint64_t slot) {
+    std::lock_guard<std::mutex> lock(guard_);
+    return create(attrs_, slot);
+}
+Error PS4Threads::attr_destroy(uint64_t slot) {
+    std::lock_guard<std::mutex> lock(guard_);
+    return remove(attrs_, slot);
+}
+Error PS4Threads::attr_set_detach(uint64_t slot, uint64_t state) {
+    std::lock_guard<std::mutex> lock(guard_);
+    Error error = ok;
+    Attr* attr = find_attr(slot, error);
+    if (!attr) return error;
+    if (uint32_t(state) > 1) return inval;
+    attr->detached = uint32_t(state) == 1;
+    return ok;
+}
+Error PS4Threads::attr_get_detach(uint64_t slot, uint64_t output) {
+    std::lock_guard<std::mutex> lock(guard_);
+    Error error = ok;
+    Attr* attr = find_attr(slot, error);
+    if (!attr) return error;
+    return write_output(output, attr->detached ? 1 : 0, 4) ? ok : fault;
+}
+Error PS4Threads::attr_set_stack(uint64_t slot, uint64_t bytes) {
+    std::lock_guard<std::mutex> lock(guard_);
+    Error error = ok;
+    Attr* attr = find_attr(slot, error);
+    if (!attr) return error;
+    if (bytes < minimum_stack) return inval;
+    attr->stack = bytes;
+    return ok;
+}
+Error PS4Threads::attr_get_stack(uint64_t slot, uint64_t output) {
+    std::lock_guard<std::mutex> lock(guard_);
+    Error error = ok;
+    Attr* attr = find_attr(slot, error);
+    if (!attr) return error;
+    return write_output(output, attr->stack, 8) ? ok : fault;
+}
+Error PS4Threads::attr_accept(uint64_t slot) {
+    std::lock_guard<std::mutex> lock(guard_);
+    Error error = ok;
+    return find_attr(slot, error) ? ok : error;
+}
+Error PS4Threads::thread_attributes(uint64_t slot, bool& detached, uint64_t& stack) {
+    std::lock_guard<std::mutex> lock(guard_);
+    detached = false;
+    stack = default_stack;
+    if (!slot) return ok;
+    Error error = ok;
+    Attr* attr = find_attr(slot, error);
+    if (!attr) return error;
+    detached = attr->detached;
+    stack = attr->stack;
+    return ok;
+}
+Error PS4Threads::mutexattr_init(uint64_t slot) {
+    std::lock_guard<std::mutex> lock(guard_);
+    return create(mutexattrs_, slot);
+}
+Error PS4Threads::mutexattr_destroy(uint64_t slot) {
+    std::lock_guard<std::mutex> lock(guard_);
+    return remove(mutexattrs_, slot);
+}
+Error PS4Threads::mutexattr_settype(uint64_t slot, uint64_t type) {
+    std::lock_guard<std::mutex> lock(guard_);
+    Error error = ok;
+    MutexAttr* attr = find_mutexattr(slot, error);
+    if (!attr) return error;
+    if (uint32_t(type) < error_check || uint32_t(type) > adaptive) return inval;
+    attr->type = uint32_t(type);
+    return ok;
+}
+Error PS4Threads::mutexattr_gettype(uint64_t slot, uint64_t output) {
+    std::lock_guard<std::mutex> lock(guard_);
+    Error error = ok;
+    MutexAttr* attr = find_mutexattr(slot, error);
+    if (!attr) return error;
+    return write_output(output, attr->type, 4) ? ok : fault;
+}
+Error PS4Threads::mutexattr_accept(uint64_t slot) {
+    std::lock_guard<std::mutex> lock(guard_);
+    Error error = ok;
+    return find_mutexattr(slot, error) ? ok : error;
+}
 Error PS4Threads::init(uint64_t slot, uint64_t attributes, uint64_t name) {
     std::lock_guard<std::mutex> lock(guard_);
-    if (attributes) return notsup; // Default private/error-check mutex only.
+    uint32_t type = error_check;
+    if (attributes) {
+        Error error = ok;
+        MutexAttr* attr = find_mutexattr(attributes, error);
+        if (!attr) return error;
+        type = attr->type;
+    }
     if (!writable(slot)) return fault;
     if (name) {
         char text[1024];
@@ -76,7 +212,7 @@ Error PS4Threads::init(uint64_t slot, uint64_t attributes, uint64_t name) {
     if (next_mutex_ == UINT64_MAX) return again;
     for (auto& mutex : mutexes_) if (!mutex.token) {
         if (!write_token(slot, next_mutex_)) return fault;
-        mutex = {next_mutex_++, 0, slot};
+        mutex = {next_mutex_++, 0, slot, type, 0};
         return ok;
     }
     return again;
@@ -87,8 +223,14 @@ Error PS4Threads::trylock(uint64_t slot, uint64_t thread) {
     Error error = ok;
     Mutex* mutex = acquire(slot, error);
     if (!mutex) return error;
+    if (mutex->owner == thread && mutex->type == recursive) {
+        if (mutex->count == UINT32_MAX) return again;
+        ++mutex->count;
+        return ok;
+    }
     if (mutex->owner) return busy;
     mutex->owner = thread;
+    mutex->count = 1;
     return ok;
 }
 Error PS4Threads::lock(uint64_t slot, uint64_t thread) {
@@ -97,7 +239,17 @@ Error PS4Threads::lock(uint64_t slot, uint64_t thread) {
     Error error = ok;
     Mutex* mutex = acquire(slot, error);
     if (!mutex) return error;
-    if (mutex->owner == thread) return deadlk;
+    if (mutex->owner == thread) {
+        if (mutex->type == recursive) {
+            if (mutex->count == UINT32_MAX) return again;
+            ++mutex->count;
+            return ok;
+        }
+        if (mutex->type != normal) return deadlk;
+        // A normal mutex locked again by its owner deadlocks, as POSIX says.
+        changed_.wait(lock, [&] { return interrupted_; });
+        return intr;
+    }
     // A free mutex can be destroyed before this thread wakes: never take
     // another mutex's record.
     const uint64_t token = mutex->token;
@@ -105,6 +257,7 @@ Error PS4Threads::lock(uint64_t slot, uint64_t thread) {
     if (interrupted_) return intr;
     if (mutex->token != token) return inval;
     mutex->owner = thread;
+    mutex->count = 1;
     return ok;
 }
 Error PS4Threads::unlock(uint64_t slot, uint64_t thread) {
@@ -117,6 +270,7 @@ Error PS4Threads::unlock(uint64_t slot, uint64_t thread) {
         Mutex* mutex = lookup(slot);
         if (!mutex) return inval;
         if (mutex->owner != thread) return perm;
+        if (--mutex->count) return ok;
         mutex->owner = 0;
     }
     changed_.notify_all();
@@ -193,8 +347,10 @@ Error PS4Threads::cond_wait(uint64_t cond_slot, uint64_t mutex_slot, uint64_t th
     // A waiter keeps the condition alive (destroy is EBUSY). The mutex is free
     // meanwhile: if it is destroyed, the wait ends with EINVAL.
     const uint64_t generation = cond->generation, mutex_token = mutex->token;
+    const uint32_t count = mutex->count;
     ++cond->waiters;
     mutex->owner = 0;
+    mutex->count = 0;
     changed_.notify_all();
     auto signalled = [&] { return cond->generation != generation && cond->wakeups; };
     auto woken = [&] { return interrupted_ || signalled(); };
@@ -213,6 +369,7 @@ Error PS4Threads::cond_wait(uint64_t cond_slot, uint64_t mutex_slot, uint64_t th
     if (interrupted_) return intr;
     if (mutex->token != mutex_token) return inval;
     mutex->owner = thread;
+    mutex->count = count;
     return consumed ? ok : timedout;
 }
 Error PS4Threads::cond_signal(uint64_t slot, bool all) {
@@ -241,7 +398,7 @@ void PS4Threads::reset() {
         std::lock_guard<std::mutex> lock(guard_);
         threads_.fill(0); threads_[0] = 1;
         // Keep counters monotonic: stale handles never reactivate.
-        mutexes_.fill({}); conds_.fill({});
+        mutexes_.fill({}); conds_.fill({}); attrs_.fill({}); mutexattrs_.fill({});
         interrupted_ = false;
     }
     changed_.notify_all();

@@ -218,8 +218,10 @@ Limites actuelles, à traiter avant tout code non fiable :
   du moteur (`MOV RDI,RAX` ; service `thread_exit` ; `HLT`). Revenir de
   l'entrée ou appeler `scePthreadExit` termine donc le thread, et `join` rend
   sa valeur. Le handle écrit en `*thread` est l'identité PS4 du thread, celle
-  que rend `scePthreadSelf` dans ce thread. Les attributs (taille de pile,
-  priorité, détachement) ne sont pas encore appliqués. FEX ne termine pas le
+  que rend `scePthreadSelf` dans ce thread. L'objet d'attributs donne l'état
+  détaché (un thread détaché, ou passé à `scePthreadDetach`, rend son
+  emplacement à sa fin) et la taille de pile, qui doit tenir dans le 1 Mio de
+  l'emplacement (sinon EAGAIN) ; priorité et affinité ne sont pas appliquées. FEX ne termine pas le
   bloc sur un SYSCALL (changer `State.rip` y est sans effet) : la trampoline
   de `scePthreadExit` finit donc par `HLT` au lieu de `RET`. Si l'entrée
   appelle `scePthreadExit`, le processus continue jusqu'à la fin de ses autres

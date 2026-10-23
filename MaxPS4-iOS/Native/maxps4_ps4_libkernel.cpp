@@ -72,6 +72,27 @@ constexpr Binding bindings[] = {
     {"scePthreadCondTimedwait", "BmMjYxmew1w", PS4KernelService::cond_timedwait},
     {"scePthreadCondSignal", "kDh-NfxgMtE", PS4KernelService::cond_signal},
     {"scePthreadCondBroadcast", "JGgj7Uvrl+A", PS4KernelService::cond_broadcast},
+    // NIDs from shadPS4 kernel/threads/pthread.cpp, pthread_attr.cpp and
+    // mutex.cpp (Orbis variants). Scheduling, affinity, guard size and the
+    // mutex protocol are accepted without effect.
+    {"scePthreadDetach", "4qGrR6eoP9Y", PS4KernelService::thread_detach},
+    {"scePthreadAttrInit", "nsYoNRywwNg", PS4KernelService::attr_init},
+    {"scePthreadAttrDestroy", "62KCwEMmzcM", PS4KernelService::attr_destroy},
+    {"scePthreadAttrSetdetachstate", "-Wreprtu0Qs", PS4KernelService::attr_set_detach},
+    {"scePthreadAttrGetdetachstate", "JaRMy+QcpeU", PS4KernelService::attr_get_detach},
+    {"scePthreadAttrSetstacksize", "UTXzJbWhhTE", PS4KernelService::attr_set_stack},
+    {"scePthreadAttrGetstacksize", "-fA+7ZlGDQs", PS4KernelService::attr_get_stack},
+    {"scePthreadAttrSetschedparam", "DzES9hQF4f4", PS4KernelService::attr_accept},
+    {"scePthreadAttrSetinheritsched", "eXbUSpEaTsA", PS4KernelService::attr_accept},
+    {"scePthreadAttrSetschedpolicy", "4+h9EzwKF4I", PS4KernelService::attr_accept},
+    {"scePthreadAttrSetaffinity", "3qxgM4ezETA", PS4KernelService::attr_accept},
+    {"scePthreadAttrSetguardsize", "El+cQ20DynU", PS4KernelService::attr_accept},
+    {"scePthreadMutexattrInit", "F8bUHwAG284", PS4KernelService::mutexattr_init},
+    {"scePthreadMutexattrInitForInternalLibc", "n2MMpvU8igI", PS4KernelService::mutexattr_init},
+    {"scePthreadMutexattrDestroy", "smWEktiyyG0", PS4KernelService::mutexattr_destroy},
+    {"scePthreadMutexattrSettype", "iMp8QpE+XO4", PS4KernelService::mutexattr_settype},
+    {"scePthreadMutexattrGettype", "gquEhBrS2iw", PS4KernelService::mutexattr_gettype},
+    {"scePthreadMutexattrSetprotocol", "1FGvU0i9saQ", PS4KernelService::mutexattr_accept},
     // NIDs from shadPS4 kernel/threads/pthread.cpp (Orbis variants).
     {"scePthreadCreate", "6UgtwV+0zb4", PS4KernelService::thread_create},
     {"scePthreadJoin", "onNY9Byn-W8", PS4KernelService::thread_join},
@@ -331,6 +352,18 @@ int64_t PS4Libkernel::invoke(PS4KernelService service, const PS4KernelCall& c, u
     case PS4KernelService::cond_broadcast:
         return threads_.known(thread) ?
             kernel_error(threads_.cond_signal(c.rdi, service == PS4KernelService::cond_broadcast)) : kernel_error(inval);
+    case PS4KernelService::attr_init: return kernel_error(threads_.attr_init(c.rdi));
+    case PS4KernelService::attr_destroy: return kernel_error(threads_.attr_destroy(c.rdi));
+    case PS4KernelService::attr_set_detach: return kernel_error(threads_.attr_set_detach(c.rdi, c.rsi));
+    case PS4KernelService::attr_get_detach: return kernel_error(threads_.attr_get_detach(c.rdi, c.rsi));
+    case PS4KernelService::attr_set_stack: return kernel_error(threads_.attr_set_stack(c.rdi, c.rsi));
+    case PS4KernelService::attr_get_stack: return kernel_error(threads_.attr_get_stack(c.rdi, c.rsi));
+    case PS4KernelService::attr_accept: return kernel_error(threads_.attr_accept(c.rdi));
+    case PS4KernelService::mutexattr_init: return kernel_error(threads_.mutexattr_init(c.rdi));
+    case PS4KernelService::mutexattr_destroy: return kernel_error(threads_.mutexattr_destroy(c.rdi));
+    case PS4KernelService::mutexattr_settype: return kernel_error(threads_.mutexattr_settype(c.rdi, c.rsi));
+    case PS4KernelService::mutexattr_gettype: return kernel_error(threads_.mutexattr_gettype(c.rdi, c.rsi));
+    case PS4KernelService::mutexattr_accept: return kernel_error(threads_.mutexattr_accept(c.rdi));
     default: break;
     }
     std::lock_guard<std::mutex> guard(lock_);

@@ -45,6 +45,11 @@ int maxps4_orbis_analysis_report(const char* path, char* output, size_t capacity
             return s.moduleVersion == 0x0100 &&
                 maxps4_ps4_resolve_libkernel(s.nid.c_str(),s.library.c_str(),s.module.c_str(),s.libraryVersion) != 0;
         });
+        // A SELF is the console's encrypted container: nothing more can be read.
+        if (bytes[0] == 0x4f && bytes[1] == 0x15 && bytes[2] == 0x3d && bytes[3] == 0x1d)
+            return copy(metadata.report() + "\nCe fichier est un SELF chiffré, tel qu’installé sur la console. "
+                "MaxPS4 ne déchiffre pas : il faut un dump déchiffré de votre propre console, "
+                "un ELF qui commence par les octets 7F 45 4C 46.", -ENOEXEC);
         // Inventory/HLE recognition is not a link binding. Prepare with an empty
         // registry and no external files; missing PRX/NID remains a real refusal.
         maxps4::OrbisLinker::Image image;
