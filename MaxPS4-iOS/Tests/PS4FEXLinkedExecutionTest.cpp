@@ -3,6 +3,7 @@
 #include "PS4OrbisExecutionFixture.h"
 #include "PS4PlayableFixture.h"
 #include "SelfFixture.h"
+#include "../Native/PM4MetalDrawPlan.hpp"
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -618,6 +619,43 @@ int main(int argc, char** argv) {
         CHECK(ran==0 && report.exited==1 && report.exit_status==timed_out);
         std::puts("PASS general scePthreadMutexLock + scePthreadCondTimedwait(1000 us) -> ETIMEDOUT");
         maxps4_fex_engine_close(process);
+    }
+    {
+        auto app=orbis_execution::make_general_gnm_app();
+        const maxps4_orbis_module module{"gnm.elf",app.data(),app.size(),orbis_execution::app_bias,nullptr,0};
+        maxps4_fex_engine* process=nullptr; CHECK(maxps4_fex_engine_open(&process)==0);
+        uint64_t relocation=0, observed=0, entry=0; uint32_t backend=0; char diagnostic[512]{};
+        const int prepared=maxps4_fex_engine_prepare_orbis_general(process,&module,1,"gnm.elf",&relocation,diagnostic,sizeof(diagnostic));
+        if(prepared) std::fprintf(stderr,"prepare GNM: %s\n",diagnostic);
+        CHECK(prepared==0);
+        uint8_t registers[48]{};
+        for(size_t i=0;i<12;++i) for(size_t j=0;j<4;++j) registers[4*i+j]=uint8_t((i==1 ? 0U : uint32_t(0x100+i))>>(8*j));
+        const uint64_t data=orbis_execution::data+relocation;
+        CHECK(maxps4_fex_engine_write_ps4(process,data+0x300,registers,28)==0);
+        CHECK(maxps4_fex_engine_write_ps4(process,data+0x340,registers,48)==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        CHECK(maxps4_fex_engine_run_orbis(process,&observed,&backend,&entry)==0);
+        maxps4_fex_cpu_report report{};
+        CHECK(maxps4_fex_engine_last_cpu_report(process,&report)==0 && report.exited==1 && report.exit_status==123);
+        std::vector<uint32_t> combined;
+        const size_t offsets[]={0x100,0x180,0x240,0x280,0x2c0}, lengths[]={29,40,10,7,3};
+        for(size_t i=0;i<5;++i) {
+            std::vector<uint8_t> bytes(lengths[i]*4);
+            CHECK(maxps4_fex_engine_read_ps4(process,data+offsets[i],bytes.data(),bytes.size())==0);
+            std::vector<uint32_t> words(lengths[i]);
+            for(size_t n=0;n<lengths[i];++n) for(size_t j=0;j<4;++j) words[n]|=uint32_t(bytes[n*4+j])<<(j*8);
+            if(i==3) CHECK(maxps4::gpu::planPM4Triangles(words.data(),words.size()).drawCount==1);
+            combined.insert(combined.end(),words.begin(),words.end());
+        }
+        const auto commands=maxps4::gpu::interpretPM4(combined.data(),combined.size());
+        CHECK(commands.valid && commands.writes.size()==20 && commands.draws.size()==2);
+        CHECK(commands.draws[0].indexed && commands.draws[0].indexAddress==data+0x400 && commands.draws[0].indexCount==6);
+        CHECK(!commands.draws[1].indexed && commands.draws[1].indexCount==3 && commands.draws[1].writesBefore==19);
+        CHECK(commands.writes[0].offset==0x48 && commands.writes[0].value==0x100);
+        CHECK(commands.writes.back().offset==0x2aa && commands.writes.back().value==0x1003f);
+        CHECK(maxps4::gpu::planPM4Triangles(combined.data(),combined.size()).error==maxps4::gpu::PM4MetalError::unsupported_state);
+        maxps4_fex_engine_close(process);
+        std::puts("PASS real GNM NIDs on FEX: VS/PS350/VGT register packets and indexed/auto draws; no shader execution claimed");
     }
     {
         auto app = orbis_execution::make_general_user_service_app();

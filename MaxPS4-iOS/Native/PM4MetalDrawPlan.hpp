@@ -18,7 +18,7 @@ inline PM4MetalPlan planPM4Triangles(const uint32_t* words, size_t count) {
     if (commands.draws.empty()) return {PM4MetalError::unsupported_draw, 0};
     for (const auto& draw : commands.draws) {
         // DRAW_INITIATOR SOURCE_SELECT=2 is auto-index. Other bits must be zero.
-        if (draw.indexCount != 3 || draw.initiator != 2)
+        if (draw.indexed || draw.instances != 1 || draw.indexCount != 3 || draw.initiator != 2)
             return {PM4MetalError::unsupported_draw, 0};
     }
     return {PM4MetalError::none, commands.draws.size()};

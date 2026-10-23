@@ -46,6 +46,21 @@ int main() {
     const std::uint32_t partial[] = {0xc0012d00, 3, 2, 0xc000ff00, 0};
     commands = interpretPM4(partial, 5);
     assert(!commands.valid && commands.draws.empty() && commands.writes.empty());
-    std::puts("PASS GCN context/shader/uconfig writes, NOP, ordering, boundaries and flags");
+    std::uint32_t indexed[] = {0xc0002a00,1,0xc0002f00,4,
+        0xc0042700,12,0x1000,1,6,0, 0xc0002a00,0, 0xc0042700,7,0x1002,0,7,0};
+    constexpr size_t indexedWords=sizeof(indexed)/sizeof(indexed[0]);
+    commands=interpretPM4(indexed,indexedWords);
+    assert(commands.valid && commands.draws.size()==2);
+    assert(commands.draws[0].indexed && commands.draws[0].indexAddress==0x100001000ULL);
+    assert(commands.draws[0].indexBytes==4 && commands.draws[0].instances==4 && commands.draws[0].maxIndices==12);
+    assert(commands.draws[1].indexBytes==2 && commands.draws[1].indexCount==7);
+    indexed[8]=13; assert(!interpretPM4(indexed,indexedWords).valid); indexed[8]=6;
+    indexed[6]=0x1002; assert(!interpretPM4(indexed,indexedWords).valid); indexed[6]=0x1000;
+    indexed[7]=0x10000; assert(!interpretPM4(indexed,indexedWords).valid); indexed[7]=1;
+    indexed[9]=1; commands=interpretPM4(indexed,indexedWords);
+    assert(!commands.valid && commands.draws.empty() && commands.writes.empty());
+    const std::uint32_t invalidType[]={0xc0002a00,2}; assert(!interpretPM4(invalidType,2).valid);
+    const std::uint32_t noInstances[]={0xc0002f00,0}; assert(!interpretPM4(noInstances,2).valid);
+    std::puts("PASS GCN register writes and indexed draws: address, index type, instancing, order, bounds and flags");
 }
 
