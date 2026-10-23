@@ -243,6 +243,21 @@ Limites actuelles, à traiter avant tout code non fiable :
   L'analyse, le précontrôle et le chargeur FEX passent par là. Un SELF à blocs
   chiffrés (0x2) ou compressés (0x8) est refusé avec un message clair :
   MaxPS4 ne déchiffre ni ne décompresse rien.
+- **Jeux du commerce** : un premier vrai jeu (exécutable en SELF à blocs en
+  clair, 274 imports sur 17 bibliothèques, 1457 relocations) se lie
+  entièrement. Pour cela : relocations dans `PT_SCE_RELRO`, `PT_TLS` vide,
+  en-têtes de métadonnées (`PT_INTERP`, paramètres SCE, `PT_GNU_*`,
+  commentaire, version de bibliothèque), tags dynamiques informatifs,
+  `DT_PREINIT_ARRAY`, tableaux d'init/fini vides, attributs de module et de
+  bibliothèque répétés, symboles locaux de section, modules système déclarés
+  mais inutilisés ou servis par la HLE sans fichier PRX. Les fonctions HLE
+  correspondent à toute version de module (comme dans shadPS4), et un import
+  de données (`STT_OBJECT`) reçoit des octets RW à zéro dans le module
+  `<hle-data>` (`Image::data`).
+- **Analyse sur PC** : `MaxPS4-iOS/Tools/ps4-orbis-analyze.cpp` fait la même
+  analyse que l'app, puis une liaison où chaque import reçoit une trampoline
+  ou une donnée provisoire : elle vérifie tout le chargeur sans dépendre des
+  fonctions implémentées. Lecture seule, aucune exécution.
 
 ## Transactions et contrat mémoire/FEX
 

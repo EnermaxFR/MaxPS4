@@ -22,3 +22,10 @@ python3 scripts/run-bounded.py 30 "$OUT/game-directory-tests.txt" "$OUT/game-dir
   -fsanitize=address,undefined -fno-omit-frame-pointer \
   MaxPS4-iOS/Tests/SelfImageTest.cpp -o "$OUT/self-image-test"
 python3 scripts/run-bounded.py 30 "$OUT/self-image-tests.txt" "$OUT/self-image-test"
+# Host analysis command (the app's analysis on a PC): builds and reads the
+# synthetic PRX written by the metadata test.
+"${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror -pedantic \
+  -fsanitize=address,undefined -fno-omit-frame-pointer \
+  MaxPS4-iOS/Tools/ps4-orbis-analyze.cpp -o "$OUT/ps4-orbis-analyze"
+python3 scripts/run-bounded.py 30 "$OUT/ps4-orbis-analyze.txt" "$OUT/ps4-orbis-analyze" "$OUT/synthetic-sce.prx"
+grep -q "Préparation : réussie" "$OUT/ps4-orbis-analyze.txt"
