@@ -64,6 +64,14 @@ constexpr Binding bindings[] = {
     {"scePthreadMutexTrylock", "upoVrzMHFeE", PS4KernelService::mutex_trylock},
     {"scePthreadMutexUnlock", "tn3VlD0hG60", PS4KernelService::mutex_unlock},
     {"scePthreadMutexDestroy", "2Of0f+3mhhE", PS4KernelService::mutex_destroy},
+    // NIDs from shadPS4 kernel/threads/mutex.cpp and condvar.cpp (Orbis variants).
+    {"scePthreadMutexLock", "9UK1vLZQft4", PS4KernelService::mutex_lock},
+    {"scePthreadCondInit", "2Tb92quprl0", PS4KernelService::cond_init},
+    {"scePthreadCondDestroy", "g+PZd2hiacg", PS4KernelService::cond_destroy},
+    {"scePthreadCondWait", "WKAXJ4XBPQ4", PS4KernelService::cond_wait},
+    {"scePthreadCondTimedwait", "BmMjYxmew1w", PS4KernelService::cond_timedwait},
+    {"scePthreadCondSignal", "kDh-NfxgMtE", PS4KernelService::cond_signal},
+    {"scePthreadCondBroadcast", "JGgj7Uvrl+A", PS4KernelService::cond_broadcast},
     // NIDs from shadPS4 kernel/threads/pthread.cpp (Orbis variants).
     {"scePthreadCreate", "6UgtwV+0zb4", PS4KernelService::thread_create},
     {"scePthreadJoin", "onNY9Byn-W8", PS4KernelService::thread_join},
@@ -301,6 +309,30 @@ int64_t PS4Libkernel::gettimeofday(uint64_t output) {
     return memory_.write(output, wire, sizeof(wire)) ? 0 : kernel_error(fault);
 }
 int64_t PS4Libkernel::invoke(PS4KernelService service, const PS4KernelCall& c, uint64_t thread) {
+    // Thread services use only PS4Threads (its own lock): a thread blocked in
+    // a lock or a wait must not hold up the thread that would release it.
+    switch (service) {
+    case PS4KernelService::thread_self: return threads_.known(thread) ? int64_t(thread) : kernel_error(inval);
+    case PS4KernelService::mutex_init:
+        return threads_.known(thread) ? kernel_error(threads_.init(c.rdi, c.rsi, c.rdx)) : kernel_error(inval);
+    case PS4KernelService::mutex_trylock: return kernel_error(threads_.trylock(c.rdi, thread));
+    case PS4KernelService::mutex_lock: return kernel_error(threads_.lock(c.rdi, thread));
+    case PS4KernelService::mutex_unlock: return kernel_error(threads_.unlock(c.rdi, thread));
+    case PS4KernelService::mutex_destroy:
+        return threads_.known(thread) ? kernel_error(threads_.destroy(c.rdi)) : kernel_error(inval);
+    case PS4KernelService::cond_init:
+        return threads_.known(thread) ? kernel_error(threads_.cond_init(c.rdi, c.rsi, c.rdx)) : kernel_error(inval);
+    case PS4KernelService::cond_destroy:
+        return threads_.known(thread) ? kernel_error(threads_.cond_destroy(c.rdi)) : kernel_error(inval);
+    case PS4KernelService::cond_wait: return kernel_error(threads_.cond_wait(c.rdi, c.rsi, thread, false, 0));
+    // scePthreadCondTimedwait(cond, mutex, usec): a relative timeout.
+    case PS4KernelService::cond_timedwait: return kernel_error(threads_.cond_wait(c.rdi, c.rsi, thread, true, c.rdx));
+    case PS4KernelService::cond_signal:
+    case PS4KernelService::cond_broadcast:
+        return threads_.known(thread) ?
+            kernel_error(threads_.cond_signal(c.rdi, service == PS4KernelService::cond_broadcast)) : kernel_error(inval);
+    default: break;
+    }
     std::lock_guard<std::mutex> guard(lock_);
     try {
         if (!threads_.known(thread)) return kernel_error(inval);
@@ -321,11 +353,6 @@ int64_t PS4Libkernel::invoke(PS4KernelService service, const PS4KernelCall& c, u
             const uint64_t now = monotonic_us();
             return now >= started_us_ ? int64_t(now - started_us_) : 0;
         }
-        case PS4KernelService::thread_self: return int64_t(thread);
-        case PS4KernelService::mutex_init: return kernel_error(threads_.init(c.rdi, c.rsi, c.rdx));
-        case PS4KernelService::mutex_trylock: return kernel_error(threads_.trylock(c.rdi, thread));
-        case PS4KernelService::mutex_unlock: return kernel_error(threads_.unlock(c.rdi, thread));
-        case PS4KernelService::mutex_destroy: return kernel_error(threads_.destroy(c.rdi));
         default: return kernel_error(nosys);
         }
     } catch (const std::bad_alloc&) { return kernel_error(nomem); }
