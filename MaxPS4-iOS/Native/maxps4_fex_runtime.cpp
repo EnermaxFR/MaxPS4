@@ -36,6 +36,9 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
+#include <optional>
+#include <system_error>
 #include <thread>
 #include <pthread.h>
 #include <signal.h>
@@ -48,6 +51,11 @@
 extern "C" int maxps4_native_guest_x86_run(const uint8_t*, size_t, uint32_t,
                                            uint64_t*) noexcept;
 namespace {
+class GuestThreads;
+// scePthreadCreate/Join/Exit and the entry's exit function for a general run
+// (see GuestThreads), defined once GuestThreads is complete.
+int64_t guest_thread_service(GuestThreads& threads, maxps4::PS4KernelService service,
+                             const maxps4::PS4KernelCall& call);
 // Anonymous immutable guest memory, not a PS4 or Linux syscall ABI.
 // A syscall has no permitted host effect and returns the real ENOSYS error.
 class ProbeAddressSpace final : public FEXCore::HLE::SyscallHandler {
@@ -57,12 +65,18 @@ public:
     maxps4::PS4DynamicLinker* linker = nullptr;
     maxps4::PS4Libkernel* kernel = nullptr;
     maxps4::PS4GuestMemory* memory = nullptr;
+    GuestThreads* threads = nullptr; // General runs only.
     uint64_t private_stack = 0;
     size_t private_stack_size = 0;
-    uint32_t calls = 0;
-    int callback_error = 0;
-    bool exited = false;
-    int32_t exit_status = 0;
+    // Guest threads of a general run call in concurrently.
+    std::atomic<uint32_t> calls {0};
+    std::atomic<int> callback_error {0};
+    std::atomic<bool> exited {false};
+    std::atomic<int32_t> exit_status {0};
+    // PS4 identity (PS4Threads) of the guest thread on this host thread.
+    static inline thread_local uint64_t guest_thread = 1;
+    // Static TLS thread pointer of a child guest thread (0: the image's own).
+    static inline thread_local uint64_t guest_tls = 0;
     uint64_t HandleSyscall(FEXCore::Core::CpuStateFrame* frame, FEXCore::HLE::SyscallArguments*) override {
         namespace x86 = FEXCore::X86State;
         auto& state = frame->State;
@@ -96,18 +110,29 @@ public:
                 // through RAX, so never return an invalid pointer: on failure return the
                 // (mapped) TCB and fail the run once FEX returns.
                 uint64_t index[2]{};
-                const uint8_t* address = memory->read(call.rdi,index,sizeof(index)) ?
-                    image->tls_address(index[0],index[1]) : nullptr;
-                if (!address) { callback_error = -EFAULT; address = image->thread_pointer_host(); }
+                const uint8_t* address = !memory->read(call.rdi,index,sizeof(index)) ? nullptr :
+                    guest_tls ? image->tls_address(guest_tls,index[0],index[1]) :
+                    image->tls_address(index[0],index[1]);
+                if (!address) {
+                    callback_error = -EFAULT;
+                    address = guest_tls ? reinterpret_cast<const uint8_t*>(guest_tls) : image->thread_pointer_host();
+                }
                 result = static_cast<int64_t>(reinterpret_cast<uintptr_t>(address));
             } else if (orbis == maxps4::PS4KernelService::process_exit) {
                 // The entry's exit function: the status (EDI) becomes RAX, and the
-                // HLT that follows this SYSCALL ends the run.
-                exited = true;
-                exit_status = static_cast<int32_t>(r[x86::REG_RDI]);
-                result = exit_status;
+                // HLT that follows this SYSCALL ends the calling thread. The first
+                // exit sets the status; from a child thread it also ends the run.
+                result = static_cast<int32_t>(r[x86::REG_RDI]);
+                bool first = false;
+                if (exited.compare_exchange_strong(first, true)) exit_status = static_cast<int32_t>(result);
+                if (threads) guest_thread_service(*threads,orbis,call);
+            } else if (maxps4::general_only(orbis)) {
+                // scePthreadExit's trampoline and the thread-return trampoline
+                // both end with HLT after their SYSCALL.
+                result = threads ? guest_thread_service(*threads,orbis,call) :
+                    maxps4::ps4::kernel_error(maxps4::ps4::nosys);
             } else {
-                result = kernel->invoke(orbis,call,1);
+                result = kernel->invoke(orbis,call,guest_thread);
             }
             ++calls;
             r[x86::REG_RAX] = static_cast<uint64_t>(result);
@@ -205,7 +230,10 @@ public:
 // Time limit: after `limit_ms`, a watchdog sends SIGURG to the executing thread
 // every millisecond until it is stopped the same way, from JIT or dispatcher
 // code (signal SIGURG). While the thread is in FEX or HLE C++ code the signal
-// chains (SIGURG is ignored by default) and the next one retries.
+// chains (SIGURG is ignored by default) and the next one retries. `expire`
+// runs once when the limit elapses (it wakes HLE waits such as a join).
+// A child guest thread's guard has `install` false: the main run's guard owns
+// the process handlers for the whole run, this one only routes its thread.
 class GuestFaultGuard final {
 public:
     static constexpr bool available =
@@ -215,21 +243,24 @@ public:
         false;
 #endif
     GuestFaultGuard(FEXCore::Context::Context* context, FEXCore::Core::InternalThreadState* thread,
-                    const FEXCore::SignalDelegatorConfig& config, uint32_t limit_ms)
+                    const FEXCore::SignalDelegatorConfig& config, uint32_t limit_ms,
+                    bool install = true, std::function<void()> expire = {})
         : context(context), thread(thread), config(config) {
         if (!available) return;
+        active = this;
+        if (!install) return;
         struct sigaction action {};
         action.sa_sigaction = handle;
         action.sa_flags = SA_SIGINFO;
         sigemptyset(&action.sa_mask);
         for (; installed < signals.size(); ++installed)
             if (::sigaction(signals[installed], &action, &previous[installed]) != 0) break;
-        active = this;
         if (limit_ms && installed == signals.size()) {
             const pthread_t target = ::pthread_self();
-            watchdog = std::thread([this, target, limit_ms] {
+            watchdog = std::thread([this, target, limit_ms, expire = std::move(expire)] {
                 std::unique_lock lock(watch_lock);
                 if (watch.wait_for(lock, std::chrono::milliseconds(limit_ms), [this] { return finished; })) return;
+                if (expire) expire();
                 while (!finished && !signal.load()) {
                     ::pthread_kill(target, SIGURG);
                     watch.wait_for(lock, std::chrono::milliseconds(1), [this] { return finished; });
@@ -307,6 +338,263 @@ private:
     std::condition_variable watch;
     bool finished = false;
 };
+// Initial FEX state of one guest thread (main or child): zero integer
+// registers, RIP/RSP, FS base, a guarded CALL/RET stack and a GDT holding one
+// 64-bit user code segment. Owns that host memory until the thread is gone.
+class FEXThreadSetup final {
+public:
+    static constexpr size_t callret_size = FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE;
+    explicit FEXThreadSetup(size_t page) : page(page), callret(callret_size + 2 * page, PROT_NONE) {}
+    bool mapped() const { return callret.address != MAP_FAILED; }
+    int prepare(FEXCore::Core::InternalThreadState* thread, uint64_t rip, uint64_t rsp, uint64_t fs) {
+        if (!mapped()) return -ENOMEM;
+        auto* base = static_cast<uint8_t*>(callret.address) + page;
+        if (::mprotect(base, callret_size, PROT_READ | PROT_WRITE) != 0) return -errno;
+        auto& state = thread->CurrentFrame->State;
+        std::fill(std::begin(state.gregs), std::end(state.gregs), uint64_t{});
+        state.gregs[FEXCore::X86State::REG_RSP] = rsp;
+        state.rip = rip;
+        if (fs) state.fs_cached = fs;
+        thread->CallRetStackBase = base;
+        state.callret_sp = reinterpret_cast<uintptr_t>(base) + callret_size / 4;
+        state.segment_arrays[FEXCore::Core::CPUState::SEGMENT_ARRAY_INDEX_GDT] = gdt.data();
+        state.segment_arrays[FEXCore::Core::CPUState::SEGMENT_ARRAY_INDEX_LDT] = gdt.data();
+        state.cs_idx = FEXCore::Core::CPUState::DEFAULT_USER_CS << 3;
+        auto* segment = FEXCore::Core::CPUState::GetSegmentFromIndex(state, state.cs_idx);
+        FEXCore::Core::CPUState::SetGDTBase(segment, 0);
+        FEXCore::Core::CPUState::SetGDTLimit(segment, 0xF'FFFFU);
+        segment->L = 1;
+        segment->D = 0;
+        state.cs_cached = FEXCore::Core::CPUState::CalculateGDTBase(*segment);
+        return 0;
+    }
+private:
+    size_t page;
+    Mapping callret;
+    std::array<FEXCore::Core::CPUState::gdt_segment, 32> gdt {};
+};
+// Child guest threads of one general run (scePthreadCreate). Each runs on its
+// own host thread with its own FEX thread state: RIP = entry, RDI = arg, RSP =
+// its GuestELF slot's stack top - 8 holding the thread-return trampoline, FS =
+// the slot's TCB. Returning from the entry or calling scePthreadExit ends it on
+// the trampoline's HLT; scePthreadJoin waits for that and frees the slot.
+// Attributes are not applied yet: every thread gets a 1 MiB slot stack and is
+// joinable. After the main thread's scePthreadExit the run waits for the other
+// threads. When the main thread's run ends, every remaining thread is stopped
+// (SIGURG, as the watchdog does; without fault containment they are waited
+// for) and joined. A contained fault in a child thread, or a child calling the
+// entry's exit function, stops the main thread too; a fault becomes the run's
+// result.
+class GuestThreads final {
+public:
+    GuestThreads(FEXCore::Context::Context* context, const FEXCore::SignalDelegatorConfig& config,
+                 maxps4::GuestELF& image, maxps4::PS4GuestMemory& memory,
+                 maxps4::PS4Threads& identities, size_t page)
+        : context(context), config(config), image(image), memory(memory), identities(identities),
+          page(page), main_thread(::pthread_self()) {}
+    ~GuestThreads() { finish(); }
+    GuestThreads(const GuestThreads&) = delete;
+    GuestThreads& operator=(const GuestThreads&) = delete;
+    // scePthreadCreate(PthreadT* out, attr, entry, arg, name): *out = the new
+    // thread's PS4 identity (also what scePthreadSelf returns in it).
+    int64_t create(const maxps4::PS4KernelCall& call) {
+        using namespace maxps4::ps4;
+#if defined(VIXL_SIMULATOR)
+        // FEX's VIXL simulator belongs to the context's dispatcher: concurrent
+        // guest threads would share one simulated CPU.
+        (void)call;
+        return kernel_error(nosys);
+#endif
+        if (!call.rdi || !image.translate(call.rdx, 1, 5)) return kernel_error(inval);
+        std::lock_guard guard(lock);
+        if (stopping) return kernel_error(again);
+        const auto slot = std::find_if(threads.begin(), threads.end(), [](const Thread& t) { return !t.used; });
+        if (slot == threads.end()) return kernel_error(again);
+        uint64_t top = 0, tp = 0;
+        if (!image.prepare_thread(static_cast<size_t>(slot - threads.begin()), top, tp)) return kernel_error(nomem);
+        const uint64_t id = identities.attach();
+        if (!id) return kernel_error(again);
+        uint8_t handle[8], back[8];
+        put_le(handle, 0, id, 8);
+        put_le(back, 0, image.thread_return(), 8);
+        if (!memory.write(call.rdi, handle, sizeof(handle)) || !memory.write(top - 8, back, sizeof(back))) {
+            identities.detach(id);
+            return kernel_error(fault);
+        }
+        slot->id = id; slot->entry = call.rdx; slot->arg = call.rcx;
+        slot->rsp = top - 8; slot->fs = tp; slot->value = 0;
+        slot->finished = slot->joining = slot->ends_process = false;
+        try {
+            slot->host = std::thread([this, thread = &*slot] { run(*thread); });
+        } catch (const std::system_error&) {
+            identities.detach(id);
+            return kernel_error(again);
+        }
+        slot->used = true;
+        return 0;
+    }
+    // scePthreadJoin(thread, void** value).
+    int64_t join(uint64_t id, uint64_t out) {
+        using namespace maxps4::ps4;
+        if (id == ProbeAddressSpace::guest_thread) return kernel_error(deadlk);
+        std::unique_lock guard(lock);
+        const auto target = std::find_if(threads.begin(), threads.end(),
+            [id](const Thread& t) { return t.used && t.id == id && !t.joining; });
+        if (target == threads.end()) return kernel_error(srch);
+        target->joining = true;
+        changed.wait(guard, [&] { return target->finished || stopping; });
+        // Stopping (time limit or a child's fault): return to guest code, where
+        // the stop signals land, and leave the thread to finish(). A faulting
+        // child only exits once the main run is done, so joining it here would
+        // never return.
+        if (stopping) { target->joining = false; return kernel_error(intr); }
+        // finish() may join hosts too: whoever moves the handle out joins it.
+        std::thread host = std::move(target->host);
+        const uint64_t value = target->value;
+        guard.unlock();
+        if (host.joinable()) host.join();
+        guard.lock();
+        // A thread that still owns a mutex keeps its identity (PS4Threads).
+        identities.detach(id);
+        target->used = target->joining = false;
+        guard.unlock();
+        if (!out) return 0;
+        uint8_t wire[8];
+        put_le(wire, 0, value, 8);
+        return memory.write(out, wire, sizeof(wire)) ? 0 : kernel_error(fault);
+    }
+    // scePthreadExit(value), or the return of a child's entry: the HLT after
+    // the SYSCALL ends the calling thread. On the main thread the process
+    // lives on until its other threads end (wait()).
+    void exit(uint64_t value) {
+        if (current) { current->value = value; return; }
+        std::lock_guard guard(lock);
+        main_exited = true;
+    }
+    // The entry's exit function: called from a child thread, that thread ends
+    // on the HLT after the SYSCALL and then stops the main run.
+    void process_exit() { if (current) current->ends_process = true; }
+    bool main_thread_exited() const {
+        std::lock_guard guard(lock);
+        return main_exited;
+    }
+    // After the main thread's scePthreadExit: until every child has ended, or
+    // a stop (time limit, fault, exit function) is requested.
+    void wait() {
+        std::unique_lock guard(lock);
+        changed.wait(guard, [&] {
+            return stopping || std::none_of(threads.begin(), threads.end(),
+                [](const Thread& t) { return t.used && !t.finished; });
+        });
+    }
+    // Time limit expired: wake every join so the stop signals can land.
+    void interrupt() {
+        { std::lock_guard guard(lock); stopping = timed_out = true; }
+        changed.notify_all();
+    }
+    bool expired() const {
+        std::lock_guard guard(lock);
+        return timed_out;
+    }
+    // The main thread's run ended: stop and join every child thread.
+    void finish() {
+        std::unique_lock guard(lock);
+        if (main_done) return;
+        stopping = main_done = true;
+        changed.notify_all();
+        for (auto& thread : threads) {
+            while (thread.used && !thread.finished) {
+                if (GuestFaultGuard::available && thread.host.joinable())
+                    ::pthread_kill(thread.host.native_handle(), SIGURG);
+                changed.wait_for(guard, std::chrono::milliseconds(1));
+            }
+        }
+        // Every child has finished, so every join in progress has returned.
+        for (auto& thread : threads) {
+            if (!thread.used) continue;
+            std::thread host = std::move(thread.host);
+            guard.unlock();
+            if (host.joinable()) host.join();
+            guard.lock();
+            identities.detach(thread.id);
+            thread.used = false;
+        }
+    }
+    bool faulted(maxps4_fex_guest_fault& out) const {
+        std::lock_guard guard(lock);
+        out = first_fault;
+        return first_fault.signal != 0;
+    }
+private:
+    struct Thread {
+        bool used = false, joining = false, finished = false, ends_process = false;
+        uint64_t id = 0, entry = 0, arg = 0, rsp = 0, fs = 0, value = 0;
+        std::thread host;
+    };
+    void run(Thread& thread) {
+        ProbeAddressSpace::guest_thread = thread.id;
+        ProbeAddressSpace::guest_tls = thread.fs;
+        current = &thread;
+        maxps4_fex_guest_fault fault {};
+        bool skip = false;
+        { std::lock_guard guard(lock); skip = stopping; }
+        if (!skip) {
+            FEXThreadSetup setup(page);
+            if (auto* fex = context->CreateThread(thread.entry, thread.rsp)) {
+                if (setup.prepare(fex, thread.entry, thread.rsp, thread.fs) == 0) {
+                    fex->CurrentFrame->State.gregs[FEXCore::X86State::REG_RDI] = thread.arg;
+                    GuestFaultGuard guard(context, fex, config, 0, false);
+                    context->ExecuteThread(fex);
+                    const int signal = guard.signal.load();
+                    // SIGURG only comes from finish(): a stop, not a fault.
+                    if (signal && signal != SIGURG)
+                        fault = {signal, 0, guard.address, fex->CurrentFrame->State.rip};
+                }
+                context->DestroyThread(fex);
+            }
+        }
+        current = nullptr;
+        bool stop_main = false;
+        {
+            std::lock_guard guard(lock);
+            if (fault.signal && !first_fault.signal) { first_fault = fault; stop_main = stopping = true; }
+            if (thread.ends_process) stop_main = stopping = true;
+            thread.finished = true; // `thread` may be reused from here on.
+        }
+        changed.notify_all();
+        if (!stop_main) return;
+        // A faulting or exiting thread ends the process: stop the main thread too.
+        std::unique_lock guard(lock);
+        while (!main_done) {
+            ::pthread_kill(main_thread, SIGURG);
+            changed.wait_for(guard, std::chrono::milliseconds(1));
+        }
+    }
+    FEXCore::Context::Context* context;
+    FEXCore::SignalDelegatorConfig config;
+    maxps4::GuestELF& image;
+    maxps4::PS4GuestMemory& memory;
+    maxps4::PS4Threads& identities;
+    size_t page;
+    pthread_t main_thread;
+    mutable std::mutex lock;
+    std::condition_variable changed;
+    std::array<Thread, maxps4::GuestELF::generalThreads> threads {};
+    bool stopping = false, main_done = false, main_exited = false, timed_out = false;
+    maxps4_fex_guest_fault first_fault {};
+    static inline thread_local Thread* current = nullptr;
+};
+int64_t guest_thread_service(GuestThreads& threads, maxps4::PS4KernelService service,
+                             const maxps4::PS4KernelCall& call) {
+    using maxps4::PS4KernelService;
+    switch (service) {
+    case PS4KernelService::thread_create: return threads.create(call);
+    case PS4KernelService::thread_join: return threads.join(call.rdi, call.rsi);
+    case PS4KernelService::thread_exit: threads.exit(call.rdi); return 0;
+    case PS4KernelService::process_exit: threads.process_exit(); return 0;
+    default: return maxps4::ps4::kernel_error(maxps4::ps4::nosys);
+    }
+}
 }
 struct maxps4_fex_engine {
     // This real FEX configuration holder installs no process signal handlers.
@@ -520,14 +808,10 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     const size_t page = static_cast<size_t>(host_page);
     Mapping stack(3 * page, PROT_NONE);
     if (stack.address == MAP_FAILED) return -errno;
-    constexpr size_t callret_size = FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE;
-    Mapping callret(callret_size + 2 * page, PROT_NONE);
-    if (callret.address == MAP_FAILED) return -errno;
+    FEXThreadSetup setup(page);
+    if (!setup.mapped()) return -errno;
     auto* stack_base = static_cast<uint8_t*>(stack.address) + page;
-    auto* callret_base = static_cast<uint8_t*>(callret.address) + page;
-    if (::mprotect(stack_base, page, PROT_READ | PROT_WRITE) != 0 ||
-        ::mprotect(callret_base, callret_size, PROT_READ | PROT_WRITE) != 0) return -errno;
-    std::array<FEXCore::Core::CPUState::gdt_segment, 32> gdt {};
+    if (::mprotect(stack_base, page, PROT_READ | PROT_WRITE) != 0) return -errno;
     engine->probe.image = &image;
     engine->probe.linker = linked ? &engine->linker : nullptr;
     // Orbis images with synthesized HLE trampolines also reach libkernel.
@@ -542,6 +826,7 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
         ~ClearRange() {
             space.image = nullptr; space.linker = nullptr; space.kernel = nullptr;
             space.memory = nullptr; space.private_stack = 0; space.private_stack_size = 0;
+            space.threads = nullptr;
         }
     } clear_range {engine->probe};
     engine->cpu_report = {};
@@ -572,11 +857,10 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
         ~DestroyThread() { context->DestroyThread(thread); }
     } destroy {engine->context.get(), thread};
     auto& state = thread->CurrentFrame->State;
-    std::fill(std::begin(state.gregs), std::end(state.gregs), uint64_t{});
-    state.gregs[FEXCore::X86State::REG_RSP] = initial_rsp;
-    state.rip = initial_rip;
     // Static TLS: FS base is the host address of the image's TCB (variant II).
-    if (const auto* tcb = image.thread_pointer_host()) state.fs_cached = reinterpret_cast<uintptr_t>(tcb);
+    const auto* tcb = image.thread_pointer_host();
+    if (const int prepared = setup.prepare(thread, initial_rip, initial_rsp, reinterpret_cast<uintptr_t>(tcb)))
+        return prepared;
     auto& observed = engine->cpu_report;
     observed.entry = image.entry();
     observed.rsp_alignment = state.gregs[FEXCore::X86State::REG_RSP] & 15;
@@ -597,17 +881,6 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
         observed.auxv_valid = stack_words[3] == 6 && stack_words[5] == 9 &&
             stack_words[6] == state.rip && stack_words[7] == 0 && stack_words[8] == 0;
     }
-    thread->CallRetStackBase = callret_base;
-    state.callret_sp = reinterpret_cast<uintptr_t>(callret_base) + callret_size / 4;
-    state.segment_arrays[FEXCore::Core::CPUState::SEGMENT_ARRAY_INDEX_GDT] = gdt.data();
-    state.segment_arrays[FEXCore::Core::CPUState::SEGMENT_ARRAY_INDEX_LDT] = gdt.data();
-    state.cs_idx = FEXCore::Core::CPUState::DEFAULT_USER_CS << 3;
-    auto* segment = FEXCore::Core::CPUState::GetSegmentFromIndex(state, state.cs_idx);
-    FEXCore::Core::CPUState::SetGDTBase(segment, 0);
-    FEXCore::Core::CPUState::SetGDTLimit(segment, 0xF'FFFFU);
-    segment->L = 1;
-    segment->D = 0;
-    state.cs_cached = FEXCore::Core::CPUState::CalculateGDTBase(*segment);
     // mmap can reuse a previous image's address. The context retains a shared
     // L3 guest-to-host cache across threads: discard those old translations
     // without allocating another iOS JIT buffer. All engine execution is locked.
@@ -615,15 +888,36 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     engine->frame_code_cached = persistent_frame;
     engine->last_fault = {};
     {
-        GuestFaultGuard guard(engine->context.get(), thread, engine->signals.GetConfig(), engine->time_limit_ms);
+        // General images may create guest threads; all are joined before the
+        // guard (which owns the signal handlers) goes away.
+        std::optional<GuestThreads> threads;
+        if (ps4_entry && engine->probe.kernel)
+            threads.emplace(engine->context.get(), engine->signals.GetConfig(), image,
+                            engine->system_memory, engine->libkernel.threads(), page);
+        engine->probe.threads = threads ? &*threads : nullptr;
+        GuestFaultGuard guard(engine->context.get(), thread, engine->signals.GetConfig(), engine->time_limit_ms,
+                              true, [&threads] { if (threads) threads->interrupt(); });
         engine->context->ExecuteThread(thread);
-        if (const int signal = guard.signal.load()) {
-            // RIP is the guest position FEX last stored (block granularity).
-            engine->last_fault = {signal, 0, guard.address, state.rip};
+        int signal = guard.signal.load();
+        // scePthreadExit on the main thread: the other threads carry on.
+        const bool main_exit = threads && !signal && threads->main_thread_exited();
+        if (main_exit) threads->wait();
+        maxps4_fex_guest_fault child {};
+        if (threads) threads->finish();
+        engine->probe.threads = nullptr;
+        if (main_exit && threads->expired() && !engine->probe.exited) signal = SIGURG;
+        // A child's exit function stops the main thread with SIGURG: not a timeout.
+        if (signal == SIGURG && engine->probe.exited) signal = 0;
+        // RIP is the guest position FEX last stored (block granularity).
+        if (threads && threads->faulted(child)) { engine->last_fault = child; signal = child.signal; }
+        else if (signal) engine->last_fault = {signal, 0, guard.address, state.rip};
+        if (signal) {
             engine->frame_code_cached = false;
             return signal == SIGURG ? -ETIMEDOUT :
                 signal == SIGSEGV || signal == SIGBUS ? -EFAULT : -EILSEQ;
         }
+        // The last thread ended after the main thread's scePthreadExit: exit(0).
+        if (main_exit) engine->probe.exited = true;
     }
     if (engine->probe.callback_error) return engine->probe.callback_error;
     if (submission) {
@@ -730,8 +1024,10 @@ extern "C" int32_t maxps4_fex_engine_run_linked_ps4(maxps4_fex_engine* engine,
 namespace {
 // Validates the C module table into linker inputs; libkernel is provided by
 // HLE: one synthesized trampoline per implemented NID, identity
-// libkernel/libkernel version 1 (as resolve_libkernel).
-int orbisInputs(const maxps4_orbis_module* modules, size_t count,
+// libkernel/libkernel version 1 (as resolve_libkernel). Services only general
+// images get are offered when `general`; scePthreadExit's trampoline ends
+// with HLT: FEX goes on after a SYSCALL whatever the handler sets in RIP.
+int orbisInputs(const maxps4_orbis_module* modules, size_t count, bool general,
     std::vector<maxps4::OrbisLinker::Input>& inputs, std::vector<maxps4::OrbisLinker::HLE>& hle) {
     for (size_t i=0;i<count;++i) {
         const auto& m = modules[i];
@@ -748,8 +1044,10 @@ int orbisInputs(const maxps4_orbis_module* modules, size_t count,
     size_t exported = 0;
     const auto* kernel_exports = maxps4::libkernel_exports(exported);
     for (size_t i=0;i<exported;++i) {
+        const auto service = kernel_exports[i].service;
+        if (!general && maxps4::general_only(service)) continue;
         maxps4::OrbisLinker::Identity id{kernel_exports[i].nid,"libkernel","libkernel",1,1,2};
-        hle.push_back({id,0,static_cast<uint32_t>(kernel_exports[i].service)});
+        hle.push_back({id,0,static_cast<uint32_t>(service),service == maxps4::PS4KernelService::thread_exit});
     }
     return 0;
 }
@@ -772,7 +1070,7 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine* en
     try {
         std::vector<maxps4::OrbisLinker::Input> inputs;
         std::vector<maxps4::OrbisLinker::HLE> hle;
-        const int collected = orbisInputs(modules,count,inputs,hle);
+        const int collected = orbisInputs(modules,count,true,inputs,hle);
         if (collected) return collected;
         std::string reason;
         uint64_t moved = 0;
@@ -800,7 +1098,7 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis(maxps4_fex_engine* engine,
     try {
         std::vector<maxps4::OrbisLinker::Input> inputs;
         std::vector<maxps4::OrbisLinker::HLE> hle;
-        const int collected = orbisInputs(modules,count,inputs,hle);
+        const int collected = orbisInputs(modules,count,false,inputs,hle);
         if (collected) return collected;
         maxps4::OrbisLinker::Image linked;
         std::string reason;

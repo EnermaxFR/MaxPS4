@@ -5,8 +5,9 @@
 #include <mutex>
 
 namespace maxps4 {
-// Guest thread identities supplied by a future CPU scheduler. Never launch an
-// x86 function using host pthread_create. No guest execution or wait scheduler.
+// Guest thread identities and mutexes. Guest threads themselves run on FEX
+// (GuestThreads in maxps4_fex_runtime.cpp), which attaches/detaches them here;
+// x86 code never runs natively on a host thread.
 class PS4Threads final {
 public:
     explicit PS4Threads(PS4GuestMemory& memory) : memory_(memory) { threads_[0] = 1; }

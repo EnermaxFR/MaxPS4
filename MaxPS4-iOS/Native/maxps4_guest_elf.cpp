@@ -81,6 +81,8 @@ void GuestELF::clear() {
     guest_base = guest_entry = thread_pointer = start_address = 0;
     identity = false;
     stack_address = stack_bytes = heap_address = heap_bytes = entry_params_address = 0;
+    threads_address = thread_slot_bytes = thread_return_address = 0;
+    tls_image.clear();
     thunks.clear();
     tls_blocks.clear();
     blockers = 0;
@@ -218,10 +220,11 @@ int GuestELF::prepare_orbis_general(const std::vector<OrbisLinker::Input>& input
         if (low >= high) return fail(-ENOEXEC, "image has no loadable segment");
         // After the image: startup stub, static TLS and stack, each behind a guard
         // page (see prepare_linked), page rounding, a guard page after the stack
-        // and base alignment.
+        // and base alignment, then the child thread slots (stack + TLS + guard).
         low &= ~(generalAlignment - 1);
         const uint64_t tail = 10 * page + OrbisLinker::tlsBudget + 2 * 4096 + generalStack +
-            2 * generalHeapPage + generalHeap;
+            2 * generalHeapPage + generalHeap +
+            generalThreads * (generalStack + OrbisLinker::tlsBudget + 2 * 4096 + 2 * page);
         if (high - low > generalSpan - tail - generalAlignment)
             return fail(-E2BIG, "image span exceeds the general address-space reservation");
         const auto size = static_cast<size_t>(high - low + tail + generalAlignment);
@@ -287,14 +290,16 @@ int GuestELF::prepare_linked(const OrbisLinker::Image& linked, const std::string
         // shadPS4 RunMainEntry): after the module_start calls, SUB RSP,8; RDI =
         // &EntryParams; PUSH [RDI+8]; PUSH [RDI]; RSI = exit function; JMP
         // entry. The exit function follows: an engine trampoline (SYSCALL at
-        // +8 like the linker's) whose HLT ends the run.
-        constexpr uint64_t call_block = 11, entry_block = 34, exit_block = 14;
+        // +8 like the linker's) whose HLT ends the run. Then the thread-return
+        // trampoline, a child thread's return address: MOV RDI,RAX; MOV EAX,
+        // token; SYSCALL (thread_exit, at +8); HLT.
+        constexpr uint64_t call_block = 11, entry_block = 34, exit_block = 14, return_block = 14;
         uint64_t start = entry;
         size_t stub_module = SIZE_MAX, entry_at = 0;
         if (!copy.initializers.empty() || mapped_identity) {
             start = (highest + page - 1) / page * page + page;
             entry_at = static_cast<size_t>(call_block * copy.initializers.size());
-            const uint64_t size = entry_at + (mapped_identity ? entry_block + exit_block : 5);
+            const uint64_t size = entry_at + (mapped_identity ? entry_block + exit_block + return_block : 5);
             if (start > (uint64_t{1} << 47) - size) return fail(-E2BIG, "startup stub outside user range");
             std::vector<uint8_t> stub(static_cast<size_t>(size));
             auto branch = [&](size_t at, uint8_t opcode, uint64_t target) {
@@ -325,6 +330,13 @@ int GuestELF::prepare_linked(const OrbisLinker::Image& linked, const std::string
                 static_assert(sizeof(enter) + 5 == entry_block && sizeof(leave) == exit_block, "stub layout");
                 std::copy(std::begin(leave), std::end(leave), stub.begin() + entry_at + entry_block);
                 copy.thunks.push_back({start + entry_at + entry_block, token});
+                const uint32_t ends = static_cast<uint32_t>(PS4KernelService::thread_exit);
+                const uint8_t back[] = {0x48,0x89,0xc7, 0xb8,uint8_t(ends),uint8_t(ends>>8),
+                    uint8_t(ends>>16),uint8_t(ends>>24), 0x0f,0x05, 0xf4, 0xcc,0xcc,0xcc};
+                static_assert(sizeof(back) == return_block, "stub layout");
+                const size_t back_at = entry_at + entry_block + exit_block;
+                std::copy(std::begin(back), std::end(back), stub.begin() + back_at);
+                copy.thunks.push_back({start + back_at, ends});
             }
             if (!branch(jump, 0xe9, entry))
                 return fail(-EOVERFLOW, "entry JMP displacement overflow");
@@ -357,11 +369,15 @@ int GuestELF::prepare_linked(const OrbisLinker::Image& linked, const std::string
                 if (block.fileSize) std::memcpy(tls_bytes.data() + (blocks - block.offset), source, block.fileSize);
             }
         }
-        // General mode: a zeroed RW stack after a guard page, last in the image.
-        uint64_t stack_low = 0;
+        // General mode: a zeroed RW stack after a guard page, then the mmap
+        // window, then the child thread slots, each followed by a guard page.
+        uint64_t stack_low = 0, heap_low = 0, slots_low = 0, slot_stride = 0;
         if (mapped_identity) {
             const uint64_t after = tp ? tp + 16 : highest;
             stack_low = (after + page - 1) / page * page + page;
+            heap_low = (stack_low + generalStack + page + generalHeapPage - 1) / generalHeapPage * generalHeapPage;
+            slots_low = heap_low + generalHeap + page;
+            slot_stride = (generalStack + tls_bytes.size() + page - 1) / page * page + page;
             // EntryParams sit at the top of the stack; the stub points RDI at
             // them and RSI at its exit function.
             const uint64_t params = stack_low + generalStack - entryParamsBytes;
@@ -644,6 +660,11 @@ int GuestELF::prepare_linked(const OrbisLinker::Image& linked, const std::string
         if (stack_low) { // Zero-filled: no file bytes to copy.
             parsed.push_back({stack_low,0,0,generalStack,6});
             sources.push_back(nullptr);
+            // Thread slots: TLS bytes are copied when a thread is created.
+            for (size_t k = 0; k < generalThreads; ++k) {
+                parsed.push_back({slots_low + k * slot_stride,0,0,generalStack + tls_bytes.size(),6});
+                sources.push_back(nullptr);
+            }
         }
         const int mapped = map_segments(std::move(parsed),sources,entry);
         if (mapped) return fail(mapped,"Orbis page mapping refused (page overlap, span or protection)");
@@ -665,11 +686,14 @@ int GuestELF::prepare_linked(const OrbisLinker::Image& linked, const std::string
             stack_address = stack_low; stack_bytes = generalStack;
             entry_params_address = stack_low + generalStack - entryParamsBytes;
             // sceKernelMmap window: after a guard page, PROT_NONE until mapped.
-            heap_address = (stack_low + generalStack + page + generalHeapPage - 1) / generalHeapPage * generalHeapPage;
+            heap_address = heap_low;
             heap_bytes = generalHeap;
             // A guard page must follow it inside the reservation.
             if (heap_address + heap_bytes + page > guest_base + arena_size)
                 return fail(-E2BIG,"mmap window outside the general reservation");
+            threads_address = slots_low; thread_slot_bytes = slot_stride;
+            thread_return_address = start + entry_at + entry_block + exit_block;
+            tls_image = std::move(tls_bytes);
         }
         identity = mapped_identity;
         // Restricted rebasing never establishes general PS4 addressing; the
@@ -689,6 +713,21 @@ uint64_t GuestELF::write_entry_params() {
     std::memcpy(params, words, sizeof(words));
     std::memcpy(params + 32, program, sizeof(program));
     return entry_params_address;
+}
+bool GuestELF::prepare_thread(size_t slot, uint64_t& stack_top, uint64_t& tp) {
+    stack_top = tp = 0;
+    if (!threads_address || slot >= generalThreads) return false;
+    const uint64_t low = threads_address + slot * thread_slot_bytes;
+    if (!translate(low, static_cast<size_t>(generalStack + tls_image.size()), 6)) return false;
+    stack_top = low + generalStack;
+    if (tls_image.empty()) return true;
+    // Same variant II layout as the main thread: blocks, then the TCB at TP
+    // whose word 0 is its own (host = guest) address.
+    auto* tls = const_cast<uint8_t*>(translate(stack_top, tls_image.size(), 6));
+    std::memcpy(tls, tls_image.data(), tls_image.size());
+    tp = stack_top + tls_image.size() - 16;
+    std::memcpy(tls + tls_image.size() - 16, &tp, sizeof(tp));
+    return true;
 }
 int GuestELF::stage_ps4(const uint8_t* file, size_t length) {
     clear();

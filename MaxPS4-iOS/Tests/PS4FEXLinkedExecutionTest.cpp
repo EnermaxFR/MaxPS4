@@ -146,6 +146,8 @@ static int animatedGuestTest() {
 }
 int main(int argc, char** argv) {
     using namespace ps4_linked_test;
+    // CI logs go to a file: keep every line written before a crash or a kill.
+    std::setvbuf(stdout,nullptr,_IONBF,0);
     if (argc==3 && !std::strcmp(argv[1],"--playable-evidence")) return playableTest(argv[2]);
     if (argc==3 && (!std::strcmp(argv[1],"--playable-bundle") || !std::strcmp(argv[1],"--animated-playable-bundle"))) {
         std::filesystem::create_directories(argv[2]);
@@ -507,7 +509,107 @@ int main(int argc, char** argv) {
         std::puts("PASS general FEX execution -> provider.prx module_start -> PS4 entry stub -> entry (HLT)");
         maxps4_fex_engine_close(process);
     }
+    {
+        // Guest threads: scePthreadCreate x2, threads that wait for each other
+        // (so they must run concurrently), RET into the thread-return trampoline
+        // and scePthreadExit, then scePthreadJoin x2 and exit(42 + 58).
+        auto app = orbis_execution::make_general_threads_app();
+        const maxps4_orbis_module modules[] = {
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,nullptr,0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        char diagnostic[512]{};
+        // Thread services are for general images only: a bounded image that
+        // imports them is refused.
+        CHECK(maxps4_fex_engine_prepare_orbis(process,modules,1,"app.elf",65536,diagnostic,sizeof(diagnostic))==-ENOEXEC &&
+              std::strstr(diagnostic,"unresolved NID 6UgtwV+0zb4"));
+        uint64_t relocation=0;
+        const int prepared = maxps4_fex_engine_prepare_orbis_general(process,modules,1,"app.elf",&relocation,diagnostic,sizeof(diagnostic));
+        if (prepared) std::fprintf(stderr,"prepare: %s\n",diagnostic);
+        CHECK(prepared==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        uint64_t observed=0, logical_entry=0; uint32_t cpu=0;
+        const int ran = maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry);
+        maxps4_fex_cpu_report report{};
+        CHECK(maxps4_fex_engine_last_cpu_report(process,&report)==0 || ran);
+        std::printf("general guest threads: run=%d RAX=%llu exited=%u status=%d\n",ran,(unsigned long long)observed,
+            report.exited,report.exit_status);
+#ifdef VIXL_SIMULATOR
+        // One simulated CPU per FEX context: scePthreadCreate answers ENOSYS
+        // and the entry exits with that error.
+        const int32_t refused = static_cast<int32_t>(0x80020000u + 78);
+        CHECK(ran==0 && report.exited==1 && report.exit_status==refused);
+        std::puts("PASS general FEX execution (VIXL simulator) -> scePthreadCreate refused with ENOSYS -> exit(error)");
+#else
+        CHECK(ran==0 && observed==100 && report.exited==1 && report.exit_status==100);
+        std::puts("PASS general FEX execution -> scePthreadCreate x2 (concurrent, own stacks) -> RET / scePthreadExit -> scePthreadJoin x2 -> exit(100)");
+#endif
+        maxps4_fex_engine_close(process);
+    }
 #if (defined(__aarch64__) || defined(__arm64__)) && !defined(VIXL_SIMULATOR)
+    for (int fault = 0; fault < 2; ++fault) {
+        // A child thread that never ends: when the entry exits, the run stops it
+        // (no hang). One that faults while the entry joins it ends the run with
+        // the child's contained fault. The same engine then runs again.
+        auto app = orbis_execution::make_general_stuck_thread_app(fault);
+        const maxps4_orbis_module modules[] = {
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,nullptr,0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        char diagnostic[512]{};
+        uint64_t relocation=0;
+        CHECK(maxps4_fex_engine_prepare_orbis_general(process,modules,1,"app.elf",&relocation,diagnostic,sizeof(diagnostic))==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        CHECK(maxps4_fex_engine_set_time_limit(process,10000)==0);
+        for (int repeat=0;repeat<2;++repeat) {
+            uint64_t observed=0, logical_entry=0; uint32_t cpu=0;
+            const auto started = std::chrono::steady_clock::now();
+            const int ran = maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry);
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - started).count();
+            maxps4_fex_guest_fault guest{};
+            const int faulted = maxps4_fex_engine_last_guest_fault(process,&guest);
+            std::printf("general stuck thread (%s): run=%d signal=%d address=0x%llx elapsed=%lldms\n",
+                fault ? "fault" : "spin",ran,guest.signal,(unsigned long long)guest.address,(long long)elapsed);
+            CHECK(elapsed < 5000); // Well before the 10 s watchdog.
+            if (fault) {
+                CHECK(ran==-EFAULT && faulted==0 && (guest.signal==SIGSEGV || guest.signal==SIGBUS) && !guest.address);
+            } else {
+                maxps4_fex_cpu_report report{};
+                CHECK(ran==0 && faulted==-ENOENT && maxps4_fex_engine_last_cpu_report(process,&report)==0);
+                CHECK(report.exited==1 && report.exit_status==0);
+            }
+        }
+        std::puts(fault ? "PASS general guest thread fault during scePthreadJoin -> contained, run returns -EFAULT" :
+                          "PASS general entry exits while a guest thread spins -> thread stopped and joined");
+        maxps4_fex_engine_close(process);
+    }
+    for (int spins = 0; spins < 2; ++spins) {
+        // The entry hands off with scePthreadExit (the worker carries on), or
+        // spins (the worker's exit function stops it): both exit with 77.
+        auto app = orbis_execution::make_general_handoff_app(spins);
+        const maxps4_orbis_module modules[] = {
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,nullptr,0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        char diagnostic[512]{};
+        uint64_t relocation=0;
+        CHECK(maxps4_fex_engine_prepare_orbis_general(process,modules,1,"app.elf",&relocation,diagnostic,sizeof(diagnostic))==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        CHECK(maxps4_fex_engine_set_time_limit(process,10000)==0);
+        for (int repeat=0;repeat<2;++repeat) {
+            uint64_t observed=0, logical_entry=0; uint32_t cpu=0;
+            const int ran = maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry);
+            maxps4_fex_cpu_report report{};
+            CHECK(maxps4_fex_engine_last_cpu_report(process,&report)==0 || ran);
+            std::printf("general handoff (%s): run=%d exited=%u status=%d\n",spins ? "entry spins" : "scePthreadExit",
+                ran,report.exited,report.exit_status);
+            CHECK(ran==0 && report.exited==1 && report.exit_status==77);
+        }
+        std::puts(spins ? "PASS general worker's exit function while the entry spins -> entry stopped, exit(77)" :
+                          "PASS general entry scePthreadExit -> worker carries on -> its exit(77) ends the run");
+        maxps4_fex_engine_close(process);
+    }
     {
         // Contained guest faults: each run fails with a diagnostic instead of
         // killing the process, and the same engine then runs a valid image.

@@ -297,6 +297,152 @@ inline std::vector<uint8_t> make_general_entry_app() {
     put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
     return b;
 }
+// Several system libkernel imports: symbol i+1 is `nids[i]`, bound by a
+// JUMP_SLOT to GOT slot data+8*i.
+inline void use_libkernel_imports(std::vector<uint8_t>& b, std::initializer_list<const char*> nids) {
+    using orbis_fixture::put;
+    use_libkernel(b,*nids.begin());
+    std::fill(b.begin()+0x615,b.begin()+0x700,0);
+    std::fill(b.begin()+0x818,b.begin()+0x900,0);
+    std::fill(b.begin()+0x900,b.begin()+0xa00,0);
+    size_t i=0;
+    for (const char* nid : nids) {
+        const size_t name=21+16*i;
+        std::copy(nid,nid+11,b.begin()+0x600+name);
+        std::copy_n("#B#B",4,b.begin()+0x600+name+11);
+        put(b,0x818+24*i,name,4); b[0x81c+24*i]=0x12;
+        put(b,0x900+24*i,0x8000+8*i); put(b,0x908+24*i,((i+1)<<32)|7);
+        ++i;
+    }
+    orbis_fixture::setTag(b,0x61000037,21+16*i);
+    orbis_fixture::setTag(b,0x6100003f,24*(i+1));
+    orbis_fixture::setTag(b,0x61000031,24*i);
+}
+// Two guest threads (general mode). The entry creates thread A (entry A, arg
+// &40) and thread B (entry B, arg 5) with scePthreadCreate, joins both with
+// scePthreadJoin and exits with A's value + B's value = 100 (or the failing
+// call's error). A sets flag 0x8068 then spins until B sets 0x806c, and B
+// waits for A first: only truly concurrent threads finish. A also checks its
+// scePthreadSelf is not the main thread's (1) and that RSP = 8 (mod 16), then
+// returns [arg]+2 = 42 (7 on failure); B ends with scePthreadExit(arg+53 = 58).
+constexpr uint64_t threads_values=data+0x50;
+inline std::vector<uint8_t> make_general_threads_app() {
+    auto b=make_kernel_app();
+    use_libkernel_imports(b,{"6UgtwV+0zb4","onNY9Byn-W8","3kg7rT0NQIs","aI+OeCz8xrQ"});
+    using orbis_fixture::put;
+    constexpr uint64_t create=data, join=data+8, quit=data+0x10, self=data+0x18;
+    constexpr uint64_t handleA=data+0x40, handleB=data+0x48, valueA=data+0x50, valueB=data+0x58;
+    constexpr uint64_t arg=data+0x60, flagA=data+0x68, flagB=data+0x6c;
+    constexpr size_t A=0x8e, B=0xc4;
+    const uint8_t code[]={
+        0x53, 0x48,0x89,0xf3,                                  // 0x00 PUSH RBX; MOV RBX,RSI (exit)
+        0x48,0x8d,0x3d,0,0,0,0, 0x31,0xf6,                     // 0x04 LEA RDI,[handleA]; XOR ESI,ESI
+        0x48,0x8d,0x15,0,0,0,0, 0x48,0x8d,0x0d,0,0,0,0,        // 0x0d LEA RDX,[A]; LEA RCX,[arg]
+        0x45,0x31,0xc0, 0xff,0x15,0,0,0,0, 0x85,0xc0,0x75,0x61, // 0x1b XOR R8D,R8D; CALL [create]; JNZ fail
+        0x48,0x8d,0x3d,0,0,0,0, 0x31,0xf6,                     // 0x28 LEA RDI,[handleB]; XOR ESI,ESI
+        0x48,0x8d,0x15,0,0,0,0, 0xb9,5,0,0,0,                  // 0x31 LEA RDX,[B]; MOV ECX,5
+        0x45,0x31,0xc0, 0xff,0x15,0,0,0,0, 0x85,0xc0,0x75,0x3f, // 0x3d XOR R8D,R8D; CALL [create]; JNZ fail
+        0x48,0x8b,0x3d,0,0,0,0, 0x48,0x8d,0x35,0,0,0,0,        // 0x4a MOV RDI,[handleA]; LEA RSI,[valueA]
+        0xff,0x15,0,0,0,0, 0x85,0xc0,0x75,0x27,                // 0x58 CALL [join]; JNZ fail
+        0x48,0x8b,0x3d,0,0,0,0, 0x48,0x8d,0x35,0,0,0,0,        // 0x62 MOV RDI,[handleB]; LEA RSI,[valueB]
+        0xff,0x15,0,0,0,0, 0x85,0xc0,0x75,0x0f,                // 0x70 CALL [join]; JNZ fail
+        0x8b,0x3d,0,0,0,0, 0x03,0x3d,0,0,0,0,                  // 0x7a EDI=[valueA]+[valueB]
+        0xff,0xd3, 0xf4,                                       // 0x86 CALL RBX; HLT
+        0x89,0xc7, 0xff,0xd3, 0xf4,                            // 0x89 fail: EDI=EAX; CALL RBX; HLT
+        // A (0x8e)
+        0x8b,0x1f, 0xc7,0x05,0,0,0,0,1,0,0,0,                  // +00 EBX=[arg]; [flagA]=1
+        0x83,0x3d,0,0,0,0,0, 0x74,0xf7,                        // +0c spin while [flagB]==0
+        0xff,0x15,0,0,0,0, 0x48,0x83,0xf8,0x01, 0x74,0x0f,     // +15 CALL [self]; CMP RAX,1; JE bad
+        0x48,0x89,0xe1, 0x83,0xe1,0x0f, 0x83,0xf9,0x08, 0x75,0x04, // +21 RSP%16==8 or bad
+        0x8d,0x43,0x02, 0xc3,                                  // +2c EAX=EBX+2; RET
+        0xb8,7,0,0,0, 0xc3,                                    // +30 bad: EAX=7; RET
+        // B (0xc4)
+        0x83,0x3d,0,0,0,0,0, 0x74,0xf7,                        // +00 spin while [flagA]==0
+        0xc7,0x05,0,0,0,0,1,0,0,0,                             // +09 [flagB]=1
+        0x8d,0x7f,0x35, 0xff,0x15,0,0,0,0,                     // +13 EDI=arg+53; CALL [exit]
+        0xb8,9,0,0,0, 0xc3};                                   // +1c never reached: EAX=9; RET
+    static_assert(sizeof(code)==B+0x22, "thread fixture layout");
+    std::fill(b.begin()+0x200,b.begin()+0x300,0);
+    std::copy(std::begin(code),std::end(code),b.begin()+0x200);
+    // RIP-relative operand at `at` of an instruction ending at `end`.
+    auto rip=[&](size_t at, size_t end, uint64_t target) { put(b,0x200+at,target-(entry+end),4); };
+    rip(0x07,0x0b,handleA); rip(0x10,0x14,entry+A); rip(0x17,0x1b,arg); rip(0x20,0x24,create);
+    rip(0x2b,0x2f,handleB); rip(0x34,0x38,entry+B); rip(0x42,0x46,create);
+    rip(0x4d,0x51,handleA); rip(0x54,0x58,valueA); rip(0x5a,0x5e,join);
+    rip(0x65,0x69,handleB); rip(0x6c,0x70,valueB); rip(0x72,0x76,join);
+    rip(0x7c,0x80,valueA); rip(0x82,0x86,valueB);
+    rip(A+0x04,A+0x0c,flagA); rip(A+0x0e,A+0x13,flagB); rip(A+0x17,A+0x1b,self);
+    rip(B+0x02,B+0x07,flagA); rip(B+0x0b,B+0x13,flagB); rip(B+0x18,B+0x1c,quit);
+    put(b,0x300+(arg-data),40,4);
+    put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
+    return b;
+}
+// One child thread that never returns. With `fault` it loads from address 0
+// while the entry waits in scePthreadJoin; otherwise it spins forever and the
+// entry exits at once with scePthreadCreate's result (0).
+inline std::vector<uint8_t> make_general_stuck_thread_app(bool fault) {
+    auto b=make_kernel_app();
+    use_libkernel_imports(b,{"6UgtwV+0zb4","onNY9Byn-W8"});
+    using orbis_fixture::put;
+    constexpr uint64_t create=data, join=data+8, handle=data+0x40;
+    constexpr size_t child=0x37;
+    const uint8_t code[]={
+        0x53, 0x48,0x89,0xf3,                                  // 0x00 PUSH RBX; MOV RBX,RSI (exit)
+        0x48,0x8d,0x3d,0,0,0,0, 0x31,0xf6,                     // 0x04 LEA RDI,[handle]; XOR ESI,ESI
+        0x48,0x8d,0x15,0,0,0,0, 0x31,0xc9, 0x45,0x31,0xc0,     // 0x0d LEA RDX,[child]; ECX=R8D=0
+        0xff,0x15,0,0,0,0, 0x85,0xc0,                          // 0x19 CALL [create]; TEST EAX,EAX
+        uint8_t(fault ? 0x75 : 0xeb),0x0f,                     // 0x21 JNZ / JMP leave
+        0x48,0x8b,0x3d,0,0,0,0, 0x31,0xf6, 0xff,0x15,0,0,0,0,  // 0x23 join(handle, NULL)
+        0x89,0xc7, 0xff,0xd3, 0xf4,                            // 0x32 leave: EDI=EAX; CALL RBX; HLT
+        // child (0x37)
+        uint8_t(fault ? 0x8b : 0xeb), uint8_t(fault ? 0x04 : 0xfe), 0x25,0,0,0,0, 0xc3}; // MOV EAX,[0] / JMP $
+    static_assert(sizeof(code)==child+8, "stuck thread fixture layout");
+    std::fill(b.begin()+0x200,b.begin()+0x300,0);
+    std::copy(std::begin(code),std::end(code),b.begin()+0x200);
+    auto rip=[&](size_t at, size_t end, uint64_t target) { put(b,0x200+at,target-(entry+end),4); };
+    rip(0x07,0x0b,handle); rip(0x10,0x14,entry+child); rip(0x1b,0x1f,create);
+    rip(0x26,0x2a,handle); rip(0x2e,0x32,join);
+    put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
+    return b;
+}
+// The entry keeps its exit function, creates a worker, then either sets a flag
+// and calls scePthreadExit(0) (`main_spins` false) or spins forever. The worker
+// waits for the flag (preset when the entry spins), counts down 2^20, then
+// calls the entry's exit function with 77: either way the run exits with 77.
+inline std::vector<uint8_t> make_general_handoff_app(bool main_spins) {
+    auto b=make_kernel_app();
+    use_libkernel_imports(b,{"6UgtwV+0zb4","3kg7rT0NQIs"});
+    using orbis_fixture::put;
+    constexpr uint64_t create=data, quit=data+8, exitfn=data+0x40, handle=data+0x48, flag=data+0x50;
+    constexpr size_t W=0x43;
+    const uint8_t code[]={
+        0x53, 0x48,0x89,0x35,0,0,0,0,                          // 0x00 PUSH RBX; MOV [exitfn],RSI
+        0x48,0x8d,0x3d,0,0,0,0, 0x31,0xf6,                     // 0x08 LEA RDI,[handle]; XOR ESI,ESI
+        0x48,0x8d,0x15,0,0,0,0, 0x31,0xc9, 0x45,0x31,0xc0,     // 0x11 LEA RDX,[worker]; ECX=R8D=0
+        0xff,0x15,0,0,0,0, 0x85,0xc0, 0x75,0x13,               // 0x1d CALL [create]; JNZ fail
+        0xc7,0x05,0,0,0,0,1,0,0,0,                             // 0x27 [flag]=1 (or JMP $)
+        0x31,0xff, 0xff,0x15,0,0,0,0, 0xf4,                    // 0x31 scePthreadExit(0); HLT
+        0x89,0xc7, 0xff,0x15,0,0,0,0, 0xf4,                    // 0x3a fail: exit(EAX); HLT
+        // worker (0x43)
+        0x83,0x3d,0,0,0,0,0, 0x74,0xf7,                        // +00 spin while [flag]==0
+        0xb9,0,0,0x10,0, 0xff,0xc9, 0x75,0xfc,                 // +09 ECX=2^20; DEC ECX; JNZ
+        0xbf,77,0,0,0, 0xff,0x15,0,0,0,0, 0xf4};               // +12 exit(77); HLT
+    static_assert(sizeof(code)==W+0x1e, "handoff fixture layout");
+    std::fill(b.begin()+0x200,b.begin()+0x300,0);
+    std::copy(std::begin(code),std::end(code),b.begin()+0x200);
+    auto rip=[&](size_t at, size_t end, uint64_t target) { put(b,0x200+at,target-(entry+end),4); };
+    rip(0x04,0x08,exitfn); rip(0x0b,0x0f,handle); rip(0x14,0x18,entry+W); rip(0x1f,0x23,create);
+    rip(0x3e,0x42,exitfn); rip(W+0x02,W+0x07,flag); rip(W+0x19,W+0x1d,exitfn);
+    if (main_spins) {
+        b[0x200+0x27]=0xeb; b[0x200+0x28]=0xfe;
+        std::fill(b.begin()+0x200+0x29,b.begin()+0x200+0x3a,0x90);
+        put(b,0x300+(flag-data),1,4);
+    } else {
+        rip(0x29,0x31,flag); rip(0x35,0x39,quit);
+    }
+    put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
+    return b;
+}
 // sceKernelClockGettime(clock, RSP buffer): the timespec lives on the guest
 // stack, then is copied to app data at 0x8010. Returns the HLE result.
 inline std::vector<uint8_t> make_general_clock_app(uint32_t clock=4) {
