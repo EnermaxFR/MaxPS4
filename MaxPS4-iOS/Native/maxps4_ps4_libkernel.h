@@ -3,6 +3,7 @@
 #include "maxps4_ps4_guest_memory.h"
 #include "maxps4_ps4_threads.h"
 #include "maxps4_ps4_videoout.h"
+#include "maxps4_ps4_user_service.h"
 #include <array>
 #include <map>
 #include <mutex>
@@ -65,7 +66,8 @@ enum class PS4KernelService : uint32_t {
     video_open, video_close, video_attribute, video_register, video_unregister,
     video_submit, video_pending, video_flip_status, video_vblank_status,
     video_add_flip, video_add_vblank, video_delete_flip, video_delete_vblank,
-    video_event_id, video_event_data, video_event_count
+    video_event_id, video_event_data, video_event_count,
+    user_initialize, user_terminate, user_initial, user_login_list, user_event, user_name
 };
 // Token bit of a trampoline whose function follows the POSIX convention: -1
 // with the error in the calling thread's errno (__Error) instead of an Orbis
@@ -128,6 +130,7 @@ private:
     PS4VirtualMemory* dynamic_;
     PS4Threads threads_;
     PS4VideoOut videoout_;
+    PS4UserService user_service_;
     uint64_t errno_table_ = 0, errno_table_size_ = 0, process_param_ = 0;
     std::map<uint64_t, uint64_t> direct_; // Allocated physical ranges: start -> length.
     int64_t memory_service(PS4KernelService service, const PS4KernelCall& call);

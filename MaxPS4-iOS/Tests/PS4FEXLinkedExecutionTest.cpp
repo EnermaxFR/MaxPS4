@@ -613,6 +613,32 @@ int main(int argc, char** argv) {
         std::puts("PASS general scePthreadMutexLock + scePthreadCondTimedwait(1000 us) -> ETIMEDOUT");
         maxps4_fex_engine_close(process);
     }
+    {
+        auto app = orbis_execution::make_general_user_service_app();
+        const maxps4_orbis_module modules[] = {
+            {"app.elf", app.data(), app.size(), orbis_execution::app_bias, nullptr, 0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process) == 0);
+        char diagnostic[512]{};
+        uint64_t relocation = 0, observed = 0, logical_entry = 0;
+        uint32_t cpu = 0;
+        const int prepared = maxps4_fex_engine_prepare_orbis_general(process, modules, 1, "app.elf", &relocation, diagnostic, sizeof(diagnostic));
+        if (prepared) std::fprintf(stderr, "prepare UserService: %s\n", diagnostic);
+        CHECK(prepared == 0 && maxps4_fex_engine_initialize(process) == 0);
+        CHECK(maxps4_fex_engine_run_orbis(process, &observed, &cpu, &logical_entry) == 0);
+        maxps4_fex_cpu_report report{};
+        CHECK(maxps4_fex_engine_last_cpu_report(process, &report) == 0 && report.exited == 1 && report.exit_status == 111);
+        uint8_t users[32]{}, name[7]{};
+        CHECK(maxps4_fex_engine_read_ps4(process, orbis_execution::data + relocation + 0x40, users, sizeof(users)) == 0);
+        CHECK(users[0] == 1 && users[8] == 1 && value(users + 12) == UINT64_MAX && users[24] == 0 && users[28] == 1);
+        CHECK(maxps4_fex_engine_read_ps4(process, orbis_execution::data + relocation + 0x68, name, sizeof(name)) == 0 && !std::memcmp(name, "MaxPS4", 7));
+        CHECK(maxps4_fex_engine_prepare_orbis_general(process, modules, 1, "app.elf", &relocation, diagnostic, sizeof(diagnostic)) == 0);
+        const uint32_t get_user = maxps4_ps4_resolve_libkernel("CdWp0oHWGr0", "libSceUserService", "libSceUserService", 1);
+        maxps4_ps4_kernel_call call{}; call.rdi = orbis_execution::data + relocation + 0x40;
+        CHECK(get_user && maxps4_fex_engine_call_libkernel(process, get_user, &call, 1) == int64_t(0x80960002) - 0x100000000LL);
+        maxps4_fex_engine_close(process);
+        std::puts("PASS FEX local UserService: lifecycle, exact library errors, user/list/name/login event, re-init -> exit(111), then restaging resets service");
+    }
     for (bool selfContained : {false, true}) {
         auto app = orbis_execution::make_general_videoout_app(selfContained);
         const maxps4_orbis_module modules[] = {

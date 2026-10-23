@@ -479,6 +479,62 @@ inline std::vector<uint8_t> make_general_timedwait_app() {
 }
 // General guest: create a user-event queue, trigger/consume an edge, verify
 // that the next poll times out, delete the queue and exit with udata (123).
+inline std::vector<uint8_t> make_general_user_service_app() {
+    auto b = make_kernel_app();
+    const std::initializer_list<const char*> nids = {"j3YMu1MVNNo", "CdWp0oHWGr0", "fPhymKNvK-A",
+                                                   "yH17Q6NWtVg", "bwFjS+bX9mA", "1xxcMiGu2fo"};
+    use_libkernel_imports(b, nids);
+    using orbis_fixture::put;
+    std::fill(b.begin() + 0x601, b.begin() + 0x700, 0);
+    std::string names(1, '\0'); names += "libSceUserService"; names.push_back('\0');
+    const size_t module_name = names.size(); names += "libSceUserService"; names.push_back('\0');
+    size_t index = 0;
+    for (const char* nid : nids) {
+        put(b, 0x818 + 24 * index++, names.size(), 4);
+        names += nid; names += "#B#B"; names.push_back('\0');
+    }
+    std::copy(names.begin(), names.end(), b.begin() + 0x600);
+    orbis_fixture::setTag(b, 0x61000037, names.size());
+    orbis_fixture::setTag(b, 0x6100000f, module_name | (uint64_t{1} << 32) | (uint64_t{1} << 48));
+    constexpr uint64_t user = data + 0x40, list = data + 0x48, event = data + 0x58,
+                       name = data + 0x68, parameters = data + 0x80;
+    std::vector<uint8_t> code;
+    std::vector<size_t> failures;
+    auto emit = [&](std::initializer_list<uint8_t> bytes) { code.insert(code.end(), bytes); };
+    auto imm = [&](uint64_t value, size_t width) {
+        for (size_t i = 0; i < width; ++i) code.push_back(uint8_t(value >> (8 * i)));
+    };
+    auto rip = [&](std::initializer_list<uint8_t> op, uint64_t address, size_t trailing = 0) {
+        emit(op); imm(address - (entry + code.size() + 4 + trailing), 4);
+    };
+    auto call = [&](size_t i) { rip({0xff, 0x15}, data + i * 8); };
+    auto expect = [&](uint32_t result) {
+        if (result) { emit({0x3d}); imm(result, 4); } else emit({0x85, 0xc0});
+        emit({0x0f, 0x85}); failures.push_back(code.size()); imm(0, 4);
+    };
+    emit({0x53, 0x48, 0x89, 0xf3}); // Preserve process exit in RBX.
+    rip({0x48, 0x8d, 0x3d}, user); call(1); expect(0x80960002); // Not initialized.
+    rip({0x48, 0x8d, 0x3d}, parameters); call(0); expect(0);
+    emit({0x31, 0xff}); call(0); expect(0x80960003); // Already initialized.
+    rip({0x48, 0x8d, 0x3d}, user); call(1); expect(0);
+    rip({0x48, 0x8d, 0x3d}, list); call(2); expect(0);
+    rip({0x48, 0x8d, 0x3d}, event); call(3); expect(0);
+    rip({0x48, 0x8d, 0x3d}, event); call(3); expect(0x80960007); // Event consumed.
+    rip({0x8b, 0x3d}, user); rip({0x48, 0x8d, 0x35}, name); emit({0xba, 7, 0, 0, 0}); call(5); expect(0);
+    call(4); expect(0);
+    rip({0x48, 0x8d, 0x3d}, user); call(1); expect(0x80960002);
+    emit({0x31, 0xff}); call(0); expect(0);
+    rip({0x48, 0x8d, 0x3d}, event); call(3); expect(0); // A fresh login after re-init.
+    rip({0x8b, 0x3d}, user); emit({0x6b, 0xff, 100});
+    rip({0x6b, 0x05}, list, 1); emit({10, 0x01, 0xc7});
+    rip({0x03, 0x3d}, event + 4); emit({0xff, 0xd3, 0xf4}); // exit(user*100 + list[0]*10 + event.user) = 111.
+    const size_t fail = code.size(); emit({0x89, 0xc7, 0xff, 0xd3, 0xf4});
+    for (size_t at : failures) put(code, at, fail - (at + 4), 4);
+    b.resize(0xc00 + code.size()); std::copy(code.begin(), code.end(), b.begin() + 0xc00);
+    put(b, 64 + 8, 0xc00); put(b, 64 + 32, code.size()); put(b, 64 + 40, code.size());
+    put(b, 0x380, 700, 4);
+    return b;
+}
 inline std::vector<uint8_t> make_general_videoout_app(bool selfContained = false) {
     auto b = make_kernel_app();
     use_libkernel_imports(b, {"fzyMKs9kim0", "Up36PTk687E", "i6-sR91Wt-4", "w3BY+tAEiQY",
