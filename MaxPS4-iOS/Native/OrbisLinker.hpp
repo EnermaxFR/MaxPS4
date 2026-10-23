@@ -249,8 +249,9 @@ private:
             s.value = read(p + 8, 8); s.size = read(p + 16, 8); s.defined = section != 0; s.local = bind == 0; s.type = type;
             if (!i) { require(read(p, 8) == 0 && s.value == 0 && s.size == 0, "invalid null symbol"); out.symbols.push_back(s); continue; }
             // Local STT_SECTION symbols (ordinary ELF bookkeeping) are kept as locals.
+            // Defined symbols may be hidden or protected (system PRX); imports are default.
             require(bind <= 2 && (type == 0 || type == 1 || type == 2 || type == 6 || (type == 3 && bind == 0)) &&
-                    p[5] == 0 && section < 0xff00,
+                    (p[5] & ~3) == 0 && (!p[5] || section != 0) && section < 0xff00,
                     "unsupported symbol binding/type/visibility/section: " + name + " bind=" + std::to_string(bind) +
                     " type=" + std::to_string(type) + " visibility=" + std::to_string(p[5]) +
                     " section=" + std::to_string(section));
@@ -269,9 +270,18 @@ private:
                 }
                 require(backed, "function export outside file-backed code");
             }
+            // A plain name (module_start, __start__Ztext) is not an NID identity:
+            // defined, it binds nothing, like a local; a weak undefined one stays
+            // 0, as an unresolved weak symbol does, and so do undefined section
+            // bounds (__start_X/__stop_X both 0: an empty range).
+            if (!s.local && name.find('#') == std::string::npos) {
+                const bool bound = name.rfind("__start_", 0) == 0 || name.rfind("__stop_", 0) == 0;
+                require(s.defined || bind == 2 || bound, "undefined non-NID symbol: " + name);
+                s.local = true;
+            }
             if (!s.local) {
                 const auto a = name.find('#'), b = a == std::string::npos ? a : name.find('#', a + 1);
-                require(a == 11 && b != std::string::npos && name.find('#', b + 1) == std::string::npos, "invalid NID identity");
+                require(a == 11 && b != std::string::npos && name.find('#', b + 1) == std::string::npos, "invalid NID identity: " + name);
                 s.identity.nid = name.substr(0, a);
                 require(s.identity.nid.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-") == std::string::npos,
                         "invalid NID alphabet");
@@ -606,8 +616,15 @@ private:
                 // TLS relocations may use symbol 0 (local-dynamic: this module, offset = A).
                 require(symbol < resolved[i].size() && (type != 8 || symbol == 0) && (type == 8 || tlsRelocation || symbol != 0),
                         "invalid relocation symbol");
-                const bool tlsSymbol = symbol && dynamic[i].symbols[symbol].type == 6;
-                require(tlsRelocation ? (!symbol || tlsSymbol) : !tlsSymbol, "TLS symbol/relocation kind mismatch");
+                // An undefined local STT_SECTION symbol in a TLS relocation names this
+                // module's TLS block (local-dynamic model), like symbol 0.
+                const auto& referenced = dynamic[i].symbols[symbol];
+                const bool sectionTLS = symbol && tlsRelocation && referenced.local && referenced.type == 3 && !referenced.defined;
+                const bool tlsSymbol = symbol && (referenced.type == 6 || sectionTLS);
+                require(tlsRelocation ? (!symbol || tlsSymbol) : !tlsSymbol, "TLS symbol/relocation kind mismatch: relocation " +
+                        std::to_string(type) + " symbol " + std::to_string(symbol) + " type " +
+                        std::to_string(symbol ? dynamic[i].symbols[symbol].type : 0) + " local " +
+                        std::to_string(symbol ? dynamic[i].symbols[symbol].local : 0) + " nid " + (symbol ? dynamic[i].symbols[symbol].identity.nid : ""));
                 auto* target = const_cast<uint8_t*>(m.image.translate(r.offset, 8, 6));
                 require(target && !m.image.translate(r.offset, 8, 1), "relocation target outside RW/non-X guest segment");
                 auto next = targets.lower_bound(r.offset);
