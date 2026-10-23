@@ -55,7 +55,7 @@ class GuestThreads;
 // scePthreadCreate/Join/Exit for a general run (see GuestThreads). Sets `rip`
 // to where the calling thread resumes.
 int64_t guest_thread_service(GuestThreads* threads, maxps4::PS4KernelService service,
-                             const maxps4::PS4KernelCall& call, uint64_t& rip);
+                             const maxps4::PS4KernelCall& call, uint64_t& halt);
 // Anonymous immutable guest memory, not a PS4 or Linux syscall ABI.
 // A syscall has no permitted host effect and returns the real ENOSYS error.
 class ProbeAddressSpace final : public FEXCore::HLE::SyscallHandler {
@@ -127,13 +127,17 @@ public:
             } else if (orbis == maxps4::PS4KernelService::thread_create ||
                        orbis == maxps4::PS4KernelService::thread_join ||
                        orbis == maxps4::PS4KernelService::thread_exit) {
-                uint64_t resume = state.rip + 2;
-                result = threads ? guest_thread_service(threads,orbis,call,resume) :
+                uint64_t halt = 0;
+                result = threads ? guest_thread_service(threads,orbis,call,halt) :
                     maxps4::ps4::kernel_error(maxps4::ps4::nosys);
-                ++calls;
-                r[x86::REG_RAX] = static_cast<uint64_t>(result);
-                state.rip = resume;
-                return static_cast<uint64_t>(result);
+                // FEX does not end the block at a SYSCALL: execution goes on after
+                // it whatever State.rip says. The thread-return trampoline's HLT
+                // follows its SYSCALL; scePthreadExit's trampoline continues with
+                // RET, so make its return address that HLT.
+                uint8_t back[8];
+                maxps4::ps4::put_le(back, 0, halt, 8);
+                if (halt && state.rip + 2 != halt && !memory->write(rsp, back, sizeof(back)))
+                    callback_error = -EFAULT;
             } else {
                 result = kernel->invoke(orbis,call,guest_thread);
             }
@@ -400,6 +404,12 @@ public:
     // thread's PS4 identity (also what scePthreadSelf returns in it).
     int64_t create(const maxps4::PS4KernelCall& call) {
         using namespace maxps4::ps4;
+#if defined(VIXL_SIMULATOR)
+        // FEX's VIXL simulator belongs to the context's dispatcher: concurrent
+        // guest threads would share one simulated CPU.
+        (void)call;
+        return kernel_error(nosys);
+#endif
         if (!call.rdi || !image.translate(call.rdx, 1, 5)) return kernel_error(inval);
         std::lock_guard guard(lock);
         if (stopping) return kernel_error(again);
@@ -553,11 +563,11 @@ private:
     static inline thread_local Thread* current = nullptr;
 };
 int64_t guest_thread_service(GuestThreads* threads, maxps4::PS4KernelService service,
-                             const maxps4::PS4KernelCall& call, uint64_t& rip) {
+                             const maxps4::PS4KernelCall& call, uint64_t& halt) {
     switch (service) {
     case maxps4::PS4KernelService::thread_create: return threads->create(call);
     case maxps4::PS4KernelService::thread_join: return threads->join(call.rdi, call.rsi);
-    default: rip = threads->exit(call.rdi); return 0;
+    default: halt = threads->exit(call.rdi); return 0;
     }
 }
 }

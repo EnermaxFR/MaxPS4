@@ -83,7 +83,7 @@ int main() {
     assert(memory.write(0x11000, stale, 8));
     assert(call(S::mutex_trylock, 0x11000) == kernel_error(inval));
     assert(resolve_libkernel("upoVrzMHFeE", "libkernel", "libkernel", 1) == S::mutex_trylock);
-    for (const char* unsupported : {"scePthreadCreate", "scePthreadJoin", "scePthreadMutexLock", "scePthreadCondWait"})
+    for (const char* unsupported : {"scePthreadDetach", "scePthreadMutexLock", "scePthreadCondWait"})
         assert(resolve_libkernel(unsupported, "libkernel", "libkernel", 1) == S::unresolved);
     std::puts("PS4 guest thread identity and nonblocking mutex checks passed");
 }
