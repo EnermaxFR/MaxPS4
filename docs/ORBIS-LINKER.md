@@ -222,8 +222,11 @@ Limites actuelles, à traiter avant tout code non fiable :
   priorité, détachement) ne sont pas encore appliqués. Quand l'entrée se
   termine, les threads restants sont arrêtés (`SIGURG`, comme le chien de
   garde) puis joints. Une faute confinée dans un thread arrête aussi le thread
-  principal et devient le résultat de l'exécution. Sans confinement (simulateur
-  VIXL), le moteur attend que les threads restants se terminent.
+  principal et devient le résultat de l'exécution. FEX ne termine pas le bloc
+  sur un SYSCALL (changer `State.rip` y est sans effet) : pour
+  `scePthreadExit`, le moteur écrit donc l'adresse du `HLT` dans `[RSP]`, que
+  le `RET` de la trampoline consomme. Sous le simulateur VIXL, qui est unique
+  par contexte FEX, `scePthreadCreate` répond `ENOSYS`.
 - Pas de SYSCALL hors trampoline (l'exécution échoue avec `-EPERM`).
 
 ## Transactions et contrat mémoire/FEX
