@@ -56,7 +56,10 @@ enum class PS4KernelService : uint32_t {
     stack_chk_guard, progname, errno_table,
     // Guest code (PS4KernelExport::code), never a SYSCALL: pthread_once calls
     // its init routine from guest code.
-    once
+    once,
+    equeue_create, equeue_delete, equeue_wait, user_event_add, user_event_add_edge,
+    user_event_delete, user_event_trigger, event_id, event_filter, event_data,
+    event_fflags, event_error, event_user_data
 };
 // Token bit of a trampoline whose function follows the POSIX convention: -1
 // with the error in the calling thread's errno (__Error) instead of an Orbis
@@ -67,7 +70,8 @@ constexpr uint32_t posix_token = 0x40000000;
 constexpr bool general_only(PS4KernelService service) {
     return service == PS4KernelService::thread_create || service == PS4KernelService::thread_join ||
            service == PS4KernelService::thread_exit || service == PS4KernelService::thread_detach ||
-           service == PS4KernelService::cond_wait || service == PS4KernelService::cond_timedwait;
+           service == PS4KernelService::cond_wait || service == PS4KernelService::cond_timedwait ||
+           service == PS4KernelService::equeue_wait;
 }
 // Implemented libkernel functions (name, NID, service), e.g. for an HLE registry.
 // `posix`: POSIX convention (see posix_token). `noreturn`: the trampoline ends

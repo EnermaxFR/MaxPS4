@@ -606,6 +606,25 @@ int main(int argc, char** argv) {
         maxps4_fex_engine_close(process);
     }
     {
+        auto app = orbis_execution::make_general_equeue_app();
+        const maxps4_orbis_module modules[] = {
+            {"app.elf", app.data(), app.size(), orbis_execution::app_bias, nullptr, 0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process) == 0);
+        char diagnostic[512]{};
+        uint64_t relocation = 0, observed = 0, logical_entry = 0;
+        uint32_t cpu = 0;
+        const int prepared = maxps4_fex_engine_prepare_orbis_general(process, modules, 1, "app.elf", &relocation, diagnostic, sizeof(diagnostic));
+        if (prepared) std::fprintf(stderr, "prepare equeue: %s\n", diagnostic);
+        CHECK(prepared == 0 && maxps4_fex_engine_initialize(process) == 0);
+        CHECK(maxps4_fex_engine_run_orbis(process, &observed, &cpu, &logical_entry) == 0);
+        maxps4_fex_cpu_report report{};
+        CHECK(maxps4_fex_engine_last_cpu_report(process, &report) == 0);
+        CHECK(report.exited == 1 && report.exit_status == 123);
+        maxps4_fex_engine_close(process);
+        std::puts("PASS general FEX event queue: create, edge trigger, wait (RCX/R8), consumed edge timeout, delete -> exit(123)");
+    }
+    {
         // libc support: pthread_once as guest code (init runs once), and the
         // POSIX convention: nanosleep(1e9 ns) returns -1, __Error() gives EINVAL.
         auto app = orbis_execution::make_general_libc_support_app();
