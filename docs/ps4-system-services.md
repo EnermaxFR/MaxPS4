@@ -229,6 +229,10 @@ plumbing, **not a GPU workload**. No production GPU completion source, GNM
 command submission, VideoOut port/flip/vblank service or Metal presentation
 is connected by this change.
 
+The next bounded output path is documented in [Linear VideoOut handoff](videoout-linear.md):
+checked linear buffers, owned pixel snapshots, and explicit host flip/vblank
+notifications. It does not connect a production renderer or display timing source.
+
 ## Engine integration
 
 The engine owns a virtual-memory provider, checked memory adapter and libkernel

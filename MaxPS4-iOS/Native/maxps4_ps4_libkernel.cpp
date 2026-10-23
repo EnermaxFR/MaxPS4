@@ -194,6 +194,22 @@ constexpr Binding bindings[] = {
     {"sceGnmAddEqEvent", "b0xyllnVY-I", PS4KernelService::graphics_event_add, "libSceGnmDriver"},
     {"sceGnmDeleteEqEvent", "PVT+fuoS9gU", PS4KernelService::graphics_event_delete, "libSceGnmDriver"},
     {"sceGnmGetEqEventType", "UoYY0DWMC0U", PS4KernelService::event_data, "libSceGnmDriver"},
+    {"sceVideoOutOpen", "Up36PTk687E", PS4KernelService::video_open, "libSceVideoOut"},
+    {"sceVideoOutClose", "uquVH4-Du78", PS4KernelService::video_close, "libSceVideoOut"},
+    {"sceVideoOutSetBufferAttribute", "i6-sR91Wt-4", PS4KernelService::video_attribute, "libSceVideoOut"},
+    {"sceVideoOutRegisterBuffers", "w3BY+tAEiQY", PS4KernelService::video_register, "libSceVideoOut"},
+    {"sceVideoOutUnregisterBuffers", "N5KDtkIjjJ4", PS4KernelService::video_unregister, "libSceVideoOut"},
+    {"sceVideoOutSubmitFlip", "U46NwOiJpys", PS4KernelService::video_submit, "libSceVideoOut"},
+    {"sceVideoOutIsFlipPending", "zgXifHT9ErY", PS4KernelService::video_pending, "libSceVideoOut"},
+    {"sceVideoOutGetFlipStatus", "SbU3dwp80lQ", PS4KernelService::video_flip_status, "libSceVideoOut"},
+    {"sceVideoOutGetVblankStatus", "1FZBKy8HeNU", PS4KernelService::video_vblank_status, "libSceVideoOut"},
+    {"sceVideoOutAddFlipEvent", "HXzjK9yI30k", PS4KernelService::video_add_flip, "libSceVideoOut"},
+    {"sceVideoOutAddVblankEvent", "Xru92wHJRmg", PS4KernelService::video_add_vblank, "libSceVideoOut"},
+    {"sceVideoOutDeleteFlipEvent", "-Ozn0F1AFRg", PS4KernelService::video_delete_flip, "libSceVideoOut"},
+    {"sceVideoOutDeleteVblankEvent", "oNOQn3knW6s", PS4KernelService::video_delete_vblank, "libSceVideoOut"},
+    {"sceVideoOutGetEventId", "U2JJtSqNKZI", PS4KernelService::video_event_id, "libSceVideoOut"},
+    {"sceVideoOutGetEventData", "rWUTcKdkUzQ", PS4KernelService::video_event_data, "libSceVideoOut"},
+    {"sceVideoOutGetEventCount", "Mt4QHHkxkOc", PS4KernelService::video_event_count, "libSceVideoOut"},
     // Memory (shadPS4 kernel/memory.cpp).
     {"sceKernelGetDirectMemorySize", "pO96TwzOm5E", PS4KernelService::direct_size},
     {"sceKernelAllocateDirectMemory", "rTXw65xmLIA", PS4KernelService::direct_allocate},
@@ -251,7 +267,7 @@ PS4KernelService resolve_libkernel(std::string_view symbol, std::string_view lib
     return PS4KernelService::unresolved;
 }
 PS4Libkernel::PS4Libkernel(PS4GuestMemory& memory, PS4VirtualMemory* dynamic)
-    : memory_(memory), dynamic_(dynamic), threads_(memory), started_us_(monotonic_us()) {}
+    : memory_(memory), dynamic_(dynamic), threads_(memory), videoout_(memory, threads_), started_us_(monotonic_us()) {}
 PS4Libkernel::~PS4Libkernel() {
     reset();
 }
@@ -262,6 +278,7 @@ void PS4Libkernel::reset() {
     std::lock_guard<std::mutex> guard(lock_);
     close_files();
     for (auto& mount : mounts_) if (mount.root >= 0) { ::close(mount.root); mount.root = -1; }
+    videoout_.reset();
     if (dynamic_) dynamic_->reset();
     threads_.reset();
     errno_table_ = errno_table_size_ = process_param_ = 0;
@@ -680,6 +697,25 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     };
     using S = PS4KernelService;
     switch (service) {
+    case S::video_open: return videoout_.open(signed32(c.rsi), signed32(c.rdx), c.rcx);
+    case S::video_close: return videoout_.close(c.rdi);
+    case S::video_attribute: {
+        uint8_t pitch[8];
+        if (!c.rsp || c.rsp > UINT64_MAX - 8 || !memory_.read(c.rsp + 8, pitch, 8)) return PS4VideoOut::error(2);
+        return videoout_.set_attribute(c.rdi, uint32_t(c.rsi), uint32_t(c.rdx), uint32_t(c.rcx), uint32_t(c.r8), uint32_t(c.r9), uint32_t(get_le(pitch, 8)));
+    }
+    case S::video_register: return videoout_.register_buffers(c.rdi, signed32(c.rsi), c.rdx, signed32(c.rcx), c.r8);
+    case S::video_unregister: return videoout_.unregister_buffers(c.rdi, signed32(c.rsi));
+    case S::video_submit: return videoout_.submit(c.rdi, signed32(c.rsi), signed32(c.rdx), c.rcx);
+    case S::video_pending: return videoout_.pending(c.rdi);
+    case S::video_flip_status: return videoout_.flip_status(c.rdi, c.rsi);
+    case S::video_vblank_status: return videoout_.vblank_status(c.rdi, c.rsi);
+    case S::video_add_flip: case S::video_add_vblank:
+        return videoout_.add_event(c.rdi, c.rsi, service == S::video_add_flip ? 6 : 7, c.rdx);
+    case S::video_delete_flip: case S::video_delete_vblank:
+        return videoout_.add_event(c.rdi, c.rsi, service == S::video_delete_flip ? 6 : 7, 0, true);
+    case S::video_event_id: case S::video_event_data: case S::video_event_count:
+        return videoout_.event_field(c.rdi, c.rsi, service == S::video_event_id ? 0 : service == S::video_event_data ? 1 : 2);
     case S::graphics_event_add: return kernel_error(threads_.graphics_event_add(c.rdi, c.rsi, c.rdx));
     case S::graphics_event_delete: return kernel_error(threads_.graphics_event_delete(c.rdi, c.rsi));
     case S::equeue_create: return kernel_error(threads_.equeue_create(c.rdi, c.rsi));

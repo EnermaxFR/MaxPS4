@@ -479,6 +479,68 @@ inline std::vector<uint8_t> make_general_timedwait_app() {
 }
 // General guest: create a user-event queue, trigger/consume an edge, verify
 // that the next poll times out, delete the queue and exit with udata (123).
+inline std::vector<uint8_t> make_general_videoout_app() {
+    auto b = make_kernel_app();
+    use_libkernel_imports(b, {"fzyMKs9kim0", "Up36PTk687E", "i6-sR91Wt-4", "w3BY+tAEiQY",
+                            "HXzjK9yI30k", "U46NwOiJpys", "rWUTcKdkUzQ", "uquVH4-Du78"});
+    using orbis_fixture::put;
+    // Symbol 1 is libkernel, symbols 2..8 belong to libSceVideoOut.
+    constexpr size_t library_name = 0xa0;
+    std::copy_n("libSceVideoOut", 15, b.begin() + 0x600 + library_name);
+    for (size_t i = 1; i < 8; ++i) std::copy_n("#C#C", 4, b.begin() + 0x600 + 21 + 16 * i + 11);
+    orbis_fixture::setTag(b, 0x61000037, library_name + 15);
+    orbis_fixture::appendTag(b, 0x61000015, library_name | (uint64_t{1} << 32) | (uint64_t{2} << 48));
+    orbis_fixture::appendTag(b, 0x6100000f, library_name | (uint64_t{1} << 32) | (uint64_t{2} << 48));
+    constexpr uint64_t queue = data + 0x40, port = data + 0x48, count = data + 0x58,
+        attribute = data + 0x60, pointers = data + 0x90, result = data + 0xa0,
+        events = data + 0xc0, pixels = data + 0x100;
+    std::vector<uint8_t> code;
+    std::vector<size_t> failures;
+    auto emit = [&](std::initializer_list<uint8_t> bytes) { code.insert(code.end(), bytes); };
+    auto imm = [&](uint64_t value, size_t width) {
+        for (size_t i = 0; i < width; ++i) code.push_back(uint8_t(value >> (8 * i)));
+    };
+    auto rip = [&](std::initializer_list<uint8_t> op, uint64_t address) {
+        emit(op); imm(address - (entry + code.size() + 4), 4);
+    };
+    auto call = [&](size_t index) { rip({0xff, 0x15}, data + index * 8); };
+    auto check = [&] { emit({0x85, 0xc0, 0x0f, 0x85}); failures.push_back(code.size()); imm(0, 4); };
+    auto store = [&](uint64_t address, uint32_t pixel) {
+        emit({0xc7, 0x05}); imm(address - (entry + code.size() + 8), 4); imm(pixel, 4);
+    };
+    emit({0x53, 0x48, 0x89, 0xf3}); // Preserve the process exit function.
+    emit({0x31, 0xff, 0x31, 0xf6, 0x31, 0xd2, 0x31, 0xc9}); call(1);
+    rip({0x48, 0x89, 0x05}, port); // Open returns a positive handle.
+    // SetBufferAttribute(&attr, RGBA, linear, 16:9, width=2, height=1, pitch=2).
+    rip({0x48, 0x8d, 0x3d}, attribute);
+    emit({0xbe}); imm(0x80002200, 4); emit({0xba, 1, 0, 0, 0, 0x31, 0xc9});
+    emit({0x41, 0xb8, 2, 0, 0, 0, 0x41, 0xb9, 1, 0, 0, 0});
+    emit({0x48, 0x83, 0xec, 0x10, 0x48, 0xc7, 0x04, 0x24, 2, 0, 0, 0});
+    call(2); emit({0x48, 0x83, 0xc4, 0x10}); check();
+    store(pixels, 0xff123456); store(pixels + 4, 0xffabcdef);
+    rip({0x48, 0x8d, 0x05}, pixels); rip({0x48, 0x89, 0x05}, pointers);
+    rip({0x48, 0x8b, 0x3d}, port); emit({0x31, 0xf6});
+    rip({0x48, 0x8d, 0x15}, pointers); emit({0xb9, 1, 0, 0, 0});
+    rip({0x4c, 0x8d, 0x05}, attribute); call(3); check();
+    rip({0x48, 0x8b, 0x3d}, queue); rip({0x48, 0x8b, 0x35}, port);
+    emit({0xba, 77, 0, 0, 0}); call(4); check();
+    rip({0x48, 0x8b, 0x3d}, port); emit({0x31, 0xf6, 0xba, 1, 0, 0, 0, 0x48, 0xb9});
+    imm(uint64_t(int64_t(-123)), 8); call(5); check();
+    rip({0x48, 0x8b, 0x3d}, queue); rip({0x48, 0x8d, 0x35}, events);
+    emit({0xba, 1, 0, 0, 0}); rip({0x48, 0x8d, 0x0d}, count);
+    rip({0x4c, 0x8d, 0x05}, data + 0xb0); call(0); check(); // Bounded failure if the host callback fails.
+    rip({0x48, 0x8d, 0x3d}, events); rip({0x48, 0x8d, 0x35}, result); call(6); check();
+    rip({0x48, 0x8b, 0x3d}, port); call(7); check();
+    rip({0x8b, 0x3d}, result); emit({0xf7, 0xdf, 0xff, 0xd3, 0xf4}); // exit(-flip_argument) = 123.
+    const size_t fail = code.size(); emit({0x89, 0xc7, 0xff, 0xd3, 0xf4});
+    for (size_t at : failures) put(code, at, fail - (at + 4), 4);
+    b.resize(0xc00 + code.size()); // Keep the larger code away from the data segment at file 0x300.
+    std::copy(code.begin(), code.end(), b.begin() + 0xc00);
+    put(b, 64 + 8, 0xc00); put(b, 64 + 32, code.size()); put(b, 64 + 40, code.size());
+    std::copy_n("video", 6, b.begin() + 0x350);
+    put(b, 0x3b0, 15000000, 4);
+    return b;
+}
 inline std::vector<uint8_t> make_general_graphics_wait_app() {
     auto b = make_kernel_app();
     use_libkernel_imports(b, {"fzyMKs9kim0", "UoYY0DWMC0U"});

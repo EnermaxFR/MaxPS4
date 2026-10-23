@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include "maxps4_jit_memory.h"
 #include "OrbisLinkerBridge.h"
+#include "maxps4_ps4_videoout_abi.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -51,6 +52,19 @@ int64_t maxps4_fex_engine_graphics_event_ticket(maxps4_fex_engine *engine,
     uint64_t queue, uint64_t id, uint64_t *ticket);
 int64_t maxps4_fex_engine_complete_graphics_event(maxps4_fex_engine *engine,
     uint64_t ticket);
+// Owned linear VideoOut frame (raw RGBA/BGRA bytes, including row padding).
+// With pixels=NULL/capacity=0, query metadata only. Otherwise capacity must
+// cover byte_count. Returns 0, -EAGAIN if no frame, or -EINVAL for bad outputs;
+// metadata is zero on failure and pixel output is untouched on failure.
+// Completion(false) cancels without advancing flip status or signalling events.
+// vblank must be called by a real display timing source, not SubmitFlip.
+// These calls may run concurrently with guest execution, but the caller must
+// keep the engine alive until callbacks finish and serialize close itself.
+int32_t maxps4_fex_engine_videoout_snapshot(maxps4_fex_engine *engine,
+    maxps4_videoout_frame *frame, uint8_t *pixels, size_t capacity);
+int64_t maxps4_fex_engine_videoout_complete(maxps4_fex_engine *engine,
+    uint64_t ticket, uint32_t presented);
+int64_t maxps4_fex_engine_videoout_vblank(maxps4_fex_engine *engine, uint64_t port);
 enum { MAXPS4_CPU_RESTRICTED_INTERPRETER = 1, MAXPS4_CPU_FEX_ARM64_JIT = 2,
        MAXPS4_CPU_FEX_ARM64_SIMULATOR = 3 };
 enum { MAXPS4_FEX_CONTEXT_CREATED = 1, MAXPS4_FEX_DISPATCHER_INITIALIZED = 2 };
