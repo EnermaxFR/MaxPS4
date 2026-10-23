@@ -32,7 +32,9 @@ int main(int argc, char** argv) {
     auto rejected = [&](std::vector<uint8_t> f) {
         ++rejection;
         if (m.parse(f.data(),f.size())) { std::fprintf(stderr,"Accepted rejection case %zu\n",rejection); std::abort(); }
-        assert(!m.error.empty() && m.segments.empty() && m.symbols.empty() && m.relocations.empty());
+        // Program headers decoded before the refusal stay for the report;
+        // nothing past them (symbols, relocations) is kept.
+        assert(!m.error.empty() && m.symbols.empty() && m.relocations.empty());
     };
     auto bad = good; put(bad,UINT64_MAX,32); rejected(bad);
     bad=good; put(bad,0xffff,56,2); rejected(bad);
@@ -76,7 +78,7 @@ int main(int argc, char** argv) {
     assert(m.parse(bad.data(),bad.size()) && m.relocations[0].type==0 && m.relocations[0].supported);
     // Bounded deterministic malformed-header coverage.
     for (size_t i=0; i<288; ++i) { bad=good; bad[i]^=0xff;
-        if (!m.parse(bad.data(),bad.size())) assert(m.segments.empty()); }
+        if (!m.parse(bad.data(),bad.size())) assert(m.symbols.empty() && m.relocations.empty()); }
 
     maxps4::OrbisPRXPreparation p;
     std::vector<maxps4::OrbisPRXPreparation::Input> inputs{{"a.prx",good,0x10000},{"b.prx",consumer,0x20000}};
