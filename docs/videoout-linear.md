@@ -102,6 +102,10 @@ presentation, a game frame or an iPhone device run.
 
 ## Metal diagnostic consumer
 
+The selectable [Pad/VideoOut integration](ps4-pad-videoout.md) also exercises
+120 CPU-generated frames with live PS4 Pad input. The single-frame test below
+remains available. Neither path renders PS4 GPU commands.
+
 Diagnostic → VideoOut → Metal runs a built-in, self-contained variant of the
 same synthetic guest. It creates its event queue itself, writes two pixels,
 submits them through VideoOut, waits for a flip and exits with 123. The

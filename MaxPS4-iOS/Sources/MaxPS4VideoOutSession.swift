@@ -13,6 +13,16 @@ final class MaxPS4VideoOutSource: @unchecked Sendable {
     private var ready = false
     private var stopped = false
     private var presentations = 0
+    private var buttons: UInt32 = 0
+
+    func input(_ buttons: UInt32) {
+        lock.lock(); defer { lock.unlock() }
+        guard !stopped else { return }
+        self.buttons = buttons
+        if ready, let engine {
+            _ = maxps4_fex_engine_pad_update(engine, buttons, 128, 128, 128, 128, 0, 0, 1)
+        }
+    }
 
     func snapshot() throws -> Frame? {
         lock.lock(); defer { lock.unlock() }
@@ -53,12 +63,12 @@ final class MaxPS4VideoOutSource: @unchecked Sendable {
         if let engine { self.engine = nil; maxps4_fex_engine_close(engine) }
     }
 
-    func run() -> String {
+    func run(interactive: Bool = false) -> String {
         // Called only on the serial FEX queue; close cannot overtake run_orbis.
         dispatchPrecondition(condition: .onQueue(MaxPS4FEXMetalExecution.queue))
         defer { close() }
         do {
-            guard let url = Bundle.main.url(forResource: "videoout", withExtension: "elf", subdirectory: "VideoOutDemo") else {
+            guard let url = Bundle.main.url(forResource: interactive ? "pad-videoout" : "videoout", withExtension: "elf", subdirectory: "VideoOutDemo") else {
                 throw failure("Démo VideoOut absente de cette compilation", -2)
             }
             let bytes = try Data(contentsOf: url)
@@ -85,7 +95,9 @@ final class MaxPS4VideoOutSource: @unchecked Sendable {
             guard initialized == 0 else { throw failure("Activer le JIT avec StikDebug puis réessayer", initialized) }
             let limited = maxps4_fex_engine_set_time_limit(opened, 5000)
             guard limited == 0 else { throw failure("Limite d’exécution indisponible", limited) }
-            lock.lock(); ready = !stopped; let cancelled = stopped; lock.unlock()
+            lock.lock(); ready = !stopped; let cancelled = stopped
+            if ready { _ = maxps4_fex_engine_pad_update(opened, buttons, 128, 128, 128, 128, 0, 0, 1) }
+            lock.unlock()
             if cancelled { return "Arrêté." }
             var result: UInt64 = 0, entry: UInt64 = 0
             var backend: UInt32 = 0
@@ -94,10 +106,12 @@ final class MaxPS4VideoOutSource: @unchecked Sendable {
             let reported = maxps4_fex_engine_last_cpu_report(opened, &report)
             lock.lock(); let displayed = presentations; lock.unlock()
             guard ran == 0, reported == 0, report.exited == 1, report.exit_status == 123,
-                  backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT), displayed == 1 else {
+                  backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT), displayed == (interactive ? 120 : 1) else {
                 throw failure("Test incomplet : sortie \(report.exit_status), backend \(backend), présentation \(displayed)", ran)
             }
-            return "Deux pixels x86-64 présentés via Metal. FEX ARM64 natif, flip confirmé, sortie 123."
+            return interactive
+                ? "120 images x86-64 présentées via Metal. Entrées lues par libScePad, FEX ARM64 natif, sortie 123."
+                : "Deux pixels x86-64 présentés via Metal. FEX ARM64 natif, flip confirmé, sortie 123."
         } catch { return "Échec : \(error.localizedDescription)" }
     }
 
@@ -115,13 +129,14 @@ final class MaxPS4VideoOutSource: @unchecked Sendable {
     private var worker: MaxPS4VideoOutSource?
     private var generation = UUID()
 
-    func start() {
+    func input(_ buttons: UInt32) { worker?.input(buttons) }
+    func start(interactive: Bool = false) {
         stop()
         let source = MaxPS4VideoOutSource(), id = UUID()
         generation = id; self.source = source; worker = source; running = true
         report = "Préparation FEX et attente de présentation Metal…"
         MaxPS4FEXMetalExecution.queue.async { [weak self] in
-            let report = source.run()
+            let report = source.run(interactive: interactive)
             DispatchQueue.main.async {
                 guard let self, self.generation == id else { return }
                 self.report = report; self.running = false

@@ -1397,6 +1397,11 @@ extern "C" int32_t maxps4_fex_engine_videoout_snapshot(maxps4_fex_engine* engine
     if (!engine || !frame) return -EINVAL;
     return engine->libkernel.videoout().snapshot(*frame, pixels, capacity);
 }
+extern "C" int32_t maxps4_fex_engine_pad_update(maxps4_fex_engine* engine, uint32_t buttons,
+    uint8_t lx, uint8_t ly, uint8_t rx, uint8_t ry, uint8_t l2, uint8_t r2, uint32_t connected) {
+    if (!engine || connected > 1) return -EINVAL;
+    return engine->libkernel.pad().update(buttons, {{lx, ly, rx, ry}}, l2, r2, connected != 0);
+}
 extern "C" int64_t maxps4_fex_engine_videoout_complete(maxps4_fex_engine* engine,
     uint64_t ticket, uint32_t presented) {
     if (!engine || presented > 1) return maxps4::PS4VideoOut::error(1);

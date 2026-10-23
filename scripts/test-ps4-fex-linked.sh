@@ -50,3 +50,5 @@ cmp "$OUT/playable-bundle/provider.prx" "$ROOT/MaxPS4-iOS/Resources/PlayableDemo
 cp "$ROOT/MaxPS4-iOS/Resources/PlayableDemo/maxps4.json" "$OUT/playable-bundle/"
 "$OUT/Bin/maxps4-ps4-linked-test" --videoout-bundle "$OUT/videoout-bundle"
 cmp "$OUT/videoout-bundle/videoout.elf" "$ROOT/MaxPS4-iOS/Resources/VideoOutDemo/videoout.elf"
+"$OUT/Bin/maxps4-ps4-linked-test" --pad-videoout-bundle "$OUT/pad-videoout.elf"
+cmp "$OUT/pad-videoout.elf" "$ROOT/MaxPS4-iOS/Resources/VideoOutDemo/pad-videoout.elf"

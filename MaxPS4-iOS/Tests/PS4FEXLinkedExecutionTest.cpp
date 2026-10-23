@@ -171,6 +171,12 @@ int main(int argc, char** argv) {
         }
         return 0;
     }
+    if (argc==3 && !std::strcmp(argv[1],"--pad-videoout-bundle")) {
+        const auto bytes = orbis_execution::make_general_pad_videoout_app();
+        FILE* output = std::fopen(argv[2], "wb"); CHECK(output);
+        CHECK(std::fwrite(bytes.data(), 1, bytes.size(), output) == bytes.size());
+        CHECK(std::fclose(output) == 0); return 0;
+    }
     if (argc==3 && !std::strcmp(argv[1],"--videoout-bundle")) {
         std::filesystem::create_directories(argv[2]);
         const auto bytes = orbis_execution::make_general_videoout_app(true);
@@ -638,6 +644,51 @@ int main(int argc, char** argv) {
         CHECK(get_user && maxps4_fex_engine_call_libkernel(process, get_user, &call, 1) == int64_t(0x80960002) - 0x100000000LL);
         maxps4_fex_engine_close(process);
         std::puts("PASS FEX local UserService: lifecycle, exact library errors, user/list/name/login event, re-init -> exit(111), then restaging resets service");
+    }
+    {
+        auto app = orbis_execution::make_general_pad_videoout_app();
+        const maxps4_orbis_module module{"pad.elf",app.data(),app.size(),orbis_execution::app_bias,nullptr,0};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process) == 0);
+        char diagnostic[512]{}; uint64_t relocation=0, observed=0, entry=0; uint32_t backend=0;
+        const int prepared = maxps4_fex_engine_prepare_orbis_general(process,&module,1,"pad.elf",&relocation,diagnostic,sizeof(diagnostic));
+        if (prepared) std::fprintf(stderr,"prepare Pad/VideoOut: %s\n",diagnostic);
+        CHECK(prepared == 0 && maxps4_fex_engine_initialize(process) == 0);
+#if (defined(__aarch64__) || defined(__arm64__)) && !defined(VIXL_SIMULATOR)
+        CHECK(maxps4_fex_engine_set_time_limit(process,10000) == 0);
+#else
+        // VIXL has no native signal watchdog; the test process is externally
+        // bounded by run-bounded.py, like the existing simulator wait tests.
+        CHECK(maxps4_fex_engine_set_time_limit(process,10000) == -ENOTSUP);
+#endif
+        CHECK(maxps4_fex_engine_pad_update(process,0x4080,0,255,128,128,12,244,1) == 0);
+        CHECK(maxps4_fex_engine_pad_update(process,1,0,0,0,0,0,0,1) == -EINVAL);
+        size_t frames=0; bool saw_changed=false; int presenter_status=0;
+        std::thread presenter([&] {
+            const auto end=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+            while (frames < 120 && std::chrono::steady_clock::now()<end) {
+                maxps4_videoout_frame frame{}; uint8_t pixels[8]{};
+                const int status=maxps4_fex_engine_videoout_snapshot(process,&frame,pixels,sizeof(pixels));
+                if (status == -EAGAIN) { std::this_thread::sleep_for(std::chrono::milliseconds(1)); continue; }
+                if (status || frame.width!=2 || frame.height!=1 || frame.byte_count!=8 ||
+                    uint32_t(value(pixels))!=(frames < 60 ? 0xff004080U : 0xff000020U)) { presenter_status=-1; return; }
+                if (frames == 59 && maxps4_fex_engine_pad_update(process,0x20,128,128,128,128,0,0,1)) { presenter_status=-2; return; }
+                if (frames >= 60) saw_changed=true;
+                if (maxps4_fex_engine_videoout_complete(process,frame.ticket,1)) { presenter_status=-3; return; }
+                ++frames;
+            }
+        });
+        const int ran=maxps4_fex_engine_run_orbis(process,&observed,&backend,&entry);
+        presenter.join();
+        CHECK(ran==0 && presenter_status==0 && frames==120 && saw_changed);
+        maxps4_fex_cpu_report report{};
+        CHECK(maxps4_fex_engine_last_cpu_report(process,&report)==0 && report.exited==1 && report.exit_status==123);
+        CHECK(maxps4_fex_engine_prepare_orbis_general(process,&module,1,"pad.elf",&relocation,diagnostic,sizeof(diagnostic))==0);
+        const auto service=maxps4_ps4_resolve_libkernel("xk0AcarP3V4","libScePad","libScePad",1);
+        maxps4_ps4_kernel_call call{}; call.rdi=1;
+        CHECK(service && maxps4_fex_engine_call_libkernel(process,service,&call,1)==int64_t(0x80920005U)-0x100000000LL);
+        maxps4_fex_engine_close(process);
+        std::puts("PASS FEX Pad input changes guest pixels across 120 explicitly completed VideoOut frames; restaging clears Pad");
     }
     for (bool selfContained : {false, true}) {
         auto app = orbis_execution::make_general_videoout_app(selfContained);
