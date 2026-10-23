@@ -52,6 +52,11 @@ int64_t maxps4_fex_engine_graphics_event_ticket(maxps4_fex_engine *engine,
     uint64_t queue, uint64_t id, uint64_t *ticket);
 int64_t maxps4_fex_engine_complete_graphics_event(maxps4_fex_engine *engine,
     uint64_t ticket);
+// Concurrent host input. Values use PS4 button bits and 0..255 stick/trigger
+// samples (sticks centered at 128). No global execution lock is acquired.
+// Caller retains the engine and serializes against close; connected is 0 or 1.
+int32_t maxps4_fex_engine_pad_update(maxps4_fex_engine* engine, uint32_t buttons,
+    uint8_t lx, uint8_t ly, uint8_t rx, uint8_t ry, uint8_t l2, uint8_t r2, uint32_t connected);
 // Owned linear VideoOut frame (raw RGBA/BGRA bytes, including row padding).
 // With pixels=NULL/capacity=0, query metadata only. Otherwise capacity must
 // cover byte_count. Returns 0, -EAGAIN if no frame, or -EINVAL for bad outputs;

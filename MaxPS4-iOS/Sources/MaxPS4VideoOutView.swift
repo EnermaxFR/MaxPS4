@@ -1,5 +1,6 @@
 import SwiftUI
 import MetalKit
+import GameController
 
 #if MAXPS4_FEX_APP
 private final class VideoOutRenderer: NSObject, MTKViewDelegate {
@@ -111,23 +112,36 @@ struct MaxPS4VideoOutView: View {
 #if MAXPS4_FEX_APP
     @StateObject private var session = MaxPS4VideoOutSession()
     @State private var device = MTLCreateSystemDefaultDevice()
+    @State private var interactive = true
+    @State private var touch: UInt32 = 0
+    private let poll = Timer.publish(every: 1.0 / 60, on: .main, in: .common).autoconnect()
 #endif
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Deux pixels écrits par un programme x86-64 intégré, agrandis avec Metal. La confirmation de flip attend la présentation du drawable. Ce test ne lance pas de jeu PS4.")
+                Text("Images écrites par un programme x86-64 intégré, agrandies avec Metal. En mode commandes, les boutons lus par libScePad changent la couleur du pixel gauche pendant 120 images. Ce test ne lance pas de jeu PS4.")
                 Text("Activer le JIT avec StikDebug avant de démarrer.").font(.footnote)
 #if MAXPS4_FEX_APP
                 if let device {
+                    Toggle("Tester les commandes PS4 (120 images)", isOn: $interactive).disabled(session.running)
                     VideoOutSurface(device: device, source: session.source,
                         active: session.running && scenePhase == .active, report: session.rendererReport)
                         .frame(height: 260)
                         .accessibilityIdentifier("maxps4.videoout.surface")
                     Button(session.running ? "Arrêter" : "Tester VideoOut → Metal") {
-                        if session.running { session.stop() } else { session.start() }
+                        touch = 0
+                        if session.running { session.stop() } else { session.start(interactive: interactive) }
                     }
                     .buttonStyle(.borderedProminent)
                     .accessibilityIdentifier("maxps4.videoout.start")
+                    if interactive {
+                        VStack {
+                            control("Haut", bit: 0x10)
+                            HStack { control("Gauche", bit: 0x80); control("Croix", bit: 0x4000); control("Droite", bit: 0x20) }
+                            control("Bas", bit: 0x40)
+                        }.disabled(!session.running)
+                        Text("Maintenir un bouton tactile ou utiliser le pavé directionnel, le stick gauche et A d’une manette iOS.").font(.footnote)
+                    }
                 } else { Text("Metal indisponible sur cet appareil.") }
                 Text(session.report).textSelection(.enabled)
                 ShareLink(item: session.report) { Label("Partager le résultat", systemImage: "square.and.arrow.up") }
@@ -138,8 +152,39 @@ struct MaxPS4VideoOutView: View {
         }
         .navigationTitle("VideoOut → Metal")
 #if MAXPS4_FEX_APP
-        .onDisappear { session.stop() }
-        .onChange(of: scenePhase) { _, phase in if phase != .active { session.stop() } }
+        .onReceive(poll) { _ in
+            guard session.running, interactive, scenePhase == .active else { return }
+            var buttons = touch
+            for controller in GCController.controllers() {
+                if let pad = controller.extendedGamepad {
+                    if pad.dpad.left.isPressed || pad.leftThumbstick.xAxis.value < -0.3 { buttons |= 0x80 }
+                    if pad.dpad.right.isPressed || pad.leftThumbstick.xAxis.value > 0.3 { buttons |= 0x20 }
+                    if pad.dpad.up.isPressed || pad.leftThumbstick.yAxis.value > 0.3 { buttons |= 0x10 }
+                    if pad.dpad.down.isPressed || pad.leftThumbstick.yAxis.value < -0.3 { buttons |= 0x40 }
+                    if pad.buttonA.isPressed { buttons |= 0x4000 }
+                } else if let pad = controller.microGamepad {
+                    if pad.dpad.xAxis.value < -0.3 { buttons |= 0x80 }
+                    if pad.dpad.xAxis.value > 0.3 { buttons |= 0x20 }
+                    if pad.dpad.yAxis.value > 0.3 { buttons |= 0x10 }
+                    if pad.dpad.yAxis.value < -0.3 { buttons |= 0x40 }
+                    if pad.buttonA.isPressed { buttons |= 0x4000 }
+                }
+            }
+            session.input(buttons)
+        }
+        .onDisappear { touch = 0; session.stop() }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { touch = 0; session.stop() } }
 #endif
     }
+#if MAXPS4_FEX_APP
+    private func control(_ name: String, bit: UInt32) -> some View {
+        Text(name).frame(minWidth: 70, minHeight: 48)
+            .background(touch & bit != 0 ? Color.blue : Color.gray.opacity(0.2))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .accessibilityLabel(name).accessibilityAddTraits(.isButton)
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { _ in touch |= bit; session.input(touch) }
+                .onEnded { _ in touch &= ~bit; session.input(touch) })
+    }
+#endif
 }

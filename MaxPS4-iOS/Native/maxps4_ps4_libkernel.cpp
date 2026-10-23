@@ -194,6 +194,13 @@ constexpr Binding bindings[] = {
     {"sceGnmAddEqEvent", "b0xyllnVY-I", PS4KernelService::graphics_event_add, "libSceGnmDriver"},
     {"sceGnmDeleteEqEvent", "PVT+fuoS9gU", PS4KernelService::graphics_event_delete, "libSceGnmDriver"},
     {"sceGnmGetEqEventType", "UoYY0DWMC0U", PS4KernelService::event_data, "libSceGnmDriver"},
+    {"scePadInit", "hv1luiJrqQM", PS4KernelService::pad_init, "libScePad"},
+    {"scePadOpen", "xk0AcarP3V4", PS4KernelService::pad_open, "libScePad"},
+    {"scePadClose", "6ncge5+l5Qs", PS4KernelService::pad_close, "libScePad"},
+    {"scePadRead", "q1cHNfGycLI", PS4KernelService::pad_read, "libScePad"},
+    {"scePadReadState", "YndgXqQVV7c", PS4KernelService::pad_read_state, "libScePad"},
+    {"scePadGetControllerInformation", "gjP9-KQzoUk", PS4KernelService::pad_information, "libScePad"},
+    {"scePadGetHandle", "u1GRHp+oWoY", PS4KernelService::pad_handle, "libScePad"},
     {"sceUserServiceInitialize", "j3YMu1MVNNo", PS4KernelService::user_initialize, "libSceUserService"},
     {"sceUserServiceTerminate", "bwFjS+bX9mA", PS4KernelService::user_terminate, "libSceUserService"},
     {"sceUserServiceGetInitialUser", "CdWp0oHWGr0", PS4KernelService::user_initial, "libSceUserService"},
@@ -273,7 +280,7 @@ PS4KernelService resolve_libkernel(std::string_view symbol, std::string_view lib
     return PS4KernelService::unresolved;
 }
 PS4Libkernel::PS4Libkernel(PS4GuestMemory& memory, PS4VirtualMemory* dynamic)
-    : memory_(memory), dynamic_(dynamic), threads_(memory), videoout_(memory, threads_), user_service_(memory), started_us_(monotonic_us()) {}
+    : memory_(memory), dynamic_(dynamic), threads_(memory), videoout_(memory, threads_), user_service_(memory), pad_(memory), started_us_(monotonic_us()) {}
 PS4Libkernel::~PS4Libkernel() {
     reset();
 }
@@ -286,6 +293,7 @@ void PS4Libkernel::reset() {
     for (auto& mount : mounts_) if (mount.root >= 0) { ::close(mount.root); mount.root = -1; }
     videoout_.reset();
     user_service_.reset();
+    pad_.reset();
     if (dynamic_) dynamic_->reset();
     threads_.reset();
     errno_table_ = errno_table_size_ = process_param_ = 0;
@@ -705,6 +713,13 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     using S = PS4KernelService;
     switch (service) {
     case S::user_initialize: return user_service_.initialize(c.rdi);
+    case S::pad_init: return pad_.initialize();
+    case S::pad_open: return pad_.open(signed32(c.rdi), signed32(c.rsi), signed32(c.rdx), c.rcx);
+    case S::pad_close: return pad_.close(signed32(c.rdi));
+    case S::pad_handle: return pad_.get_handle(signed32(c.rdi), signed32(c.rsi), signed32(c.rdx));
+    case S::pad_read: return pad_.read(signed32(c.rdi), c.rsi, signed32(c.rdx), false);
+    case S::pad_read_state: return pad_.read(signed32(c.rdi), c.rsi, 1, true);
+    case S::pad_information: return pad_.information(signed32(c.rdi), c.rsi);
     case S::user_terminate: return user_service_.terminate();
     case S::user_initial: return user_service_.initial_user(c.rdi);
     case S::user_login_list: return user_service_.login_users(c.rdi);

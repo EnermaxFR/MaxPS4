@@ -535,6 +535,65 @@ inline std::vector<uint8_t> make_general_user_service_app() {
     put(b, 0x380, 700, 4);
     return b;
 }
+// Interactive synthetic CPU renderer: read real libScePad data, write two
+// pixels, submit VideoOut and wait for host presentation before reusing them.
+// This intentionally uses no PS4 GPU shaders or PM4 commands.
+inline std::vector<uint8_t> make_general_pad_videoout_app() {
+    auto b = make_kernel_app();
+    use_libkernel_imports(b, {"hv1luiJrqQM", "xk0AcarP3V4", "YndgXqQVV7c", "Up36PTk687E",
+                            "i6-sR91Wt-4", "w3BY+tAEiQY", "U46NwOiJpys", "zgXifHT9ErY", "1jfXLRVzisc"});
+    using orbis_fixture::put;
+    // Library B = Pad, C = VideoOut, D = libkernel (usleep).
+    std::copy_n("libScePad", 10, b.begin()+0x601);
+    std::copy_n("libScePad", 10, b.begin()+0x60b);
+    constexpr size_t video_name = 0xc0, kernel_name = 0xd0;
+    std::copy_n("libSceVideoOut", 15, b.begin()+0x600+video_name);
+    std::copy_n("libkernel", 10, b.begin()+0x600+kernel_name);
+    for (size_t i=3; i<8; ++i) std::copy_n("#C#C",4,b.begin()+0x600+21+16*i+11);
+    std::copy_n("#D#D",4,b.begin()+0x600+21+16*8+11);
+    orbis_fixture::setTag(b,0x61000037,kernel_name+10);
+    for (auto tag : {0x61000015,0x6100000f}) {
+        orbis_fixture::appendTag(b,tag,video_name|(uint64_t{1}<<32)|(uint64_t{2}<<48));
+        orbis_fixture::appendTag(b,tag,kernel_name|(uint64_t{1}<<32)|(uint64_t{3}<<48));
+    }
+    constexpr uint64_t port=data+0x50, pad=data+0x58, attr=data+0x60,
+        pointer=data+0x90, pixels=data+0x100, sample=data+0x120;
+    std::vector<uint8_t> code; std::vector<size_t> failures;
+    auto emit = [&](std::initializer_list<uint8_t> bytes) { code.insert(code.end(),bytes); };
+    auto imm = [&](uint64_t value,size_t width) { for(size_t i=0;i<width;++i) code.push_back(uint8_t(value>>(8*i))); };
+    auto rip = [&](std::initializer_list<uint8_t> op,uint64_t target) { emit(op); imm(target-(entry+code.size()+4),4); };
+    auto call = [&](size_t i) { rip({0xff,0x15},data+8*i); };
+    auto check = [&] { emit({0x85,0xc0,0x0f,0x85}); failures.push_back(code.size()); imm(0,4); };
+    auto positive = [&] { emit({0x85,0xc0,0x0f,0x8e}); failures.push_back(code.size()); imm(0,4); };
+    auto store = [&](uint64_t target,uint32_t value) { emit({0xc7,0x05}); imm(target-(entry+code.size()+8),4); imm(value,4); };
+    emit({0x53,0x48,0x89,0xf3,0x41,0x54,0x48,0x83,0xec,8}); // exit in RBX, frames in R12D; align stack.
+    call(0); check();
+    emit({0xbf,1,0,0,0,0x31,0xf6,0x31,0xd2,0x31,0xc9}); call(1); positive(); rip({0x89,0x05},pad);
+    emit({0x31,0xff,0x31,0xf6,0x31,0xd2,0x31,0xc9}); call(3); positive(); rip({0x89,0x05},port);
+    rip({0x48,0x8d,0x3d},attr); emit({0xbe}); imm(0x80002200,4);
+    emit({0xba,1,0,0,0,0x31,0xc9,0x41,0xb8,2,0,0,0,0x41,0xb9,1,0,0,0});
+    emit({0x48,0x83,0xec,0x10,0x48,0xc7,0x04,0x24,2,0,0,0}); call(4); emit({0x48,0x83,0xc4,0x10}); check();
+    rip({0x48,0x8d,0x05},pixels); rip({0x48,0x89,0x05},pointer);
+    rip({0x8b,0x3d},port); emit({0x31,0xf6}); rip({0x48,0x8d,0x15},pointer);
+    emit({0xb9,1,0,0,0}); rip({0x4c,0x8d,0x05},attr); call(5); check();
+    emit({0x41,0xbc,120,0,0,0}); const size_t frame = code.size();
+    rip({0x8b,0x3d},pad); rip({0x48,0x8d,0x35},sample); call(2); check();
+    // Button bits become visible RGB bytes, with an opaque alpha channel.
+    rip({0x8b,0x05},sample); emit({0x0d,0,0,0,0xff}); rip({0x89,0x05},pixels);
+    store(pixels+4,0xffabcdef);
+    rip({0x8b,0x3d},port); emit({0x31,0xf6,0xba,1,0,0,0,0x31,0xc9}); call(6); check();
+    const size_t pending = code.size();
+    emit({0xbf,0xe8,3,0,0}); call(8); check(); // Yield while waiting for presentation.
+    rip({0x8b,0x3d},port); call(7);
+    emit({0x83,0xf8,1,0x0f,0x84}); imm(pending-(code.size()+4),4); check();
+    emit({0x41,0xff,0xcc,0x0f,0x85}); imm(frame-(code.size()+4),4);
+    emit({0xbf,123,0,0,0,0xff,0xd3,0xf4});
+    const size_t fail=code.size(); emit({0x89,0xc7,0xff,0xd3,0xf4});
+    for(size_t at:failures) put(code,at,fail-(at+4),4);
+    b.resize(0xc00+code.size()); std::copy(code.begin(),code.end(),b.begin()+0xc00);
+    put(b,64+8,0xc00); put(b,64+32,code.size()); put(b,64+40,code.size());
+    return b;
+}
 inline std::vector<uint8_t> make_general_videoout_app(bool selfContained = false) {
     auto b = make_kernel_app();
     use_libkernel_imports(b, {"fzyMKs9kim0", "Up36PTk687E", "i6-sR91Wt-4", "w3BY+tAEiQY",
