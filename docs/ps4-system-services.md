@@ -233,6 +233,10 @@ The next bounded output path is documented in [Linear VideoOut handoff](videoout
 checked linear buffers, owned pixel snapshots, and explicit host flip/vblank
 notifications. It does not connect a production renderer or display timing source.
 
+The local profile lifecycle is documented in [Local UserService](ps4-user-service.md):
+per-engine initialization, user/list/name queries and a consumed-once login event.
+It provides a virtual profile without online or host-account identity.
+
 ## Engine integration
 
 The engine owns a virtual-memory provider, checked memory adapter and libkernel
