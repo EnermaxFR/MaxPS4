@@ -59,7 +59,8 @@ enum class PS4KernelService : uint32_t {
     once,
     equeue_create, equeue_delete, equeue_wait, user_event_add, user_event_add_edge,
     user_event_delete, user_event_trigger, event_id, event_filter, event_data,
-    event_fflags, event_error, event_user_data
+    event_fflags, event_error, event_user_data,
+    graphics_event_add, graphics_event_delete
 };
 // Token bit of a trampoline whose function follows the POSIX convention: -1
 // with the error in the calling thread's errno (__Error) instead of an Orbis

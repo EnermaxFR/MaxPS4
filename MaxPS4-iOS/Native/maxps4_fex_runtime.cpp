@@ -1377,6 +1377,20 @@ extern "C" int64_t maxps4_fex_engine_call_libkernel(maxps4_fex_engine* engine, u
         call->r8, call->r9, call->rsp};
     return engine->libkernel.invoke(static_cast<maxps4::PS4KernelService>(service), registers, guest_thread);
 }
+extern "C" int64_t maxps4_fex_engine_graphics_event_ticket(maxps4_fex_engine* engine,
+    uint64_t queue, uint64_t id, uint64_t* ticket) {
+    if (ticket) *ticket = 0;
+    if (!engine || !ticket) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
+    return maxps4::ps4::kernel_error(engine->libkernel.threads().graphics_event_ticket(queue, id, *ticket));
+}
+extern "C" int64_t maxps4_fex_engine_complete_graphics_event(maxps4_fex_engine* engine,
+    uint64_t ticket) {
+    if (!engine) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
+    // Never take runtime_lock: the guest may hold it while waiting for this
+    // notification. PS4Threads protects its registration table independently;
+    // completion touches no guest memory and no renderer or host pointer.
+    return maxps4::ps4::kernel_error(engine->libkernel.threads().graphics_event_complete(ticket));
+}
 extern "C" int32_t maxps4_fex_engine_read_ps4(maxps4_fex_engine* engine,
     uint64_t address, uint8_t* output, size_t length) {
     if (!engine || !output || !length || length > 1024 * 1024) return -EINVAL;

@@ -191,6 +191,9 @@ constexpr Binding bindings[] = {
     {"sceKernelGetEventFflags", "Q0qr9AyqJSk", PS4KernelService::event_fflags},
     {"sceKernelGetEventError", "Uu-iDFC9aUc", PS4KernelService::event_error},
     {"sceKernelGetEventUserData", "vz+pg2zdopI", PS4KernelService::event_user_data},
+    {"sceGnmAddEqEvent", "b0xyllnVY-I", PS4KernelService::graphics_event_add, "libSceGnmDriver"},
+    {"sceGnmDeleteEqEvent", "PVT+fuoS9gU", PS4KernelService::graphics_event_delete, "libSceGnmDriver"},
+    {"sceGnmGetEqEventType", "UoYY0DWMC0U", PS4KernelService::event_data, "libSceGnmDriver"},
     // Memory (shadPS4 kernel/memory.cpp).
     {"sceKernelGetDirectMemorySize", "pO96TwzOm5E", PS4KernelService::direct_size},
     {"sceKernelAllocateDirectMemory", "rTXw65xmLIA", PS4KernelService::direct_allocate},
@@ -677,6 +680,8 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     };
     using S = PS4KernelService;
     switch (service) {
+    case S::graphics_event_add: return kernel_error(threads_.graphics_event_add(c.rdi, c.rsi, c.rdx));
+    case S::graphics_event_delete: return kernel_error(threads_.graphics_event_delete(c.rdi, c.rsi));
     case S::equeue_create: return kernel_error(threads_.equeue_create(c.rdi, c.rsi));
     case S::equeue_delete: return kernel_error(threads_.equeue_delete(c.rdi));
     case S::equeue_wait:

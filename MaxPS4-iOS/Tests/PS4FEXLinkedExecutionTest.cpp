@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <fstream>
+#include <thread>
 #include <unistd.h>
 
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); return 1; } } while (0)
@@ -604,6 +605,52 @@ int main(int argc, char** argv) {
         CHECK(ran==0 && report.exited==1 && report.exit_status==timed_out);
         std::puts("PASS general scePthreadMutexLock + scePthreadCondTimedwait(1000 us) -> ETIMEDOUT");
         maxps4_fex_engine_close(process);
+    }
+    {
+        auto app = orbis_execution::make_general_graphics_wait_app();
+        const maxps4_orbis_module modules[] = {
+            {"app.elf", app.data(), app.size(), orbis_execution::app_bias, nullptr, 0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process) == 0);
+        char diagnostic[512]{};
+        uint64_t relocation = 0, observed = 0, logical_entry = 0;
+        uint32_t cpu = 0;
+        CHECK(maxps4_fex_engine_prepare_orbis_general(process, modules, 1, "app.elf", &relocation, diagnostic, sizeof(diagnostic)) == 0);
+        const uint64_t data = orbis_execution::data + relocation;
+        maxps4_ps4_kernel_call create{};
+        create.rdi = data + 0x40; create.rsi = data + 0x48;
+        const uint32_t create_service = maxps4_ps4_resolve_libkernel("D0OdFMjp46I", "libkernel", "libkernel", 1);
+        CHECK(create_service != 0 && maxps4_fex_engine_call_libkernel(process, create_service, &create, 1) == 0);
+        uint8_t wire[8]{};
+        CHECK(maxps4_fex_engine_read_ps4(process, data + 0x40, wire, sizeof(wire)) == 0);
+        const uint64_t queue = value(wire);
+        const uint32_t add = maxps4_ps4_resolve_libkernel("b0xyllnVY-I", "libSceGnmDriver", "libSceGnmDriver", 1);
+        const uint32_t remove = maxps4_ps4_resolve_libkernel("PVT+fuoS9gU", "libSceGnmDriver", "libSceGnmDriver", 1);
+        CHECK(add != 0 && remove != 0);
+        maxps4_ps4_kernel_call registration{};
+        registration.rdi = queue; registration.rsi = 0x40; registration.rdx = 789;
+        CHECK(maxps4_fex_engine_call_libkernel(process, add, &registration, 1) == 0);
+        uint64_t ticket = 0;
+        CHECK(maxps4_fex_engine_graphics_event_ticket(process, queue, 0x40, &ticket) == 0 && ticket != 0);
+        CHECK(maxps4_fex_engine_initialize(process) == 0);
+        int64_t completion = -1;
+        std::thread backend([&] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            completion = maxps4_fex_engine_complete_graphics_event(process, ticket);
+        });
+        const int ran = maxps4_fex_engine_run_orbis(process, &observed, &cpu, &logical_entry);
+        backend.join();
+        CHECK(ran == 0 && completion == 0);
+        maxps4_fex_cpu_report report{};
+        CHECK(maxps4_fex_engine_last_cpu_report(process, &report) == 0);
+        CHECK(report.exited == 1 && report.exit_status == 64);
+        uint8_t event[32]{};
+        CHECK(maxps4_fex_engine_read_ps4(process, data + 0x60, event, sizeof(event)) == 0);
+        CHECK(value(event) == 0x40 && event[8] == 0xf2 && event[9] == 0xff && value(event + 16) == 0x40 && value(event + 24) == 789);
+        CHECK(maxps4_fex_engine_call_libkernel(process, remove, &registration, 1) == 0);
+        CHECK(maxps4_fex_engine_complete_graphics_event(process, ticket) != 0);
+        maxps4_fex_engine_close(process);
+        std::puts("PASS general FEX waits for explicit GNM backend completion from another host thread -> exit(64); no GPU work simulated");
     }
     {
         auto app = orbis_execution::make_general_equeue_app();
