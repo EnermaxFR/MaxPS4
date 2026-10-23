@@ -10,6 +10,6 @@ typedef struct maxps4_videoout_frame {
     uint32_t pitch_in_pixels;
     uint32_t pixel_format;
     uint32_t buffer_index;
-    uint32_t reserved;
+    uint32_t tiled; // 1: the GPU's tiled layout, copied as is (not detiled yet).
     uint64_t byte_count;
 } maxps4_videoout_frame;

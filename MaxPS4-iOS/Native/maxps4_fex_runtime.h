@@ -204,6 +204,13 @@ int32_t maxps4_fex_engine_prepare_orbis(maxps4_fex_engine *engine,
 int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine *engine,
     const maxps4_orbis_module *modules, size_t count, const char *root,
     uint64_t *relocation, char *diagnostic, size_t capacity);
+// Diagnostic boot probe for later prepare_orbis_general calls (0: off, the
+// default). When on, every import that neither a given module nor the HLE
+// provides gets a stub: a function writes "missing import <library> <NID>"
+// to stderr on its first call and returns 0, a data object is 64 zero bytes.
+// Every HLE call of a run is also traced to stderr with its result.
+// It shows how far a game gets; it never makes it correct.
+int32_t maxps4_fex_engine_set_import_probe(maxps4_fex_engine *engine, uint32_t enabled);
 // Optional bounded RGBA8 output/input contract for an admitted SCE process.
 // buttons: left=1, right=2, up=4, down=8, action=16. No host pointer returned.
 // Invalid configuration clears previous output. Dimensions <=320x240; disjoint RW/non-X.

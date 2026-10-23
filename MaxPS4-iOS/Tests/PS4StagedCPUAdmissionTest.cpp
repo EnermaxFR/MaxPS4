@@ -47,6 +47,7 @@ int main() {
     guest_test::put(bad, 240, 72, 8); guest_test::put(bad, 251, 128, 8);
     std::fill(bad.begin() + 176, bad.begin() + 232, 0);
     guest_test::put(bad, 7, 176, 4);
+    guest_test::put(bad, 8, 216, 8); // A sized PT_TLS; an empty one declares no TLS.
     CHECK(image.stage_ps4(bad.data(), bad.size()) == 0);
     CHECK(image.ps4_blockers() == 6);
     CHECK(image.admit_staged_cpu(6) == -ENOTSUP);

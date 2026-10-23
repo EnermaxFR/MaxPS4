@@ -10,7 +10,9 @@ namespace maxps4 {
 // variables. Guest threads themselves run on FEX (GuestThreads in
 // maxps4_fex_runtime.cpp), which attaches/detaches them here; x86 code never
 // runs natively on a host thread. Every object lives behind an opaque 64-bit
-// token in its guest slot, never a host pointer.
+// token in its guest slot, never a host pointer. With an object arena (general
+// images), a token is the guest address of a zeroed object_size block, as on a
+// PS4 where the slot points to the object: a game's libc writes into it.
 // A guest slot holding 0 (or 1 for a mutex: the adaptive initializer) is a
 // static initializer: the object is created on first use. Destroyed objects
 // leave 2 in their slot, which stays invalid.
@@ -99,6 +101,10 @@ public:
     // run's threads go back to guest code, where the stop signal lands.
     void interrupt();
     void resume();
+    // Writable guest range that later mutex, attribute, condition and rwlock
+    // tokens are carved from, never reused (reset() forgets it).
+    void set_object_arena(uint64_t base, uint64_t size);
+    static constexpr uint64_t object_size = 64;
     void reset();
     static constexpr size_t thread_limit = 64, mutex_limit = 256, cond_limit = 256, attr_limit = 256,
                             key_limit = 256, rwlock_limit = 256;
@@ -135,6 +141,9 @@ private:
     std::array<std::array<uint64_t, key_limit>, thread_limit> values_{};
     RwLock* acquire_rwlock(uint64_t slot, ps4::Error& error);
     uint64_t next_thread_ = 2, next_mutex_ = 0x10000;
+    uint64_t arena_next_ = 0, arena_end_ = 0; // arena_end_ 0: no arena.
+    // A new object token (0: none left); see set_object_arena.
+    uint64_t next_token();
     bool interrupted_ = false;
     bool known_locked(uint64_t thread) const;
     bool writable(uint64_t slot) const;

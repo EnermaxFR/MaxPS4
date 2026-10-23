@@ -7,6 +7,7 @@
 #include "maxps4_jit_memory.h"
 #include "maxps4_guest_elf.h"
 #include "SelfImage.hpp"
+#include "OrbisMetadata.hpp"
 #include "maxps4_ps4_guest_memory.h"
 #include "maxps4_ps4_libkernel.h"
 #include "maxps4_ps4_linker.h"
@@ -57,6 +58,13 @@ class GuestThreads;
 // (see GuestThreads), defined once GuestThreads is complete.
 int64_t guest_thread_service(GuestThreads& threads, maxps4::PS4KernelService service,
                              const maxps4::PS4KernelCall& call);
+// First exported name of an HLE service, for the boot probe's trace.
+const char* service_name(maxps4::PS4KernelService service) {
+    size_t count = 0;
+    const auto* exports = maxps4::libkernel_exports(count);
+    for (size_t i = 0; i < count; ++i) if (exports[i].service == service) return exports[i].name;
+    return "?";
+}
 // Anonymous immutable guest memory, not a PS4 or Linux syscall ABI.
 // A syscall has no permitted host effect and returns the real ENOSYS error.
 class ProbeAddressSpace final : public FEXCore::HLE::SyscallHandler {
@@ -67,6 +75,10 @@ public:
     maxps4::PS4Libkernel* kernel = nullptr;
     maxps4::PS4GuestMemory* memory = nullptr;
     GuestThreads* threads = nullptr; // General runs only.
+    // Boot probe stubs: "<library> <NID>" per missing_import_token index, and
+    // whether each was already reported.
+    const std::vector<std::string>* missing_imports = nullptr;
+    std::vector<std::atomic<bool>>* missing_reported = nullptr;
     uint64_t private_stack = 0;
     size_t private_stack_size = 0;
     // Guest threads of a general run call in concurrently.
@@ -107,7 +119,16 @@ public:
                 // seventh, at RSP+8 past the trampoline's return address) are
                 // readable. Bounded images keep 0, which makes them fault.
                 image->general() ? r[x86::REG_RSP] : 0};
-            if (orbis == maxps4::PS4KernelService::tls_get_addr) {
+            const uint32_t stub = static_cast<uint32_t>(orbis) - maxps4::missing_import_token;
+            if (static_cast<uint32_t>(orbis) >= maxps4::missing_import_token) {
+                if (missing_imports && stub < missing_imports->size()) {
+                    if (!(*missing_reported)[stub].exchange(true))
+                        std::fprintf(stderr, "missing import %s\n", (*missing_imports)[stub].c_str());
+                    result = 0;
+                } else {
+                    callback_error = -EPERM;
+                }
+            } else if (orbis == maxps4::PS4KernelService::tls_get_addr) {
                 // __tls_get_addr(&tls_index{module, offset}): the guest may have changed
                 // tls_index, so validate it now. The admitted next instruction reads
                 // through RAX, so never return an invalid pointer: on failure return the
@@ -144,6 +165,11 @@ public:
                 result = kernel->invoke(orbis,call,guest_thread,posix);
             }
             ++calls;
+            if (missing_imports && static_cast<uint32_t>(orbis) < maxps4::missing_import_token)
+                std::fprintf(stderr, "hle %s(0x%llx, 0x%llx, 0x%llx, 0x%llx) = 0x%llx rsp 0x%llx -> 0x%llx\n",
+                    service_name(orbis), (unsigned long long)call.rdi, (unsigned long long)call.rsi,
+                    (unsigned long long)call.rdx, (unsigned long long)call.rcx, (unsigned long long)result,
+                    (unsigned long long)rsp, (unsigned long long)r[x86::REG_RSP]);
             r[x86::REG_RAX] = static_cast<uint64_t>(result);
             state.rip += 2;
             return static_cast<uint64_t>(result);
@@ -667,6 +693,9 @@ struct maxps4_fex_engine {
     maxps4::PS4GuestMemory system_memory{staged_ps4, &dynamic_ps4};
     maxps4::PS4Libkernel libkernel{system_memory, &dynamic_ps4};
     maxps4::PS4DynamicLinker linker;
+    bool import_probe = false;
+    std::vector<std::string> missing_imports;
+    std::vector<std::atomic<bool>> missing_reported;
     fextl::unique_ptr<FEXCore::Context::Context> context;
     int32_t stage = MAXPS4_FEX_CONTEXT_CREATED;
 };
@@ -699,6 +728,14 @@ extern "C" int32_t maxps4_fex_engine_open(maxps4_fex_engine **out) {
         // The Darwin dependency defaults to native indirect runtime calls.
         // x86 CI's upstream ARM64 simulator must use its real C++ ABI wrappers.
         FEXCore::Config::Set(FEXCore::Config::CONFIG_DISABLE_VIXL_INDIRECT_RUNTIME_CALLS, "0");
+        // TSO loads are LDAPUR, which the simulator aborts on when a guest
+        // access crosses 16 bytes (hardware faults and FEX fixes it up). The
+        // simulator runs a single guest thread, so TSO ordering is moot.
+        FEXCore::Config::Set(FEXCore::Config::CONFIG_TSOENABLED, "0");
+        // The simulator offers SVE, which no iPhone has; match the device so
+        // that AVX takes the same 128-bit pair path.
+        FEXCore::Config::Set(FEXCore::Config::CONFIG_HOSTFEATURES,
+            std::to_string(static_cast<uint64_t>(FEXCore::Config::HostFeatures::DISABLESVE)));
 #endif
     }
     // Real Darwin sysctl-based feature discovery; never fabricated features.
@@ -868,6 +905,9 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     // Orbis images with synthesized HLE trampolines also reach libkernel.
     engine->probe.kernel = linked || image.has_hle() ? &engine->libkernel : nullptr;
     engine->probe.memory = linked || image.has_hle() ? &engine->system_memory : nullptr;
+    // Probe mode only: stubs report themselves and every HLE call is traced.
+    engine->probe.missing_imports = engine->import_probe ? &engine->missing_imports : nullptr;
+    engine->probe.missing_reported = engine->import_probe ? &engine->missing_reported : nullptr;
     engine->probe.private_stack = reinterpret_cast<uintptr_t>(stack_base);
     engine->probe.private_stack_size = page;
     engine->probe.calls = 0;
@@ -877,7 +917,7 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
         ~ClearRange() {
             space.image = nullptr; space.linker = nullptr; space.kernel = nullptr;
             space.memory = nullptr; space.private_stack = 0; space.private_stack_size = 0;
-            space.threads = nullptr;
+            space.threads = nullptr; space.missing_imports = nullptr; space.missing_reported = nullptr;
         }
     } clear_range {engine->probe};
     engine->cpu_report = {};
@@ -1083,7 +1123,8 @@ namespace {
 // with `why`.
 int orbisInputs(const maxps4_orbis_module* modules, size_t count, bool general,
     std::vector<std::vector<uint8_t>>& plain, std::string& why,
-    std::vector<maxps4::OrbisLinker::Input>& inputs, std::vector<maxps4::OrbisLinker::HLE>& hle) {
+    std::vector<maxps4::OrbisLinker::Input>& inputs, std::vector<maxps4::OrbisLinker::HLE>& hle,
+    std::vector<std::string>* missing = nullptr) {
     for (size_t i=0;i<count;++i) {
         const auto& m = modules[i];
         if (!m.path || !m.bytes || m.dependency_count > 128 ||
@@ -1112,11 +1153,36 @@ int orbisInputs(const maxps4_orbis_module* modules, size_t count, bool general,
         const auto& e = kernel_exports[i];
         // Data objects and guest routines serve the libc of general images.
         if (!general && (maxps4::general_only(e.service) || e.data || e.code)) continue;
-        maxps4::OrbisLinker::Identity id{e.nid,e.library,e.library,1,1,uint8_t(e.data ? 1 : 2)};
+        maxps4::OrbisLinker::Identity id{e.nid,e.library,e.module ? e.module : e.library,1,1,uint8_t(e.data ? 1 : 2)};
         if (e.data) { hle.push_back({id,0,e.data}); continue; }
         if (e.code) { hle.push_back({id,0,0,false,std::vector<uint8_t>(e.code,e.code+e.code_size)}); continue; }
         const uint32_t token = static_cast<uint32_t>(e.service) | (e.posix ? maxps4::posix_token : 0);
         hle.push_back({id,0,token,e.noreturn || e.service == maxps4::PS4KernelService::thread_exit});
+    }
+    if (!missing) return 0;
+    // Boot probe: stub what neither the given modules' libraries nor the HLE
+    // above provide, with the import's own identity.
+    std::vector<maxps4::OrbisMetadata> metadata(count);
+    std::set<std::string> exported_libraries;
+    for (size_t i=0;i<count;++i) {
+        if (!metadata[i].parse(modules[i].bytes,modules[i].size)) {
+            why = std::string(modules[i].path) + ": " + metadata[i].error;
+            return -ENOEXEC;
+        }
+        for (const auto& l : metadata[i].libraries) if (l.exported) exported_libraries.insert(l.name);
+    }
+    std::set<std::pair<std::string,std::string>> provided;
+    for (const auto& h : hle) provided.insert({h.identity.nid,h.identity.library});
+    std::set<maxps4::OrbisLinker::Identity> stubs;
+    for (const auto& m : metadata)
+        for (const auto& s : m.symbols)
+            if (!s.defined && !s.nid.empty() && (s.kind == 1 || s.kind == 2) &&
+                !exported_libraries.count(s.library) && !provided.count({s.nid,s.library}))
+                stubs.insert({s.nid,s.library,s.module,s.libraryVersion,s.moduleVersion,s.kind});
+    for (const auto& id : stubs) {
+        if (id.type == 1) { hle.push_back({id,0,64}); continue; }
+        hle.push_back({id,0,maxps4::missing_import_token + uint32_t(missing->size())});
+        missing->push_back(id.library + " " + id.nid);
     }
     return 0;
 }
@@ -1141,8 +1207,12 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine* en
         std::vector<maxps4::OrbisLinker::HLE> hle;
         std::vector<std::vector<uint8_t>> plain;
         std::string why;
-        const int collected = orbisInputs(modules,count,true,plain,why,inputs,hle);
+        std::vector<std::string> missing;
+        const int collected = orbisInputs(modules,count,true,plain,why,inputs,hle,
+            engine->import_probe ? &missing : nullptr);
         if (collected) { message(why); return collected; }
+        engine->missing_imports = std::move(missing);
+        engine->missing_reported = std::vector<std::atomic<bool>>(engine->missing_imports.size());
         std::string reason;
         uint64_t moved = 0;
         int status = engine->staged_ps4.prepare_orbis_general(inputs,hle,root,reason,moved);
@@ -1159,6 +1229,15 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine* en
                         status = -EFAULT;
                     }
             engine->libkernel.set_process_param(engine->staged_ps4.process_param());
+            // A game's libc writes into the objects behind its mutexes and
+            // conditions (PS4Threads::set_object_arena): give them memory.
+            constexpr uint64_t arena = 4 * 1024 * 1024;
+            uint64_t objects = 0;
+            if (!status && engine->dynamic_ps4.place(0, arena, 0, 3, false, objects)) {
+                reason = "synchronization object arena could not be mapped";
+                status = -ENOMEM;
+            }
+            if (!status) engine->libkernel.threads().set_object_arena(objects, arena);
             if (status) engine->staged_ps4.clear();
         }
         message(status ? reason : "SCE image linked and identity-mapped; execution not attempted");
@@ -1166,6 +1245,12 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine* en
         if (!status) *relocation = moved;
         return status;
     } catch (const std::bad_alloc&) { message("Orbis allocation failed"); return -ENOMEM; }
+}
+extern "C" int32_t maxps4_fex_engine_set_import_probe(maxps4_fex_engine* engine, uint32_t enabled) {
+    if (!engine || enabled > 1) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    engine->import_probe = enabled != 0;
+    return 0;
 }
 extern "C" int32_t maxps4_fex_engine_prepare_orbis(maxps4_fex_engine* engine,
     const maxps4_orbis_module* modules, size_t count, const char* root,

@@ -60,14 +60,31 @@ PS4Threads::Mutex* PS4Threads::acquire(uint64_t slot, Error& error) {
         return mutex;
     }
     if (!writable(slot)) { error = fault; return nullptr; }
-    if (next_mutex_ == UINT64_MAX) { error = again; return nullptr; }
     for (auto& mutex : mutexes_) if (!mutex.token) {
-        if (!write_token(slot, next_mutex_)) { error = fault; return nullptr; }
-        mutex = {next_mutex_++, 0, slot, token == adaptive_initializer ? adaptive : error_check, 0};
+        const uint64_t fresh = next_token();
+        if (!fresh) { error = again; return nullptr; }
+        if (!write_token(slot, fresh)) { error = fault; return nullptr; }
+        mutex = {fresh, 0, slot, token == adaptive_initializer ? adaptive : error_check, 0};
         return &mutex;
     }
     error = again;
     return nullptr;
+}
+uint64_t PS4Threads::next_token() {
+    if (arena_end_) {
+        if (arena_end_ - arena_next_ < object_size) return 0;
+        const uint8_t zero[object_size] = {};
+        if (!memory_.write(arena_next_, zero, object_size)) return 0;
+        const uint64_t token = arena_next_;
+        arena_next_ += object_size;
+        return token;
+    }
+    return next_mutex_ == UINT64_MAX ? 0 : next_mutex_++;
+}
+void PS4Threads::set_object_arena(uint64_t base, uint64_t size) {
+    std::lock_guard<std::mutex> lock(guard_);
+    arena_next_ = base;
+    arena_end_ = base + size;
 }
 bool PS4Threads::write_output(uint64_t address, uint64_t value, size_t width) {
     uint8_t wire[8]; put_le(wire, 0, value, width);
@@ -91,14 +108,15 @@ PS4Threads::MutexAttr* PS4Threads::find_mutexattr(uint64_t slot, Error& error) {
 }
 template <typename Table> Error PS4Threads::create(Table& table, uint64_t slot) {
     if (!writable(slot)) return fault;
-    if (next_mutex_ == UINT64_MAX) return again;
     auto entry = std::find_if(table.begin(), table.end(), [slot](const auto& e) { return e.token && e.slot == slot; });
     if (entry == table.end())
         entry = std::find_if(table.begin(), table.end(), [](const auto& e) { return !e.token; });
     if (entry == table.end()) return nomem;
-    if (!write_token(slot, next_mutex_)) return fault;
+    const uint64_t fresh = next_token();
+    if (!fresh) return again;
+    if (!write_token(slot, fresh)) return fault;
     *entry = {};
-    entry->token = next_mutex_++;
+    entry->token = fresh;
     entry->slot = slot;
     return ok;
 }
@@ -214,10 +232,11 @@ Error PS4Threads::init(uint64_t slot, uint64_t attributes, uint64_t name) {
         if (!memory_.read_cstring(name, text, sizeof(text))) return fault;
     }
     for (const auto& mutex : mutexes_) if (mutex.token && mutex.slot == slot) return busy;
-    if (next_mutex_ == UINT64_MAX) return again;
     for (auto& mutex : mutexes_) if (!mutex.token) {
-        if (!write_token(slot, next_mutex_)) return fault;
-        mutex = {next_mutex_++, 0, slot, type, 0};
+        const uint64_t fresh = next_token();
+        if (!fresh) return again;
+        if (!write_token(slot, fresh)) return fault;
+        mutex = {fresh, 0, slot, type, 0};
         return ok;
     }
     return again;
@@ -300,10 +319,11 @@ PS4Threads::Cond* PS4Threads::acquire_cond(uint64_t slot, Error& error) {
         return nullptr;
     }
     if (!writable(slot)) { error = fault; return nullptr; }
-    if (next_mutex_ == UINT64_MAX) { error = again; return nullptr; }
     for (auto& cond : conds_) if (!cond.token) {
-        if (!write_token(slot, next_mutex_)) { error = fault; return nullptr; }
-        cond = {next_mutex_++, slot, 0, 0, 0};
+        const uint64_t fresh = next_token();
+        if (!fresh) { error = again; return nullptr; }
+        if (!write_token(slot, fresh)) { error = fault; return nullptr; }
+        cond = {fresh, slot, 0, 0, 0};
         return &cond;
     }
     error = again;
@@ -317,10 +337,11 @@ Error PS4Threads::cond_init(uint64_t slot, uint64_t, uint64_t name) {
         if (!memory_.read_cstring(name, text, sizeof(text))) return fault;
     }
     for (const auto& cond : conds_) if (cond.token && cond.slot == slot) return busy;
-    if (next_mutex_ == UINT64_MAX) return again;
     for (auto& cond : conds_) if (!cond.token) {
-        if (!write_token(slot, next_mutex_)) return fault;
-        cond = {next_mutex_++, slot, 0, 0, 0};
+        const uint64_t fresh = next_token();
+        if (!fresh) return again;
+        if (!write_token(slot, fresh)) return fault;
+        cond = {fresh, slot, 0, 0, 0};
         return ok;
     }
     return again;
@@ -399,10 +420,11 @@ PS4Threads::RwLock* PS4Threads::acquire_rwlock(uint64_t slot, Error& error) {
         return nullptr;
     }
     if (!writable(slot)) { error = fault; return nullptr; }
-    if (next_mutex_ == UINT64_MAX) { error = again; return nullptr; }
     for (auto& lock : rwlocks_) if (!lock.token) {
-        if (!write_token(slot, next_mutex_)) { error = fault; return nullptr; }
-        lock = {next_mutex_++, slot, 0, 0};
+        const uint64_t fresh = next_token();
+        if (!fresh) { error = again; return nullptr; }
+        if (!write_token(slot, fresh)) { error = fault; return nullptr; }
+        lock = {fresh, slot, 0, 0};
         return &lock;
     }
     error = again;
@@ -727,6 +749,7 @@ void PS4Threads::reset() {
         rwlocks_.fill({}); keys_.fill({}); equeues_.fill({});
         for (auto& values : values_) values.fill(0);
         interrupted_ = false;
+        arena_next_ = arena_end_ = 0; // Its pages went with the dynamic memory.
     }
     changed_.notify_all();
 }

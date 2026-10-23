@@ -52,7 +52,11 @@ public:
         attr.width = uint32_t(ps4::get_le(wire + 12, 4)); attr.height = uint32_t(ps4::get_le(wire + 16, 4));
         attr.pitch = uint32_t(ps4::get_le(wire + 20, 4));
         if (attr.format != rgba && attr.format != bgra) return error(3);
-        if (ps4::get_le(wire + 4, 4) != 1) return error(7); // Linear only; tiled bytes are never misread.
+        // Tiling 0 (tiled, what games use) or 1 (linear). Tiled frames are
+        // marked as such, never presented as linear rows.
+        const uint64_t tiling = ps4::get_le(wire + 4, 4);
+        if (tiling > 1) return error(7);
+        attr.tiled = tiling == 0;
         if (ps4::get_le(wire + 8, 4) != 0) return error(8);
         if (!attr.width || !attr.height || attr.width > 1920 || attr.height > 1080) return error(5);
         if (attr.pitch < attr.width || attr.pitch > 2048) return error(4);
@@ -95,7 +99,7 @@ public:
         try {
             std::vector<uint8_t> pixels(attr.bytes());
             if (!memory_.read(buffer.address, pixels.data(), pixels.size())) return error(0x13);
-            frame_ = {next_frame_++, port_, argument, attr.width, attr.height, attr.pitch, attr.format, uint32_t(index), 0, pixels.size()};
+            frame_ = {next_frame_++, port_, argument, attr.width, attr.height, attr.pitch, attr.format, uint32_t(index), attr.tiled ? 1U : 0U, pixels.size()};
             pixels_.swap(pixels);
         } catch (const std::bad_alloc&) { return error(0x100c); }
         return 0;
@@ -121,6 +125,19 @@ public:
         std::lock_guard<std::mutex> lock(guard_);
         if (!valid(port)) return error(11);
         ++vblank_count_; vblank_time_ = now(); events_.video_event_notify(port_, 7, 0, vblank_time_); return 0;
+    }
+    // sceVideoOutGetResolutionStatus: a 1080p 59.94 Hz television (shadPS4
+    // layout: four s32 sizes, u64 refresh rate 3, float inches, flags, zeroes).
+    int64_t resolution(uint64_t port, uint64_t output) {
+        std::lock_guard<std::mutex> lock(guard_);
+        if (!valid(port)) return error(11);
+        uint8_t wire[44]{};
+        const uint32_t sizes[] = {1920, 1080, 1920, 1080};
+        for (size_t i = 0; i < 4; ++i) ps4::put_le(wire, i * 4, sizes[i], 4);
+        ps4::put_le(wire, 16, 3, 8);
+        const float inches = 50.0f;
+        std::memcpy(wire + 24, &inches, 4);
+        return output && memory_.write(output, wire, sizeof(wire)) ? 0 : error(2);
     }
     int64_t pending(uint64_t port) {
         std::lock_guard<std::mutex> lock(guard_); return valid(port) ? (frame_.ticket ? 1 : 0) : error(11);
@@ -154,7 +171,7 @@ public:
         return memory_.write(output, wire, sizeof(wire)) ? 0 : error(2);
     }
 private:
-    struct Attribute { uint32_t format = 0, width = 0, height = 0, pitch = 0; size_t bytes() const { return size_t(pitch) * height * 4; } };
+    struct Attribute { uint32_t format = 0, width = 0, height = 0, pitch = 0; bool tiled = false; size_t bytes() const { return size_t(pitch) * height * 4; } };
     struct Group { bool used = false; Attribute attribute; };
     struct Buffer { bool used = false; size_t group = 0; uint64_t address = 0; };
     PS4GuestMemory& memory_; PS4Threads& events_; std::mutex guard_;

@@ -151,6 +151,7 @@ private:
         std::vector<Descriptor> imports, exports, importLibraries, exportLibraries;
         std::vector<std::string> needed;
         uint64_t init = 0, fini = 0, initArray = 0, finiArray = 0, initArraySize = 0, finiArraySize = 0;
+        bool hasInit = false; // DT_INIT 0 is a real address: libc.prx's module_start.
     };
     static Dynamic parse(const Input& input, const Module& m, uint64_t tlsMemory, size_t& symbolBudget, size_t& relocationBudget) {
         const auto* bytes = input.file.bytes; const auto size = input.file.size;
@@ -311,7 +312,7 @@ private:
         relocations(0x6100002f, 0x61000031, 0x61000033, 24);
         relocations(0x61000029, 0x6100002d, 0x6100002b, 7); // DT_RELA
         auto optional = [&](uint64_t tag) { auto it = tags.find(tag); return it == tags.end() ? uint64_t{0} : it->second; };
-        out.init = optional(12); out.fini = optional(13);
+        out.init = optional(12); out.fini = optional(13); out.hasInit = tags.count(12) != 0;
         out.initArray = optional(25); out.finiArray = optional(26);
         out.initArraySize = optional(27); out.finiArraySize = optional(28);
         // An empty array (size 0) is no array, whatever its address.
@@ -709,7 +710,7 @@ private:
                     code(entry, what);
                 }
             };
-            if (d.init) {
+            if (d.hasInit) {
                 code(add(m.bias, d.init), "DT_INIT");
                 if (m.image.type == 0xfe18) out.initializers.push_back(add(m.bias, d.init)); // module_start
             }

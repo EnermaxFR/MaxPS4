@@ -110,7 +110,8 @@ private:
                 read(p + 8, 8), read(p + 16, 8), read(p + 32, 8), read(p + 40, 8), read(p + 48, 8)};
             headers.push_back(h);
             requiresLinker |= h.type == 2 || h.type == 0x60000000 || h.type == 0x61000000;
-            requiresTLS |= h.type == 7;
+            // An empty PT_TLS (some games keep the header) declares no TLS.
+            requiresTLS |= h.type == 7 && (h.memorySize || h.fileSize);
             if (!isSelf && h.fileSize && !range(h.offset, h.fileSize, size)) return -ENOEXEC;
             if (h.type != 1 && h.type != 0x61000010) continue; // Metadata retained, not executed.
             if (!h.memorySize || h.fileSize > h.memorySize || h.memorySize > memoryBudget - allocated ||
