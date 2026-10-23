@@ -2,6 +2,7 @@
 #include "OrbisMetadata.hpp"
 #include "OrbisLinker.hpp"
 #include "GameDirectoryPreflight.hpp"
+#include "SystemModules.hpp"
 #include "maxps4_fex_runtime.h"
 #include <cstdio>
 #include <cerrno>
@@ -16,6 +17,22 @@ int maxps4_game_directory_report(const char* path, char* output, size_t capacity
     const auto count = std::min(report.size(),capacity-1);
     std::memcpy(output,report.data(),count); output[count] = 0;
     return count == report.size() ? status : -ENOSPC;
+}
+int maxps4_system_modules_report(const char* directory, char* output, size_t capacity) {
+    if (!output || !capacity) return -EINVAL;
+    output[0] = 0;
+    if (!directory) return -EINVAL;
+    try {
+        std::vector<maxps4::SystemModules::Module> modules;
+        const int status = maxps4::SystemModules::scan(directory, modules);
+        const std::string report = status == -ENOENT ? maxps4::SystemModules::report({}) :
+            status ? "Inventaire des modules système impossible (code " + std::to_string(status) + ")" :
+            maxps4::SystemModules::report(modules);
+        const auto count = std::min(report.size(), capacity - 1);
+        std::memcpy(output, report.data(), count); output[count] = 0;
+        return count == report.size() ? (status == -ENOENT ? 0 : status) : -ENOSPC;
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
+      catch (const std::exception&) { return -EIO; }
 }
 
 int maxps4_orbis_analysis_report(const char* path, char* output, size_t capacity) {

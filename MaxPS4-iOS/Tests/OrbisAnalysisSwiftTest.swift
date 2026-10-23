@@ -30,6 +30,21 @@ struct OrbisAnalysisSwiftTest {
         precondition(inventory.text == MaxPS4OrbisAnalyzer.inspectDirectory(url: directory).text)
         precondition(inventory.text.contains("aucune exécution"))
         precondition(!MaxPS4OrbisAnalyzer.inspectDirectory(url: invalid).inspectionCompleted)
+        // System modules: only top-level .prx/.sprx files are copied, then
+        // inventoried; removal leaves an empty inventory.
+        let modules = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: modules) }
+        precondition(MaxPS4OrbisAnalyzer.systemModulesReport(directory: modules).contains("Aucun module"))
+        try FileManager.default.copyItem(at: url, to: directory.appendingPathComponent("libSynthetic.sprx"))
+        try Data([0]).write(to: directory.appendingPathComponent("notes.txt"))
+        let copied1 = try MaxPS4OrbisAnalyzer.importSystemModules(from: directory, to: modules)
+        precondition(copied1 == 1)
+        let modulesReport = MaxPS4OrbisAnalyzer.systemModulesReport(directory: modules)
+        precondition(modulesReport.contains("en clair : 1") && modulesReport.contains("libSynthetic.sprx"))
+        let copied2 = try MaxPS4OrbisAnalyzer.importSystemModules(from: directory, to: modules)
+        precondition(copied2 == 1)
+        try MaxPS4OrbisAnalyzer.removeSystemModules(directory: modules)
+        precondition(MaxPS4OrbisAnalyzer.systemModulesReport(directory: modules).contains("Aucun module"))
         print("PASS Swift Orbis analysis bridge: SCE PRX metadata, qualified NID and rejected inputs; no execution")
     }
 }

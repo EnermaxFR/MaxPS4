@@ -13,6 +13,11 @@ int maxps4_orbis_analysis_report(const char* path, char* output, size_t capacity
 // means inspection completed, NOT launch readiness; blockers are in the report.
 // Negative errno means incomplete/rejected inspection (including truncation).
 int maxps4_game_directory_report(const char* path, char* output, size_t capacity);
+// Inventory of the PS4 system modules (.prx/.sprx, top level, no symlinks)
+// the user copied, decrypted, from their own console into `directory`.
+// Encrypted SELF files are reported, never read further. Never executes.
+// Negative errno for a missing directory, too many files or truncation.
+int maxps4_system_modules_report(const char* directory, char* output, size_t capacity);
 #ifdef __cplusplus
 }
 #endif
