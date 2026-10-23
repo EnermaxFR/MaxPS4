@@ -12,6 +12,7 @@ struct MaxPS4FEXDiagnosticView: View {
     @State private var importingOrbisDirectory = false
     @State private var importedReport: String?
     @State private var ps4LibkernelReport: String?
+    @State private var guestThreadsReport: String?
     @State private var analyzingOrbis = false
     @State private var orbisReport: String?
 
@@ -73,6 +74,27 @@ struct MaxPS4FEXDiagnosticView: View {
                         Text(ps4LibkernelReport).font(.system(.body, design: .monospaced))
                             .textSelection(.enabled)
                         ShareLink(item: ps4LibkernelReport) { Label("Partager le rapport ELF PS4", systemImage: "square.and.arrow.up") }
+                    }
+                    Button("Tester les threads invités") {
+                        running = true
+                        Task {
+                            guestThreadsReport = await withCheckedContinuation { continuation in
+                                MaxPS4FEXMetalExecution.queue.async {
+                                    continuation.resume(returning: MaxPS4FEXDiagnostic.testGuestThreads())
+                                }
+                            }
+                            running = false
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(running)
+                    .accessibilityIdentifier("maxps4-guest-threads-test")
+                    Text("Deux images x86-64 intégrées, en mode général : deux threads qui doivent tourner en même temps, puis un mutex avec une variable de condition. Activer le JIT avec StikDebug d’abord.")
+                        .font(.footnote)
+                    if let guestThreadsReport {
+                        Text(guestThreadsReport).font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                        ShareLink(item: guestThreadsReport) { Label("Partager le rapport threads", systemImage: "square.and.arrow.up") }
                     }
                     Button("Analyser un exécutable Orbis") { analyzingOrbis = true; importingELF = true }
                         .disabled(running)

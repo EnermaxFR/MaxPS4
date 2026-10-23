@@ -212,6 +212,97 @@ struct MaxPS4FEXDiagnostic: Sendable {
 #endif
     }
 
+    /// Built-in general-mode images (Resources/GuestThreadsDemo, exported by
+    /// the linked FEX test and compared in CI): two guest threads that must run
+    /// concurrently, then a producer/consumer on a mutex and a condition
+    /// variable. Each runs on its own engine with a 5 s time limit.
+    static func testGuestThreads() -> String {
+#if MAXPS4_FEX_APP
+        let cases: [(file: String, title: String, expected: Int32)] = [
+            ("threads", "2 threads concurrents (Create/Join/Exit)", 100),
+            ("cond", "Mutex + variable de condition", 77)
+        ]
+#if targetEnvironment(simulator)
+        let environment = "simulateur iOS — aucune preuve iPhone"
+#elseif os(iOS)
+        let environment = "appareil iOS physique"
+#else
+        let environment = "hôte macOS — aucune preuve iPhone"
+#endif
+        var lines = [
+            "Test threads invités (mode général) v1",
+            "Date UTC : " + ISO8601DateFormatter().string(from: Date()),
+            "Environnement : " + environment + " ; " + ProcessInfo.processInfo.operatingSystemVersionString
+        ]
+        var passed = 0
+        for test in cases {
+            guard let url = Bundle.main.url(forResource: test.file, withExtension: "elf", subdirectory: "GuestThreadsDemo"),
+                  let bytes = try? Data(contentsOf: url) else {
+                lines.append(test.title + " : image absente de l’application")
+                continue
+            }
+            let (ok, detail) = runGeneralImage(bytes, expected: test.expected)
+            if ok { passed += 1 }
+            lines.append(test.title + " : " + detail)
+        }
+        lines.append("Validation : \(passed)/\(cases.count) réussis")
+        lines.append("Images de test intégrées ; aucun jeu PS4 n’est exécuté.")
+        return lines.joined(separator: "\n")
+#else
+        return "Test threads invités : moteur FEXCore natif absent de cette compilation"
+#endif
+    }
+
+#if MAXPS4_FEX_APP
+    private static func runGeneralImage(_ bytes: Data, expected: Int32) -> (Bool, String) {
+        var engine: OpaquePointer?
+        let opened = maxps4_fex_engine_open(&engine)
+        guard opened == 0, let engine else { return (false, "ouverture FEX refusée (\(opened))") }
+        defer { maxps4_fex_engine_close(engine) }
+        var diagnostic = [CChar](repeating: 0, count: 512)
+        var relocation: UInt64 = 0
+        let prepared: Int32 = bytes.withUnsafeBytes { raw in
+            "app.elf".withCString { path in
+                var module = maxps4_orbis_module(path: path,
+                    bytes: raw.baseAddress?.assumingMemoryBound(to: UInt8.self), size: raw.count,
+                    load_bias: 0x100000, dependencies: nil, dependency_count: 0)
+                return diagnostic.withUnsafeMutableBufferPointer { text in
+                    maxps4_fex_engine_prepare_orbis_general(engine, &module, 1, path, &relocation,
+                        text.baseAddress, text.count)
+                }
+            }
+        }
+        guard prepared == 0 else {
+            let reason = diagnostic.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
+            return (false, "préparation refusée (\(prepared)) : " + reason)
+        }
+        let initialized = maxps4_fex_engine_initialize(engine)
+        guard initialized == 0 else {
+            return (false, "JIT FEX indisponible (\(initialized)) : activer StikDebug puis réessayer")
+        }
+        _ = maxps4_fex_engine_set_time_limit(engine, 5000)
+        var value: UInt64 = 0, entry: UInt64 = 0
+        var backend: UInt32 = 0
+        let started = Date()
+        let status = maxps4_fex_engine_run_orbis(engine, &value, &backend, &entry)
+        let elapsed = Int(Date().timeIntervalSince(started) * 1000)
+        guard status == 0 else {
+            var fault = maxps4_fex_guest_fault()
+            let faulted = maxps4_fex_engine_last_guest_fault(engine, &fault) == 0
+            return (false, "exécution échouée (\(status))" +
+                (faulted ? " ; signal \(fault.signal), adresse 0x" + String(fault.address, radix: 16) : "") +
+                " ; \(elapsed) ms")
+        }
+        var report = maxps4_fex_cpu_report()
+        guard maxps4_fex_engine_last_cpu_report(engine, &report) == 0 else { return (false, "rapport CPU indisponible") }
+        let cpu = backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT) ? "JIT ARM64 natif" :
+            backend == UInt32(MAXPS4_CPU_FEX_ARM64_SIMULATOR) ? "simulateur ARM64" : "backend \(backend)"
+        let ok = report.exited == 1 && report.exit_status == expected
+        return (ok, (ok ? "réussi" : "résultat inattendu") +
+            " — sortie \(report.exit_status) (attendu \(expected)), \(cpu), \(elapsed) ms")
+    }
+#endif
+
     // An authorized plaintext bundle has an explicit graph. A recognized PKG
     // or opaque PFS never supplies these bytes implicitly.
     static func executeOrbisDirectory(url: URL) -> String {

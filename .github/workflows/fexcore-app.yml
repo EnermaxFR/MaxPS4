@@ -133,6 +133,10 @@ jobs:
           cmp build/fex-app-host/playable-bundle/app.elf MaxPS4-iOS/Resources/PlayableDemo/app.elf
           cmp build/fex-app-host/playable-bundle/provider.prx MaxPS4-iOS/Resources/PlayableDemo/provider.prx
           cp MaxPS4-iOS/Resources/PlayableDemo/maxps4.json build/fex-app-host/playable-bundle/
+          build/fex-app-host/Bin/maxps4-ps4-linked-test --guest-threads-bundle build/fex-app-host/guest-threads
+          for elf in threads cond; do
+            cmp build/fex-app-host/guest-threads/$elf.elf MaxPS4-iOS/Resources/GuestThreadsDemo/$elf.elf
+          done
           python3 scripts/run-bounded.py 60 build/fex-app-host/playable-frames.txt build/fex-app-host/Bin/maxps4-ps4-linked-test --playable-evidence build/fex-app-host/playable-evidence
           swiftc -parse-as-library -D MAXPS4_FEX_APP \
             -import-objc-header MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h \
