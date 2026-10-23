@@ -6,6 +6,7 @@
 #include <iterator>
 #include "maxps4_jit_memory.h"
 #include "maxps4_guest_elf.h"
+#include "SelfImage.hpp"
 #include "maxps4_ps4_guest_memory.h"
 #include "maxps4_ps4_libkernel.h"
 #include "maxps4_ps4_linker.h"
@@ -1073,14 +1074,28 @@ namespace {
 // libkernel/libkernel version 1 (as resolve_libkernel). Services only general
 // images get are offered when `general`; scePthreadExit's trampoline ends
 // with HLT: FEX goes on after a SYSCALL whatever the handler sets in RIP.
+// A SELF with plaintext blocks (homebrew fSELF) is linked as its plain ELF,
+// kept in `plain` until the image is prepared; an encrypted one is refused
+// with `why`.
 int orbisInputs(const maxps4_orbis_module* modules, size_t count, bool general,
+    std::vector<std::vector<uint8_t>>& plain, std::string& why,
     std::vector<maxps4::OrbisLinker::Input>& inputs, std::vector<maxps4::OrbisLinker::HLE>& hle) {
     for (size_t i=0;i<count;++i) {
         const auto& m = modules[i];
         if (!m.path || !m.bytes || m.dependency_count > 128 ||
             (m.dependency_count && !m.dependencies)) return -EINVAL;
         if (::strnlen(m.path,256)>255 || m.size>32*1024*1024) return -E2BIG;
-        maxps4::OrbisLinker::Input in{{{m.path,{}},m.bytes,m.size},m.load_bias};
+        const uint8_t* bytes = m.bytes;
+        size_t size = m.size;
+        std::vector<uint8_t> elf;
+        const int unwrapped = maxps4::SelfImage::unwrap(bytes,size,elf,why);
+        if (unwrapped < 0) { why = std::string(m.path) + ": " + why; return unwrapped; }
+        if (unwrapped) {
+            plain.push_back(std::move(elf)); // Moving keeps the buffer where it is.
+            bytes = plain.back().data();
+            size = plain.back().size();
+        }
+        maxps4::OrbisLinker::Input in{{{m.path,{}},bytes,size},m.load_bias};
         for (size_t j=0;j<m.dependency_count;++j) {
             if (!m.dependencies[j] || ::strnlen(m.dependencies[j],256)>255) return -EINVAL;
             in.file.request.dependencies.emplace_back(m.dependencies[j]);
@@ -1116,8 +1131,10 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine* en
     try {
         std::vector<maxps4::OrbisLinker::Input> inputs;
         std::vector<maxps4::OrbisLinker::HLE> hle;
-        const int collected = orbisInputs(modules,count,true,inputs,hle);
-        if (collected) return collected;
+        std::vector<std::vector<uint8_t>> plain;
+        std::string why;
+        const int collected = orbisInputs(modules,count,true,plain,why,inputs,hle);
+        if (collected) { message(why); return collected; }
         std::string reason;
         uint64_t moved = 0;
         const int status = engine->staged_ps4.prepare_orbis_general(inputs,hle,root,reason,moved);
@@ -1144,8 +1161,10 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis(maxps4_fex_engine* engine,
     try {
         std::vector<maxps4::OrbisLinker::Input> inputs;
         std::vector<maxps4::OrbisLinker::HLE> hle;
-        const int collected = orbisInputs(modules,count,false,inputs,hle);
-        if (collected) return collected;
+        std::vector<std::vector<uint8_t>> plain;
+        std::string why;
+        const int collected = orbisInputs(modules,count,false,plain,why,inputs,hle);
+        if (collected) { message(why); return collected; }
         maxps4::OrbisLinker::Image linked;
         std::string reason;
         if (!maxps4::OrbisLinker::link(inputs,hle,linked,reason)) {

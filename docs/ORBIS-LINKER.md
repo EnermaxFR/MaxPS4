@@ -235,6 +235,14 @@ Limites actuelles, à traiter avant tout code non fiable :
   simulateur VIXL, qui est unique par contexte FEX, `scePthreadCreate` répond
   `ENOSYS`.
 - Pas de SYSCALL hors trampoline (l'exécution échoue avec `-EPERM`).
+- **Conteneur SELF** (`SelfImage.hpp`, disposition du chargeur de shadPS4
+  `core/loader/elf.cpp`) : un SELF dont les blocs sont en clair (fSELF des
+  homebrews, dump déchiffré sur la console) est lu comme son ELF. Chaque bloc
+  « blocked » d'ID n contient les octets du segment ELF n ; ils sont replacés
+  à leur position ELF, et les segments sans bloc doivent tenir dans un autre.
+  L'analyse, le précontrôle et le chargeur FEX passent par là. Un SELF à blocs
+  chiffrés (0x2) ou compressés (0x8) est refusé avec un message clair :
+  MaxPS4 ne déchiffre ni ne décompresse rien.
 
 ## Transactions et contrat mémoire/FEX
 

@@ -76,7 +76,7 @@ int main() {
     assert(inspect(root).find("fournisseurs PRX déclarés=0 ; service/import absent")!=std::string::npos);
     // SELF/encrypted content is diagnosed, never decrypted or dispatched.
     auto self = app; orbis_fixture::put(self,0,0x1d3d154f,4); write(root/"eboot.bin",self);
-    assert(inspect(root).find("Premier blocage du précontrôle : eboot.bin: Conteneur SELF non pris en charge")!=std::string::npos);
+    assert(inspect(root).find("Premier blocage du précontrôle : eboot.bin: en-tête SELF invalide")!=std::string::npos);
     write(root/"encrypted.pkg",{0x7f,'C','N','T',0,0,0,0});
     assert(inspect(root).find("encrypted.pkg: contenu non accessible")!=std::string::npos);
     fs::remove(root/"encrypted.pkg");
