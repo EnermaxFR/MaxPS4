@@ -479,19 +479,20 @@ inline std::vector<uint8_t> make_general_timedwait_app() {
 }
 // General guest: create a user-event queue, trigger/consume an edge, verify
 // that the next poll times out, delete the queue and exit with udata (123).
-inline std::vector<uint8_t> make_general_videoout_app() {
+inline std::vector<uint8_t> make_general_videoout_app(bool selfContained = false) {
     auto b = make_kernel_app();
     use_libkernel_imports(b, {"fzyMKs9kim0", "Up36PTk687E", "i6-sR91Wt-4", "w3BY+tAEiQY",
-                            "HXzjK9yI30k", "U46NwOiJpys", "rWUTcKdkUzQ", "uquVH4-Du78"});
+                            "HXzjK9yI30k", "U46NwOiJpys", "rWUTcKdkUzQ", "uquVH4-Du78", "D0OdFMjp46I"});
     using orbis_fixture::put;
-    // Symbol 1 is libkernel, symbols 2..8 belong to libSceVideoOut.
-    constexpr size_t library_name = 0xa0;
+    // Symbols 1 and 9 are libkernel; symbols 2..8 belong to libSceVideoOut.
+    constexpr size_t library_name = 0xc0;
     std::copy_n("libSceVideoOut", 15, b.begin() + 0x600 + library_name);
     for (size_t i = 1; i < 8; ++i) std::copy_n("#C#C", 4, b.begin() + 0x600 + 21 + 16 * i + 11);
     orbis_fixture::setTag(b, 0x61000037, library_name + 15);
     orbis_fixture::appendTag(b, 0x61000015, library_name | (uint64_t{1} << 32) | (uint64_t{2} << 48));
     orbis_fixture::appendTag(b, 0x6100000f, library_name | (uint64_t{1} << 32) | (uint64_t{2} << 48));
-    constexpr uint64_t queue = data + 0x40, port = data + 0x48, count = data + 0x58,
+    const uint64_t queue = selfContained ? data + 0x110 : data + 0x40;
+    constexpr uint64_t port = data + 0x48, count = data + 0x58,
         attribute = data + 0x60, pointers = data + 0x90, result = data + 0xa0,
         events = data + 0xc0, pixels = data + 0x100;
     std::vector<uint8_t> code;
@@ -509,6 +510,10 @@ inline std::vector<uint8_t> make_general_videoout_app() {
         emit({0xc7, 0x05}); imm(address - (entry + code.size() + 8), 4); imm(pixel, 4);
     };
     emit({0x53, 0x48, 0x89, 0xf3}); // Preserve the process exit function.
+    if (selfContained) {
+        store(data + 0x118, 0x65646976); store(data + 0x11c, 0x6f); // "video" in guest BSS.
+        rip({0x48, 0x8d, 0x3d}, queue); rip({0x48, 0x8d, 0x35}, data + 0x118); call(8); check();
+    }
     emit({0x31, 0xff, 0x31, 0xf6, 0x31, 0xd2, 0x31, 0xc9}); call(1);
     rip({0x48, 0x89, 0x05}, port); // Open returns a positive handle.
     // SetBufferAttribute(&attr, RGBA, linear, 16:9, width=2, height=1, pitch=2).

@@ -21,6 +21,7 @@ struct MaxPS4FEXDiagnosticView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     NavigationLink("Première image jouable", destination: MaxPS4PlayableView())
+                    NavigationLink("VideoOut → Metal", destination: MaxPS4VideoOutView())
                     Text("État du JIT FEXCore").font(.headline)
                     if let report {
                         let jitActive = report.succeeded && report.backend == "FEXCore JIT ARM64"

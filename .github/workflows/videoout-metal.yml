@@ -1,0 +1,49 @@
+name: VideoOut Metal presentation checks
+on:
+  pull_request:
+    paths:
+      - 'MaxPS4-iOS/Sources/MaxPS4VideoOut*'
+      - 'MaxPS4-iOS/Tests/VideoOut*'
+      - 'MaxPS4-iOS/Resources/VideoOutDemo/**'
+      - 'MaxPS4-iOS/Native/maxps4_ps4_videoout*'
+      - '.github/workflows/videoout-metal.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  metal:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test presentation callback ordering and cancellation
+        run: |
+          mkdir -p build/videoout
+          swiftc -parse-as-library MaxPS4-iOS/Sources/MaxPS4VideoOutPresentation.swift \
+            MaxPS4-iOS/Tests/VideoOutPresentationTest.swift -o build/videoout/presentation-test
+          build/videoout/presentation-test
+      - name: Test actual offscreen Metal pixels when a device is available
+        run: |
+          swiftc -parse-as-library MaxPS4-iOS/Sources/MaxPS4VideoOutMetal.swift \
+            MaxPS4-iOS/Tests/VideoOutMetalTest.swift -o build/videoout/metal-test
+          build/videoout/metal-test | tee build/videoout/metal-results.txt
+      - name: Compile shader and typecheck complete iPhone frontend with FEX enabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('MaxPS4-iOS/Sources/MaxPS4VideoOutMetal.swift').read_text()
+          Path('build/videoout/videoout.metal').write_text(source.split('"""')[1])
+          PY
+          xcrun -sdk iphoneos metal -c build/videoout/videoout.metal -o build/videoout/videoout.air
+          xcrun -sdk iphoneos metallib build/videoout/videoout.air -o build/videoout/videoout.metallib
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          swiftc -typecheck -D MAXPS4_FEX_APP -target arm64-apple-ios18.0 -sdk "$SDK" \
+            -import-objc-header MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h \
+            MaxPS4-iOS/Sources/*.swift
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: videoout-metal-validation
+          path: build/videoout/*.txt

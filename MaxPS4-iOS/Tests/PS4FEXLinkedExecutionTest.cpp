@@ -171,6 +171,13 @@ int main(int argc, char** argv) {
         }
         return 0;
     }
+    if (argc==3 && !std::strcmp(argv[1],"--videoout-bundle")) {
+        std::filesystem::create_directories(argv[2]);
+        const auto bytes = orbis_execution::make_general_videoout_app(true);
+        std::ofstream out(std::filesystem::path(argv[2])/"videoout.elf", std::ios::binary);
+        out.write(reinterpret_cast<const char*>(bytes.data()), bytes.size()); CHECK(bool(out));
+        return 0;
+    }
     if (argc == 3 && !std::strcmp(argv[1],"--orbis-bundle")) {
         const std::filesystem::path directory(argv[2]);
         std::filesystem::create_directories(directory);
@@ -606,8 +613,8 @@ int main(int argc, char** argv) {
         std::puts("PASS general scePthreadMutexLock + scePthreadCondTimedwait(1000 us) -> ETIMEDOUT");
         maxps4_fex_engine_close(process);
     }
-    {
-        auto app = orbis_execution::make_general_videoout_app();
+    for (bool selfContained : {false, true}) {
+        auto app = orbis_execution::make_general_videoout_app(selfContained);
         const maxps4_orbis_module modules[] = {
             {"app.elf", app.data(), app.size(), orbis_execution::app_bias, nullptr, 0}};
         maxps4_fex_engine* process = nullptr;
@@ -622,7 +629,7 @@ int main(int argc, char** argv) {
         maxps4_ps4_kernel_call create{};
         create.rdi = data + 0x40; create.rsi = data + 0x50;
         const uint32_t create_service = maxps4_ps4_resolve_libkernel("D0OdFMjp46I", "libkernel", "libkernel", 1);
-        CHECK(create_service && maxps4_fex_engine_call_libkernel(process, create_service, &create, 1) == 0);
+        if (!selfContained) CHECK(create_service && maxps4_fex_engine_call_libkernel(process, create_service, &create, 1) == 0);
         CHECK(maxps4_fex_engine_initialize(process) == 0);
         maxps4_videoout_frame captured{};
         uint8_t captured_pixels[8]{};

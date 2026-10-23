@@ -1,8 +1,8 @@
 # Linear VideoOut handoff
 
 The runtime implements a bounded, CPU-visible VideoOut surface for synthetic
-guest programs. It does not connect a game renderer or present a drawable on
-an iPhone. Interface layouts, NIDs and library-specific errors follow the
+guest programs. Its optional Metal diagnostic consumer displays synthetic
+pixels; no PS4 game renderer is connected. Interface layouts, NIDs and library-specific errors follow the
 [shadPS4 VideoOut interface](https://github.com/shadps4-emu/shadPS4/blob/91e6afa69b0a64b0afaa0281b80f8fbb0cd88136/src/core/libraries/videoout/video_out.h),
 [buffer attributes](https://github.com/shadps4-emu/shadPS4/blob/91e6afa69b0a64b0afaa0281b80f8fbb0cd88136/src/core/libraries/videoout/buffer.h)
 and its VideoOut implementation.
@@ -57,8 +57,9 @@ confirmation advances the flip count/current buffer/flip argument and emits
 a flip event. `presented=0` cancels the submission without advancing status or
 emitting an event. Closing/restaging invalidates pending tickets. Tickets are
 monotonic and a duplicate or stale completion is refused. Neither submitting
-nor copying pixels claims they were displayed. No Metal consumer calls this
-API yet; tests provide the confirmation explicitly.
+nor copying pixels claims they were displayed. Native-only tests provide
+confirmation explicitly, without a Metal consumer.
+The optional iPhone diagnostic consumer below uses Metal presentation callbacks.
 
 Vblank comes separately from
 `maxps4_fex_engine_videoout_vblank(engine, port)`. A real display timing source
@@ -98,3 +99,40 @@ confirmation, reads flip argument -123 through the real VideoOut getter and
 closes the port. The host verifies the eight copied bytes and the guest exit
 status 123. This checks pixel handoff and notification plumbing, not Metal
 presentation, a game frame or an iPhone device run.
+
+## Metal diagnostic consumer
+
+Diagnostic → VideoOut → Metal runs a built-in, self-contained variant of the
+same synthetic guest. It creates its event queue itself, writes two pixels,
+submits them through VideoOut, waits for a flip and exits with 123. The
+bundled `VideoOutDemo/videoout.elf` is compared byte-for-byte against the
+linked FEX fixture export in CI. No game files are loaded by this diagnostic.
+
+The consumer uploads the owned RGBA/BGRA snapshot to an sRGB Metal texture,
+honoring row pitch, and draws it with nearest sampling and aspect-fit bars.
+The source texture contains copied pixels and does not refer to FEX memory.
+An in-flight presentation blocks duplicate submission of the same ticket.
+
+A flip is confirmed only after both successful Metal command completion and
+a positive drawable `presentedTime`, in either callback order. GPU completion
+alone cannot prove that a frame reached the screen. See Apple's
+[presentation callback](https://developer.apple.com/documentation/metal/mtldrawable/addpresentedhandler(_:))
+and [presentedTime semantics](https://developer.apple.com/documentation/metal/mtldrawable/presentedtime).
+Dropped drawables, GPU failures, leaving the screen, backgrounding and a
+three-second presentation timeout cancel without confirming a flip. This
+consumer does not drive vblank notifications.
+
+FEX execution/close remain on the existing serial FEX queue. A source mutex
+serializes native snapshot/completion calls against close; callbacks arriving
+after close see no engine. GPU resources retain their copied texture data.
+The native run has a five-second watchdog so cancellation cannot leave the
+CPU queue blocked indefinitely. UI generations ignore results from old runs.
+
+`VideoOutPresentationTest` exercises callback ordering, dropped frames,
+failure, cancellation and concurrent completion. `VideoOutMetalTest` checks
+actual offscreen readback (RGBA/BGRA, padding and orientation) when a Metal
+device is available, and explicitly skips that GPU test otherwise. CI also
+compiles the shader and typechecks the entire iPhone frontend with FEX
+enabled. Neither offscreen execution nor an SDK typecheck establishes an
+onscreen iPhone result; that requires running this diagnostic on a device
+with the StikDebug JIT active.
