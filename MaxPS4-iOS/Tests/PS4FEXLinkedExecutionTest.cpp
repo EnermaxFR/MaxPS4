@@ -159,7 +159,16 @@ int main(int argc, char** argv) {
         }
         return 0;
     }
-    std::setvbuf(stdout,nullptr,_IONBF,0);
+    if (argc==3 && !std::strcmp(argv[1],"--guest-threads-bundle")) {
+        // The app's built-in guest thread test (Resources/GuestThreadsDemo).
+        std::filesystem::create_directories(argv[2]);
+        for (bool cond : {false,true}) {
+            const auto bytes=cond ? orbis_execution::make_general_cond_app() : orbis_execution::make_general_threads_app();
+            std::ofstream out(std::filesystem::path(argv[2])/(cond ? "cond.elf" : "threads.elf"),std::ios::binary);
+            out.write(reinterpret_cast<const char*>(bytes.data()),bytes.size()); CHECK(bool(out));
+        }
+        return 0;
+    }
     if (argc == 3 && !std::strcmp(argv[1],"--orbis-bundle")) {
         const std::filesystem::path directory(argv[2]);
         std::filesystem::create_directories(directory);

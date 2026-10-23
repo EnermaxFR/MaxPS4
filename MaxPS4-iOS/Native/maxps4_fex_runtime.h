@@ -154,8 +154,8 @@ int32_t maxps4_fex_engine_prepare_orbis(maxps4_fex_engine *engine,
 // requested load_bias (a multiple of 1 MiB). Then run with run_orbis.
 // On ARM64 hosts a guest fault in generated code ends the run with -EFAULT
 // or -EILSEQ (see last_guest_fault); faults inside FEX or HLE C++ code, and
-// any fault under the VIXL simulator, still end the host process. There is
-// no time limit yet. Not for untrusted code; the app does not call it.
+// any fault under the VIXL simulator, still end the host process. Not for
+// untrusted code: the app only runs its built-in guest thread images with it.
 int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine *engine,
     const maxps4_orbis_module *modules, size_t count, const char *root,
     uint64_t *relocation, char *diagnostic, size_t capacity);
