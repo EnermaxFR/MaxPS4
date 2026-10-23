@@ -1397,6 +1397,20 @@ extern "C" int32_t maxps4_fex_engine_videoout_snapshot(maxps4_fex_engine* engine
     if (!engine || !frame) return -EINVAL;
     return engine->libkernel.videoout().snapshot(*frame, pixels, capacity);
 }
+extern "C" int32_t maxps4_fex_engine_gnm_backend(maxps4_fex_engine* engine, uint32_t enabled) {
+    if (!engine || enabled>1) return -EINVAL;
+    return engine->libkernel.graphics().backend(enabled!=0);
+}
+extern "C" int32_t maxps4_fex_engine_gnm_snapshot(maxps4_fex_engine* engine,
+    maxps4_gnm_submission* submission, uint32_t* words, size_t capacity) {
+    if (submission) *submission={};
+    if (!engine || !submission) return -EINVAL;
+    return engine->libkernel.graphics().snapshot(*submission,words,capacity);
+}
+extern "C" int32_t maxps4_fex_engine_gnm_complete(maxps4_fex_engine* engine, uint64_t ticket, uint32_t success) {
+    if (!engine || success>1) return -EINVAL;
+    return engine->libkernel.graphics().complete(ticket,success!=0);
+}
 extern "C" int32_t maxps4_fex_engine_pad_update(maxps4_fex_engine* engine, uint32_t buttons,
     uint8_t lx, uint8_t ly, uint8_t rx, uint8_t ry, uint8_t l2, uint8_t r2, uint32_t connected) {
     if (!engine || connected > 1) return -EINVAL;

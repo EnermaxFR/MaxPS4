@@ -621,6 +621,43 @@ int main(int argc, char** argv) {
         maxps4_fex_engine_close(process);
     }
     {
+        auto app=orbis_execution::make_general_gnm_submit_app();
+        const maxps4_orbis_module module{"submit.elf",app.data(),app.size(),orbis_execution::app_bias,nullptr,0};
+        maxps4_fex_engine* process=nullptr; CHECK(maxps4_fex_engine_open(&process)==0);
+        uint64_t relocation=0,observed=0,entry=0; uint32_t backend=0; char diagnostic[512]{};
+        const int prepared=maxps4_fex_engine_prepare_orbis_general(process,&module,1,"submit.elf",&relocation,diagnostic,sizeof(diagnostic));
+        if(prepared) std::fprintf(stderr,"prepare GNM submit: %s\n",diagnostic);
+        CHECK(prepared==0 && maxps4_fex_engine_initialize(process)==0);
+        CHECK(maxps4_fex_engine_gnm_backend(process,1)==0);
+#if (defined(__aarch64__) || defined(__arm64__)) && !defined(VIXL_SIMULATOR)
+        CHECK(maxps4_fex_engine_set_time_limit(process,10000)==0);
+#endif
+        int host_status=-1; maxps4_gnm_submission captured{};
+        std::thread consumer([&] {
+            const auto end=std::chrono::steady_clock::now()+std::chrono::seconds(8);
+            uint32_t words[7]{};
+            while(std::chrono::steady_clock::now()<end) {
+                const int status=maxps4_fex_engine_gnm_snapshot(process,&captured,words,7);
+                if(status==-EAGAIN) { std::this_thread::sleep_for(std::chrono::milliseconds(1)); continue; }
+                if(status || words[0]!=0xc0012d00 || words[1]!=3 || words[2]!=2) { host_status=-2; return; }
+                // Explicit test acknowledgment, not a claim of GPU execution.
+                host_status=maxps4_fex_engine_gnm_complete(process,captured.ticket,1); return;
+            }
+        });
+        const int ran=maxps4_fex_engine_run_orbis(process,&observed,&backend,&entry);
+        consumer.join(); CHECK(ran==0 && host_status==0 && captured.word_count==7 && captured.draw_count==1);
+        maxps4_fex_cpu_report report{};
+        CHECK(maxps4_fex_engine_last_cpu_report(process,&report)==0 && report.exited==1 && report.exit_status==123);
+        CHECK(maxps4_fex_engine_gnm_complete(process,captured.ticket,1)==-EINVAL);
+        CHECK(maxps4_fex_engine_prepare_orbis_general(process,&module,1,"submit.elf",&relocation,diagnostic,sizeof(diagnostic))==0);
+        const auto allowed=maxps4_ps4_resolve_libkernel("b08AgtPlHPg","libSceGnmDriver","libSceGnmDriver",1);
+        maxps4_ps4_kernel_call call{};
+        CHECK(allowed && maxps4_fex_engine_call_libkernel(process,allowed,&call,1)==0);
+        CHECK(maxps4_fex_engine_gnm_complete(process,captured.ticket,1)==-EINVAL);
+        maxps4_fex_engine_close(process);
+        std::puts("PASS FEX GNM SubmitCommandBuffers/SubmitDone/AreSubmitsAllowed: independent host handoff, explicit acknowledgment and restaging detach");
+    }
+    {
         auto app=orbis_execution::make_general_gnm_app();
         const maxps4_orbis_module module{"gnm.elf",app.data(),app.size(),orbis_execution::app_bias,nullptr,0};
         maxps4_fex_engine* process=nullptr; CHECK(maxps4_fex_engine_open(&process)==0);

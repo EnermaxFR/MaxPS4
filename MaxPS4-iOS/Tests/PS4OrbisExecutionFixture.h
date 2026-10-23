@@ -576,6 +576,39 @@ inline std::vector<uint8_t> make_general_gnm_app() {
     put(b,64+56+40,0x500);
     return b;
 }
+inline std::vector<uint8_t> make_general_gnm_submit_app() {
+    auto b=make_kernel_app();
+    const std::initializer_list<const char*> nids={"GGsn7jMTxw4","zwY0YV91TTI","yvZ73uQUqrk","b08AgtPlHPg"};
+    use_libkernel_imports(b,nids);
+    using orbis_fixture::put;
+    std::fill(b.begin()+0x601,b.begin()+0x700,0);
+    std::string names(1,'\0'); names+="libSceGnmDriver"; names.push_back('\0');
+    const size_t module=names.size(); names+="libSceGnmDriver"; names.push_back('\0');
+    size_t i=0;
+    for(const char* nid:nids) { put(b,0x818+24*i++,names.size(),4); names+=nid; names+="#B#B"; names.push_back('\0'); }
+    std::copy(names.begin(),names.end(),b.begin()+0x600);
+    orbis_fixture::setTag(b,0x61000037,names.size());
+    orbis_fixture::setTag(b,0x6100000f,module|(uint64_t{1}<<32)|(uint64_t{1}<<48));
+    std::vector<uint8_t> code; std::vector<size_t> failures;
+    auto emit=[&](std::initializer_list<uint8_t> bytes) { code.insert(code.end(),bytes); };
+    auto imm=[&](uint64_t value,size_t width) { for(size_t n=0;n<width;++n) code.push_back(uint8_t(value>>(8*n))); };
+    auto rip=[&](std::initializer_list<uint8_t> op,uint64_t target) { emit(op); imm(target-(entry+code.size()+4),4); };
+    auto call=[&](size_t index) { rip({0xff,0x15},data+8*index); };
+    auto check=[&] { emit({0x85,0xc0,0x0f,0x85}); failures.push_back(code.size()); imm(0,4); };
+    emit({0x53,0x48,0x89,0xf3});
+    rip({0x48,0x8d,0x3d},data+0x100); emit({0xbe,7,0,0,0,0xba,3,0,0,0,0x31,0xc9}); call(0); check();
+    rip({0x48,0x8d,0x05},data+0x100); rip({0x48,0x89,0x05},data+0x40);
+    emit({0xbf,1,0,0,0}); rip({0x48,0x8d,0x35},data+0x40); rip({0x48,0x8d,0x15},data+0x50);
+    emit({0x31,0xc9,0x45,0x31,0xc0}); call(1); check();
+    call(2); check();
+    const size_t poll=code.size(); call(3); emit({0x85,0xc0,0x0f,0x84}); imm(poll-(code.size()+4),4);
+    emit({0xbf,123,0,0,0,0xff,0xd3,0xf4});
+    const size_t fail=code.size(); emit({0x89,0xc7,0xff,0xd3,0xf4});
+    for(size_t at:failures) put(code,at,fail-(at+4),4);
+    b.resize(0xc00+code.size()); std::copy(code.begin(),code.end(),b.begin()+0xc00);
+    put(b,64+8,0xc00); put(b,64+32,code.size()); put(b,64+40,code.size());
+    put(b,0x350,28,4); return b;
+}
 // Interactive synthetic CPU renderer: read real libScePad data, write two
 // pixels, submit VideoOut and wait for host presentation before reusing them.
 // This intentionally uses no PS4 GPU shaders or PM4 commands.
