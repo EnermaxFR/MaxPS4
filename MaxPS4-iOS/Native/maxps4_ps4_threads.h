@@ -82,6 +82,13 @@ public:
     ps4::Error user_event_add(uint64_t handle, int32_t id, bool edge);
     ps4::Error user_event_delete(uint64_t handle, int32_t id);
     ps4::Error user_event_trigger(uint64_t handle, int32_t id, uint64_t data);
+    // GNM completion events (0..6 compute release-memory, 0x40 graphics EOP).
+    // A backend captures a ticket when it schedules work, then signals that
+    // ticket only after completion. Delete/re-register/reset invalidate it.
+    ps4::Error graphics_event_add(uint64_t handle, uint64_t id, uint64_t user_data);
+    ps4::Error graphics_event_delete(uint64_t handle, uint64_t id);
+    ps4::Error graphics_event_ticket(uint64_t handle, uint64_t id, uint64_t& ticket);
+    ps4::Error graphics_event_complete(uint64_t ticket);
     ps4::Error equeue_wait(uint64_t handle, uint64_t events, int32_t count,
                           uint64_t output, uint64_t timeout);
     // Wakes every blocked lock and wait with EINTR until resume(): a stopping
@@ -110,12 +117,13 @@ private:
     std::array<RwLock, rwlock_limit> rwlocks_{};
     struct Key { bool used = false; uint64_t destructor = 0; };
     std::array<Key, key_limit> keys_{};
-    struct UserEvent {
+    struct Event {
         bool used = false, edge = false, triggered = false;
-        int32_t id = 0;
-        uint64_t data = 0;
+        uint64_t id = 0;
+        uint64_t user_data = 0, data = 0, ticket = 0;
+        int16_t filter = -11;
     };
-    struct Equeue { uint64_t token = 0; std::array<UserEvent, event_limit> events{}; };
+    struct Equeue { uint64_t token = 0; std::array<Event, event_limit> events{}; };
     std::array<Equeue, equeue_limit> equeues_{};
     Equeue* find_equeue(uint64_t handle);
     // values_[thread index][key].

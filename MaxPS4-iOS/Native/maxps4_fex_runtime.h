@@ -40,6 +40,17 @@ int64_t maxps4_fex_engine_mount(maxps4_fex_engine *engine, const char *guest, co
 // guest thread identity is 1. No guest CPU import trampoline is installed.
 int64_t maxps4_fex_engine_call_libkernel(maxps4_fex_engine *engine, uint32_t service,
     const maxps4_ps4_kernel_call *call, uint64_t guest_thread);
+// Backend-side GNM completion bridge. Capture a registration-scoped ticket
+// when scheduling work; signal it only after real GPU completion. No automatic
+// producer/rendering is installed. Errors use Orbis kernel codes; capture
+// clears *ticket on failure. Deletion/re-registration/restaging cancels tickets.
+// These two calls may run concurrently with guest execution (no runtime lock),
+// so a completion can wake sceKernelWaitEqueue. The caller MUST keep the engine
+// alive until every completion callback finishes and serialize close itself.
+int64_t maxps4_fex_engine_graphics_event_ticket(maxps4_fex_engine *engine,
+    uint64_t queue, uint64_t id, uint64_t *ticket);
+int64_t maxps4_fex_engine_complete_graphics_event(maxps4_fex_engine *engine,
+    uint64_t ticket);
 enum { MAXPS4_CPU_RESTRICTED_INTERPRETER = 1, MAXPS4_CPU_FEX_ARM64_JIT = 2,
        MAXPS4_CPU_FEX_ARM64_SIMULATOR = 3 };
 enum { MAXPS4_FEX_CONTEXT_CREATED = 1, MAXPS4_FEX_DISPATCHER_INITIALIZED = 2 };

@@ -543,20 +543,22 @@ Error PS4Threads::user_event_add(uint64_t handle, int32_t id, bool edge) {
     std::lock_guard<std::mutex> lock(guard_);
     auto* queue = find_equeue(handle);
     if (!queue) return badf;
-    UserEvent* entry = nullptr;
-    for (auto& event : queue->events) if (event.used && event.id == id) { entry = &event; break; }
+    const uint64_t ident = uint64_t(int64_t(id));
+    Event* entry = nullptr;
+    for (auto& event : queue->events) if (event.used && event.filter == -11 && event.id == ident) { entry = &event; break; }
     if (!entry) for (auto& event : queue->events) if (!event.used) { entry = &event; break; }
     if (!entry) return nomem;
     // Re-registration updates the mode/data without losing a pending trigger.
     const bool pending = entry->used && entry->triggered;
-    *entry = {true, edge, pending, id, 0};
+    *entry = {true, edge, pending, ident, 0};
     return ok;
 }
 Error PS4Threads::user_event_delete(uint64_t handle, int32_t id) {
     std::lock_guard<std::mutex> lock(guard_);
     auto* queue = find_equeue(handle);
     if (!queue) return badf;
-    for (auto& event : queue->events) if (event.used && event.id == id) { event = {}; return ok; }
+    for (auto& event : queue->events)
+        if (event.used && event.filter == -11 && event.id == uint64_t(int64_t(id))) { event = {}; return ok; }
     return noent;
 }
 Error PS4Threads::user_event_trigger(uint64_t handle, int32_t id, uint64_t data) {
@@ -565,9 +567,58 @@ Error PS4Threads::user_event_trigger(uint64_t handle, int32_t id, uint64_t data)
         auto* queue = find_equeue(handle);
         if (!queue) return badf;
         auto event = std::find_if(queue->events.begin(), queue->events.end(),
-            [id](const UserEvent& e) { return e.used && e.id == id; });
+            [id](const Event& e) { return e.used && e.filter == -11 && e.id == uint64_t(int64_t(id)); });
         if (event == queue->events.end()) return noent;
-        event->data = data; event->triggered = true;
+        event->user_data = data; event->triggered = true;
+    }
+    changed_.notify_all();
+    return ok;
+}
+Error PS4Threads::graphics_event_add(uint64_t handle, uint64_t id, uint64_t user_data) {
+    std::lock_guard<std::mutex> lock(guard_);
+    auto* queue = find_equeue(handle);
+    if (!queue) return badf;
+    if (id > 6 && id != 0x40) return inval;
+    if (next_mutex_ == UINT64_MAX) return again;
+    Event* entry = nullptr;
+    for (auto& event : queue->events)
+        if (event.used && event.filter == -14 && event.id == id) { entry = &event; break; }
+    if (!entry) for (auto& event : queue->events) if (!event.used) { entry = &event; break; }
+    if (!entry) return nomem;
+    // A fresh registration cancels the old subscription and any outstanding
+    // completion tickets. New work must capture the new ticket explicitly.
+    *entry = {true, true, false, id, user_data, 0, next_mutex_++, -14};
+    return ok;
+}
+Error PS4Threads::graphics_event_delete(uint64_t handle, uint64_t id) {
+    std::lock_guard<std::mutex> lock(guard_);
+    auto* queue = find_equeue(handle);
+    if (!queue) return badf;
+    if (id > 6 && id != 0x40) return inval;
+    for (auto& event : queue->events)
+        if (event.used && event.filter == -14 && event.id == id) { event = {}; return ok; }
+    return noent;
+}
+Error PS4Threads::graphics_event_ticket(uint64_t handle, uint64_t id, uint64_t& ticket) {
+    ticket = 0;
+    std::lock_guard<std::mutex> lock(guard_);
+    auto* queue = find_equeue(handle);
+    if (!queue) return badf;
+    if (id > 6 && id != 0x40) return inval;
+    for (const auto& event : queue->events)
+        if (event.used && event.filter == -14 && event.id == id) { ticket = event.ticket; return ok; }
+    return noent;
+}
+Error PS4Threads::graphics_event_complete(uint64_t ticket) {
+    {
+        std::lock_guard<std::mutex> lock(guard_);
+        if (!ticket) return inval;
+        Event* found = nullptr;
+        for (auto& queue : equeues_) if (queue.token)
+            for (auto& event : queue.events)
+                if (event.used && event.filter == -14 && event.ticket == ticket) { found = &event; break; }
+        if (!found) return noent;
+        found->data = found->id; found->triggered = true;
     }
     changed_.notify_all();
     return ok;
@@ -591,7 +642,7 @@ Error PS4Threads::equeue_wait(uint64_t handle, uint64_t events, int32_t count,
     auto ready = [&] {
         return interrupted_ || queue->token != handle ||
             std::any_of(queue->events.begin(), queue->events.end(),
-                [](const UserEvent& e) { return e.used && e.triggered; });
+                [](const Event& e) { return e.used && e.triggered; });
     };
     if (!ready()) {
         if (!timeout) changed_.wait(lock, ready);
@@ -606,10 +657,11 @@ Error PS4Threads::equeue_wait(uint64_t handle, uint64_t events, int32_t count,
     size_t returned = 0;
     for (const auto& event : queue->events) if (event.used && event.triggered && returned < size_t(count)) {
         const size_t offset = returned++ * event_size;
-        put_le(wire.data(), offset, uint64_t(int64_t(event.id)), 8);
-        put_le(wire.data(), offset + 8, uint16_t(0xfff5), 2); // EVFILT_USER = -11.
+        put_le(wire.data(), offset, event.id, 8);
+        put_le(wire.data(), offset + 8, uint16_t(event.filter), 2);
         put_le(wire.data(), offset + 10, event.edge ? 0x20 : 0, 2); // EV_CLEAR.
-        put_le(wire.data(), offset + 24, event.data, 8); // Opaque udata, never dereferenced.
+        put_le(wire.data(), offset + 16, event.data, 8);
+        put_le(wire.data(), offset + 24, event.user_data, 8); // Opaque udata, never dereferenced.
     }
     if (!returned) return timedout;
     if (!memory_.write(events, wire.data(), returned * event_size) || !write_output(output, returned, 4)) return fault;

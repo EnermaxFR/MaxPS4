@@ -479,6 +479,44 @@ inline std::vector<uint8_t> make_general_timedwait_app() {
 }
 // General guest: create a user-event queue, trigger/consume an edge, verify
 // that the next poll times out, delete the queue and exit with udata (123).
+inline std::vector<uint8_t> make_general_graphics_wait_app() {
+    auto b = make_kernel_app();
+    use_libkernel_imports(b, {"fzyMKs9kim0", "UoYY0DWMC0U"});
+    using orbis_fixture::put;
+    // The second symbol belongs to GNM, not libkernel: exercise actual
+    // cross-library NID resolution in the general Orbis/FEX path.
+    std::copy_n("libSceGnmDriver", 16, b.begin() + 0x640);
+    std::copy_n("#C#C", 4, b.begin() + 0x630);
+    orbis_fixture::setTag(b, 0x61000037, 0x50);
+    orbis_fixture::appendTag(b, 0x61000015, 0x40 | (uint64_t{1} << 32) | (uint64_t{2} << 48));
+    orbis_fixture::appendTag(b, 0x6100000f, 0x40 | (uint64_t{1} << 32) | (uint64_t{2} << 48));
+    // The host creates a queue/subscription before running this guest. A
+    // separate backend thread completes it while FEX is blocked in the wait.
+    const uint8_t code[] = {
+        0x53, 0x48, 0x89, 0xf3,                         // Save process exit.
+        0x48, 0x8b, 0x3d, 0, 0, 0, 0,                  // RDI = queue at data+0x40.
+        0x48, 0x8d, 0x35, 0, 0, 0, 0,                  // RSI = event at data+0x60.
+        0xba, 1, 0, 0, 0,
+        0x48, 0x8d, 0x0d, 0, 0, 0, 0,                  // RCX = count at data+0x80.
+        0x45, 0x31, 0xc0,                              // R8 = null (indefinite wait).
+        0xff, 0x15, 0, 0, 0, 0,                        // WaitEqueue.
+        0x85, 0xc0, 0x75, 18,                          // Error -> exit(EAX).
+        0x48, 0x8d, 0x3d, 0, 0, 0, 0,                  // RDI = event.
+        0xff, 0x15, 0, 0, 0, 0,                        // sceGnmGetEqEventType -> 64.
+        0x89, 0xc7,
+        0xff, 0xd3, 0xf4,
+        0x89, 0xc7, 0xff, 0xd3, 0xf4};
+    static_assert(sizeof(code) == 66, "graphics wait fixture layout");
+    std::fill(b.begin() + 0x200, b.begin() + 0x300, 0);
+    std::copy(std::begin(code), std::end(code), b.begin() + 0x200);
+    auto rip = [&](size_t at, size_t end, uint64_t target) { put(b, 0x200 + at, target - (entry + end), 4); };
+    rip(7, 11, data + 0x40); rip(14, 18, data + 0x60);
+    rip(26, 30, data + 0x80); rip(35, 39, data);
+    rip(46, 50, data + 0x60); rip(52, 56, data + 8);
+    std::copy_n("graphics", 9, b.begin() + 0x348);
+    put(b, 64 + 32, sizeof(code)); put(b, 64 + 40, sizeof(code));
+    return b;
+}
 inline std::vector<uint8_t> make_general_equeue_app() {
     auto b = make_kernel_app();
     use_libkernel_imports(b, {"D0OdFMjp46I", "WDszmSbWuDk", "F6e0kwo4cnk", "fzyMKs9kim0", "jpFjmgAC5AE"});

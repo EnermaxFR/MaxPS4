@@ -183,13 +183,50 @@ Limits: 32 queues per engine, 64 registered user events per queue, and 1–64
 events per wait (larger requests return EINVAL). Waits are general-image
 services, since they can block until another guest thread produces an
 event. Timer, file, GPU and VideoOut filters and POSIX kqueue/kevent are not
-implemented. This does not produce a game's display or validate Sonic Mania.
+implemented through this user-event interface. GNM completion subscriptions
+are described below. This does not produce a game's display or validate Sonic Mania.
 
 `PS4EventQueueTest` covers wire layout, level/edge delivery, polling,
 timeouts, wakeup, interruption, deletion/reuse, stale handles, limits and
 invalid buffers. The linked FEX suite executes a synthetic x86 guest that
 creates a queue, triggers/consumes an edge, observes the next poll timing
 out and deletes the queue, then exits with its returned user data (123).
+
+## GNM completion-event subscriptions
+
+`sceGnmAddEqEvent`, `sceGnmDeleteEqEvent` and `sceGnmGetEqEventType` are
+registered under **libSceGnmDriver**, using the ABI/NIDs and event IDs from
+[shadPS4's GNM driver](https://github.com/shadps4-emu/shadPS4/blob/91e6afa69b0a64b0afaa0281b80f8fbb0cd88136/src/core/libraries/gnmdriver/gnmdriver.cpp).
+Supported IDs are compute release-memory 0–6 and graphics EOP 0x40. Other
+IDs return EINVAL. The event's filter is GraphicsCore (-14), data holds the
+event type and udata retains the caller's opaque value. Events clear after
+successful delivery. Multiple completions before a wait coalesce. User and
+GPU events with the same ident coexist as separate (ident, filter) keys;
+both share the existing per-queue capacity.
+
+The backend API `maxps4_fex_engine_graphics_event_ticket` captures an
+engine-scoped **registration ticket**; `maxps4_fex_engine_complete_graphics_event`
+delivers a notification for that subscription. Registration/capture alone
+never signals completion. A backend must capture before scheduling work and
+call completion only after successful execution. Deletion, re-registration,
+queue deletion and restaging invalidate captured tickets, so a late callback
+cannot signal a replacement subscription. This is a subscription ticket, not
+a GPU fence or a per-submission completion counter.
+
+These two host APIs use the event-table mutex rather than the global runtime
+lock, allowing a backend thread to wake a guest blocked in `WaitEqueue`.
+They do not access guest memory. The caller must keep the engine alive until
+every callback has finished and serialize engine close with those callbacks.
+They return Orbis kernel errors; capture clears the output ticket on failure.
+
+`PS4GraphicsEventTest` checks wire fields, all supported IDs, invalid IDs,
+coexisting filters, delayed callbacks, cross-thread wakeup, queue isolation
+and reset. The FEX suite runs a synthetic guest waiting indefinitely while
+a host test thread explicitly completes a subscription; the guest resolves
+the real GNM event-type getter and exits with 64. This verifies notification
+plumbing, **not a GPU workload**. No production GPU completion source, GNM
+command submission, VideoOut port/flip/vblank service or Metal presentation
+is connected by this change.
 
 ## Engine integration
 
