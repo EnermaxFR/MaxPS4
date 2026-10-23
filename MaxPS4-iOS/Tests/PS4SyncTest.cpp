@@ -86,6 +86,54 @@ int main() {
     assert(threads.cond_signal(cv, false) == inval);
     assert(threads.cond_init(cv, 0, 0) == ok && threads.cond_init(cv, 0, 0) == busy);
     assert(threads.destroy(m) == ok && threads.lock(m, 1) == inval && threads.trylock(m, 1) == inval);
+    // Thread attributes: defaults, detach state, stack size; initializing a
+    // slot again gives a fresh object.
+    constexpr uint64_t attr = 0x10020, mattr = 0x10028, rm = 0x10030, nm = 0x10038, out = 0x10040;
+    for (uint64_t slot : {attr, mattr, rm, nm}) assert(memory.write(slot, zero, 8));
+    bool detached = true;
+    uint64_t stack = 0;
+    assert(threads.thread_attributes(0, detached, stack) == ok && !detached && stack == PS4Threads::default_stack);
+    assert(threads.attr_set_detach(attr, 1) == inval && threads.thread_attributes(attr, detached, stack) == inval);
+    assert(threads.attr_init(attr) == ok && threads.attr_set_detach(attr, 2) == inval);
+    assert(threads.attr_set_detach(attr, 1) == ok && threads.attr_set_stack(attr, 4096) == inval);
+    assert(threads.attr_set_stack(attr, 512 * 1024) == ok && threads.attr_accept(attr) == ok);
+    assert(threads.thread_attributes(attr, detached, stack) == ok && detached && stack == 512 * 1024);
+    assert(threads.attr_get_detach(attr, out) == ok && memory.read(out, wire, 4) && get_le(wire, 4) == 1);
+    assert(threads.attr_get_stack(attr, out) == ok && memory.read(out, wire, 8) && get_le(wire, 8) == 512 * 1024);
+    assert(threads.attr_get_stack(attr, 0) == fault);
+    assert(threads.attr_init(attr) == ok);
+    assert(threads.thread_attributes(attr, detached, stack) == ok && !detached && stack == PS4Threads::default_stack);
+    assert(threads.attr_destroy(attr) == ok && threads.attr_accept(attr) == inval && threads.attr_destroy(attr) == inval);
+    // Recursive mutexes count; a condition wait releases every count and
+    // restores it.
+    assert(threads.mutexattr_init(mattr) == ok);
+    assert(threads.mutexattr_settype(mattr, 0) == inval && threads.mutexattr_settype(mattr, 5) == inval);
+    assert(threads.mutexattr_settype(mattr, PS4Threads::recursive) == ok && threads.mutexattr_accept(mattr) == ok);
+    assert(threads.mutexattr_gettype(mattr, out) == ok && memory.read(out, wire, 4) && get_le(wire, 4) == 2);
+    assert(threads.init(rm, mattr, 0) == ok);
+    assert(threads.lock(rm, 1) == ok && threads.lock(rm, 1) == ok && threads.trylock(rm, 1) == ok);
+    assert(threads.trylock(rm, a) == busy);
+    assert(threads.unlock(rm, 1) == ok && threads.unlock(rm, 1) == ok && threads.trylock(rm, a) == busy);
+    assert(threads.lock(rm, 1) == ok); // Count 2 again.
+    std::thread probe([&] {
+        std::this_thread::sleep_for(5ms);
+        assert(threads.trylock(rm, a) == ok && threads.unlock(rm, a) == ok);
+    });
+    assert(threads.cond_wait(cv, rm, 1, true, 50000) == timedout);
+    probe.join();
+    assert(threads.unlock(rm, 1) == ok && threads.trylock(rm, a) == busy);
+    assert(threads.unlock(rm, 1) == ok && threads.unlock(rm, 1) == perm);
+    // A normal mutex locked again by its owner blocks until interrupted.
+    assert(threads.mutexattr_settype(mattr, PS4Threads::normal) == ok && threads.init(nm, mattr, 0) == ok);
+    assert(threads.lock(nm, 1) == ok);
+    std::thread unstick([&] { std::this_thread::sleep_for(20ms); threads.interrupt(); });
+    assert(threads.lock(nm, 1) == intr);
+    unstick.join();
+    threads.resume();
+    assert(threads.unlock(nm, 1) == ok);
+    // The adaptive static initializer gives EDEADLK to its owner.
+    assert(threads.lock(adaptive, 1) == ok && threads.lock(adaptive, 1) == deadlk && threads.unlock(adaptive, 1) == ok);
+    assert(threads.mutexattr_destroy(mattr) == ok && threads.init(0x10048, mattr, 0) == inval);
     assert(threads.detach(a) == ok && threads.detach(b) == ok);
-    std::puts("PS4 blocking mutex and condition variable checks passed");
+    std::puts("PS4 blocking mutex, condition variable and attribute checks passed");
 }

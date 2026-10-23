@@ -666,6 +666,28 @@ int main(int argc, char** argv) {
         maxps4_fex_engine_close(process);
     }
     {
+        // 16 threads from a detached attribute object plus one scePthreadDetach:
+        // more threads than slots, so ended detached threads must give theirs back.
+        auto app = orbis_execution::make_general_detached_app();
+        const maxps4_orbis_module modules[] = {
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,nullptr,0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        char diagnostic[512]{};
+        uint64_t relocation=0;
+        CHECK(maxps4_fex_engine_prepare_orbis_general(process,modules,1,"app.elf",&relocation,diagnostic,sizeof(diagnostic))==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        CHECK(maxps4_fex_engine_set_time_limit(process,10000)==0);
+        uint64_t observed=0, logical_entry=0; uint32_t cpu=0;
+        const int ran = maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry);
+        maxps4_fex_cpu_report report{};
+        CHECK(maxps4_fex_engine_last_cpu_report(process,&report)==0 || ran);
+        std::printf("general detached threads: run=%d exited=%u status=%d\n",ran,report.exited,report.exit_status);
+        CHECK(ran==0 && report.exited==1 && report.exit_status==17);
+        std::puts("PASS general 16 detached threads (attribute) + scePthreadDetach, 8 slots reused -> exit(17)");
+        maxps4_fex_engine_close(process);
+    }
+    {
         // Contained guest faults: each run fails with a diagnostic instead of
         // killing the process, and the same engine then runs a valid image.
         auto provider = orbis_execution::make(true);

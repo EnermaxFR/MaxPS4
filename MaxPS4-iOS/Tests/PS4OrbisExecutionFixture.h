@@ -477,6 +477,56 @@ inline std::vector<uint8_t> make_general_timedwait_app() {
     put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
     return b;
 }
+// Detached threads give their slot back. The entry makes a detached attribute
+// object (scePthreadAttrInit + Setdetachstate(1)) and creates 16 threads with
+// it, more than the 8 slots: a create that gets EAGAIN is retried. Then one
+// joinable thread is created and detached with scePthreadDetach. Each thread
+// does LOCK INC [count]; the entry waits for 17 and exits with it (or with
+// the failing call's error).
+inline std::vector<uint8_t> make_general_detached_app() {
+    auto b=make_kernel_app();
+    use_libkernel_imports(b,{"6UgtwV+0zb4","4qGrR6eoP9Y","nsYoNRywwNg","-Wreprtu0Qs"});
+    using orbis_fixture::put;
+    constexpr uint64_t create=data, detach=data+8, attr_init=data+0x10, set_detach=data+0x18;
+    constexpr uint64_t handle=data+0x40, attr=data+0x48, count=data+0x50;
+    constexpr size_t W=0xc3, fail=0xbe;
+    const uint8_t code[]={
+        0x53, 0x48,0x89,0xf3,                                  // 0x00 PUSH RBX; MOV RBX,RSI (exit)
+        0x48,0x8d,0x3d,0,0,0,0, 0xff,0x15,0,0,0,0,             // 0x04 scePthreadAttrInit(&attr)
+        0x85,0xc0, 0x0f,0x85,0,0,0,0,                          // 0x11 JNZ fail
+        0x48,0x8d,0x3d,0,0,0,0, 0xbe,1,0,0,0,                  // 0x19 LEA RDI,[attr]; ESI=1
+        0xff,0x15,0,0,0,0, 0x85,0xc0, 0x0f,0x85,0,0,0,0,       // 0x25 Setdetachstate; JNZ fail
+        0x41,0xbc,16,0,0,0,                                    // 0x33 R12D=16
+        0x48,0x8d,0x3d,0,0,0,0, 0x48,0x8d,0x35,0,0,0,0,        // 0x39 loop: LEA RDI,[handle]; LEA RSI,[attr]
+        0x48,0x8d,0x15,0,0,0,0, 0x31,0xc9, 0x45,0x31,0xc0,     // 0x47 LEA RDX,[worker]; ECX=R8D=0
+        0xff,0x15,0,0,0,0, 0x3d,0x23,0x00,0x02,0x80, 0x74,0xd9, // 0x53 create; EAGAIN -> loop
+        0x85,0xc0, 0x0f,0x85,0,0,0,0, 0x41,0xff,0xcc, 0x75,0xcc, // 0x60 JNZ fail; DEC R12D; JNZ loop
+        0x48,0x8d,0x3d,0,0,0,0, 0x31,0xf6,                     // 0x6d retry: LEA RDI,[handle]; ESI=0
+        0x48,0x8d,0x15,0,0,0,0, 0x31,0xc9, 0x45,0x31,0xc0,     // 0x76 LEA RDX,[worker]; ECX=R8D=0
+        0xff,0x15,0,0,0,0, 0x3d,0x23,0x00,0x02,0x80, 0x74,0xde, // 0x82 create; EAGAIN -> retry
+        0x85,0xc0, 0x0f,0x85,0,0,0,0,                          // 0x8f JNZ fail
+        0x48,0x8b,0x3d,0,0,0,0, 0xff,0x15,0,0,0,0,             // 0x97 scePthreadDetach([handle])
+        0x85,0xc0, 0x0f,0x85,0,0,0,0,                          // 0xa4 JNZ fail
+        0x83,0x3d,0,0,0,0,17, 0x75,0xf7,                       // 0xac wait while [count]!=17
+        0x8b,0x3d,0,0,0,0, 0xff,0xd3, 0xf4,                    // 0xb5 exit([count]); HLT
+        0x89,0xc7, 0xff,0xd3, 0xf4,                            // 0xbe fail: exit(EAX); HLT
+        // worker (0xc3)
+        0xf0,0xff,0x05,0,0,0,0, 0xc3};                         // +00 LOCK INC [count]; RET
+    static_assert(sizeof(code)==W+8, "detached fixture layout");
+    std::fill(b.begin()+0x200,b.begin()+0x300,0);
+    std::copy(std::begin(code),std::end(code),b.begin()+0x200);
+    auto rip=[&](size_t at, size_t end, uint64_t target) { put(b,0x200+at,target-(entry+end),4); };
+    rip(0x07,0x0b,attr); rip(0x0d,0x11,attr_init); rip(0x15,0x19,entry+fail);
+    rip(0x1c,0x20,attr); rip(0x27,0x2b,set_detach); rip(0x2f,0x33,entry+fail);
+    rip(0x3c,0x40,handle); rip(0x43,0x47,attr); rip(0x4a,0x4e,entry+W); rip(0x55,0x59,create);
+    rip(0x64,0x68,entry+fail);
+    rip(0x70,0x74,handle); rip(0x79,0x7d,entry+W); rip(0x84,0x88,create); rip(0x93,0x97,entry+fail);
+    rip(0x9a,0x9e,handle); rip(0xa0,0xa4,detach); rip(0xa8,0xac,entry+fail);
+    rip(0xae,0xb3,count); rip(0xb7,0xbb,count); rip(W+0x03,W+0x07,count);
+    for (uint64_t slot : {handle, attr, count}) put(b,0x300+(slot-data),0,8);
+    put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
+    return b;
+}
 // The entry keeps its exit function, creates a worker, then either sets a flag
 // and calls scePthreadExit(0) (`main_spins` false) or spins forever. The worker
 // waits for the flag (preset when the entry spins), counts down 2^20, then

@@ -128,7 +128,8 @@ public:
                 if (threads) guest_thread_service(*threads,orbis,call);
             } else if (orbis == maxps4::PS4KernelService::thread_create ||
                        orbis == maxps4::PS4KernelService::thread_join ||
-                       orbis == maxps4::PS4KernelService::thread_exit) {
+                       orbis == maxps4::PS4KernelService::thread_exit ||
+                       orbis == maxps4::PS4KernelService::thread_detach) {
                 // scePthreadExit's trampoline and the thread-return trampoline
                 // both end with HLT after their SYSCALL.
                 result = threads ? guest_thread_service(*threads,orbis,call) :
@@ -380,8 +381,10 @@ private:
 // its GuestELF slot's stack top - 8 holding the thread-return trampoline, FS =
 // the slot's TCB. Returning from the entry or calling scePthreadExit ends it on
 // the trampoline's HLT; scePthreadJoin waits for that and frees the slot.
-// Attributes are not applied yet: every thread gets a 1 MiB slot stack and is
-// joinable. After the main thread's scePthreadExit the run waits for the other
+// The attribute object gives the detach state (a detached thread's slot is
+// reused once it ends; scePthreadDetach does the same later) and the stack
+// size, which must fit the slot's 1 MiB stack (larger: EAGAIN). Scheduling
+// and affinity are not applied. After the main thread's scePthreadExit the run waits for the other
 // threads. When the main thread's run ends, every remaining thread is stopped
 // (SIGURG, as the watchdog does; without fault containment they are waited
 // for) and joined. A contained fault in a child thread, or a child calling the
@@ -410,7 +413,13 @@ public:
         return kernel_error(nosys);
 #endif
         if (!call.rdi || !image.translate(call.rdx, 1, 5)) return kernel_error(inval);
-        std::lock_guard guard(lock);
+        bool detached = false;
+        uint64_t stack = 0;
+        if (const auto error = identities.thread_attributes(call.rsi, detached, stack)) return kernel_error(error);
+        if (stack > maxps4::GuestELF::generalStack) return kernel_error(again);
+        std::unique_lock guard(lock);
+        if (stopping) return kernel_error(again);
+        reap(guard);
         if (stopping) return kernel_error(again);
         const auto slot = std::find_if(threads.begin(), threads.end(), [](const Thread& t) { return !t.used; });
         if (slot == threads.end()) return kernel_error(again);
@@ -428,6 +437,7 @@ public:
         slot->id = id; slot->entry = call.rdx; slot->arg = call.rcx;
         slot->rsp = top - 8; slot->fs = tp; slot->value = 0;
         slot->finished = slot->joining = slot->ends_process = false;
+        slot->detached = detached;
         try {
             slot->host = std::thread([this, thread = &*slot] { run(*thread); });
         } catch (const std::system_error&) {
@@ -443,8 +453,9 @@ public:
         if (id == ProbeAddressSpace::guest_thread) return kernel_error(deadlk);
         std::unique_lock guard(lock);
         const auto target = std::find_if(threads.begin(), threads.end(),
-            [id](const Thread& t) { return t.used && t.id == id && !t.joining; });
+            [id](const Thread& t) { return t.used && t.id == id; });
         if (target == threads.end()) return kernel_error(srch);
+        if (target->joining || target->detached) return kernel_error(inval);
         target->joining = true;
         changed.wait(guard, [&] { return target->finished || stopping; });
         // Stopping (time limit or a child's fault): return to guest code, where
@@ -466,6 +477,18 @@ public:
         uint8_t wire[8];
         put_le(wire, 0, value, 8);
         return memory.write(out, wire, sizeof(wire)) ? 0 : kernel_error(fault);
+    }
+    // scePthreadDetach(thread): its slot is reused once it ends.
+    int64_t detach(uint64_t id) {
+        using namespace maxps4::ps4;
+        std::unique_lock guard(lock);
+        const auto target = std::find_if(threads.begin(), threads.end(),
+            [id](const Thread& t) { return t.used && t.id == id; });
+        if (target == threads.end()) return kernel_error(srch);
+        if (target->joining || target->detached) return kernel_error(inval);
+        target->detached = true;
+        reap(guard);
+        return 0;
     }
     // scePthreadExit(value), or the return of a child's entry: the HLT after
     // the SYSCALL ends the calling thread. On the main thread the process
@@ -534,10 +557,24 @@ public:
     }
 private:
     struct Thread {
-        bool used = false, joining = false, finished = false, ends_process = false;
+        bool used = false, joining = false, finished = false, ends_process = false, detached = false;
         uint64_t id = 0, entry = 0, arg = 0, rsp = 0, fs = 0, value = 0;
         std::thread host;
     };
+    // Gives back the slots of detached threads that have ended. Never while
+    // stopping: a thread that stops the main run waits for it to be done.
+    void reap(std::unique_lock<std::mutex>& guard) {
+        for (auto& thread : threads) {
+            if (stopping || !thread.used || !thread.detached || !thread.finished) continue;
+            std::thread host = std::move(thread.host);
+            const uint64_t id = thread.id;
+            thread.used = false;
+            guard.unlock();
+            if (host.joinable()) host.join(); // It has ended: only returns from run().
+            guard.lock();
+            identities.detach(id);
+        }
+    }
     void run(Thread& thread) {
         ProbeAddressSpace::guest_thread = thread.id;
         ProbeAddressSpace::guest_tls = thread.fs;
@@ -599,6 +636,7 @@ int64_t guest_thread_service(GuestThreads& threads, maxps4::PS4KernelService ser
     case PS4KernelService::thread_create: return threads.create(call);
     case PS4KernelService::thread_join: return threads.join(call.rdi, call.rsi);
     case PS4KernelService::thread_exit: threads.exit(call.rdi); return 0;
+    case PS4KernelService::thread_detach: return threads.detach(call.rdi);
     case PS4KernelService::process_exit: threads.process_exit(); return 0;
     default: return maxps4::ps4::kernel_error(maxps4::ps4::nosys);
     }

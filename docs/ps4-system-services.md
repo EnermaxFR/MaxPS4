@@ -84,8 +84,16 @@ Guest slots contain opaque 64-bit handles, never host pointers. A slot holding
 is created on first use. Destruction leaves 2, which stays invalid until the
 next init. Ownership is checked, locked mutex destruction/detach returns
 EBUSY, and stale handles are invalid after reset. Named objects validate the
-guest string; mutex attributes are unsupported and condition attributes
-(clock, process sharing) are ignored. ScePthread errors use Orbis kernel codes,
+guest string. Mutex attribute objects (`scePthreadMutexattrInit/Destroy/
+Settype/Gettype`, the protocol accepted without effect) give the type:
+error-checking (the default; its owner relocking gets EDEADLK), recursive
+(counted; a condition wait releases and restores every count), normal (its
+owner relocking blocks until the run stops) or adaptive (as error-checking).
+Thread attribute objects (`scePthreadAttrInit/Destroy`, detach state, stack
+size of at least 16 KiB; scheduling, inheritance, affinity and guard size are
+accepted without effect) are read by `scePthreadCreate`. Initializing an
+attribute slot again replaces its object. Condition attributes (clock,
+process sharing) are ignored. ScePthread errors use Orbis kernel codes,
 as their upstream Orbis wrappers do, rather than the POSIX pthread
 positive-errno convention.
 
@@ -94,8 +102,8 @@ so a blocked thread never holds up the one that would release it. When a run
 stops (time limit, fault, exit function, end of the entry), every blocked lock
 and wait returns EINTR so the thread goes back to guest code, where the stop
 signal lands. Condition waits are general-image services: a bounded image has
-no other thread to end them. Semaphores, thread attributes, detach,
-scheduling and cancellation remain unresolved. Host-worker tests
+no other thread to end them. Semaphores, scheduling, priorities and
+cancellation remain unresolved. Host-worker tests
 (`PS4ThreadsTest`, `PS4SyncTest`) verify mutual exclusion, blocking, signal,
 broadcast, timeouts and interruption.
 
