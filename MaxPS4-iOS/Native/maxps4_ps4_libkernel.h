@@ -3,6 +3,7 @@
 #include "maxps4_ps4_guest_memory.h"
 #include "maxps4_ps4_threads.h"
 #include <array>
+#include <map>
 #include <mutex>
 #include <string_view>
 
@@ -43,6 +44,9 @@ enum class PS4KernelService : uint32_t {
     rwlock_init, rwlock_destroy, rwlock_rdlock, rwlock_wrlock, rwlock_tryrdlock, rwlock_trywrlock, rwlock_unlock,
     thread_getprio, thread_getaffinity, attr_get_np, attr_getaffinity,
     sigfillset, signal, utc_to_local, local_to_utc, proc_param, module_info_from_addr,
+    // Memory: direct memory (physical ranges, then mapped as zeroed host
+    // pages; no aliasing), flexible memory and POSIX mmap.
+    direct_size, direct_allocate, direct_release, direct_map, flexible_map, posix_mmap,
     // Accepted without effect, answering 0 (masks, priorities, heap API, ...).
     succeed,
     // Data objects (PS4KernelExport::data): filled by initialize_data().
@@ -108,6 +112,8 @@ private:
     PS4VirtualMemory* dynamic_;
     PS4Threads threads_;
     uint64_t errno_table_ = 0, errno_table_size_ = 0, process_param_ = 0;
+    std::map<uint64_t, uint64_t> direct_; // Allocated physical ranges: start -> length.
+    int64_t memory_service(PS4KernelService service, const PS4KernelCall& call);
     int64_t posix_result(int64_t result, uint64_t thread);
     int64_t invoke_service(PS4KernelService service, const PS4KernelCall& call, uint64_t thread);
     int64_t extended(PS4KernelService service, const PS4KernelCall& call, uint64_t thread, bool& handled);

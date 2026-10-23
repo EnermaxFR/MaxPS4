@@ -260,6 +260,21 @@ int main() {
             CHECK(!vm.translate(first,1,4)[0]); // Unmapped pages come back zeroed.
             uint64_t tooLarge=0;
             CHECK(vm.map(0,maxps4::GuestELF::generalHeap,3,0x1002,-1,0,tooLarge)==maxps4::ps4::nomem);
+            // Host pages: a hint is a search start, MAP_FIXED replaces what the
+            // span held, alignment holds, and a span unmapped inside a region
+            // can be mapped again.
+            using maxps4::ps4::ok;
+            uint64_t hinted=0, again=0, fixed=0, aligned=0, big=0, unused=0;
+            CHECK(vm.place(window+0x100000,0x4000,0,3,false,hinted)==ok && hinted==window+0x100000);
+            CHECK(vm.place(window+0x100000,0x4000,0,3,false,again)==ok && again==window+0x104000);
+            CHECK(vm.place(second+0x4000,0x4000,0,3,true,fixed)==ok && fixed==second+0x4000);
+            CHECK(vm.translate(second,1,4) && !vm.translate(second,1,2) && vm.translate(fixed,1,2));
+            CHECK(vm.place(0,0x4000,0x200000,3,false,aligned)==ok && aligned%0x200000==0);
+            CHECK(vm.place(0,0xc000,0,3,false,big)==ok && vm.unmap(big+0x4000,0x4000)==ok);
+            CHECK(vm.translate(big,1,4) && !vm.translate(big+0x4000,1,4) && vm.translate(big+0x8000,1,4));
+            CHECK(vm.place(big+0x4000,0x4000,0,3,true,fixed)==ok && fixed==big+0x4000 && vm.translate(fixed,1,2));
+            CHECK(vm.place(0x1000000,0x4000,0,3,true,unused)==maxps4::ps4::inval);
+            CHECK(vm.place(0,0x4000,0x3000,3,false,unused)==maxps4::ps4::inval);
             vm.reset();
             CHECK(!vm.translate(first,1,4) && !vm.allocated());
         }

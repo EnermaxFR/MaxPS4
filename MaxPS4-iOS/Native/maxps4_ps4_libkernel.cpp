@@ -169,6 +169,15 @@ constexpr Binding bindings[] = {
     {"sigreturn", "mo0bFmWppIw", PS4KernelService::succeed, "libkernel", true},
     {"__pthread_cxa_finalize", "kbw4UHHSYy0", PS4KernelService::succeed, "libkernel", true},
     {"(libkernel hHlZQUnlxSM)", "hHlZQUnlxSM", PS4KernelService::succeed},
+    // Memory (shadPS4 kernel/memory.cpp).
+    {"sceKernelGetDirectMemorySize", "pO96TwzOm5E", PS4KernelService::direct_size},
+    {"sceKernelAllocateDirectMemory", "rTXw65xmLIA", PS4KernelService::direct_allocate},
+    {"sceKernelReleaseDirectMemory", "MBuItvba6z8", PS4KernelService::direct_release},
+    {"sceKernelMapDirectMemory", "L-Q3LEjIbgA", PS4KernelService::direct_map},
+    {"sceKernelMapNamedFlexibleMemory", "mL8NDH86iQI", PS4KernelService::flexible_map},
+    {"mmap", "BPE9s9vQQXo", PS4KernelService::posix_mmap, "libkernel", true},
+    {"msync", "tZY4+SZNFhA", PS4KernelService::succeed, "libkernel", true},
+    {"sceKernelMlock", "3k6kx-zOOSQ", PS4KernelService::succeed},
     // Data objects, filled by PS4Libkernel::initialize_data. "MaxPS4errno" is
     // engine-internal (no game imports it): the per-thread errno cells.
     {"__stack_chk_guard", "f7uOxY9mM1U", PS4KernelService::stack_chk_guard, "libkernel", false, false, 8},
@@ -216,6 +225,7 @@ void PS4Libkernel::reset() {
     if (dynamic_) dynamic_->reset();
     threads_.reset();
     errno_table_ = errno_table_size_ = process_param_ = 0;
+    direct_.clear();
     started_us_ = monotonic_us();
 }
 int64_t PS4Libkernel::mount_app0(const char* directory) {
@@ -488,10 +498,110 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
         if (c.rdx && !write(c.rdx, c.rdi, 8)) return kernel_error(fault);
         if (c.r8 && !write(c.r8, 0, 4)) return kernel_error(fault);
         return 0;
+    case S::direct_size: case S::direct_allocate: case S::direct_release:
+    case S::direct_map: case S::flexible_map: case S::posix_mmap:
+        return memory_service(service, c);
     case S::proc_param: return int64_t(process_param_);
     case S::module_info_from_addr: return kernel_error(srch);
     case S::succeed: return 0;
     default: handled = false; return 0;
+    }
+}
+int64_t PS4Libkernel::memory_service(PS4KernelService service, const PS4KernelCall& c) {
+    using S = PS4KernelService;
+    // The PS4's direct memory: 5056 MiB of physical address space.
+    constexpr uint64_t direct_total = uint64_t(5056) * 1024 * 1024, page = PS4VirtualMemory::page_size;
+    if (service == S::direct_size) return int64_t(direct_total);
+    std::lock_guard<std::mutex> guard(lock_);
+    if (!dynamic_) return kernel_error(nosys);
+    auto aligned = [&](uint64_t value) { return value % page == 0; };
+    // CPU read/write bits; GPU-only memory (0x10/0x20) is CPU read/write here,
+    // since the GPU is emulated on the CPU. Execution is refused.
+    auto cpu = [](uint64_t protection, uint32_t& out) {
+        if (protection & ~uint64_t{0x33}) return false;
+        out = uint32_t(protection & 3);
+        if (!out && (protection & 0x30)) out = 3;
+        return true;
+    };
+    auto read_pointer = [&](uint64_t address, uint64_t& value) {
+        uint8_t wire[8];
+        if (!address || !memory_.read(address, wire, 8)) return false;
+        value = get_le(wire, 8);
+        return true;
+    };
+    auto write_pointer = [&](uint64_t address, uint64_t value) {
+        uint8_t wire[8]; put_le(wire, 0, value, 8);
+        return memory_.write(address, wire, 8);
+    };
+    switch (service) {
+    // sceKernelAllocateDirectMemory(start, end, length, alignment, type, s64* physical):
+    // the first fit in [start, end), aligned.
+    case S::direct_allocate: {
+        const int64_t start = signed64(c.rdi), end = signed64(c.rsi);
+        const uint64_t length = c.rdx, alignment = c.rcx ? c.rcx : page;
+        if (start < 0 || end < 0 || !length || !aligned(length) || !aligned(alignment) ||
+            (alignment & (alignment - 1)) || uint32_t(c.r8) > 10 || !c.r9) return kernel_error(inval);
+        if (length > direct_total) return kernel_error(again);
+        const uint64_t limit = std::min<uint64_t>(uint64_t(end), direct_total);
+        uint64_t candidate = (uint64_t(start) + alignment - 1) & ~(alignment - 1);
+        for (const auto& [at, bytes] : direct_) {
+            if (at + bytes <= candidate) continue;
+            if (candidate + length <= at) break;
+            candidate = (at + bytes + alignment - 1) & ~(alignment - 1);
+        }
+        if (candidate > limit || length > limit - candidate) return kernel_error(again);
+        if (!write_pointer(c.r9, candidate)) return kernel_error(fault);
+        direct_[candidate] = length;
+        return 0;
+    }
+    // sceKernelReleaseDirectMemory(start, length): whole allocations in the range.
+    case S::direct_release: {
+        if (!aligned(c.rdi) || !c.rsi || !aligned(c.rsi)) return kernel_error(inval);
+        bool released = false;
+        for (auto it = direct_.lower_bound(c.rdi); it != direct_.end() && it->first < c.rdi + c.rsi;) {
+            it = direct_.erase(it);
+            released = true;
+        }
+        return released ? 0 : kernel_error(noent);
+    }
+    // sceKernelMapDirectMemory(void** address, length, protection, flags, physical, alignment):
+    // the physical range must be allocated; *address is a hint, or exact with MAP_FIXED.
+    case S::direct_map: {
+        uint64_t hint = 0;
+        uint32_t protection = 0;
+        if (!read_pointer(c.rdi, hint)) return kernel_error(fault);
+        if (!c.rsi || !aligned(c.rsi) || !aligned(c.r8) || !cpu(c.rdx, protection)) return kernel_error(inval);
+        auto owner = direct_.upper_bound(c.r8);
+        if (owner == direct_.begin() || std::prev(owner)->first + std::prev(owner)->second < c.r8 + c.rsi)
+            return kernel_error(inval);
+        uint64_t mapped = 0;
+        const Error e = dynamic_->place(hint, c.rsi, std::max<uint64_t>(c.r9, page), protection, (c.rcx & 0x10) != 0, mapped);
+        if (e) return kernel_error(e);
+        return write_pointer(c.rdi, mapped) ? 0 : (dynamic_->unmap(mapped, c.rsi), kernel_error(fault));
+    }
+    // sceKernelMapNamedFlexibleMemory(void** address, length, protection, flags, name).
+    case S::flexible_map: {
+        uint64_t hint = 0;
+        uint32_t protection = 0;
+        char name[32];
+        if (!read_pointer(c.rdi, hint)) return kernel_error(fault);
+        if (!c.r8 || !memory_.read_cstring(c.r8, name, sizeof(name))) return kernel_error(fault);
+        if (!c.rsi || !aligned(c.rsi) || !cpu(c.rdx, protection)) return kernel_error(inval);
+        uint64_t mapped = 0;
+        const Error e = dynamic_->place(hint, c.rsi, page, protection, (c.rcx & 0x10) != 0 && hint, mapped);
+        if (e) return kernel_error(e);
+        return write_pointer(c.rdi, mapped) ? 0 : (dynamic_->unmap(mapped, c.rsi), kernel_error(fault));
+    }
+    // mmap(address, length, protection, flags, fd, offset): anonymous mappings only.
+    case S::posix_mmap: {
+        uint32_t protection = 0;
+        if (!c.rsi || !cpu(c.rdx, protection)) return kernel_error(inval);
+        if (!(c.rcx & 0x1000) || signed32(c.r8) != -1) return kernel_error(nosys);
+        uint64_t mapped = 0;
+        const Error e = dynamic_->place(c.rdi, c.rsi, page, protection, (c.rcx & 0x10) != 0, mapped);
+        return e ? kernel_error(e) : int64_t(mapped);
+    }
+    default: return kernel_error(nosys);
     }
 }
 bool PS4Libkernel::initialize_data(PS4KernelService service, uint64_t address, uint64_t size) {
