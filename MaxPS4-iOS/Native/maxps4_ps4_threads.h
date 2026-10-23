@@ -89,6 +89,10 @@ public:
     ps4::Error graphics_event_delete(uint64_t handle, uint64_t id);
     ps4::Error graphics_event_ticket(uint64_t handle, uint64_t id, uint64_t& ticket);
     ps4::Error graphics_event_complete(uint64_t ticket);
+    ps4::Error video_event_add(uint64_t queue, uint64_t source, uint64_t id, uint64_t user_data);
+    ps4::Error video_event_delete(uint64_t queue, uint64_t source, uint64_t id);
+    void video_event_remove_source(uint64_t source);
+    void video_event_notify(uint64_t source, uint64_t id, uint64_t argument, uint64_t timestamp);
     ps4::Error equeue_wait(uint64_t handle, uint64_t events, int32_t count,
                           uint64_t output, uint64_t timeout);
     // Wakes every blocked lock and wait with EINTR until resume(): a stopping
@@ -122,6 +126,7 @@ private:
         uint64_t id = 0;
         uint64_t user_data = 0, data = 0, ticket = 0;
         int16_t filter = -11;
+        uint64_t source = 0;
     };
     struct Equeue { uint64_t token = 0; std::array<Event, event_limit> events{}; };
     std::array<Equeue, equeue_limit> equeues_{};

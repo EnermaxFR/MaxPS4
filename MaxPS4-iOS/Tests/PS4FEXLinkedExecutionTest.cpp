@@ -607,6 +607,50 @@ int main(int argc, char** argv) {
         maxps4_fex_engine_close(process);
     }
     {
+        auto app = orbis_execution::make_general_videoout_app();
+        const maxps4_orbis_module modules[] = {
+            {"app.elf", app.data(), app.size(), orbis_execution::app_bias, nullptr, 0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process) == 0);
+        char diagnostic[512]{};
+        uint64_t relocation = 0, observed = 0, logical_entry = 0;
+        uint32_t cpu = 0;
+        const int prepared = maxps4_fex_engine_prepare_orbis_general(process, modules, 1, "app.elf", &relocation, diagnostic, sizeof(diagnostic));
+        if (prepared) std::fprintf(stderr, "prepare VideoOut: %s\n", diagnostic);
+        CHECK(prepared == 0);
+        const uint64_t data = orbis_execution::data + relocation;
+        maxps4_ps4_kernel_call create{};
+        create.rdi = data + 0x40; create.rsi = data + 0x50;
+        const uint32_t create_service = maxps4_ps4_resolve_libkernel("D0OdFMjp46I", "libkernel", "libkernel", 1);
+        CHECK(create_service && maxps4_fex_engine_call_libkernel(process, create_service, &create, 1) == 0);
+        CHECK(maxps4_fex_engine_initialize(process) == 0);
+        maxps4_videoout_frame captured{};
+        uint8_t captured_pixels[8]{};
+        int64_t completion = -1;
+        std::thread presenter([&] {
+            const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            while (std::chrono::steady_clock::now() < end) {
+                const int status = maxps4_fex_engine_videoout_snapshot(process, &captured, captured_pixels, sizeof(captured_pixels));
+                if (status == 0) { completion = maxps4_fex_engine_videoout_complete(process, captured.ticket, 1); return; }
+                if (status != -EAGAIN) { completion = status; return; }
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        });
+        const int ran = maxps4_fex_engine_run_orbis(process, &observed, &cpu, &logical_entry);
+        presenter.join();
+        CHECK(ran == 0 && completion == 0);
+        CHECK(captured.width == 2 && captured.height == 1 && captured.pitch_in_pixels == 2 && captured.byte_count == 8);
+        const uint8_t expected[] = {0x56, 0x34, 0x12, 0xff, 0xef, 0xcd, 0xab, 0xff};
+        CHECK(captured.pixel_format == 0x80002200u && !std::memcmp(captured_pixels, expected, sizeof(expected)));
+        maxps4_fex_cpu_report report{};
+        CHECK(maxps4_fex_engine_last_cpu_report(process, &report) == 0 && report.exited == 1 && report.exit_status == 123);
+        uint8_t argument[8]{};
+        CHECK(maxps4_fex_engine_read_ps4(process, data + 0xa0, argument, sizeof(argument)) == 0 && value(argument) == uint64_t(int64_t(-123)));
+        CHECK(maxps4_fex_engine_videoout_complete(process, captured.ticket, 1) != 0);
+        maxps4_fex_engine_close(process);
+        std::puts("PASS FEX writes linear VideoOut pixels, passes stack pitch/fourth flip argument, waits for explicit host confirmation -> exit(123); no Metal presentation claimed");
+    }
+    {
         auto app = orbis_execution::make_general_graphics_wait_app();
         const maxps4_orbis_module modules[] = {
             {"app.elf", app.data(), app.size(), orbis_execution::app_bias, nullptr, 0}};

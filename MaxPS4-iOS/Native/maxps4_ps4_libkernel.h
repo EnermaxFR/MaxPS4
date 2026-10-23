@@ -2,6 +2,7 @@
 #include "maxps4_ps4_abi.h"
 #include "maxps4_ps4_guest_memory.h"
 #include "maxps4_ps4_threads.h"
+#include "maxps4_ps4_videoout.h"
 #include <array>
 #include <map>
 #include <mutex>
@@ -60,7 +61,11 @@ enum class PS4KernelService : uint32_t {
     equeue_create, equeue_delete, equeue_wait, user_event_add, user_event_add_edge,
     user_event_delete, user_event_trigger, event_id, event_filter, event_data,
     event_fflags, event_error, event_user_data,
-    graphics_event_add, graphics_event_delete
+    graphics_event_add, graphics_event_delete,
+    video_open, video_close, video_attribute, video_register, video_unregister,
+    video_submit, video_pending, video_flip_status, video_vblank_status,
+    video_add_flip, video_add_vblank, video_delete_flip, video_delete_vblank,
+    video_event_id, video_event_data, video_event_count
 };
 // Token bit of a trampoline whose function follows the POSIX convention: -1
 // with the error in the calling thread's errno (__Error) instead of an Orbis
@@ -72,7 +77,7 @@ constexpr bool general_only(PS4KernelService service) {
     return service == PS4KernelService::thread_create || service == PS4KernelService::thread_join ||
            service == PS4KernelService::thread_exit || service == PS4KernelService::thread_detach ||
            service == PS4KernelService::cond_wait || service == PS4KernelService::cond_timedwait ||
-           service == PS4KernelService::equeue_wait;
+           service == PS4KernelService::equeue_wait || service == PS4KernelService::video_attribute;
 }
 // Implemented libkernel functions (name, NID, service), e.g. for an HLE registry.
 // `posix`: POSIX convention (see posix_token). `noreturn`: the trampoline ends
@@ -116,11 +121,13 @@ public:
     // The root module's PT_SCE_PROCPARAM (sceKernelGetProcParam), 0 if none.
     void set_process_param(uint64_t address) { process_param_ = address; }
     PS4Threads& threads() { return threads_; }
+    PS4VideoOut& videoout() { return videoout_; }
     static constexpr int32_t abort_status = 134; // As a process killed by SIGABRT.
 private:
     PS4GuestMemory& memory_;
     PS4VirtualMemory* dynamic_;
     PS4Threads threads_;
+    PS4VideoOut videoout_;
     uint64_t errno_table_ = 0, errno_table_size_ = 0, process_param_ = 0;
     std::map<uint64_t, uint64_t> direct_; // Allocated physical ranges: start -> length.
     int64_t memory_service(PS4KernelService service, const PS4KernelCall& call);

@@ -1391,6 +1391,21 @@ extern "C" int64_t maxps4_fex_engine_complete_graphics_event(maxps4_fex_engine* 
     // completion touches no guest memory and no renderer or host pointer.
     return maxps4::ps4::kernel_error(engine->libkernel.threads().graphics_event_complete(ticket));
 }
+extern "C" int32_t maxps4_fex_engine_videoout_snapshot(maxps4_fex_engine* engine,
+    maxps4_videoout_frame* frame, uint8_t* pixels, size_t capacity) {
+    if (frame) *frame = {};
+    if (!engine || !frame) return -EINVAL;
+    return engine->libkernel.videoout().snapshot(*frame, pixels, capacity);
+}
+extern "C" int64_t maxps4_fex_engine_videoout_complete(maxps4_fex_engine* engine,
+    uint64_t ticket, uint32_t presented) {
+    if (!engine || presented > 1) return maxps4::PS4VideoOut::error(1);
+    return engine->libkernel.videoout().complete(ticket, presented != 0);
+}
+extern "C" int64_t maxps4_fex_engine_videoout_vblank(maxps4_fex_engine* engine, uint64_t port) {
+    if (!engine) return maxps4::PS4VideoOut::error(11);
+    return engine->libkernel.videoout().vblank(port);
+}
 extern "C" int32_t maxps4_fex_engine_read_ps4(maxps4_fex_engine* engine,
     uint64_t address, uint8_t* output, size_t length) {
     if (!engine || !output || !length || length > 1024 * 1024) return -EINVAL;

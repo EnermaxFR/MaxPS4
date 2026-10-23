@@ -623,6 +623,44 @@ Error PS4Threads::graphics_event_complete(uint64_t ticket) {
     changed_.notify_all();
     return ok;
 }
+Error PS4Threads::video_event_add(uint64_t handle, uint64_t source, uint64_t id, uint64_t user_data) {
+    std::lock_guard<std::mutex> lock(guard_);
+    auto* queue = find_equeue(handle);
+    if (!queue) return badf;
+    if (!source || (id != 6 && id != 7)) return inval;
+    Event* entry = nullptr;
+    for (auto& event : queue->events)
+        if (event.used && event.filter == -13 && event.id == id) { entry = &event; break; }
+    if (!entry) for (auto& event : queue->events) if (!event.used) { entry = &event; break; }
+    if (!entry) return nomem;
+    *entry = {true, true, false, id, user_data, 0, 0, -13, source};
+    return ok;
+}
+Error PS4Threads::video_event_delete(uint64_t handle, uint64_t source, uint64_t id) {
+    std::lock_guard<std::mutex> lock(guard_);
+    auto* queue = find_equeue(handle);
+    if (!queue) return badf;
+    for (auto& event : queue->events)
+        if (event.used && event.filter == -13 && event.id == id && event.source == source) event = {};
+    return ok;
+}
+void PS4Threads::video_event_remove_source(uint64_t source) {
+    std::lock_guard<std::mutex> lock(guard_);
+    for (auto& queue : equeues_) for (auto& event : queue.events)
+        if (event.used && event.filter == -13 && event.source == source) event = {};
+}
+void PS4Threads::video_event_notify(uint64_t source, uint64_t id, uint64_t argument, uint64_t timestamp) {
+    {
+        std::lock_guard<std::mutex> lock(guard_);
+        for (auto& queue : equeues_) if (queue.token) for (auto& event : queue.events)
+            if (event.used && event.filter == -13 && event.source == source && event.id == id) {
+                const uint64_t count = event.triggered ? std::min<uint64_t>(15, ((event.data >> 12) & 15) + 1) : 1;
+                event.data = (timestamp & 0xfff) | (count << 12) | ((argument & 0x0000ffffffffffffULL) << 16);
+                event.triggered = true;
+            }
+    }
+    changed_.notify_all();
+}
 Error PS4Threads::equeue_wait(uint64_t handle, uint64_t events, int32_t count,
                             uint64_t output, uint64_t timeout) {
     std::unique_lock<std::mutex> lock(guard_);
