@@ -506,6 +506,120 @@ Error PS4Threads::sleep(uint64_t microseconds) {
     const auto limit = std::chrono::microseconds(std::min<uint64_t>(microseconds, uint64_t(1) << 50));
     return changed_.wait_for(lock, limit, [&] { return interrupted_; }) ? intr : ok;
 }
+PS4Threads::Equeue* PS4Threads::find_equeue(uint64_t handle) {
+    for (auto& queue : equeues_) if (handle && queue.token == handle) return &queue;
+    return nullptr;
+}
+Error PS4Threads::equeue_create(uint64_t output, uint64_t name) {
+    std::lock_guard<std::mutex> lock(guard_);
+    if (!output || !name) return inval;
+    if (!memory_.permitted(output, 8, 2) || memory_.permitted(output, 8, 1)) return fault;
+    // Copy/validate the name without ever treating a guest address as a host pointer.
+    for (size_t i = 0; ; ++i) {
+        uint8_t byte = 0;
+        if (name > UINT64_MAX - i || !memory_.read(name + i, &byte, 1)) return fault;
+        if (!byte) break;
+        if (i == 32) return nametoolong;
+    }
+    if (next_mutex_ == UINT64_MAX) return again;
+    for (auto& queue : equeues_) if (!queue.token) {
+        if (!write_output(output, next_mutex_, 8)) return fault;
+        queue = {}; queue.token = next_mutex_++;
+        return ok;
+    }
+    return nomem;
+}
+Error PS4Threads::equeue_delete(uint64_t handle) {
+    {
+        std::lock_guard<std::mutex> lock(guard_);
+        auto* queue = find_equeue(handle);
+        if (!queue) return badf;
+        *queue = {};
+    }
+    changed_.notify_all(); // An outstanding wait must not survive deletion/reuse.
+    return ok;
+}
+Error PS4Threads::user_event_add(uint64_t handle, int32_t id, bool edge) {
+    std::lock_guard<std::mutex> lock(guard_);
+    auto* queue = find_equeue(handle);
+    if (!queue) return badf;
+    UserEvent* entry = nullptr;
+    for (auto& event : queue->events) if (event.used && event.id == id) { entry = &event; break; }
+    if (!entry) for (auto& event : queue->events) if (!event.used) { entry = &event; break; }
+    if (!entry) return nomem;
+    // Re-registration updates the mode/data without losing a pending trigger.
+    const bool pending = entry->used && entry->triggered;
+    *entry = {true, edge, pending, id, 0};
+    return ok;
+}
+Error PS4Threads::user_event_delete(uint64_t handle, int32_t id) {
+    std::lock_guard<std::mutex> lock(guard_);
+    auto* queue = find_equeue(handle);
+    if (!queue) return badf;
+    for (auto& event : queue->events) if (event.used && event.id == id) { event = {}; return ok; }
+    return noent;
+}
+Error PS4Threads::user_event_trigger(uint64_t handle, int32_t id, uint64_t data) {
+    {
+        std::lock_guard<std::mutex> lock(guard_);
+        auto* queue = find_equeue(handle);
+        if (!queue) return badf;
+        auto event = std::find_if(queue->events.begin(), queue->events.end(),
+            [id](const UserEvent& e) { return e.used && e.id == id; });
+        if (event == queue->events.end()) return noent;
+        event->data = data; event->triggered = true;
+    }
+    changed_.notify_all();
+    return ok;
+}
+Error PS4Threads::equeue_wait(uint64_t handle, uint64_t events, int32_t count,
+                            uint64_t output, uint64_t timeout) {
+    std::unique_lock<std::mutex> lock(guard_);
+    auto* queue = find_equeue(handle);
+    if (!queue) return badf;
+    if (!output || !memory_.permitted(output, 4, 2) || memory_.permitted(output, 4, 1)) return fault;
+    if (count < 1 || size_t(count) > event_limit) {
+        return write_output(output, 0, 4) ? inval : fault;
+    }
+    const size_t capacity = size_t(count) * event_size;
+    if (!events || !memory_.permitted(events, capacity, 2) || memory_.permitted(events, capacity, 1)) return fault;
+    // out_count must not corrupt a returned event, even with aliased guest inputs.
+    if (events <= output ? output - events < capacity : events - output < 4) return inval;
+    uint8_t wire_timeout[4]{};
+    if (timeout && !memory_.read(timeout, wire_timeout, 4)) return fault;
+    const uint64_t micros = get_le(wire_timeout, 4);
+    auto ready = [&] {
+        return interrupted_ || queue->token != handle ||
+            std::any_of(queue->events.begin(), queue->events.end(),
+                [](const UserEvent& e) { return e.used && e.triggered; });
+    };
+    if (!ready()) {
+        if (!timeout) changed_.wait(lock, ready);
+        else changed_.wait_for(lock, std::chrono::microseconds(micros), ready);
+    }
+    if (!write_output(output, 0, 4)) return fault;
+    if (interrupted_) return intr;
+    if (queue->token != handle) return badf;
+    // Validate again after the wait: another guest may have unmapped outputs.
+    if (!memory_.permitted(events, capacity, 2) || memory_.permitted(events, capacity, 1)) return fault;
+    std::array<uint8_t, event_limit * event_size> wire{};
+    size_t returned = 0;
+    for (const auto& event : queue->events) if (event.used && event.triggered && returned < size_t(count)) {
+        const size_t offset = returned++ * event_size;
+        put_le(wire.data(), offset, uint64_t(int64_t(event.id)), 8);
+        put_le(wire.data(), offset + 8, uint16_t(0xfff5), 2); // EVFILT_USER = -11.
+        put_le(wire.data(), offset + 10, event.edge ? 0x20 : 0, 2); // EV_CLEAR.
+        put_le(wire.data(), offset + 24, event.data, 8); // Opaque udata, never dereferenced.
+    }
+    if (!returned) return timedout;
+    if (!memory_.write(events, wire.data(), returned * event_size) || !write_output(output, returned, 4)) return fault;
+    size_t consumed = 0;
+    for (auto& event : queue->events) if (event.used && event.triggered && consumed < returned) {
+        ++consumed;
+        if (event.edge) event.triggered = false;
+    }
+    return ok;
+}
 void PS4Threads::interrupt() {
     { std::lock_guard<std::mutex> lock(guard_); interrupted_ = true; }
     changed_.notify_all();
@@ -520,7 +634,7 @@ void PS4Threads::reset() {
         threads_.fill(0); threads_[0] = 1;
         // Keep counters monotonic: stale handles never reactivate.
         mutexes_.fill({}); conds_.fill({}); attrs_.fill({}); mutexattrs_.fill({});
-        rwlocks_.fill({}); keys_.fill({});
+        rwlocks_.fill({}); keys_.fill({}); equeues_.fill({});
         for (auto& values : values_) values.fill(0);
         interrupted_ = false;
     }

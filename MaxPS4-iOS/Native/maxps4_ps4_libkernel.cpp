@@ -176,6 +176,21 @@ constexpr Binding bindings[] = {
     {"sigreturn", "mo0bFmWppIw", PS4KernelService::succeed, "libkernel", true},
     {"__pthread_cxa_finalize", "kbw4UHHSYy0", PS4KernelService::succeed, "libkernel", true},
     {"(libkernel hHlZQUnlxSM)", "hHlZQUnlxSM", PS4KernelService::succeed},
+    // Event queue ABI/NIDs: shadPS4 kernel/equeue.cpp. GPU/display filters are
+    // deliberately not registered until their actual producers exist.
+    {"sceKernelCreateEqueue", "D0OdFMjp46I", PS4KernelService::equeue_create},
+    {"sceKernelDeleteEqueue", "jpFjmgAC5AE", PS4KernelService::equeue_delete},
+    {"sceKernelWaitEqueue", "fzyMKs9kim0", PS4KernelService::equeue_wait},
+    {"sceKernelAddUserEvent", "4R6-OvI2cEA", PS4KernelService::user_event_add},
+    {"sceKernelAddUserEventEdge", "WDszmSbWuDk", PS4KernelService::user_event_add_edge},
+    {"sceKernelDeleteUserEvent", "LJDwdSNTnDg", PS4KernelService::user_event_delete},
+    {"sceKernelTriggerUserEvent", "F6e0kwo4cnk", PS4KernelService::user_event_trigger},
+    {"sceKernelGetEventId", "mJ7aghmgvfc", PS4KernelService::event_id},
+    {"sceKernelGetEventFilter", "23CPPI1tyBY", PS4KernelService::event_filter},
+    {"sceKernelGetEventData", "kwGyyjohI50", PS4KernelService::event_data},
+    {"sceKernelGetEventFflags", "Q0qr9AyqJSk", PS4KernelService::event_fflags},
+    {"sceKernelGetEventError", "Uu-iDFC9aUc", PS4KernelService::event_error},
+    {"sceKernelGetEventUserData", "vz+pg2zdopI", PS4KernelService::event_user_data},
     // Memory (shadPS4 kernel/memory.cpp).
     {"sceKernelGetDirectMemorySize", "pO96TwzOm5E", PS4KernelService::direct_size},
     {"sceKernelAllocateDirectMemory", "rTXw65xmLIA", PS4KernelService::direct_allocate},
@@ -662,6 +677,28 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     };
     using S = PS4KernelService;
     switch (service) {
+    case S::equeue_create: return kernel_error(threads_.equeue_create(c.rdi, c.rsi));
+    case S::equeue_delete: return kernel_error(threads_.equeue_delete(c.rdi));
+    case S::equeue_wait:
+        return kernel_error(threads_.equeue_wait(c.rdi, c.rsi, signed32(c.rdx), c.rcx, c.r8));
+    case S::user_event_add: case S::user_event_add_edge:
+        return kernel_error(threads_.user_event_add(c.rdi, signed32(c.rsi), service == S::user_event_add_edge));
+    case S::user_event_delete: return kernel_error(threads_.user_event_delete(c.rdi, signed32(c.rsi)));
+    case S::user_event_trigger: return kernel_error(threads_.user_event_trigger(c.rdi, signed32(c.rsi), c.rdx));
+    case S::event_id: case S::event_filter: case S::event_data: case S::event_fflags:
+    case S::event_error: case S::event_user_data: {
+        uint8_t event[PS4Threads::event_size];
+        if (!memory_.read(c.rdi, event, sizeof(event))) return kernel_error(fault);
+        if (service == S::event_id) return signed64(get_le(event, 8));
+        if (service == S::event_data) return signed64(get_le(event + 16, 8));
+        if (service == S::event_user_data) return signed64(get_le(event + 24, 8));
+        if (service == S::event_filter) {
+            const uint32_t filter = uint32_t(get_le(event + 8, 2));
+            return filter <= INT16_MAX ? int64_t(filter) : int64_t(filter) - 0x10000;
+        }
+        const uint32_t flags = uint32_t(get_le(event + 12, 4));
+        return service == S::event_error && flags ? signed32(0x80020000U | flags) : int64_t(flags);
+    }
     case S::errno_location: {
         const size_t index = threads_.index(thread);
         return errno_table_ && index < errno_table_size_ / 8 ? int64_t(errno_table_ + index * 8) : kernel_error(fault);

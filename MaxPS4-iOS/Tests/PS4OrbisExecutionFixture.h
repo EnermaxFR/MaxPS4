@@ -477,6 +477,56 @@ inline std::vector<uint8_t> make_general_timedwait_app() {
     put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
     return b;
 }
+// General guest: create a user-event queue, trigger/consume an edge, verify
+// that the next poll times out, delete the queue and exit with udata (123).
+inline std::vector<uint8_t> make_general_equeue_app() {
+    auto b = make_kernel_app();
+    use_libkernel_imports(b, {"D0OdFMjp46I", "WDszmSbWuDk", "F6e0kwo4cnk", "fzyMKs9kim0", "jpFjmgAC5AE"});
+    using orbis_fixture::put;
+    constexpr uint64_t queue = data + 0x40, name = data + 0x48,
+                       events = data + 0x60, count = data + 0x80, timeout = data + 0x84;
+    std::vector<uint8_t> code;
+    std::vector<size_t> failures;
+    auto emit = [&](std::initializer_list<uint8_t> bytes) { code.insert(code.end(), bytes); };
+    auto imm = [&](uint64_t value, size_t width) {
+        for (size_t i = 0; i < width; ++i) code.push_back(uint8_t(value >> (8 * i)));
+    };
+    auto rip = [&](std::initializer_list<uint8_t> op, uint64_t address) {
+        emit(op); imm(address - (entry + code.size() + 4), 4);
+    };
+    auto call = [&](size_t index) { rip({0xff, 0x15}, data + index * 8); };
+    auto check = [&] {
+        emit({0x85, 0xc0, 0x0f, 0x85}); failures.push_back(code.size()); imm(0, 4);
+    };
+    auto wait = [&] {
+        rip({0x48, 0x8b, 0x3d}, queue); // RDI = queue handle, not its address.
+        rip({0x48, 0x8d, 0x35}, events);
+        emit({0xba, 1, 0, 0, 0});
+        rip({0x48, 0x8d, 0x0d}, count); // Fourth argument must arrive in RCX.
+        rip({0x4c, 0x8d, 0x05}, timeout); // Fifth argument R8 points to zero: poll.
+        call(3);
+    };
+    emit({0x53, 0x48, 0x89, 0xf3}); // Save the process exit function in RBX.
+    rip({0x48, 0x8d, 0x3d}, queue); rip({0x48, 0x8d, 0x35}, name); call(0); check();
+    rip({0x48, 0x8b, 0x3d}, queue); emit({0xbe, 7, 0, 0, 0}); call(1); check();
+    rip({0x48, 0x8b, 0x3d}, queue); emit({0xbe, 7, 0, 0, 0, 0xba, 123, 0, 0, 0}); call(2); check();
+    wait(); check();
+    wait(); // The edge has been consumed; polling again must return ETIMEDOUT.
+    emit({0x3d}); imm(0x8002003c, 4);
+    emit({0x0f, 0x85}); failures.push_back(code.size()); imm(0, 4);
+    rip({0x48, 0x8b, 0x3d}, queue); call(4); check();
+    rip({0x8b, 0x3d}, events + 24); emit({0xff, 0xd3, 0xf4}); // exit(event.udata) = 123.
+    const size_t fail = code.size();
+    emit({0x89, 0xc7, 0xff, 0xd3, 0xf4}); // Any unexpected result exits with that result.
+    for (size_t at : failures) put(code, at, fail - (at + 4), 4);
+    std::fill(b.begin() + 0x200, b.begin() + 0x300, 0);
+    std::copy(code.begin(), code.end(), b.begin() + 0x200);
+    for (uint64_t slot : {queue, events, events + 8, events + 16, events + 24, count})
+        put(b, 0x300 + (slot - data), 0, 8);
+    std::copy_n("events", 7, b.begin() + 0x300 + (name - data));
+    put(b, 64 + 32, code.size()); put(b, 64 + 40, code.size());
+    return b;
+}
 // What a game's libc needs: scePthreadOnce twice with an init routine that
 // counts its calls (guest-code HLE), then nanosleep with 1e9 ns (POSIX
 // convention: -1) and __Error(): exits with count * 100 + errno = 122, or 7

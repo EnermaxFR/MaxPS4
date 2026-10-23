@@ -158,6 +158,39 @@ waits), priority 700 and affinity 0x7f, `pthread_attr_get_np`, `sigfillset`,
 queries answer ESRCH (no C++ exception unwinding yet). Masks, heap API,
 backtrace printing and a few internal hooks answer 0.
 
+## Orbis user event queues
+
+`sceKernelCreateEqueue`, `sceKernelDeleteEqueue` and `sceKernelWaitEqueue`
+now have an implementation, together with `sceKernelAddUserEvent`,
+`sceKernelAddUserEventEdge`, `sceKernelTriggerUserEvent`,
+`sceKernelDeleteUserEvent` and the six event-field getters. ABI and NIDs
+follow [shadPS4's kernel event queues](https://github.com/shadps4-emu/shadPS4/blob/91e6afa69b0a64b0afaa0281b80f8fbb0cd88136/src/core/libraries/kernel/equeue.cpp).
+An event is serialized as 32 little-endian bytes (ident, signed filter,
+flags, fflags, data, opaque udata). Guest pointers are checked and udata is
+never dereferenced.
+
+A null timeout waits indefinitely; a pointer to zero microseconds polls;
+a positive 32-bit microsecond timeout waits up to that duration. No event
+returns ETIMEDOUT with out_count zero. Level user events remain ready;
+edge user events clear only after successful delivery. Repeated triggers
+coalesce and keep the latest udata. Removing a queue wakes its waiters with
+EBADF; engine interruption wakes them with EINTR. Handles stay stale after
+deletion/reset, including when the underlying queue slot is reused. Waits
+run outside the libkernel lock, using the same interruption mechanism as
+guest mutexes and conditions.
+
+Limits: 32 queues per engine, 64 registered user events per queue, and 1–64
+events per wait (larger requests return EINVAL). Waits are general-image
+services, since they can block until another guest thread produces an
+event. Timer, file, GPU and VideoOut filters and POSIX kqueue/kevent are not
+implemented. This does not produce a game's display or validate Sonic Mania.
+
+`PS4EventQueueTest` covers wire layout, level/edge delivery, polling,
+timeouts, wakeup, interruption, deletion/reuse, stale handles, limits and
+invalid buffers. The linked FEX suite executes a synthetic x86 guest that
+creates a queue, triggers/consumes an edge, observes the next poll timing
+out and deletes the queue, then exits with its returned user data (123).
+
 ## Engine integration
 
 The engine owns a virtual-memory provider, checked memory adapter and libkernel
