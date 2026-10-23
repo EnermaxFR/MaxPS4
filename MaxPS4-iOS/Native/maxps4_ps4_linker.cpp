@@ -264,8 +264,11 @@ int PS4DynamicLinker::load(GuestELF& image, const uint8_t* file, size_t length, 
                 if (!add(parsed.entry + offset + 6,signed32(u(p+2,4)),slot)) return fail(-EOVERFLOW,"CALL slot overflow");
                 auto found = std::find_if(imports_.begin(),imports_.end(),[&](const Import& i){return i.slot == slot;});
                 if (found == imports_.end()) return fail(-ENOENT,"CALL to unresolved GOT slot");
-                if (found->service == PS4KernelService::mmap && !(initialized & (1U<<1)))
-                    return fail(-ENOTSUP,"mmap requires an explicit fourth SysV argument");
+                const auto service = found->service;
+                if ((service == PS4KernelService::mmap || service == PS4KernelService::pread ||
+                     service == PS4KernelService::pwrite || service == PS4KernelService::getdirentries) &&
+                    !(initialized & (1U<<1)))
+                    return fail(-ENOTSUP,"service requires an explicit fourth SysV argument");
                 // Four generated instructions plus the callee RET count too.
                 if (budget - instructions < 4) return fail(-E2BIG,"trampoline budget exhausted");
                 instructions += 4;
