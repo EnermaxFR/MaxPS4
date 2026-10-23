@@ -181,7 +181,7 @@ int PS4DynamicLinker::load(GuestELF& image, const uint8_t* file, size_t length, 
                         if ((sym[4] & 15) != 2 || u(sym+8) || size || (type != 6 && type != 7) || a)
                             return fail(-ENOTSUP, "unsupported imported-symbol relocation");
                         const auto service = resolve_libkernel(symbol, "libkernel", "libkernel", 1);
-                        if (service == PS4KernelService::unresolved) {
+                        if (service == PS4KernelService::unresolved || general_only(service)) {
                             diagnostic_ = "unknown essential import: " + symbol;
                             imports_.clear(); stack_ = 0; return -ENOENT;
                         }

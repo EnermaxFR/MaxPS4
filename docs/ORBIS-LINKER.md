@@ -219,14 +219,19 @@ Limites actuelles, à traiter avant tout code non fiable :
   l'entrée ou appeler `scePthreadExit` termine donc le thread, et `join` rend
   sa valeur. Le handle écrit en `*thread` est l'identité PS4 du thread, celle
   que rend `scePthreadSelf` dans ce thread. Les attributs (taille de pile,
-  priorité, détachement) ne sont pas encore appliqués. Quand l'entrée se
-  termine, les threads restants sont arrêtés (`SIGURG`, comme le chien de
-  garde) puis joints. Une faute confinée dans un thread arrête aussi le thread
-  principal et devient le résultat de l'exécution. FEX ne termine pas le bloc
-  sur un SYSCALL (changer `State.rip` y est sans effet) : pour
-  `scePthreadExit`, le moteur écrit donc l'adresse du `HLT` dans `[RSP]`, que
-  le `RET` de la trampoline consomme. Sous le simulateur VIXL, qui est unique
-  par contexte FEX, `scePthreadCreate` répond `ENOSYS`.
+  priorité, détachement) ne sont pas encore appliqués. FEX ne termine pas le
+  bloc sur un SYSCALL (changer `State.rip` y est sans effet) : la trampoline
+  de `scePthreadExit` finit donc par `HLT` au lieu de `RET`. Si l'entrée
+  appelle `scePthreadExit`, le processus continue jusqu'à la fin de ses autres
+  threads, puis sort avec le statut 0. Quand l'entrée se termine autrement, les
+  threads restants sont arrêtés (`SIGURG`, comme le chien de garde) puis
+  joints. Un thread qui appelle la fonction de sortie de l'entrée termine le
+  processus : le premier statut l'emporte et le thread principal est arrêté.
+  Une faute confinée dans un thread arrête aussi le thread principal et devient
+  le résultat de l'exécution. Ces trois services ne sont résolus que pour les
+  images générales : une image bornée qui les importe est refusée. Sous le
+  simulateur VIXL, qui est unique par contexte FEX, `scePthreadCreate` répond
+  `ENOSYS`.
 - Pas de SYSCALL hors trampoline (l'exécution échoue avec `-EPERM`).
 
 ## Transactions et contrat mémoire/FEX

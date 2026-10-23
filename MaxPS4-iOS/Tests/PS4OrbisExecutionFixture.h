@@ -405,6 +405,44 @@ inline std::vector<uint8_t> make_general_stuck_thread_app(bool fault) {
     put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
     return b;
 }
+// The entry keeps its exit function, creates a worker, then either sets a flag
+// and calls scePthreadExit(0) (`main_spins` false) or spins forever. The worker
+// waits for the flag (preset when the entry spins), counts down 2^20, then
+// calls the entry's exit function with 77: either way the run exits with 77.
+inline std::vector<uint8_t> make_general_handoff_app(bool main_spins) {
+    auto b=make_kernel_app();
+    use_libkernel_imports(b,{"6UgtwV+0zb4","3kg7rT0NQIs"});
+    using orbis_fixture::put;
+    constexpr uint64_t create=data, quit=data+8, exitfn=data+0x40, handle=data+0x48, flag=data+0x50;
+    constexpr size_t W=0x43;
+    const uint8_t code[]={
+        0x53, 0x48,0x89,0x35,0,0,0,0,                          // 0x00 PUSH RBX; MOV [exitfn],RSI
+        0x48,0x8d,0x3d,0,0,0,0, 0x31,0xf6,                     // 0x08 LEA RDI,[handle]; XOR ESI,ESI
+        0x48,0x8d,0x15,0,0,0,0, 0x31,0xc9, 0x45,0x31,0xc0,     // 0x11 LEA RDX,[worker]; ECX=R8D=0
+        0xff,0x15,0,0,0,0, 0x85,0xc0, 0x75,0x13,               // 0x1d CALL [create]; JNZ fail
+        0xc7,0x05,0,0,0,0,1,0,0,0,                             // 0x27 [flag]=1 (or JMP $)
+        0x31,0xff, 0xff,0x15,0,0,0,0, 0xf4,                    // 0x31 scePthreadExit(0); HLT
+        0x89,0xc7, 0xff,0x15,0,0,0,0, 0xf4,                    // 0x3a fail: exit(EAX); HLT
+        // worker (0x43)
+        0x83,0x3d,0,0,0,0,0, 0x74,0xf7,                        // +00 spin while [flag]==0
+        0xb9,0,0,0x10,0, 0xff,0xc9, 0x75,0xfc,                 // +09 ECX=2^20; DEC ECX; JNZ
+        0xbf,77,0,0,0, 0xff,0x15,0,0,0,0, 0xf4};               // +12 exit(77); HLT
+    static_assert(sizeof(code)==W+0x1e, "handoff fixture layout");
+    std::fill(b.begin()+0x200,b.begin()+0x300,0);
+    std::copy(std::begin(code),std::end(code),b.begin()+0x200);
+    auto rip=[&](size_t at, size_t end, uint64_t target) { put(b,0x200+at,target-(entry+end),4); };
+    rip(0x04,0x08,exitfn); rip(0x0b,0x0f,handle); rip(0x14,0x18,entry+W); rip(0x1f,0x23,create);
+    rip(0x3e,0x42,exitfn); rip(W+0x02,W+0x07,flag); rip(W+0x19,W+0x1d,exitfn);
+    if (main_spins) {
+        b[0x200+0x27]=0xeb; b[0x200+0x28]=0xfe;
+        std::fill(b.begin()+0x200+0x29,b.begin()+0x200+0x3a,0x90);
+        put(b,0x300+(flag-data),1,4);
+    } else {
+        rip(0x29,0x31,flag); rip(0x35,0x39,quit);
+    }
+    put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
+    return b;
+}
 // sceKernelClockGettime(clock, RSP buffer): the timespec lives on the guest
 // stack, then is copied to app data at 0x8010. Returns the HLE result.
 inline std::vector<uint8_t> make_general_clock_app(uint32_t clock=4) {

@@ -24,6 +24,11 @@ enum class PS4KernelService : uint32_t {
     // engine's thread-return trampoline.
     thread_create, thread_join, thread_exit
 };
+// Services only general images get: elsewhere their imports stay unresolved.
+constexpr bool general_only(PS4KernelService service) {
+    return service == PS4KernelService::thread_create || service == PS4KernelService::thread_join ||
+           service == PS4KernelService::thread_exit;
+}
 // Implemented libkernel functions (name, NID, service), e.g. for an HLE registry.
 struct PS4KernelExport { const char* name; const char* nid; PS4KernelService service; };
 const PS4KernelExport* libkernel_exports(size_t& count);

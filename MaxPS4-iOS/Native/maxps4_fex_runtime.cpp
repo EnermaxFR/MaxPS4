@@ -52,10 +52,10 @@ extern "C" int maxps4_native_guest_x86_run(const uint8_t*, size_t, uint32_t,
                                            uint64_t*) noexcept;
 namespace {
 class GuestThreads;
-// scePthreadCreate/Join/Exit for a general run (see GuestThreads). Sets `rip`
-// to where the calling thread resumes.
-int64_t guest_thread_service(GuestThreads* threads, maxps4::PS4KernelService service,
-                             const maxps4::PS4KernelCall& call, uint64_t& halt);
+// scePthreadCreate/Join/Exit and the entry's exit function for a general run
+// (see GuestThreads), defined once GuestThreads is complete.
+int64_t guest_thread_service(GuestThreads& threads, maxps4::PS4KernelService service,
+                             const maxps4::PS4KernelCall& call);
 // Anonymous immutable guest memory, not a PS4 or Linux syscall ABI.
 // A syscall has no permitted host effect and returns the real ENOSYS error.
 class ProbeAddressSpace final : public FEXCore::HLE::SyscallHandler {
@@ -71,8 +71,8 @@ public:
     // Guest threads of a general run call in concurrently.
     std::atomic<uint32_t> calls {0};
     std::atomic<int> callback_error {0};
-    bool exited = false;
-    int32_t exit_status = 0;
+    std::atomic<bool> exited {false};
+    std::atomic<int32_t> exit_status {0};
     // PS4 identity (PS4Threads) of the guest thread on this host thread.
     static inline thread_local uint64_t guest_thread = 1;
     // Static TLS thread pointer of a child guest thread (0: the image's own).
@@ -120,24 +120,17 @@ public:
                 result = static_cast<int64_t>(reinterpret_cast<uintptr_t>(address));
             } else if (orbis == maxps4::PS4KernelService::process_exit) {
                 // The entry's exit function: the status (EDI) becomes RAX, and the
-                // HLT that follows this SYSCALL ends the run.
-                exited = true;
-                exit_status = static_cast<int32_t>(r[x86::REG_RDI]);
-                result = exit_status;
-            } else if (orbis == maxps4::PS4KernelService::thread_create ||
-                       orbis == maxps4::PS4KernelService::thread_join ||
-                       orbis == maxps4::PS4KernelService::thread_exit) {
-                uint64_t halt = 0;
-                result = threads ? guest_thread_service(threads,orbis,call,halt) :
+                // HLT that follows this SYSCALL ends the calling thread. The first
+                // exit sets the status; from a child thread it also ends the run.
+                result = static_cast<int32_t>(r[x86::REG_RDI]);
+                bool first = false;
+                if (exited.compare_exchange_strong(first, true)) exit_status = static_cast<int32_t>(result);
+                if (threads) guest_thread_service(*threads,orbis,call);
+            } else if (maxps4::general_only(orbis)) {
+                // scePthreadExit's trampoline and the thread-return trampoline
+                // both end with HLT after their SYSCALL.
+                result = threads ? guest_thread_service(*threads,orbis,call) :
                     maxps4::ps4::kernel_error(maxps4::ps4::nosys);
-                // FEX does not end the block at a SYSCALL: execution goes on after
-                // it whatever State.rip says. The thread-return trampoline's HLT
-                // follows its SYSCALL; scePthreadExit's trampoline continues with
-                // RET, so make its return address that HLT.
-                uint8_t back[8];
-                maxps4::ps4::put_le(back, 0, halt, 8);
-                if (halt && state.rip + 2 != halt && !memory->write(rsp, back, sizeof(back)))
-                    callback_error = -EFAULT;
             } else {
                 result = kernel->invoke(orbis,call,guest_thread);
             }
@@ -386,10 +379,12 @@ private:
 // the slot's TCB. Returning from the entry or calling scePthreadExit ends it on
 // the trampoline's HLT; scePthreadJoin waits for that and frees the slot.
 // Attributes are not applied yet: every thread gets a 1 MiB slot stack and is
-// joinable. When the main thread's run ends, every remaining thread is stopped
+// joinable. After the main thread's scePthreadExit the run waits for the other
+// threads. When the main thread's run ends, every remaining thread is stopped
 // (SIGURG, as the watchdog does; without fault containment they are waited
-// for) and joined. A contained fault in a child thread stops the main thread
-// too and becomes the run's result.
+// for) and joined. A contained fault in a child thread, or a child calling the
+// entry's exit function, stops the main thread too; a fault becomes the run's
+// result.
 class GuestThreads final {
 public:
     GuestThreads(FEXCore::Context::Context* context, const FEXCore::SignalDelegatorConfig& config,
@@ -428,7 +423,7 @@ public:
         }
         slot->id = id; slot->entry = call.rdx; slot->arg = call.rcx;
         slot->rsp = top - 8; slot->fs = tp; slot->value = 0;
-        slot->finished = slot->joining = false;
+        slot->finished = slot->joining = slot->ends_process = false;
         try {
             slot->host = std::thread([this, thread = &*slot] { run(*thread); });
         } catch (const std::system_error&) {
@@ -468,16 +463,38 @@ public:
         put_le(wire, 0, value, 8);
         return memory.write(out, wire, sizeof(wire)) ? 0 : kernel_error(fault);
     }
-    // scePthreadExit(value), or the return of a child's entry: the calling
-    // thread resumes at the trampoline's HLT, which ends its ExecuteThread.
-    uint64_t exit(uint64_t value) {
-        if (current) current->value = value;
-        return image.thread_halt();
+    // scePthreadExit(value), or the return of a child's entry: the HLT after
+    // the SYSCALL ends the calling thread. On the main thread the process
+    // lives on until its other threads end (wait()).
+    void exit(uint64_t value) {
+        if (current) { current->value = value; return; }
+        std::lock_guard guard(lock);
+        main_exited = true;
+    }
+    // The entry's exit function: called from a child thread, that thread ends
+    // on the HLT after the SYSCALL and then stops the main run.
+    void process_exit() { if (current) current->ends_process = true; }
+    bool main_thread_exited() const {
+        std::lock_guard guard(lock);
+        return main_exited;
+    }
+    // After the main thread's scePthreadExit: until every child has ended, or
+    // a stop (time limit, fault, exit function) is requested.
+    void wait() {
+        std::unique_lock guard(lock);
+        changed.wait(guard, [&] {
+            return stopping || std::none_of(threads.begin(), threads.end(),
+                [](const Thread& t) { return t.used && !t.finished; });
+        });
     }
     // Time limit expired: wake every join so the stop signals can land.
     void interrupt() {
-        { std::lock_guard guard(lock); stopping = true; }
+        { std::lock_guard guard(lock); stopping = timed_out = true; }
         changed.notify_all();
+    }
+    bool expired() const {
+        std::lock_guard guard(lock);
+        return timed_out;
     }
     // The main thread's run ended: stop and join every child thread.
     void finish() {
@@ -510,7 +527,7 @@ public:
     }
 private:
     struct Thread {
-        bool used = false, joining = false, finished = false;
+        bool used = false, joining = false, finished = false, ends_process = false;
         uint64_t id = 0, entry = 0, arg = 0, rsp = 0, fs = 0, value = 0;
         std::thread host;
     };
@@ -541,11 +558,12 @@ private:
         {
             std::lock_guard guard(lock);
             if (fault.signal && !first_fault.signal) { first_fault = fault; stop_main = stopping = true; }
+            if (thread.ends_process) stop_main = stopping = true;
             thread.finished = true; // `thread` may be reused from here on.
         }
         changed.notify_all();
         if (!stop_main) return;
-        // A faulting thread ends the process: stop the main thread as well.
+        // A faulting or exiting thread ends the process: stop the main thread too.
         std::unique_lock guard(lock);
         while (!main_done) {
             ::pthread_kill(main_thread, SIGURG);
@@ -562,16 +580,19 @@ private:
     mutable std::mutex lock;
     std::condition_variable changed;
     std::array<Thread, maxps4::GuestELF::generalThreads> threads {};
-    bool stopping = false, main_done = false;
+    bool stopping = false, main_done = false, main_exited = false, timed_out = false;
     maxps4_fex_guest_fault first_fault {};
     static inline thread_local Thread* current = nullptr;
 };
-int64_t guest_thread_service(GuestThreads* threads, maxps4::PS4KernelService service,
-                             const maxps4::PS4KernelCall& call, uint64_t& halt) {
+int64_t guest_thread_service(GuestThreads& threads, maxps4::PS4KernelService service,
+                             const maxps4::PS4KernelCall& call) {
+    using maxps4::PS4KernelService;
     switch (service) {
-    case maxps4::PS4KernelService::thread_create: return threads->create(call);
-    case maxps4::PS4KernelService::thread_join: return threads->join(call.rdi, call.rsi);
-    default: halt = threads->exit(call.rdi); return 0;
+    case PS4KernelService::thread_create: return threads.create(call);
+    case PS4KernelService::thread_join: return threads.join(call.rdi, call.rsi);
+    case PS4KernelService::thread_exit: threads.exit(call.rdi); return 0;
+    case PS4KernelService::process_exit: threads.process_exit(); return 0;
+    default: return maxps4::ps4::kernel_error(maxps4::ps4::nosys);
     }
 }
 }
@@ -877,10 +898,16 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
         GuestFaultGuard guard(engine->context.get(), thread, engine->signals.GetConfig(), engine->time_limit_ms,
                               true, [&threads] { if (threads) threads->interrupt(); });
         engine->context->ExecuteThread(thread);
+        int signal = guard.signal.load();
+        // scePthreadExit on the main thread: the other threads carry on.
+        const bool main_exit = threads && !signal && threads->main_thread_exited();
+        if (main_exit) threads->wait();
         maxps4_fex_guest_fault child {};
         if (threads) threads->finish();
         engine->probe.threads = nullptr;
-        int signal = guard.signal.load();
+        if (main_exit && threads->expired() && !engine->probe.exited) signal = SIGURG;
+        // A child's exit function stops the main thread with SIGURG: not a timeout.
+        if (signal == SIGURG && engine->probe.exited) signal = 0;
         // RIP is the guest position FEX last stored (block granularity).
         if (threads && threads->faulted(child)) { engine->last_fault = child; signal = child.signal; }
         else if (signal) engine->last_fault = {signal, 0, guard.address, state.rip};
@@ -889,6 +916,8 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
             return signal == SIGURG ? -ETIMEDOUT :
                 signal == SIGSEGV || signal == SIGBUS ? -EFAULT : -EILSEQ;
         }
+        // The last thread ended after the main thread's scePthreadExit: exit(0).
+        if (main_exit) engine->probe.exited = true;
     }
     if (engine->probe.callback_error) return engine->probe.callback_error;
     if (submission) {
@@ -995,8 +1024,10 @@ extern "C" int32_t maxps4_fex_engine_run_linked_ps4(maxps4_fex_engine* engine,
 namespace {
 // Validates the C module table into linker inputs; libkernel is provided by
 // HLE: one synthesized trampoline per implemented NID, identity
-// libkernel/libkernel version 1 (as resolve_libkernel).
-int orbisInputs(const maxps4_orbis_module* modules, size_t count,
+// libkernel/libkernel version 1 (as resolve_libkernel). Services only general
+// images get are offered when `general`; scePthreadExit's trampoline ends
+// with HLT: FEX goes on after a SYSCALL whatever the handler sets in RIP.
+int orbisInputs(const maxps4_orbis_module* modules, size_t count, bool general,
     std::vector<maxps4::OrbisLinker::Input>& inputs, std::vector<maxps4::OrbisLinker::HLE>& hle) {
     for (size_t i=0;i<count;++i) {
         const auto& m = modules[i];
@@ -1013,8 +1044,10 @@ int orbisInputs(const maxps4_orbis_module* modules, size_t count,
     size_t exported = 0;
     const auto* kernel_exports = maxps4::libkernel_exports(exported);
     for (size_t i=0;i<exported;++i) {
+        const auto service = kernel_exports[i].service;
+        if (!general && maxps4::general_only(service)) continue;
         maxps4::OrbisLinker::Identity id{kernel_exports[i].nid,"libkernel","libkernel",1,1,2};
-        hle.push_back({id,0,static_cast<uint32_t>(kernel_exports[i].service)});
+        hle.push_back({id,0,static_cast<uint32_t>(service),service == maxps4::PS4KernelService::thread_exit});
     }
     return 0;
 }
@@ -1037,7 +1070,7 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine* en
     try {
         std::vector<maxps4::OrbisLinker::Input> inputs;
         std::vector<maxps4::OrbisLinker::HLE> hle;
-        const int collected = orbisInputs(modules,count,inputs,hle);
+        const int collected = orbisInputs(modules,count,true,inputs,hle);
         if (collected) return collected;
         std::string reason;
         uint64_t moved = 0;
@@ -1065,7 +1098,7 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis(maxps4_fex_engine* engine,
     try {
         std::vector<maxps4::OrbisLinker::Input> inputs;
         std::vector<maxps4::OrbisLinker::HLE> hle;
-        const int collected = orbisInputs(modules,count,inputs,hle);
+        const int collected = orbisInputs(modules,count,false,inputs,hle);
         if (collected) return collected;
         maxps4::OrbisLinker::Image linked;
         std::string reason;

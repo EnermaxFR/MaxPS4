@@ -222,7 +222,7 @@ int main() {
             // Then the thread-return trampoline: MOV RDI,RAX; MOV EAX,thread_exit;
             // SYSCALL (an HLE gate site); HLT, where every child thread ends.
             const uint64_t back=image.thread_return();
-            CHECK(back==image.start()+48 && image.thread_halt()==back+10);
+            CHECK(back==image.start()+48);
             const auto* ret=image.translate(back,14,5);
             CHECK(ret && ret[0]==0x48 && ret[1]==0x89 && ret[2]==0xc7 && ret[3]==0xb8 &&
                   ret[8]==0x0f && ret[9]==0x05 && ret[10]==0xf4);
@@ -303,7 +303,8 @@ int main() {
             const std::pair<const char*,Service> imports[]={{"6UgtwV+0zb4",Service::thread_create},
                 {"onNY9Byn-W8",Service::thread_join},{"3kg7rT0NQIs",Service::thread_exit},{"aI+OeCz8xrQ",Service::thread_self}};
             std::vector<maxps4::OrbisLinker::HLE> hle;
-            for (const auto& import : imports) hle.push_back({kernel_identity(import.first),0,static_cast<uint32_t>(import.second)});
+            for (const auto& import : imports) hle.push_back({kernel_identity(import.first),0,
+                static_cast<uint32_t>(import.second),import.second==Service::thread_exit});
             const std::vector<maxps4::OrbisLinker::Input> threadInputs{
                 {{{"app.elf",{}},threadsApp.data(),threadsApp.size()},app_bias}};
             uint64_t threadMoved=0;
@@ -314,6 +315,9 @@ int main() {
                 uint64_t thunk=0;
                 std::memcpy(&thunk,image.translate(data+threadMoved+8*i,8,4),8);
                 CHECK(image.hle_gate(thunk+maxps4::OrbisLinker::syscallOffset,static_cast<uint32_t>(imports[i].second)));
+                // scePthreadExit's trampoline ends with HLT, the others return.
+                const auto* last=image.translate(thunk+maxps4::OrbisLinker::thunkSize-1,1,5);
+                CHECK(last && *last==(imports[i].second==Service::thread_exit ? 0xf4 : 0xc3));
             }
             CHECK(image.prepare_orbis_general(inputs,{},"app.elf",reason,moved)==0);
         }

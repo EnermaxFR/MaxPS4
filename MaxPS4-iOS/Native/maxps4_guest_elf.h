@@ -130,10 +130,9 @@ public:
     // its stack (16-byte aligned) and its thread pointer (0 without PT_TLS).
     bool prepare_thread(size_t slot, uint64_t& stack_top, uint64_t& tp);
     // General images: the thread-return trampoline after the exit function
-    // (MOV RDI,RAX; SYSCALL thread_exit; HLT), a child's first return address,
-    // and that HLT, where every child thread ends. 0 for other images.
+    // (MOV RDI,RAX; SYSCALL thread_exit; HLT), a child's first return address.
+    // 0 for other images.
     uint64_t thread_return() const { return thread_return_address; }
-    uint64_t thread_halt() const { return thread_return_address ? thread_return_address + 10 : 0; }
     const std::vector<Segment>& segments() const { return regions; }
 private:
     friend class PS4DynamicLinker;

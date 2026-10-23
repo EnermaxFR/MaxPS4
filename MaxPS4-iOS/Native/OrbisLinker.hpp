@@ -50,7 +50,8 @@ public:
     };
     // Guest trampoline, never a host function pointer. guestAddress=0 with a
     // non-zero token asks the linker to synthesize a trampoline (see Thunk).
-    struct HLE { Identity identity; uint64_t guestAddress; uint32_t token = 0; };
+    // A `noreturn` service's trampoline ends with HLT instead of RET.
+    struct HLE { Identity identity; uint64_t guestAddress; uint32_t token = 0; bool noreturn = false; };
     // Synthesized trampoline: MOV R10,RCX; MOV EAX,token; SYSCALL; RET. The
     // runtime gate accepts a SYSCALL only at `address + syscallOffset` with
     // that exact token; the token is the HLE service number.
@@ -447,7 +448,7 @@ private:
             size_t k = 0;
             for (const auto& h : hle) if (!h.guestAddress) {
                 const uint8_t body[thunkSize] = {0x49,0x89,0xca,0xb8,uint8_t(h.token),uint8_t(h.token>>8),
-                    uint8_t(h.token>>16),uint8_t(h.token>>24),0x0f,0x05,0xc3};
+                    uint8_t(h.token>>16),uint8_t(h.token>>24),0x0f,0x05,uint8_t(h.noreturn ? 0xf4 : 0xc3)};
                 std::copy(std::begin(body), std::end(body), code.begin() + k * thunkSize);
                 out.thunks.push_back({thunkBase + k * thunkSize, h.token}); ++k;
             }
