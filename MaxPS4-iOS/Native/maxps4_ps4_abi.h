@@ -7,7 +7,7 @@ namespace maxps4::ps4 {
 enum Error : uint32_t {
     ok = 0, perm = 1, noent = 2, srch = 3, intr = 4, io = 5, badf = 9,
     deadlk = 11, nomem = 12, access = 13, fault = 14, busy = 16,
-    inval = 22, mfile = 24, rofs = 30, again = 35, notsup = 45,
+    inval = 22, mfile = 24, rofs = 30, again = 35, notsup = 45, timedout = 60,
     loop = 62, nametoolong = 63, nosys = 78, overflow = 84,
     notdir = 20, isdir = 21
 };

@@ -2,6 +2,7 @@
 #include "GuestELFFixture.h"
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstdio>
 #include <thread>
 #include <vector>
@@ -82,8 +83,22 @@ int main() {
     assert(call(S::mutex_init) == 0);
     assert(memory.write(0x11000, stale, 8));
     assert(call(S::mutex_trylock, 0x11000) == kernel_error(inval));
+    // A thread blocked in scePthreadMutexLock holds no libkernel lock: other
+    // calls (including the unlock that frees it) go through.
+    const auto blocked = threads.attach(); assert(blocked);
+    assert(call(S::mutex_lock, 0x10000) == 0 && call(S::mutex_lock, 0x10000) == kernel_error(deadlk));
+    std::atomic<bool> locked{false};
+    std::thread locker([&] { assert(call(S::mutex_lock, 0x10000, blocked) == 0); locked = true; });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    assert(!locked && kernel.invoke(S::process_time, {}) >= 0 && call(S::thread_self) == 1);
+    assert(call(S::mutex_unlock) == 0);
+    locker.join();
+    assert(locked && call(S::mutex_unlock, 0x10000, blocked) == 0 && threads.detach(blocked) == ok);
     assert(resolve_libkernel("upoVrzMHFeE", "libkernel", "libkernel", 1) == S::mutex_trylock);
-    for (const char* unsupported : {"scePthreadDetach", "scePthreadMutexLock", "scePthreadCondWait"})
+    assert(resolve_libkernel("9UK1vLZQft4", "libkernel", "libkernel", 1) == S::mutex_lock);
+    assert(resolve_libkernel("scePthreadCondWait", "libkernel", "libkernel", 1) == S::cond_wait);
+    assert(resolve_libkernel("BmMjYxmew1w", "libkernel", "libkernel", 1) == S::cond_timedwait);
+    for (const char* unsupported : {"scePthreadDetach", "scePthreadMutexattrInit", "scePthreadAttrSetstacksize"})
         assert(resolve_libkernel(unsupported, "libkernel", "libkernel", 1) == S::unresolved);
-    std::puts("PS4 guest thread identity and nonblocking mutex checks passed");
+    std::puts("PS4 guest thread identity, mutex and libkernel lock checks passed");
 }

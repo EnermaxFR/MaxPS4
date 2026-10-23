@@ -22,12 +22,17 @@ enum class PS4KernelService : uint32_t {
     // Guest threads run on FEX: served by its Orbis HLE gate for general
     // images; invoke() answers ENOSYS. thread_exit is also the service of the
     // engine's thread-return trampoline.
-    thread_create, thread_join, thread_exit
+    thread_create, thread_join, thread_exit,
+    // Blocking synchronization (PS4Threads), served by invoke() without the
+    // libkernel lock so that a blocked thread never holds up the others.
+    mutex_lock, cond_init, cond_destroy, cond_wait, cond_timedwait, cond_signal, cond_broadcast
 };
 // Services only general images get: elsewhere their imports stay unresolved.
+// A condition wait needs another thread to end it.
 constexpr bool general_only(PS4KernelService service) {
     return service == PS4KernelService::thread_create || service == PS4KernelService::thread_join ||
-           service == PS4KernelService::thread_exit;
+           service == PS4KernelService::thread_exit || service == PS4KernelService::cond_wait ||
+           service == PS4KernelService::cond_timedwait;
 }
 // Implemented libkernel functions (name, NID, service), e.g. for an HLE registry.
 struct PS4KernelExport { const char* name; const char* nid; PS4KernelService service; };

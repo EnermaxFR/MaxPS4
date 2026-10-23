@@ -405,6 +405,78 @@ inline std::vector<uint8_t> make_general_stuck_thread_app(bool fault) {
     put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
     return b;
 }
+// Producer/consumer on statically initialized objects (slots holding 0). The
+// entry creates a worker, locks the mutex and waits on the condition while
+// the flag is 0; the worker locks, stores 77 and the flag, signals and unlocks.
+// The entry then unlocks, joins and exits with the stored value (or the
+// failing call's error).
+constexpr uint64_t cond_mutex=data+0x48, cond_var=data+0x50;
+inline std::vector<uint8_t> make_general_cond_app() {
+    auto b=make_kernel_app();
+    use_libkernel_imports(b,{"6UgtwV+0zb4","onNY9Byn-W8","9UK1vLZQft4","tn3VlD0hG60","WKAXJ4XBPQ4","kDh-NfxgMtE"});
+    using orbis_fixture::put;
+    constexpr uint64_t create=data, join=data+8, lock=data+0x10, unlock=data+0x18, wait=data+0x20, signal=data+0x28;
+    constexpr uint64_t handle=data+0x40, m=cond_mutex, cv=cond_var, flag=data+0x58, value=data+0x5c;
+    constexpr size_t W=0x85;
+    const uint8_t code[]={
+        0x53, 0x48,0x89,0xf3,                                  // 0x00 PUSH RBX; MOV RBX,RSI (exit)
+        0x48,0x8d,0x3d,0,0,0,0, 0x31,0xf6,                     // 0x04 LEA RDI,[handle]; XOR ESI,ESI
+        0x48,0x8d,0x15,0,0,0,0, 0x31,0xc9, 0x45,0x31,0xc0,     // 0x0d LEA RDX,[worker]; ECX=R8D=0
+        0xff,0x15,0,0,0,0, 0x85,0xc0,0x75,0x5d,                // 0x19 CALL [create]; JNZ fail
+        0x48,0x8d,0x3d,0,0,0,0, 0xff,0x15,0,0,0,0,             // 0x23 lock(m)
+        0x85,0xc0,0x75,0x4c,                                   // 0x30 JNZ fail
+        0x83,0x3d,0,0,0,0,0, 0x75,0x1a,                        // 0x34 loop: [flag]!=0 -> done
+        0x48,0x8d,0x3d,0,0,0,0, 0x48,0x8d,0x35,0,0,0,0,        // 0x3d LEA RDI,[cv]; LEA RSI,[m]
+        0xff,0x15,0,0,0,0, 0x85,0xc0,0x75,0x2b, 0xeb,0xdd,     // 0x4b wait; JNZ fail; JMP loop
+        0x48,0x8d,0x3d,0,0,0,0, 0xff,0x15,0,0,0,0,             // 0x57 done: unlock(m)
+        0x48,0x8b,0x3d,0,0,0,0, 0x31,0xf6,                     // 0x64 MOV RDI,[handle]; XOR ESI,ESI
+        0xff,0x15,0,0,0,0, 0x85,0xc0,0x75,0x09,                // 0x6d join; JNZ fail
+        0x8b,0x3d,0,0,0,0, 0xff,0xd3, 0xf4,                    // 0x77 exit([value]); HLT
+        0x89,0xc7, 0xff,0xd3, 0xf4,                            // 0x80 fail: exit(EAX); HLT
+        // worker (0x85)
+        0x48,0x8d,0x3d,0,0,0,0, 0xff,0x15,0,0,0,0,             // +00 lock(m)
+        0xc7,0x05,0,0,0,0,77,0,0,0,                            // +0d [value]=77
+        0xc7,0x05,0,0,0,0,1,0,0,0,                             // +17 [flag]=1
+        0x48,0x8d,0x3d,0,0,0,0, 0xff,0x15,0,0,0,0,             // +21 signal(cv)
+        0x48,0x8d,0x3d,0,0,0,0, 0xff,0x15,0,0,0,0,             // +2e unlock(m)
+        0xc3};                                                 // +3b RET
+    static_assert(sizeof(code)==W+0x3c, "condition fixture layout");
+    std::fill(b.begin()+0x200,b.begin()+0x300,0);
+    std::copy(std::begin(code),std::end(code),b.begin()+0x200);
+    auto rip=[&](size_t at, size_t end, uint64_t target) { put(b,0x200+at,target-(entry+end),4); };
+    rip(0x07,0x0b,handle); rip(0x10,0x14,entry+W); rip(0x1b,0x1f,create);
+    rip(0x26,0x2a,m); rip(0x2c,0x30,lock); rip(0x36,0x3b,flag);
+    rip(0x40,0x44,cv); rip(0x47,0x4b,m); rip(0x4d,0x51,wait);
+    rip(0x5a,0x5e,m); rip(0x60,0x64,unlock); rip(0x67,0x6b,handle); rip(0x6f,0x73,join); rip(0x79,0x7d,value);
+    rip(W+0x03,W+0x07,m); rip(W+0x09,W+0x0d,lock); rip(W+0x0f,W+0x17,value); rip(W+0x19,W+0x21,flag);
+    rip(W+0x24,W+0x28,cv); rip(W+0x2a,W+0x2e,signal); rip(W+0x31,W+0x35,m); rip(W+0x37,W+0x3b,unlock);
+    for (uint64_t slot : {handle, m, cv, flag}) put(b,0x300+(slot-data),0,8);
+    put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
+    return b;
+}
+// One thread: lock a statically initialized mutex, then
+// scePthreadCondTimedwait(cv, m, 1000 us) with nobody to signal: exits with
+// its result, ETIMEDOUT.
+inline std::vector<uint8_t> make_general_timedwait_app() {
+    auto b=make_kernel_app();
+    use_libkernel_imports(b,{"9UK1vLZQft4","BmMjYxmew1w"});
+    using orbis_fixture::put;
+    constexpr uint64_t lock=data, timedwait=data+8, m=cond_mutex, cv=cond_var;
+    const uint8_t code[]={
+        0x53, 0x48,0x89,0xf3,                                  // 0x00 PUSH RBX; MOV RBX,RSI (exit)
+        0x48,0x8d,0x3d,0,0,0,0, 0xff,0x15,0,0,0,0,             // 0x04 lock(m)
+        0x48,0x8d,0x3d,0,0,0,0, 0x48,0x8d,0x35,0,0,0,0,        // 0x11 LEA RDI,[cv]; LEA RSI,[m]
+        0xba,0xe8,0x03,0,0, 0xff,0x15,0,0,0,0,                 // 0x1f timedwait(cv, m, 1000)
+        0x89,0xc7, 0xff,0xd3, 0xf4};                           // 0x2a exit(EAX); HLT
+    static_assert(sizeof(code)==0x2f, "timed wait fixture layout");
+    std::fill(b.begin()+0x200,b.begin()+0x300,0);
+    std::copy(std::begin(code),std::end(code),b.begin()+0x200);
+    auto rip=[&](size_t at, size_t end, uint64_t target) { put(b,0x200+at,target-(entry+end),4); };
+    rip(0x07,0x0b,m); rip(0x0d,0x11,lock); rip(0x14,0x18,cv); rip(0x1b,0x1f,m); rip(0x26,0x2a,timedwait);
+    for (uint64_t slot : {m, cv}) put(b,0x300+(slot-data),0,8);
+    put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
+    return b;
+}
 // The entry keeps its exit function, creates a worker, then either sets a flag
 // and calls scePthreadExit(0) (`main_spins` false) or spins forever. The worker
 // waits for the flag (preset when the entry spins), counts down 2^20, then

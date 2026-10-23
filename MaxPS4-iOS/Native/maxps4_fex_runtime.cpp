@@ -126,7 +126,9 @@ public:
                 bool first = false;
                 if (exited.compare_exchange_strong(first, true)) exit_status = static_cast<int32_t>(result);
                 if (threads) guest_thread_service(*threads,orbis,call);
-            } else if (maxps4::general_only(orbis)) {
+            } else if (orbis == maxps4::PS4KernelService::thread_create ||
+                       orbis == maxps4::PS4KernelService::thread_join ||
+                       orbis == maxps4::PS4KernelService::thread_exit) {
                 // scePthreadExit's trampoline and the thread-return trampoline
                 // both end with HLT after their SYSCALL.
                 result = threads ? guest_thread_service(*threads,orbis,call) :
@@ -391,8 +393,10 @@ public:
                  maxps4::GuestELF& image, maxps4::PS4GuestMemory& memory,
                  maxps4::PS4Threads& identities, size_t page)
         : context(context), config(config), image(image), memory(memory), identities(identities),
-          page(page), main_thread(::pthread_self()) {}
-    ~GuestThreads() { finish(); }
+          page(page), main_thread(::pthread_self()) { identities.resume(); }
+    // Locks and waits of a stopping run return EINTR (PS4Threads::interrupt);
+    // later runs block normally again.
+    ~GuestThreads() { finish(); identities.resume(); }
     GuestThreads(const GuestThreads&) = delete;
     GuestThreads& operator=(const GuestThreads&) = delete;
     // scePthreadCreate(PthreadT* out, attr, entry, arg, name): *out = the new
@@ -487,10 +491,12 @@ public:
                 [](const Thread& t) { return t.used && !t.finished; });
         });
     }
-    // Time limit expired: wake every join so the stop signals can land.
+    // Time limit expired: wake every join, lock and wait so the stop signals
+    // can land.
     void interrupt() {
         { std::lock_guard guard(lock); stopping = timed_out = true; }
         changed.notify_all();
+        identities.interrupt();
     }
     bool expired() const {
         std::lock_guard guard(lock);
@@ -502,6 +508,7 @@ public:
         if (main_done) return;
         stopping = main_done = true;
         changed.notify_all();
+        identities.interrupt();
         for (auto& thread : threads) {
             while (thread.used && !thread.finished) {
                 if (GuestFaultGuard::available && thread.host.joinable())
@@ -564,6 +571,7 @@ private:
         changed.notify_all();
         if (!stop_main) return;
         // A faulting or exiting thread ends the process: stop the main thread too.
+        identities.interrupt();
         std::unique_lock guard(lock);
         while (!main_done) {
             ::pthread_kill(main_thread, SIGURG);

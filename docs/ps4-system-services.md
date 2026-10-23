@@ -69,20 +69,35 @@ Unsupported clock IDs return EINVAL. No fabricated network/TSC clock is exposed.
 ## Thread and synchronization preparation
 
 `PS4Threads` registers up to 64 guest identities; identity 1 is the bootstrap
-thread and the CPU scheduler may attach/detach additional identities. This
-does not create or run x86 threads. `scePthreadSelf` returns the dispatcher's
-registered identity. Up to 256 explicit default private/error-check mutexes
-support `scePthreadMutexInit`, `scePthreadMutexTrylock`, `scePthreadMutexUnlock`
-and `scePthreadMutexDestroy`. Guest slots contain opaque 64-bit handles, never
-host pointers. Ownership is checked, locked mutex destruction/detach returns
-EBUSY, and stale handles are invalid after reset. Named mutexes validate the
-guest string; attributes are unsupported. Mutexes require explicit init;
-static/adaptive initialization and guest libc access to internal mutex layouts
-are not supported. ScePthread errors use Orbis kernel codes, as their upstream
-Orbis wrappers do, rather than the POSIX pthread positive-errno convention.
-`scePthreadCreate/Join`, blocking lock/wait, condition variables, semaphores,
-TLS, scheduling and cancellation remain unresolved. Host-worker tests verify
-nonblocking mutual exclusion across eight registered guest identities.
+thread and the FEX guest threads of general images attach/detach the others
+(see ORBIS-LINKER.md). `scePthreadSelf` returns the calling thread's
+identity. Up to 256 default private/error-check mutexes support
+`scePthreadMutexInit`, `scePthreadMutexLock` (blocking; the owner gets
+EDEADLK), `scePthreadMutexTrylock`, `scePthreadMutexUnlock` and
+`scePthreadMutexDestroy`. Up to 256 condition variables support
+`scePthreadCondInit`, `scePthreadCondWait`, `scePthreadCondTimedwait`
+(relative timeout in microseconds; ETIMEDOUT still retakes the mutex),
+`scePthreadCondSignal`, `scePthreadCondBroadcast` and `scePthreadCondDestroy`
+(EBUSY while a thread waits). A signal with no waiter is lost, as in POSIX.
+Guest slots contain opaque 64-bit handles, never host pointers. A slot holding
+0 (or 1, the adaptive mutex initializer) is a static initializer: the object
+is created on first use. Destruction leaves 2, which stays invalid until the
+next init. Ownership is checked, locked mutex destruction/detach returns
+EBUSY, and stale handles are invalid after reset. Named objects validate the
+guest string; mutex attributes are unsupported and condition attributes
+(clock, process sharing) are ignored. ScePthread errors use Orbis kernel codes,
+as their upstream Orbis wrappers do, rather than the POSIX pthread
+positive-errno convention.
+
+Blocking calls go through `PS4Threads` only, never under the libkernel lock,
+so a blocked thread never holds up the one that would release it. When a run
+stops (time limit, fault, exit function, end of the entry), every blocked lock
+and wait returns EINTR so the thread goes back to guest code, where the stop
+signal lands. Condition waits are general-image services: a bounded image has
+no other thread to end them. Semaphores, thread attributes, detach,
+scheduling and cancellation remain unresolved. Host-worker tests
+(`PS4ThreadsTest`, `PS4SyncTest`) verify mutual exclusion, blocking, signal,
+broadcast, timeouts and interruption.
 
 ## Engine integration
 

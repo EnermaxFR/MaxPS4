@@ -546,6 +546,28 @@ int main(int argc, char** argv) {
 #endif
         maxps4_fex_engine_close(process);
     }
+    {
+        // One thread: scePthreadCondTimedwait with nobody to signal times out
+        // (no thread needed, so this also runs under the VIXL simulator).
+        auto app = orbis_execution::make_general_timedwait_app();
+        const maxps4_orbis_module modules[] = {
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,nullptr,0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        char diagnostic[512]{};
+        uint64_t relocation=0;
+        CHECK(maxps4_fex_engine_prepare_orbis_general(process,modules,1,"app.elf",&relocation,diagnostic,sizeof(diagnostic))==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        uint64_t observed=0, logical_entry=0; uint32_t cpu=0;
+        const int ran = maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry);
+        maxps4_fex_cpu_report report{};
+        CHECK(maxps4_fex_engine_last_cpu_report(process,&report)==0 || ran);
+        const int32_t timed_out = static_cast<int32_t>(0x80020000u + 60);
+        std::printf("general timed wait: run=%d exited=%u status=%d\n",ran,report.exited,report.exit_status);
+        CHECK(ran==0 && report.exited==1 && report.exit_status==timed_out);
+        std::puts("PASS general scePthreadMutexLock + scePthreadCondTimedwait(1000 us) -> ETIMEDOUT");
+        maxps4_fex_engine_close(process);
+    }
 #if (defined(__aarch64__) || defined(__arm64__)) && !defined(VIXL_SIMULATOR)
     for (int fault = 0; fault < 2; ++fault) {
         // A child thread that never ends: when the entry exits, the run stops it
@@ -608,6 +630,30 @@ int main(int argc, char** argv) {
         }
         std::puts(spins ? "PASS general worker's exit function while the entry spins -> entry stopped, exit(77)" :
                           "PASS general entry scePthreadExit -> worker carries on -> its exit(77) ends the run");
+        maxps4_fex_engine_close(process);
+    }
+    {
+        // Producer/consumer: scePthreadMutexLock + scePthreadCondWait in the
+        // entry, signal from a worker, on statically initialized objects.
+        auto app = orbis_execution::make_general_cond_app();
+        const maxps4_orbis_module modules[] = {
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,nullptr,0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        char diagnostic[512]{};
+        uint64_t relocation=0;
+        CHECK(maxps4_fex_engine_prepare_orbis_general(process,modules,1,"app.elf",&relocation,diagnostic,sizeof(diagnostic))==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        CHECK(maxps4_fex_engine_set_time_limit(process,10000)==0);
+        for (int repeat=0;repeat<2;++repeat) {
+            uint64_t observed=0, logical_entry=0; uint32_t cpu=0;
+            const int ran = maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry);
+            maxps4_fex_cpu_report report{};
+            CHECK(maxps4_fex_engine_last_cpu_report(process,&report)==0 || ran);
+            std::printf("general condition variable: run=%d exited=%u status=%d\n",ran,report.exited,report.exit_status);
+            CHECK(ran==0 && report.exited==1 && report.exit_status==77);
+        }
+        std::puts("PASS general scePthreadMutexLock + scePthreadCondWait <- worker scePthreadCondSignal -> exit(77)");
         maxps4_fex_engine_close(process);
     }
     {
