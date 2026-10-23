@@ -189,6 +189,17 @@ int main(int argc, char** argv) {
     id.libraryVersion=1; id.moduleVersion=0x909;
     check(Linker::link(hleBatch,{{id,0x201000}},hleImage,diagnostic) && value(hleImage,0x102000)==0x201000,
           "HLE matches any module version");
+    // A function with guest code is that routine, in the RX module "<hle-code>".
+    {
+        Linker::HLE routine{id, 0, 0, false, {0x31, 0xc0, 0xc3}};
+        check(Linker::link(hleBatch, {routine}, hleImage, diagnostic), diagnostic.c_str());
+        const auto address = value(hleImage, 0x102000);
+        const auto* code = hleImage.translate(address, 3, 5);
+        check(code && code[0] == 0x31 && code[2] == 0xc3 && address % 16 == 0 && !hleImage.translate(address, 1, 2),
+              "HLE guest routine in RX memory");
+        routine.token = 1;
+        check(!Linker::link(hleBatch, {routine}, hleImage, diagnostic), "HLE routine with a token refused");
+    }
     // A data import (STT_OBJECT) gets zeroed RW bytes in "<hle-data>".
     consumer[0x81c]=0x11; hleBatch[0]=batch()[0];
     Linker::Identity object=id; object.type=1;

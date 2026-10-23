@@ -57,12 +57,30 @@ public:
     // count. ETIMEDOUT still retakes it.
     ps4::Error cond_wait(uint64_t cond, uint64_t mutex, uint64_t thread, bool timed, uint64_t timeout_us);
     ps4::Error cond_signal(uint64_t slot, bool all);
+    // Read/write locks: any number of readers or one writer. A slot holding 0
+    // is a static initializer. Attributes are ignored.
+    ps4::Error rwlock_init(uint64_t slot);
+    ps4::Error rwlock_destroy(uint64_t slot);
+    ps4::Error rwlock_lock(uint64_t slot, uint64_t thread, bool write, bool wait);
+    ps4::Error rwlock_unlock(uint64_t slot, uint64_t thread);
+    // Thread-specific data: 256 keys, a value per thread (0 until set).
+    // Destructors are recorded, not run when a thread ends.
+    ps4::Error key_create(uint64_t output, uint64_t destructor);
+    ps4::Error key_delete(uint64_t key);
+    uint64_t get_specific(uint64_t key, uint64_t thread) const;
+    ps4::Error set_specific(uint64_t key, uint64_t value, uint64_t thread);
+    // Position of a known thread in the identity table (0 for the main
+    // thread), or thread_limit.
+    size_t index(uint64_t thread) const;
+    // Sleeps, returning EINTR early if interrupt() comes first.
+    ps4::Error sleep(uint64_t microseconds);
     // Wakes every blocked lock and wait with EINTR until resume(): a stopping
     // run's threads go back to guest code, where the stop signal lands.
     void interrupt();
     void resume();
     void reset();
-    static constexpr size_t thread_limit = 64, mutex_limit = 256, cond_limit = 256, attr_limit = 256;
+    static constexpr size_t thread_limit = 64, mutex_limit = 256, cond_limit = 256, attr_limit = 256,
+                            key_limit = 256, rwlock_limit = 256;
 private:
     struct Mutex { uint64_t token = 0, owner = 0, slot = 0; uint32_t type = error_check, count = 0; };
     // A signal or broadcast starts a new generation with `wakeups` waiters of
@@ -78,6 +96,13 @@ private:
     std::array<Cond, cond_limit> conds_{};
     std::array<Attr, attr_limit> attrs_{};
     std::array<MutexAttr, attr_limit> mutexattrs_{};
+    struct RwLock { uint64_t token = 0, slot = 0, writer = 0; uint32_t readers = 0; };
+    std::array<RwLock, rwlock_limit> rwlocks_{};
+    struct Key { bool used = false; uint64_t destructor = 0; };
+    std::array<Key, key_limit> keys_{};
+    // values_[thread index][key].
+    std::array<std::array<uint64_t, key_limit>, thread_limit> values_{};
+    RwLock* acquire_rwlock(uint64_t slot, ps4::Error& error);
     uint64_t next_thread_ = 2, next_mutex_ = 0x10000;
     bool interrupted_ = false;
     bool known_locked(uint64_t thread) const;

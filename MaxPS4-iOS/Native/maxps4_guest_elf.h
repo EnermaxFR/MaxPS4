@@ -133,6 +133,10 @@ public:
     // (MOV RDI,RAX; SYSCALL thread_exit; HLT), a child's first return address.
     // 0 for other images.
     uint64_t thread_return() const { return thread_return_address; }
+    // Linked HLE data objects (OrbisLinker::Image::data) and the root module's
+    // PT_SCE_PROCPARAM address (0 if none), for the runtime to fill and report.
+    const std::vector<OrbisLinker::DataObject>& data_objects() const { return hle_data; }
+    uint64_t process_param() const { return process_param_address; }
     const std::vector<Segment>& segments() const { return regions; }
 private:
     friend class PS4DynamicLinker;
@@ -152,6 +156,8 @@ private:
              thread_return_address = 0;
     uint64_t guest_base = 0, guest_entry = 0, thread_pointer = 0, start_address = 0;
     std::vector<OrbisLinker::Thunk> thunks;
+    std::vector<OrbisLinker::DataObject> hle_data;
+    uint64_t process_param_address = 0;
     std::vector<OrbisLinker::TLSBlock> tls_blocks;
     std::vector<uint8_t> tls_image; // Static TLS region as initialized (blocks + TCB).
 };

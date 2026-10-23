@@ -84,6 +84,8 @@ void GuestELF::clear() {
     threads_address = thread_slot_bytes = thread_return_address = 0;
     tls_image.clear();
     thunks.clear();
+    hle_data.clear();
+    process_param_address = 0;
     tls_blocks.clear();
     blockers = 0;
     regions.clear();
@@ -672,6 +674,9 @@ int GuestELF::prepare_linked(const OrbisLinker::Image& linked, const std::string
         for (const auto& module : copy.modules) for (const auto& segment : module.image.segments)
             regions[i++].file_size = segment.header.fileSize;
         thunks = copy.thunks;
+        hle_data = copy.data;
+        for (const auto& module : copy.modules) if (module.path == root)
+            for (const auto& h : module.image.headers) if (h.type == 0x61000001) process_param_address = module.bias + h.address;
         start_address = start;
         if (tp) tls_blocks = copy.tls;
         if (tp) {

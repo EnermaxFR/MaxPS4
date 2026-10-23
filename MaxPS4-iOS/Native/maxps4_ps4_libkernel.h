@@ -31,8 +31,30 @@ enum class PS4KernelService : uint32_t {
     // Thread and mutex attribute objects (PS4Threads). *_accept validates the
     // object for a setting that does not change anything here.
     attr_init, attr_destroy, attr_set_detach, attr_get_detach, attr_set_stack, attr_get_stack, attr_accept,
-    mutexattr_init, mutexattr_destroy, mutexattr_settype, mutexattr_gettype, mutexattr_accept
+    mutexattr_init, mutexattr_destroy, mutexattr_settype, mutexattr_gettype, mutexattr_accept,
+    // What a game's own libc.prx needs from libkernel (shadPS4 names):
+    // __Error (the calling thread's errno cell), stack_chk_fail and
+    // sceKernelDebugRaiseException (end the process like the exit function,
+    // with status 134), sleeps and yields, thread identity and priority,
+    // thread-specific keys, read/write locks, signals (no delivery: masks
+    // and handlers are accepted), process facts, time zone (UTC).
+    errno_location, abort_process, nanosleep, usleep, page_size, yield, thread_equal,
+    key_create, key_delete, get_specific, set_specific,
+    rwlock_init, rwlock_destroy, rwlock_rdlock, rwlock_wrlock, rwlock_tryrdlock, rwlock_trywrlock, rwlock_unlock,
+    thread_getprio, thread_getaffinity, attr_get_np, attr_getaffinity,
+    sigfillset, signal, utc_to_local, local_to_utc, proc_param, module_info_from_addr,
+    // Accepted without effect, answering 0 (masks, priorities, heap API, ...).
+    succeed,
+    // Data objects (PS4KernelExport::data): filled by initialize_data().
+    stack_chk_guard, progname, errno_table,
+    // Guest code (PS4KernelExport::code), never a SYSCALL: pthread_once calls
+    // its init routine from guest code.
+    once
 };
+// Token bit of a trampoline whose function follows the POSIX convention: -1
+// with the error in the calling thread's errno (__Error) instead of an Orbis
+// kernel error code.
+constexpr uint32_t posix_token = 0x40000000;
 // Services only general images get: elsewhere their imports stay unresolved.
 // A condition wait needs another thread to end it.
 constexpr bool general_only(PS4KernelService service) {
@@ -41,7 +63,17 @@ constexpr bool general_only(PS4KernelService service) {
            service == PS4KernelService::cond_wait || service == PS4KernelService::cond_timedwait;
 }
 // Implemented libkernel functions (name, NID, service), e.g. for an HLE registry.
-struct PS4KernelExport { const char* name; const char* nid; PS4KernelService service; };
+// `posix`: POSIX convention (see posix_token). `noreturn`: the trampoline ends
+// with HLT. `data`: a data object of that many bytes instead of a function.
+// `code`: a guest routine of `code_size` bytes instead of a trampoline.
+struct PS4KernelExport {
+    const char* name; const char* nid; PS4KernelService service;
+    const char* library = "libkernel";
+    bool posix = false, noreturn = false;
+    uint32_t data = 0;
+    const uint8_t* code = nullptr;
+    size_t code_size = 0;
+};
 const PS4KernelExport* libkernel_exports(size_t& count);
 // Library/module/version are decoded by an ELF/PRX loader before resolution.
 // This resolver deliberately does not guess the meaning of encoded # IDs.
@@ -61,12 +93,24 @@ public:
     // preserves the previous mount. Successful remount closes guest descriptors.
     int64_t mount_app0(const char* host_directory);
     void reset();
-    int64_t invoke(PS4KernelService service, const PS4KernelCall& call, uint64_t thread = 1);
+    // `posix`: the trampoline's token had posix_token; an Orbis error result
+    // becomes -1 with that error in the thread's errno cell.
+    int64_t invoke(PS4KernelService service, const PS4KernelCall& call, uint64_t thread = 1, bool posix = false);
+    // Fills a linked data object (stack_chk_guard, progname, errno_table) at
+    // its guest address. Returns false for an unknown service or bad memory.
+    bool initialize_data(PS4KernelService service, uint64_t address, uint64_t size);
+    // The root module's PT_SCE_PROCPARAM (sceKernelGetProcParam), 0 if none.
+    void set_process_param(uint64_t address) { process_param_ = address; }
     PS4Threads& threads() { return threads_; }
+    static constexpr int32_t abort_status = 134; // As a process killed by SIGABRT.
 private:
     PS4GuestMemory& memory_;
     PS4VirtualMemory* dynamic_;
     PS4Threads threads_;
+    uint64_t errno_table_ = 0, errno_table_size_ = 0, process_param_ = 0;
+    int64_t posix_result(int64_t result, uint64_t thread);
+    int64_t invoke_service(PS4KernelService service, const PS4KernelCall& call, uint64_t thread);
+    int64_t extended(PS4KernelService service, const PS4KernelCall& call, uint64_t thread, bool& handled);
     std::mutex lock_;
     int root_ = -1;
     std::array<int, descriptor_limit> files_;

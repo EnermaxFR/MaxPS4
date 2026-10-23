@@ -134,6 +134,34 @@ int main() {
     // The adaptive static initializer gives EDEADLK to its owner.
     assert(threads.lock(adaptive, 1) == ok && threads.lock(adaptive, 1) == deadlk && threads.unlock(adaptive, 1) == ok);
     assert(threads.mutexattr_destroy(mattr) == ok && threads.init(0x10048, mattr, 0) == inval);
+    // Read/write locks: readers share, a writer excludes; a static initializer works.
+    constexpr uint64_t rw = 0x10050, keyOut = 0x10058;
+    assert(memory.write(rw, zero, 8));
+    assert(threads.rwlock_lock(rw, 1, false, true) == ok && threads.rwlock_lock(rw, a, false, false) == ok);
+    assert(threads.rwlock_lock(rw, b, true, false) == busy);
+    std::atomic<bool> wrote{false};
+    std::thread writer([&] { assert(threads.rwlock_lock(rw, b, true, true) == ok); wrote = true; assert(threads.rwlock_unlock(rw, b) == ok); });
+    std::this_thread::sleep_for(20ms);
+    assert(!wrote);
+    assert(threads.rwlock_unlock(rw, 1) == ok && threads.rwlock_unlock(rw, a) == ok);
+    writer.join();
+    assert(wrote && threads.rwlock_lock(rw, a, true, false) == ok && threads.rwlock_lock(rw, a, true, true) == deadlk);
+    assert(threads.rwlock_destroy(rw) == busy && threads.rwlock_unlock(rw, a) == ok && threads.rwlock_destroy(rw) == ok);
+    assert(threads.rwlock_lock(rw, 1, false, false) == inval && threads.rwlock_init(rw) == ok);
+    // Thread-specific keys: a value per thread, 0 until set; a deleted key is invalid.
+    assert(threads.key_create(keyOut, 0x1234) == ok && memory.read(keyOut, wire, 4));
+    const uint64_t key = get_le(wire, 4);
+    assert(threads.get_specific(key, 1) == 0 && threads.set_specific(key, 7, 1) == ok && threads.set_specific(key, 9, a) == ok);
+    assert(threads.get_specific(key, 1) == 7 && threads.get_specific(key, a) == 9 && threads.get_specific(key, b) == 0);
+    assert(threads.key_delete(key) == ok && threads.key_delete(key) == inval && threads.set_specific(key, 1, 1) == inval);
+    assert(threads.key_create(0, 0) == fault);
+    // Thread indices (errno cells) and interruptible sleeps.
+    assert(threads.index(1) == 0 && threads.index(a) < PS4Threads::thread_limit && threads.index(12345) == PS4Threads::thread_limit);
+    assert(threads.sleep(1000) == ok);
+    std::thread stopper([&] { std::this_thread::sleep_for(20ms); threads.interrupt(); });
+    assert(threads.sleep(10000000) == intr);
+    stopper.join();
+    threads.resume();
     assert(threads.detach(a) == ok && threads.detach(b) == ok);
     std::puts("PS4 blocking mutex, condition variable and attribute checks passed");
 }
