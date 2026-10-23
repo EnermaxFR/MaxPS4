@@ -165,6 +165,10 @@ public:
                 result = kernel->invoke(orbis,call,guest_thread,posix);
             }
             ++calls;
+            char path[256] = {};
+            if (missing_imports && (orbis == maxps4::PS4KernelService::open || orbis == maxps4::PS4KernelService::stat) &&
+                memory->read_cstring(call.rdi, path, sizeof(path)))
+                std::fprintf(stderr, "hle path \"%s\"\n", path);
             if (missing_imports && static_cast<uint32_t>(orbis) < maxps4::missing_import_token)
                 std::fprintf(stderr, "hle %s(0x%llx, 0x%llx, 0x%llx, 0x%llx) = 0x%llx rsp 0x%llx -> 0x%llx\n",
                     service_name(orbis), (unsigned long long)call.rdi, (unsigned long long)call.rsi,

@@ -918,6 +918,9 @@ int64_t PS4Libkernel::memory_service(PS4KernelService service, const PS4KernelCa
     auto cpu = [](uint64_t protection, uint32_t& out) {
         if (protection & ~uint64_t{0x33}) return false;
         out = uint32_t(protection & 3);
+        // x86 pages are never write-only (games map CPU-write + GPU memory,
+        // 0x32, for frame buffers), and the emulated GPU reads on the CPU.
+        if (out & 2) out = 3;
         if (!out && (protection & 0x30)) out = 3;
         return true;
     };
