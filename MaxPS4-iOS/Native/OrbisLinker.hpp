@@ -323,13 +323,18 @@ private:
             Module m {staged.logicalPath, in.bias, 0, std::move(staged.image)};
             uint64_t tlsMemory = 0;
             const PS4ExecutableImage::Header* tls = nullptr;
-            for (const auto& h : m.image.headers) if (h.type == 7) { require(!tls, "duplicate PT_TLS"); tls = &h; }
+            // An empty PT_TLS (some games keep the header) declares no TLS.
+            for (const auto& h : m.image.headers) if (h.type == 7 && (h.memorySize || h.fileSize)) {
+                require(!tls, "duplicate PT_TLS"); tls = &h;
+            }
             if (tls) {
                 report.phase = "TLS";
                 const auto alignment = tls->alignment ? tls->alignment : 1;
-                require(!(alignment & (alignment - 1)) && alignment <= 4096, "invalid PT_TLS alignment");
+                require(!(alignment & (alignment - 1)) && alignment <= 4096,
+                        "invalid PT_TLS alignment " + std::to_string(tls->alignment));
                 require(tls->memorySize && tls->fileSize <= tls->memorySize && tls->memorySize <= tlsBudget,
-                        "invalid PT_TLS size");
+                        "invalid PT_TLS size: filesz=" + std::to_string(tls->fileSize) +
+                        " memsz=" + std::to_string(tls->memorySize));
                 // The initialization image must lie in loaded, readable, file-backed bytes.
                 bool backed = !tls->fileSize;
                 for (const auto& region : m.image.segments) {
@@ -350,11 +355,17 @@ private:
                 ++report.tlsModules; report.staticTLSBytes = offset;
                 report.phase = "ELF/segments";
             }
+            // Metadata games carry (process/module parameters, unwind tables,
+            // stack/RELRO hints, comment, library version) is not mapped here.
             for (const auto& h : m.image.headers) {
                 require(h.type == 0 || h.type == 1 || h.type == 2 || h.type == 4 || h.type == 6 ||
-                        h.type == 7 || h.type == 0x61000000 || h.type == 0x61000010,
+                        h.type == 7 || h.type == 0x61000000 || h.type == 0x61000010 ||
+                        h.type == 0x61000001 || h.type == 0x61000002 || h.type == 0x6474e550 ||
+                        h.type == 0x6474e551 || h.type == 0x6474e552 || h.type == 0x6fffff00 || h.type == 0x6fffff01,
                         "unsupported runtime program header " + std::to_string(h.type));
             }
+            // PT_SCE_RELRO is written by relocations, then made read-only below.
+            for (auto& s : m.image.segments) if (s.header.type == 0x61000010) s.header.flags |= 2U;
             for (const auto& s : m.image.segments) {
                 require(s.bytes.size() <= budget - allocated, "batch memory budget exceeded"); allocated += s.bytes.size();
                 require((s.header.flags & 3) != 3, "writable executable guest segment refused");

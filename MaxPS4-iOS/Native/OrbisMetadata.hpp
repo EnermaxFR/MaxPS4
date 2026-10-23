@@ -47,7 +47,13 @@ public:
             pending.decode(bytes, size, resolver);
             *this = std::move(pending);
             return true;
-        } catch (const std::exception& e) { error = e.what(); return false; }
+        } catch (const std::exception& e) {
+            // Keep what was decoded before the refusal: the report shows it.
+            error = e.what();
+            type = pending.type; entry = pending.entry; container = pending.container;
+            segments = std::move(pending.segments);
+            return false;
+        }
     }
     static bool range(uint64_t offset, uint64_t count, uint64_t size) {
         return offset <= size && count <= size - offset;
@@ -80,7 +86,16 @@ public:
     std::string report() const {
         std::ostringstream out;
         out << "Analyse Orbis — lecture seule, aucune exécution\n";
-        if (!error.empty()) { out << "Rejet : " << error << '\n'; return out.str(); }
+        if (!error.empty()) {
+            out << "Rejet : " << error << '\n';
+            if (container) out << "Conteneur : SELF à blocs en clair (fSELF ou dump déchiffré), lu comme son ELF\n";
+            if (type) out << "Type : " << typeName(type) << " (0x" << std::hex << type << std::dec << ")\n";
+            for (const auto& s : segments)
+                out << "Segment " << segmentName(s.type) << " type=0x" << std::hex << s.type << " adresse=0x" << s.address
+                    << " flags=" << s.flags << std::dec << " fichier=" << s.offset << "+" << s.filesz
+                    << " mémoire=" << s.memsz << " align=" << s.align << '\n';
+            return out.str();
+        }
         if (container) out << "Conteneur : SELF à blocs en clair (fSELF ou dump déchiffré), lu comme son ELF\n";
         out << "Type : " << typeName(type) << " (0x" << std::hex << type << ")\n"
             << "Architecture : x86-64 ; entrée : 0x" << entry << std::dec << '\n';
@@ -208,6 +223,11 @@ private:
         auto covered = [&](uint64_t address, uint64_t bytes, uint32_t flags) {
             for (const auto& s : segments) if ((s.type == 1 || s.type == 0x61000010) &&
                 (s.flags & flags) == flags && address >= s.address && range(address-s.address,bytes,s.memsz)) return true;
+            return false;
+        };
+        auto relro = [&](uint64_t address, uint64_t bytes) {
+            for (const auto& s : segments) if (s.type == 0x61000010 &&
+                address >= s.address && range(address-s.address,bytes,s.memsz)) return true;
             return false;
         };
         for (const auto& s : segments) if (s.type == 7) {
@@ -385,7 +405,13 @@ private:
                 bool supported = kind == 0 || kind == 1 || kind == 6 || kind == 7 || kind == 8;
                 Relocation r{read(p,8),sym,addend,kind,supported};
                 if (kind == 8) require(sym == 0, "R_RELATIVE avec symbole");
-                if (kind != 0) require(covered(r.target,8,2), "Cible RELA hors segment writable");
+                // PT_SCE_RELRO is written while relocating, then becomes read-only.
+                if (kind != 0 && !covered(r.target,8,2) && !relro(r.target,8)) {
+                    std::ostringstream why;
+                    why << "Cible RELA hors segment writable : cible=0x" << std::hex << r.target
+                        << " type=" << std::dec << kind;
+                    throw std::runtime_error(why.str());
+                }
                 for (const auto& old : relocations) if (kind && old.type)
                     require(r.target >= old.target+8 || old.target >= r.target+8, "Cibles RELA se chevauchant");
                 if (!supported) block("Relocations non prises en charge");
