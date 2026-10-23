@@ -198,7 +198,8 @@ out and deletes the queue, then exits with its returned user data (123).
 registered under **libSceGnmDriver**, using the ABI/NIDs and event IDs from
 [shadPS4's GNM driver](https://github.com/shadps4-emu/shadPS4/blob/91e6afa69b0a64b0afaa0281b80f8fbb0cd88136/src/core/libraries/gnmdriver/gnmdriver.cpp).
 Supported IDs are compute release-memory 0–6 and graphics EOP 0x40. Other
-IDs return EINVAL. The event's filter is GraphicsCore (-14), data holds the
+IDs return EINVAL. Deleting an absent supported subscription from a valid
+queue succeeds, matching shadPS4's GNM wrapper. The event's filter is GraphicsCore (-14), data holds the
 event type and udata retains the caller's opaque value. Events clear after
 successful delivery. Multiple completions before a wait coalesce. User and
 GPU events with the same ident coexist as separate (ident, filter) keys;

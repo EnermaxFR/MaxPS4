@@ -597,7 +597,7 @@ Error PS4Threads::graphics_event_delete(uint64_t handle, uint64_t id) {
     if (id > 6 && id != 0x40) return inval;
     for (auto& event : queue->events)
         if (event.used && event.filter == -14 && event.id == id) { event = {}; return ok; }
-    return noent;
+    return ok; // sceGnmDeleteEqEvent is idempotent for a valid queue/event ID.
 }
 Error PS4Threads::graphics_event_ticket(uint64_t handle, uint64_t id, uint64_t& ticket) {
     ticket = 0;

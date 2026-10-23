@@ -69,7 +69,7 @@ int main() {
     waiter.join();
     assert(read(events + 24) == 999);
     assert(threads.graphics_event_delete(queue, 0x40) == ok);
-    assert(threads.graphics_event_delete(queue, 0x40) == noent);
+    assert(threads.graphics_event_delete(queue, 0x40) == ok);
     assert(threads.graphics_event_complete(ticket) == noent);
     assert(threads.user_event_trigger(queue, 0x40, 77) == ok); // GPU delete leaves user event intact.
     assert(threads.equeue_wait(queue, events, 1, count, timeout) == ok && read(events + 8, 2) == 0xfff5);
