@@ -19,10 +19,12 @@ targets:
     sources:
       - path: Sources
       - path: Resources
-        excludes: [PlayableDemo, GuestThreadsDemo]
+        excludes: [PlayableDemo, GuestThreadsDemo, VideoOutDemo]
       - path: Resources/PlayableDemo
         type: folder
       - path: Resources/GuestThreadsDemo
+        type: folder
+      - path: Resources/VideoOutDemo
         type: folder
       - path: Native/PM4MetalDrawBridge.mm
       - path: Native/PS4PKGBridge.cpp
@@ -62,10 +64,12 @@ targets:
       - path: ../experimental/orbis-v3-staging/MaxPS4OrbisTestView.swift
       - path: ../experimental/orbis-v3-staging/MaxPS4OrbisTestApp.swift
       - path: Resources
-        excludes: [PlayableDemo, GuestThreadsDemo]
+        excludes: [PlayableDemo, GuestThreadsDemo, VideoOutDemo]
       - path: Resources/PlayableDemo
         type: folder
       - path: Resources/GuestThreadsDemo
+        type: folder
+      - path: Resources/VideoOutDemo
         type: folder
       - path: Native/PM4MetalDrawBridge.mm
       - path: Native/PS4PKGBridge.cpp
