@@ -17,14 +17,19 @@ bool PS4Threads::known(uint64_t thread) const {
 uint64_t PS4Threads::attach() {
     std::lock_guard<std::mutex> lock(guard_);
     if (next_thread_ == UINT64_MAX) return 0;
-    for (auto& thread : threads_) if (!thread) { thread = next_thread_++; return thread; }
+    for (size_t i = 0; i < threads_.size(); ++i) if (!threads_[i]) {
+        threads_[i] = next_thread_++;
+        values_[i].fill(0); // A reused slot starts with no thread-specific data.
+        return threads_[i];
+    }
     return 0;
 }
 Error PS4Threads::detach(uint64_t thread) {
     std::lock_guard<std::mutex> lock(guard_);
     if (!known_locked(thread) || thread == 1) return inval;
     for (const auto& mutex : mutexes_) if (mutex.owner == thread) return busy;
-    for (auto& value : threads_) if (value == thread) { value = 0; break; }
+    for (size_t i = 0; i < threads_.size(); ++i)
+        if (threads_[i] == thread) { threads_[i] = 0; values_[i].fill(0); break; }
     return ok;
 }
 bool PS4Threads::writable(uint64_t slot) const {
@@ -385,6 +390,122 @@ Error PS4Threads::cond_signal(uint64_t slot, bool all) {
     changed_.notify_all();
     return ok;
 }
+PS4Threads::RwLock* PS4Threads::acquire_rwlock(uint64_t slot, Error& error) {
+    uint64_t token = 0;
+    if (!slot || !memory_.permitted(slot, 8, 4) || !read_token(slot, token)) { error = fault; return nullptr; }
+    if (token != static_initializer) {
+        for (auto& lock : rwlocks_) if (lock.token == token) return &lock;
+        error = inval;
+        return nullptr;
+    }
+    if (!writable(slot)) { error = fault; return nullptr; }
+    if (next_mutex_ == UINT64_MAX) { error = again; return nullptr; }
+    for (auto& lock : rwlocks_) if (!lock.token) {
+        if (!write_token(slot, next_mutex_)) { error = fault; return nullptr; }
+        lock = {next_mutex_++, slot, 0, 0};
+        return &lock;
+    }
+    error = again;
+    return nullptr;
+}
+Error PS4Threads::rwlock_init(uint64_t slot) {
+    std::lock_guard<std::mutex> lock(guard_);
+    if (!writable(slot)) return fault;
+    for (const auto& existing : rwlocks_) if (existing.token && existing.slot == slot) return busy;
+    if (!write_token(slot, static_initializer)) return fault;
+    Error error = ok;
+    return acquire_rwlock(slot, error) ? ok : error;
+}
+Error PS4Threads::rwlock_destroy(uint64_t slot) {
+    std::lock_guard<std::mutex> lock(guard_);
+    if (!writable(slot)) return fault;
+    uint64_t token = 0;
+    if (!read_token(slot, token)) return fault;
+    if (token == static_initializer) return ok;
+    const auto found = std::find_if(rwlocks_.begin(), rwlocks_.end(),
+        [token](const RwLock& l) { return l.token && l.token == token; });
+    if (found == rwlocks_.end()) return inval;
+    if (found->writer || found->readers) return busy;
+    if (!write_token(slot, destroyed)) return fault;
+    *found = {};
+    return ok;
+}
+Error PS4Threads::rwlock_lock(uint64_t slot, uint64_t thread, bool write, bool wait) {
+    std::unique_lock<std::mutex> lock(guard_);
+    if (!known_locked(thread)) return inval;
+    Error error = ok;
+    RwLock* rw = acquire_rwlock(slot, error);
+    if (!rw) return error;
+    if (rw->writer == thread) return deadlk;
+    const uint64_t token = rw->token;
+    auto free = [&] { return !rw->writer && (!write || !rw->readers); };
+    if (!free()) {
+        if (!wait) return busy;
+        changed_.wait(lock, [&] { return interrupted_ || rw->token != token || free(); });
+        if (interrupted_) return intr;
+        if (rw->token != token) return inval;
+    }
+    if (write) rw->writer = thread;
+    else ++rw->readers;
+    return ok;
+}
+Error PS4Threads::rwlock_unlock(uint64_t slot, uint64_t thread) {
+    {
+        std::lock_guard<std::mutex> lock(guard_);
+        if (!known_locked(thread)) return inval;
+        uint64_t token = 0;
+        if (!slot || !read_token(slot, token)) return fault;
+        const auto found = std::find_if(rwlocks_.begin(), rwlocks_.end(),
+            [token](const RwLock& l) { return l.token && l.token == token; });
+        if (found == rwlocks_.end()) return inval;
+        if (found->writer == thread) found->writer = 0;
+        else if (found->readers) --found->readers; // Readers are not tracked per thread.
+        else return perm;
+    }
+    changed_.notify_all();
+    return ok;
+}
+Error PS4Threads::key_create(uint64_t output, uint64_t destructor) {
+    std::lock_guard<std::mutex> lock(guard_);
+    for (size_t key = 0; key < keys_.size(); ++key) if (!keys_[key].used) {
+        uint8_t wire[4]; put_le(wire, 0, key, 4);
+        if (!output || !memory_.write(output, wire, 4)) return fault;
+        keys_[key] = {true, destructor};
+        for (auto& values : values_) values[key] = 0;
+        return ok;
+    }
+    return again;
+}
+Error PS4Threads::key_delete(uint64_t key) {
+    std::lock_guard<std::mutex> lock(guard_);
+    if (uint32_t(key) >= keys_.size() || !keys_[uint32_t(key)].used) return inval;
+    keys_[uint32_t(key)] = {};
+    return ok;
+}
+uint64_t PS4Threads::get_specific(uint64_t key, uint64_t thread) const {
+    std::lock_guard<std::mutex> lock(guard_);
+    for (size_t i = 0; i < threads_.size(); ++i)
+        if (threads_[i] == thread && uint32_t(key) < key_limit && keys_[uint32_t(key)].used)
+            return values_[i][uint32_t(key)];
+    return 0;
+}
+Error PS4Threads::set_specific(uint64_t key, uint64_t value, uint64_t thread) {
+    std::lock_guard<std::mutex> lock(guard_);
+    if (uint32_t(key) >= key_limit || !keys_[uint32_t(key)].used) return inval;
+    for (size_t i = 0; i < threads_.size(); ++i)
+        if (threads_[i] == thread) { values_[i][uint32_t(key)] = value; return ok; }
+    return inval;
+}
+size_t PS4Threads::index(uint64_t thread) const {
+    std::lock_guard<std::mutex> lock(guard_);
+    for (size_t i = 0; i < threads_.size(); ++i) if (thread && threads_[i] == thread) return i;
+    return thread_limit;
+}
+Error PS4Threads::sleep(uint64_t microseconds) {
+    std::unique_lock<std::mutex> lock(guard_);
+    const auto limit = std::chrono::microseconds(std::min<uint64_t>(microseconds, uint64_t(1) << 50));
+    return changed_.wait_for(lock, limit, [&] { return interrupted_; }) ? intr : ok;
+}
 void PS4Threads::interrupt() {
     { std::lock_guard<std::mutex> lock(guard_); interrupted_ = true; }
     changed_.notify_all();
@@ -399,6 +520,8 @@ void PS4Threads::reset() {
         threads_.fill(0); threads_[0] = 1;
         // Keep counters monotonic: stale handles never reactivate.
         mutexes_.fill({}); conds_.fill({}); attrs_.fill({}); mutexattrs_.fill({});
+        rwlocks_.fill({}); keys_.fill({});
+        for (auto& values : values_) values.fill(0);
         interrupted_ = false;
     }
     changed_.notify_all();

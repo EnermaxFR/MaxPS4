@@ -107,6 +107,35 @@ cancellation remain unresolved. Host-worker tests
 (`PS4ThreadsTest`, `PS4SyncTest`) verify mutual exclusion, blocking, signal,
 broadcast, timeouts and interruption.
 
+## What a game's libc needs
+
+A game ships its own `libc.prx`, loaded like any PRX; it calls into libkernel
+for about a hundred functions. Bindings now carry their library, and three
+kinds besides plain trampolines:
+
+- **POSIX convention** (`posix`): the trampoline token has `posix_token`; an
+  Orbis error result becomes -1 with the error in the calling thread's errno
+  cell. `__Error()` returns that cell's address: the cells are the engine's
+  `MaxPS4errno` data object (8 bytes per thread index).
+- **Data objects** (`data`): `__stack_chk_guard` (random), `__progname`
+  (points at `"eboot.bin"`) and the errno cells, linked in `<hle-data>` and
+  filled by `PS4Libkernel::initialize_data` after preparation.
+- **Guest routines** (`code`): `scePthreadOnce` must call its init routine,
+  which is guest code, so it is x86 in `<hle-code>`: the first caller moves
+  the control word 0 → 2, calls init and stores 1; others wait for 1.
+
+Implemented for libc: `exit`, `__stack_chk_fail` and
+`sceKernelDebugRaiseException*` (end the process; the last two with status
+134), `nanosleep` (both NIDs), `sceKernelUsleep`, POSIX `clock_gettime` and
+`gettimeofday`, `getpagesize` (16 KiB), `sched_yield`/`pthread_yield`,
+`pthread_equal`, thread-specific keys (256, a value per thread; destructors
+recorded, not run), read/write locks (static initializer, interruptible
+waits), priority 700 and affinity 0x7f, `pthread_attr_get_np`, `sigfillset`,
+`signal` (SIG_DFL: no signal is ever delivered), UTC time-zone conversions,
+`sceKernelGetProcParam` (root module's `PT_SCE_PROCPARAM`). Module-information
+queries answer ESRCH (no C++ exception unwinding yet). Masks, heap API,
+backtrace printing and a few internal hooks answer 0.
+
 ## Engine integration
 
 The engine owns a virtual-memory provider, checked memory adapter and libkernel

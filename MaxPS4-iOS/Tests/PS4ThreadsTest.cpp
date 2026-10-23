@@ -4,6 +4,7 @@
 #include <cassert>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <thread>
 #include <vector>
 
@@ -103,5 +104,32 @@ int main() {
     assert(resolve_libkernel("UTXzJbWhhTE", "libkernel", "libkernel", 1) == S::attr_set_stack);
     for (const char* unsupported : {"scePthreadCancel", "scePthreadSetprio", "scePthreadAttrSetstack"})
         assert(resolve_libkernel(unsupported, "libkernel", "libkernel", 1) == S::unresolved);
+    // POSIX convention: -1 and the error in the calling thread's errno cell.
+    constexpr uint64_t errnos = 0x11800, progname = 0x11a00, guard = 0x11a40, request = 0x11a60;
+    assert(kernel.invoke(S::errno_location, {}, 1, true) == -1); // No errno table yet.
+    assert(kernel.initialize_data(S::errno_table, errnos, PS4Threads::thread_limit * 8));
+    assert(kernel.invoke(S::errno_location, {}, 1, true) == int64_t(errnos));
+    const uint8_t badRequest[16] = {0,0,0,0,0,0,0,0, 0,0xca,0x9a,0x3b,0,0,0,0}; // 1e9 ns: invalid.
+    assert(memory.write(request, badRequest, sizeof(badRequest)));
+    assert(kernel.invoke(S::nanosleep, {request}, 1, false) == kernel_error(inval));
+    assert(kernel.invoke(S::nanosleep, {request}, 1, true) == -1);
+    uint8_t cell[4]; assert(memory.read(errnos, cell, 4) && get_le(cell, 4) == inval);
+    const uint8_t shortRequest[16] = {0,0,0,0,0,0,0,0, 0x40,0x42,0x0f,0,0,0,0,0}; // 1 ms.
+    assert(memory.write(request, shortRequest, sizeof(shortRequest)));
+    assert(kernel.invoke(S::nanosleep, {request}, 1, true) == 0);
+    assert(kernel.invoke(S::page_size, {}) == 16384 && kernel.invoke(S::thread_equal, {5, 5}) == 1);
+    // Data objects: __progname points at "eboot.bin", the stack guard is set.
+    assert(kernel.initialize_data(S::progname, progname, 64));
+    assert(memory.read(progname, wire, 8) && get_le(wire, 8) == progname + 16);
+    char name[10]{}; assert(memory.read(progname + 16, name, sizeof(name)) && !std::strcmp(name, "eboot.bin"));
+    assert(kernel.initialize_data(S::stack_chk_guard, guard, 8) && !kernel.initialize_data(S::open, guard, 8));
+    // Bindings: library, POSIX convention, data and guest code are declared.
+    size_t count = 0; const auto* exports = libkernel_exports(count);
+    auto binding = [&](const char* nid) { for (size_t i = 0; i < count; ++i) if (!std::strcmp(exports[i].nid, nid)) return &exports[i]; return (const PS4KernelExport*)nullptr; };
+    assert(binding("9BcDykPmo1I")->posix && binding("9BcDykPmo1I")->service == S::errno_location);
+    assert(binding("6Z83sYWFlA8")->noreturn && binding("Ou3iL1abvng")->service == S::abort_process);
+    assert(binding("f7uOxY9mM1U")->data == 8 && binding("14bOACANTBo")->code && binding("14bOACANTBo")->code_size == 0x2b);
+    assert(resolve_libkernel("__Error", "libkernel", "libkernel", 1) == S::errno_location);
+    assert(resolve_libkernel("9BcDykPmo1I", "libc", "libc", 1) == S::unresolved);
     std::puts("PS4 guest thread identity, mutex and libkernel lock checks passed");
 }

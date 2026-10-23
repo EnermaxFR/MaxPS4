@@ -90,7 +90,9 @@ public:
             // Orbis path: SYSCALL from a linker-synthesized trampoline. The token is
             // the service; arguments follow SysV (RCX already moved to R10). The
             // seventh (stack) argument is readable for general images only.
-            const auto orbis = static_cast<maxps4::PS4KernelService>(r[x86::REG_RAX]);
+            // The posix_token bit selects the POSIX convention (errno, -1).
+            const bool posix = (r[x86::REG_RAX] & maxps4::posix_token) != 0;
+            const auto orbis = static_cast<maxps4::PS4KernelService>(r[x86::REG_RAX] & ~uint64_t{maxps4::posix_token});
             // Admitted code builds pointers with RIP-relative LEA, i.e. rebased host
             // addresses. libkernel works on logical PS4 addresses and re-checks
             // permissions, so translate any argument that lies in the image arena.
@@ -119,14 +121,17 @@ public:
                     address = guest_tls ? reinterpret_cast<const uint8_t*>(guest_tls) : image->thread_pointer_host();
                 }
                 result = static_cast<int64_t>(reinterpret_cast<uintptr_t>(address));
-            } else if (orbis == maxps4::PS4KernelService::process_exit) {
+            } else if (orbis == maxps4::PS4KernelService::process_exit || orbis == maxps4::PS4KernelService::abort_process) {
                 // The entry's exit function: the status (EDI) becomes RAX, and the
                 // HLT that follows this SYSCALL ends the calling thread. The first
                 // exit sets the status; from a child thread it also ends the run.
-                result = static_cast<int32_t>(r[x86::REG_RDI]);
+                // exit() is the same; __stack_chk_fail and sceKernelDebugRaiseException
+                // end the process with PS4Libkernel::abort_status.
+                const bool abort = orbis == maxps4::PS4KernelService::abort_process;
+                result = abort ? maxps4::PS4Libkernel::abort_status : static_cast<int32_t>(r[x86::REG_RDI]);
                 bool first = false;
                 if (exited.compare_exchange_strong(first, true)) exit_status = static_cast<int32_t>(result);
-                if (threads) guest_thread_service(*threads,orbis,call);
+                if (threads) guest_thread_service(*threads,maxps4::PS4KernelService::process_exit,call);
             } else if (orbis == maxps4::PS4KernelService::thread_create ||
                        orbis == maxps4::PS4KernelService::thread_join ||
                        orbis == maxps4::PS4KernelService::thread_exit ||
@@ -136,7 +141,7 @@ public:
                 result = threads ? guest_thread_service(*threads,orbis,call) :
                     maxps4::ps4::kernel_error(maxps4::ps4::nosys);
             } else {
-                result = kernel->invoke(orbis,call,guest_thread);
+                result = kernel->invoke(orbis,call,guest_thread,posix);
             }
             ++calls;
             r[x86::REG_RAX] = static_cast<uint64_t>(result);
@@ -1105,10 +1110,14 @@ int orbisInputs(const maxps4_orbis_module* modules, size_t count, bool general,
     size_t exported = 0;
     const auto* kernel_exports = maxps4::libkernel_exports(exported);
     for (size_t i=0;i<exported;++i) {
-        const auto service = kernel_exports[i].service;
-        if (!general && maxps4::general_only(service)) continue;
-        maxps4::OrbisLinker::Identity id{kernel_exports[i].nid,"libkernel","libkernel",1,1,2};
-        hle.push_back({id,0,static_cast<uint32_t>(service),service == maxps4::PS4KernelService::thread_exit});
+        const auto& e = kernel_exports[i];
+        // Data objects and guest routines serve the libc of general images.
+        if (!general && (maxps4::general_only(e.service) || e.data || e.code)) continue;
+        maxps4::OrbisLinker::Identity id{e.nid,e.library,e.library,1,1,uint8_t(e.data ? 1 : 2)};
+        if (e.data) { hle.push_back({id,0,e.data}); continue; }
+        if (e.code) { hle.push_back({id,0,0,false,std::vector<uint8_t>(e.code,e.code+e.code_size)}); continue; }
+        const uint32_t token = static_cast<uint32_t>(e.service) | (e.posix ? maxps4::posix_token : 0);
+        hle.push_back({id,0,token,e.noreturn || e.service == maxps4::PS4KernelService::thread_exit});
     }
     return 0;
 }
@@ -1137,7 +1146,22 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine* en
         if (collected) { message(why); return collected; }
         std::string reason;
         uint64_t moved = 0;
-        const int status = engine->staged_ps4.prepare_orbis_general(inputs,hle,root,reason,moved);
+        int status = engine->staged_ps4.prepare_orbis_general(inputs,hle,root,reason,moved);
+        if (!status) {
+            // HLE data objects (stack guard, __progname, errno cells) and the
+            // process parameters libc asks libkernel for.
+            size_t exported = 0;
+            const auto* kernel_exports = maxps4::libkernel_exports(exported);
+            for (const auto& object : engine->staged_ps4.data_objects())
+                for (size_t i = 0; i < exported; ++i)
+                    if (kernel_exports[i].data && object.nid == kernel_exports[i].nid &&
+                        !engine->libkernel.initialize_data(kernel_exports[i].service, object.address, object.size)) {
+                        reason = "HLE data object " + object.nid + " could not be initialized";
+                        status = -EFAULT;
+                    }
+            engine->libkernel.set_process_param(engine->staged_ps4.process_param());
+            if (status) engine->staged_ps4.clear();
+        }
         message(status ? reason : "SCE image linked and identity-mapped; execution not attempted");
         engine->orbis_admitted = status == 0;
         if (!status) *relocation = moved;

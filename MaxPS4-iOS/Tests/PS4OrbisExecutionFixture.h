@@ -477,6 +477,44 @@ inline std::vector<uint8_t> make_general_timedwait_app() {
     put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
     return b;
 }
+// What a game's libc needs: scePthreadOnce twice with an init routine that
+// counts its calls (guest-code HLE), then nanosleep with 1e9 ns (POSIX
+// convention: -1) and __Error(): exits with count * 100 + errno = 122, or 7
+// if nanosleep did not return -1.
+inline std::vector<uint8_t> make_general_libc_support_app() {
+    auto b=make_kernel_app();
+    use_libkernel_imports(b,{"14bOACANTBo","NhpspxdjEKU","9BcDykPmo1I"});
+    using orbis_fixture::put;
+    constexpr uint64_t once=data, nanosleep=data+8, error=data+0x10;
+    constexpr uint64_t ctl=data+0x40, count=data+0x48, request=data+0x50;
+    constexpr size_t init=0x5c;
+    const uint8_t code[]={
+        0x53, 0x48,0x89,0xf3,                                  // 0x00 PUSH RBX; MOV RBX,RSI (exit)
+        0x48,0x8d,0x3d,0,0,0,0, 0x48,0x8d,0x35,0,0,0,0,        // 0x04 LEA RDI,[ctl]; LEA RSI,[init]
+        0xff,0x15,0,0,0,0,                                     // 0x12 once
+        0x48,0x8d,0x3d,0,0,0,0, 0x48,0x8d,0x35,0,0,0,0,        // 0x18 LEA RDI,[ctl]; LEA RSI,[init]
+        0xff,0x15,0,0,0,0,                                     // 0x26 once again
+        0x48,0x8d,0x3d,0,0,0,0, 0x31,0xf6,                     // 0x2c LEA RDI,[request]; ESI=0
+        0xff,0x15,0,0,0,0, 0x83,0xf8,0xff, 0x75,0x14,          // 0x35 nanosleep; CMP EAX,-1; JNE fail
+        0xff,0x15,0,0,0,0, 0x8b,0x38,                          // 0x40 __Error(); MOV EDI,[RAX]
+        0x6b,0x05,0,0,0,0,100, 0x01,0xc7,                      // 0x48 EAX=[count]*100; ADD EDI,EAX
+        0xff,0xd3, 0xf4,                                       // 0x51 exit(EDI); HLT
+        0xbf,7,0,0,0, 0xff,0xd3, 0xf4,                         // 0x54 fail: exit(7); HLT
+        // init (0x5c)
+        0xff,0x05,0,0,0,0, 0xc3};                              // INC DWORD [count]; RET
+    static_assert(sizeof(code)==init+7, "libc support fixture layout");
+    std::fill(b.begin()+0x200,b.begin()+0x300,0);
+    std::copy(std::begin(code),std::end(code),b.begin()+0x200);
+    auto rip=[&](size_t at, size_t end, uint64_t target) { put(b,0x200+at,target-(entry+end),4); };
+    rip(0x07,0x0b,ctl); rip(0x0e,0x12,entry+init); rip(0x14,0x18,once);
+    rip(0x1b,0x1f,ctl); rip(0x22,0x26,entry+init); rip(0x28,0x2c,once);
+    rip(0x2f,0x33,request); rip(0x37,0x3b,nanosleep); rip(0x42,0x46,error);
+    rip(0x4a,0x4f,count); rip(init+0x02,init+0x06,count);
+    for (uint64_t slot : {ctl, count, request}) put(b,0x300+(slot-data),0,8);
+    put(b,0x300+(request-data)+8,1000000000,8); // tv_nsec = 1e9: EINVAL.
+    put(b,64+32,sizeof(code)); put(b,64+40,sizeof(code));
+    return b;
+}
 // Detached threads give their slot back. The entry makes a detached attribute
 // object (scePthreadAttrInit + Setdetachstate(1)) and creates 16 threads with
 // it, more than the 8 slots: a create that gets EAGAIN is retried. Then one

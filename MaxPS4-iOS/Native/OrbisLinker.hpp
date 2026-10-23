@@ -54,7 +54,14 @@ public:
     // A data object (identity type 1, STT_OBJECT, such as libc's stdout or
     // libkernel's __stack_chk_guard) with guestAddress=0 gets `token` zeroed
     // bytes in the RW module "<hle-data>"; the runtime may fill them (DataObject).
-    struct HLE { Identity identity; uint64_t guestAddress; uint32_t token = 0; bool noreturn = false; };
+    // A function with `code` (and guestAddress=0, token=0) is that guest
+    // routine itself, placed in the RX module "<hle-code>" (16-byte aligned):
+    // for HLE that must call guest code back, such as pthread_once.
+    struct HLE {
+        Identity identity; uint64_t guestAddress; uint32_t token = 0; bool noreturn = false;
+        std::vector<uint8_t> code = {};
+    };
+    static constexpr uint64_t codeLimit = 4096;
     struct DataObject { uint64_t address, size; std::string nid; };
     static constexpr uint64_t dataObjectLimit = 4096;
     // Synthesized trampoline: MOV R10,RCX; MOV EAX,token; SYSCALL; RET. The
@@ -490,9 +497,15 @@ private:
         // Synthesized trampolines live in one RX module after every supplied
         // module, separated by a 16 KiB guard (iOS page size).
         size_t synthesized = 0;
-        uint64_t dataBytes = 0;
+        uint64_t dataBytes = 0, codeBytes = 0;
         auto isData = [](const HLE& h) { return h.identity.type == 1; };
         for (const auto& h : hle) {
+            if (!h.code.empty()) {
+                require(!h.guestAddress && !h.token && !isData(h) && h.code.size() <= codeLimit,
+                        "HLE code entry needs no address, no token and at most 4 KiB");
+                codeBytes += (h.code.size() + 15) & ~size_t{15};
+                continue;
+            }
             require(!h.guestAddress || !h.token, "HLE entry has both an address and a token");
             require(h.guestAddress || h.token, "HLE entry needs an address or a token");
             if (h.guestAddress) continue;
@@ -514,7 +527,7 @@ private:
             PS4ExecutableImage::Header header {1, 5, 0, 0, size, size, page};
             std::vector<uint8_t> code(static_cast<size_t>(size));
             size_t k = 0;
-            for (const auto& h : hle) if (!h.guestAddress && !isData(h)) {
+            for (const auto& h : hle) if (!h.guestAddress && !isData(h) && h.code.empty()) {
                 const uint8_t body[thunkSize] = {0x49,0x89,0xca,0xb8,uint8_t(h.token),uint8_t(h.token>>8),
                     uint8_t(h.token>>16),uint8_t(h.token>>24),0x0f,0x05,uint8_t(h.noreturn ? 0xf4 : 0xc3)};
                 std::copy(std::begin(body), std::end(body), code.begin() + k * thunkSize);
@@ -523,6 +536,28 @@ private:
             thunks.image.headers.push_back(header);
             thunks.image.segments.push_back({header, std::move(code)});
             out.modules.push_back(std::move(thunks));
+        }
+        uint64_t codeBase = 0;
+        if (codeBytes) {
+            uint64_t highest = 0;
+            for (const auto& m : out.modules) for (const auto& s : m.image.segments)
+                highest = std::max(highest, add(add(m.bias, s.header.address), s.header.memorySize));
+            constexpr uint64_t page = 0x4000;
+            codeBase = add(add(highest, page - 1) & ~(page - 1), page);
+            const auto size = (codeBytes + page - 1) & ~(page - 1);
+            require(add(codeBase, size) <= (uint64_t{1} << 47), "non-canonical HLE code address");
+            Module routines {"<hle-code>", codeBase, 0, PS4ExecutableImage{}};
+            routines.image.type = 0xfe18;
+            PS4ExecutableImage::Header header {1, 5, 0, 0, codeBytes, size, page};
+            std::vector<uint8_t> bytes(static_cast<size_t>(size), 0xcc); // INT3 between routines.
+            uint64_t offset = 0;
+            for (const auto& h : hle) if (!h.code.empty()) {
+                std::copy(h.code.begin(), h.code.end(), bytes.begin() + static_cast<long>(offset));
+                offset += (h.code.size() + 15) & ~size_t{15};
+            }
+            routines.image.headers.push_back(header);
+            routines.image.segments.push_back({header, std::move(bytes)});
+            out.modules.push_back(std::move(routines));
         }
         uint64_t dataBase = 0;
         if (dataBytes) {
@@ -541,10 +576,13 @@ private:
             out.modules.push_back(std::move(data));
         }
         size_t k = 0;
-        uint64_t dataOffset = 0;
+        uint64_t dataOffset = 0, codeOffset = 0;
         for (const auto& h : hle) {
             uint64_t address = h.guestAddress;
-            if (!address && isData(h)) {
+            if (!h.code.empty()) {
+                address = codeBase + codeOffset;
+                codeOffset += (h.code.size() + 15) & ~size_t{15};
+            } else if (!address && isData(h)) {
                 address = dataBase + dataOffset;
                 dataOffset += (uint64_t(h.token) + 15) & ~uint64_t{15};
                 out.data.push_back({address, h.token, h.identity.nid});
