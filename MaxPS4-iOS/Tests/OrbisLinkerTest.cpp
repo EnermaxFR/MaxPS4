@@ -182,6 +182,19 @@ int main(int argc, char** argv) {
     check(!Linker::link(batch(),{{id,0x201000}},hleImage,diagnostic),"HLE/export collision rejected");
     check(!Linker::link(hleBatch,{{id,0x202000}},hleImage,diagnostic),"HLE data target refused");
     id.libraryVersion=2; check(!Linker::link(hleBatch,{{id,0x201000}},hleImage,diagnostic),"HLE version mismatch unresolved");
+    // HLE ignores the module version (games import libkernel 1.1 for the same functions).
+    id.libraryVersion=1; id.moduleVersion=0x909;
+    check(Linker::link(hleBatch,{{id,0x201000}},hleImage,diagnostic) && value(hleImage,0x102000)==0x201000,
+          "HLE matches any module version");
+    // A data import (STT_OBJECT) gets zeroed RW bytes in "<hle-data>".
+    consumer[0x81c]=0x11; hleBatch[0]=batch()[0];
+    Linker::Identity object=id; object.type=1;
+    check(Linker::link(hleBatch,{{object,0,24}},hleImage,diagnostic),diagnostic.c_str());
+    check(hleImage.data.size()==1 && hleImage.data[0].size==24 && hleImage.data[0].nid==id.nid &&
+          value(hleImage,0x102000)==hleImage.data[0].address && hleImage.translate(hleImage.data[0].address,24,6) &&
+          !hleImage.translate(hleImage.data[0].address,1,1),"HLE data object in RW memory");
+    check(!Linker::link(hleBatch,{{object,0,Linker::dataObjectLimit+1}},hleImage,diagnostic),"oversized HLE data object");
+    consumer=original;
     // Regression: unused dependency descriptors must not silently disappear.
     put(consumer,0x81c,0x02,1); put(consumer,0x81e,1,2); put(consumer,0x820,0x1000); put(consumer,0x828,1);
     setTag(consumer,0x61000031,0);
@@ -219,7 +232,7 @@ int main(int argc, char** argv) {
     setTag(provider,0x6100000d,uint64_t(moduleOffset-0x600)|(uint64_t{0x200}<<32)|(uint64_t{1}<<48));
     reject(batch(),"incompatible"); provider=make(true);
     // Static executable preparation needs no invented dynamic tables/imports.
-    put(consumer,64+3*56,3,4); reject(batch(),"unsupported runtime program header"); consumer=original;
+    put(consumer,64+3*56,0x12345,4); reject(batch(),"unsupported runtime program header"); consumer=original;
     auto standalone=makeStatic(); Linker::Image staticImage;
     check(Linker::link({input("static.elf",standalone,0x400000,{})},{},staticImage,diagnostic,4096,&progress),diagnostic.c_str());
     check(progress.committed && progress.imports==0 && progress.relocations==0 && progress.memoryBytes==0x300,"static report counts");

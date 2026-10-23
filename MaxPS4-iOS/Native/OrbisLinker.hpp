@@ -51,7 +51,12 @@ public:
     // Guest trampoline, never a host function pointer. guestAddress=0 with a
     // non-zero token asks the linker to synthesize a trampoline (see Thunk).
     // A `noreturn` service's trampoline ends with HLT instead of RET.
+    // A data object (identity type 1, STT_OBJECT, such as libc's stdout or
+    // libkernel's __stack_chk_guard) with guestAddress=0 gets `token` zeroed
+    // bytes in the RW module "<hle-data>"; the runtime may fill them (DataObject).
     struct HLE { Identity identity; uint64_t guestAddress; uint32_t token = 0; bool noreturn = false; };
+    struct DataObject { uint64_t address, size; std::string nid; };
+    static constexpr uint64_t dataObjectLimit = 4096;
     // Synthesized trampoline: MOV R10,RCX; MOV EAX,token; SYSCALL; RET. The
     // runtime gate accepts a SYSCALL only at `address + syscallOffset` with
     // that exact token; the token is the HLE service number.
@@ -71,6 +76,7 @@ public:
         std::vector<TLSBlock> tls;
         uint64_t staticTLSSize = 0, staticTLSAlignment = 1;
         std::vector<Thunk> thunks; // In module "<hle>", an RX segment after all modules.
+        std::vector<DataObject> data; // In module "<hle-data>", RW, after "<hle>".
         // module_start of every PRX (0xfe18) in load order (dependencies first):
         // on PS4 a PRX's DT_INIT is its module_start(args, argp, param), and it
         // runs its own DT_INIT_ARRAY (shadPS4 Module::Start). Executables get
@@ -163,6 +169,8 @@ private:
             if (tag == 0x6100000d || tag == 0x6100000f || tag == 0x61000013 || tag == 0x61000015) {
                 descriptors.push_back({tag, value}); continue;
             }
+            // Module and library attributes: one per descriptor, not interpreted.
+            if (tag == 0x61000011 || tag == 0x61000017 || tag == 0x61000019) continue;
             // Only interpreted, verified SCE table tags. Unknown semantics fail closed.
             switch (tag) {
             case 0x61000035: case 0x61000037: case 0x61000039: case 0x6100003b: case 0x6100003f:
@@ -170,6 +178,20 @@ private:
             case 0x61000029: case 0x6100002b: case 0x6100002d:
             // DT_INIT/DT_FINI and their arrays (module-relative addresses).
             case 12: case 13: case 25: case 26: case 27: case 28: break;
+            // Informational tags real games carry, which linking by NID does not
+            // need (shadPS4 ignores them too): SCE ID table entry size,
+            // fingerprint, original file name, module/library attributes, stub
+            // names and versions, symbol hash table and its size, SCE PLTGOT;
+            // DT_SONAME, DT_RPATH, DT_DEBUG, DT_TEXTREL (relocation targets are
+            // still checked one by one), DT_BIND_NOW, DT_FLAGS, DT_RELACOUNT,
+            // DT_FLAGS_1.
+            case 0x61000005: case 0x61000007: case 0x61000009: case 0x61000011:
+            case 0x61000017: case 0x61000019: case 0x6100001d: case 0x6100001f:
+            case 0x61000021: case 0x61000023: case 0x61000025: case 0x61000027: case 0x6100003d:
+            case 14: case 15: case 21: case 22: case 24: case 30: case 0x6ffffff9: case 0x6ffffffb: break;
+            // DT_PREINIT_ARRAY(SZ): an executable's own startup code runs it,
+            // like its DT_INIT_ARRAY.
+            case 32: case 33: break;
             default: throw Failure("unsupported dynamic tag " + std::to_string(tag));
             }
             require(tags.emplace(tag, value).second, "duplicate dynamic tag");
@@ -226,13 +248,17 @@ private:
             const auto section = read(p + 6, 2);
             s.value = read(p + 8, 8); s.size = read(p + 16, 8); s.defined = section != 0; s.local = bind == 0; s.type = type;
             if (!i) { require(read(p, 8) == 0 && s.value == 0 && s.size == 0, "invalid null symbol"); out.symbols.push_back(s); continue; }
-            require(bind <= 2 && (type == 0 || type == 1 || type == 2 || type == 6) && p[5] == 0 && section < 0xff00,
-                    "unsupported symbol binding/type/visibility/section");
+            // Local STT_SECTION symbols (ordinary ELF bookkeeping) are kept as locals.
+            require(bind <= 2 && (type == 0 || type == 1 || type == 2 || type == 6 || (type == 3 && bind == 0)) &&
+                    p[5] == 0 && section < 0xff00,
+                    "unsupported symbol binding/type/visibility/section: " + name + " bind=" + std::to_string(bind) +
+                    " type=" + std::to_string(type) + " visibility=" + std::to_string(p[5]) +
+                    " section=" + std::to_string(section));
             // STT_TLS values are offsets inside the module's TLS block, not addresses.
             if (s.defined && type == 6) require(tlsMemory && s.value <= tlsMemory && s.size <= tlsMemory - s.value,
                                                 "TLS symbol outside module TLS block");
             else if (s.defined) require(m.image.translate(s.value, s.size ? s.size : 1, type == 2 ? 5 : 4), "export outside valid segment");
-            else require(s.value == 0 && !s.local, "invalid undefined symbol");
+            else if (type != 3) require(s.value == 0 && !s.local, "invalid undefined symbol");
             if (s.defined && type == 2) {
                 bool backed = false;
                 for (const auto& region : m.image.segments) {
@@ -271,6 +297,9 @@ private:
         out.init = optional(12); out.fini = optional(13);
         out.initArray = optional(25); out.finiArray = optional(26);
         out.initArraySize = optional(27); out.finiArraySize = optional(28);
+        // An empty array (size 0) is no array, whatever its address.
+        if (!out.initArraySize) out.initArray = 0;
+        if (!out.finiArraySize) out.finiArray = 0;
         require(!out.initArray == !out.initArraySize && !out.finiArray == !out.finiArraySize,
                 "DT_INIT_ARRAY/DT_FINI_ARRAY need both address and size");
         return out;
@@ -323,13 +352,18 @@ private:
             Module m {staged.logicalPath, in.bias, 0, std::move(staged.image)};
             uint64_t tlsMemory = 0;
             const PS4ExecutableImage::Header* tls = nullptr;
-            for (const auto& h : m.image.headers) if (h.type == 7) { require(!tls, "duplicate PT_TLS"); tls = &h; }
+            // An empty PT_TLS (some games keep the header) declares no TLS.
+            for (const auto& h : m.image.headers) if (h.type == 7 && (h.memorySize || h.fileSize)) {
+                require(!tls, "duplicate PT_TLS"); tls = &h;
+            }
             if (tls) {
                 report.phase = "TLS";
                 const auto alignment = tls->alignment ? tls->alignment : 1;
-                require(!(alignment & (alignment - 1)) && alignment <= 4096, "invalid PT_TLS alignment");
+                require(!(alignment & (alignment - 1)) && alignment <= 4096,
+                        "invalid PT_TLS alignment " + std::to_string(tls->alignment));
                 require(tls->memorySize && tls->fileSize <= tls->memorySize && tls->memorySize <= tlsBudget,
-                        "invalid PT_TLS size");
+                        "invalid PT_TLS size: filesz=" + std::to_string(tls->fileSize) +
+                        " memsz=" + std::to_string(tls->memorySize));
                 // The initialization image must lie in loaded, readable, file-backed bytes.
                 bool backed = !tls->fileSize;
                 for (const auto& region : m.image.segments) {
@@ -350,11 +384,17 @@ private:
                 ++report.tlsModules; report.staticTLSBytes = offset;
                 report.phase = "ELF/segments";
             }
+            // Metadata games carry (interpreter path, process/module parameters, unwind tables,
+            // stack/RELRO hints, comment, library version) is not mapped here.
             for (const auto& h : m.image.headers) {
                 require(h.type == 0 || h.type == 1 || h.type == 2 || h.type == 4 || h.type == 6 ||
-                        h.type == 7 || h.type == 0x61000000 || h.type == 0x61000010,
+                        h.type == 7 || h.type == 0x61000000 || h.type == 0x61000010 ||
+                        h.type == 3 || h.type == 0x61000001 || h.type == 0x61000002 || h.type == 0x6474e550 ||
+                        h.type == 0x6474e551 || h.type == 0x6474e552 || h.type == 0x6fffff00 || h.type == 0x6fffff01,
                         "unsupported runtime program header " + std::to_string(h.type));
             }
+            // PT_SCE_RELRO is written by relocations, then made read-only below.
+            for (auto& s : m.image.segments) if (s.header.type == 0x61000010) s.header.flags |= 2U;
             for (const auto& s : m.image.segments) {
                 require(s.bytes.size() <= budget - allocated, "batch memory budget exceeded"); allocated += s.bytes.size();
                 require((s.header.flags & 3) != 3, "writable executable guest segment refused");
@@ -388,9 +428,16 @@ private:
                 bool offeredByModule = false;
                 for (const auto& d : dynamic) for (const auto& offered : library ? d.exportLibraries : d.exports)
                     offeredByModule |= offered.name == required.name;
+                // A system one none of whose symbols is imported has nothing to
+                // bind (games list modules they barely use). Supplied modules
+                // keep their explicit dependency either way.
+                bool used = false;
+                for (const auto& s : dynamic[i].symbols)
+                    used |= !s.defined && !s.local && (library ? s.identity.library : s.identity.module) == required.name;
+                if (!offeredByModule && !used) return;
                 if (!offeredByModule) for (const auto& h : hle)
                     if ((library ? h.identity.library : h.identity.module) == required.name &&
-                        (library ? h.identity.libraryVersion : h.identity.moduleVersion) == required.version) return;
+                        (!library || h.identity.libraryVersion == required.version)) return;
                 size_t named = 0, compatible = 0, declared = 0;
                 for (size_t j = 0; j < dynamic.size(); ++j) {
                     const auto& offeredDescriptors = library ? dynamic[j].exportLibraries : dynamic[j].exports;
@@ -412,6 +459,12 @@ private:
             }
             for (const auto& required : dynamic[i].importLibraries) validateDescriptor(required, true);
             for (const auto& required : dynamic[i].needed) {
+                // A system module that no supplied file exports (libkernel.prx,
+                // libSceGnmDriver.prx, ...) is served by HLE: no file needed.
+                const auto stem = required.substr(0, required.find('.'));
+                bool offeredByModule = false;
+                for (const auto& d : dynamic) for (const auto& offered : d.exports) offeredByModule |= offered.name == stem;
+                if (!offeredByModule && std::find(deps.begin(), deps.end(), required) == deps.end()) continue;
                 require(std::find(deps.begin(), deps.end(), required) != deps.end(),
                         "DT_NEEDED missing explicit dependency: " + required);
                 ++report.dependencies;
@@ -419,7 +472,7 @@ private:
         }
         report.phase = "NID imports";
         struct Export { uint64_t address; size_t owner; };
-        std::map<Identity, Export> exports;
+        std::map<Identity, Export> exports, hleExports; // HLE keys have module version 0.
         // TLS exports carry their block offset; the owner gives the TLS module.
         for (size_t i = 0; i < dynamic.size(); ++i) for (const auto& s : dynamic[i].symbols) if (s.defined && !s.local)
             require(exports.emplace(s.identity, Export{s.type == 6 ? s.value : add(out.modules[i].bias, s.value), i}).second,
@@ -427,10 +480,15 @@ private:
         // Synthesized trampolines live in one RX module after every supplied
         // module, separated by a 16 KiB guard (iOS page size).
         size_t synthesized = 0;
+        uint64_t dataBytes = 0;
+        auto isData = [](const HLE& h) { return h.identity.type == 1; };
         for (const auto& h : hle) {
             require(!h.guestAddress || !h.token, "HLE entry has both an address and a token");
             require(h.guestAddress || h.token, "HLE entry needs an address or a token");
-            synthesized += !h.guestAddress;
+            if (h.guestAddress) continue;
+            if (!isData(h)) { ++synthesized; continue; }
+            require(h.token <= dataObjectLimit, "HLE data object too large");
+            dataBytes += (uint64_t(h.token) + 15) & ~uint64_t{15};
         }
         uint64_t thunkBase = 0;
         if (synthesized) {
@@ -446,7 +504,7 @@ private:
             PS4ExecutableImage::Header header {1, 5, 0, 0, size, size, page};
             std::vector<uint8_t> code(static_cast<size_t>(size));
             size_t k = 0;
-            for (const auto& h : hle) if (!h.guestAddress) {
+            for (const auto& h : hle) if (!h.guestAddress && !isData(h)) {
                 const uint8_t body[thunkSize] = {0x49,0x89,0xca,0xb8,uint8_t(h.token),uint8_t(h.token>>8),
                     uint8_t(h.token>>16),uint8_t(h.token>>24),0x0f,0x05,uint8_t(h.noreturn ? 0xf4 : 0xc3)};
                 std::copy(std::begin(body), std::end(body), code.begin() + k * thunkSize);
@@ -456,11 +514,46 @@ private:
             thunks.image.segments.push_back({header, std::move(code)});
             out.modules.push_back(std::move(thunks));
         }
+        uint64_t dataBase = 0;
+        if (dataBytes) {
+            uint64_t highest = 0;
+            for (const auto& m : out.modules) for (const auto& s : m.image.segments)
+                highest = std::max(highest, add(add(m.bias, s.header.address), s.header.memorySize));
+            constexpr uint64_t page = 0x4000;
+            dataBase = add(add(highest, page - 1) & ~(page - 1), page);
+            const auto size = (dataBytes + page - 1) & ~(page - 1);
+            require(add(dataBase, size) <= (uint64_t{1} << 47), "non-canonical HLE data address");
+            Module data {"<hle-data>", dataBase, 0, PS4ExecutableImage{}};
+            data.image.type = 0xfe18;
+            PS4ExecutableImage::Header header {1, 6, 0, 0, 0, size, page};
+            data.image.headers.push_back(header);
+            data.image.segments.push_back({header, std::vector<uint8_t>(static_cast<size_t>(size), 0)});
+            out.modules.push_back(std::move(data));
+        }
         size_t k = 0;
+        uint64_t dataOffset = 0;
         for (const auto& h : hle) {
-            const auto address = h.guestAddress ? h.guestAddress : thunkBase + (k++) * thunkSize;
-            require(h.identity.type == 2 && out.translate(address, 1, 5), "HLE requires mapped executable guest trampoline");
-            require(exports.emplace(h.identity, Export{address, SIZE_MAX}).second, "ambiguous HLE/export");
+            uint64_t address = h.guestAddress;
+            if (!address && isData(h)) {
+                address = dataBase + dataOffset;
+                dataOffset += (uint64_t(h.token) + 15) & ~uint64_t{15};
+                out.data.push_back({address, h.token, h.identity.nid});
+            } else if (!address) {
+                address = thunkBase + (k++) * thunkSize;
+            }
+            if (isData(h)) require(out.translate(address, h.token ? h.token : 1, 6), "HLE data object outside RW guest memory");
+            else require(h.identity.type == 2 && out.translate(address, 1, 5), "HLE requires mapped executable guest trampoline");
+            // HLE functions match any module version, as in shadPS4: games import
+            // libkernel 1.1, libSceScreenShot 0.9, ... for the same functions.
+            auto key = h.identity;
+            key.moduleVersion = 0;
+            for (const auto& [identity, unused] : exports) {
+                (void)unused;
+                auto exported = identity;
+                exported.moduleVersion = 0;
+                require(exported.key() != key.key(), "ambiguous HLE/export");
+            }
+            require(hleExports.emplace(key, Export{address, SIZE_MAX}).second, "ambiguous HLE/export");
         }
         // Resolve every import (including unreferenced/weak imports) before writes.
         std::vector<std::vector<uint64_t>> resolved(dynamic.size());
@@ -469,9 +562,15 @@ private:
             for (size_t j = 0; j < dynamic[i].symbols.size(); ++j) {
                 const auto& s = dynamic[i].symbols[j]; uint64_t address = 0; size_t definer = i;
                 if (s.defined) address = s.type == 6 ? s.value : add(out.modules[i].bias, s.value);
-                else if (j) {
+                else if (j && !s.local) { // Local (section) symbols are never imported.
                     ++report.imports;
-                    const auto it = exports.find(s.identity);
+                    auto it = exports.find(s.identity);
+                    if (it == exports.end()) {
+                        auto key = s.identity;
+                        key.moduleVersion = 0;
+                        it = hleExports.find(key);
+                        if (it == hleExports.end()) it = exports.end();
+                    }
                     require(it != exports.end(), out.modules[i].path + ": unresolved NID " + s.identity.nid +
                             " library=" + s.identity.library + " module=" + s.identity.module);
                     const auto owner = it->second.owner;

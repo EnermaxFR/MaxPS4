@@ -2,6 +2,7 @@
 #include "PS4LinkedELFFixture.h"
 #include "PS4OrbisExecutionFixture.h"
 #include "PS4PlayableFixture.h"
+#include "SelfFixture.h"
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -492,6 +493,33 @@ int main(int argc, char** argv) {
             CHECK(observed==42 && report.exited==1 && report.exit_status==42 && report.argc==1);
         }
         std::puts("PASS general FEX execution -> PS4 entry ABI (EntryParams in RDI, copy at RSP, RSP=8 mod 16) -> exit function(42)");
+        maxps4_fex_engine_close(process);
+    }
+    {
+        // The same image in a homebrew-style SELF with plaintext blocks runs the
+        // same; with encrypted blocks it is refused before any mapping.
+        const auto self = self_fixture::wrap(orbis_execution::make_general_entry_app());
+        const auto encrypted = self_fixture::wrap(orbis_execution::make_general_entry_app(), 0x2);
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        char diagnostic[512]{};
+        uint64_t relocation=0;
+        const maxps4_orbis_module refused[] = {
+            {"eboot.bin",encrypted.data(),encrypted.size(),orbis_execution::app_bias,nullptr,0}};
+        CHECK(maxps4_fex_engine_prepare_orbis_general(process,refused,1,"eboot.bin",&relocation,diagnostic,sizeof(diagnostic))==-ENOTSUP);
+        CHECK(std::strstr(diagnostic,"chiffré"));
+        const maxps4_orbis_module modules[] = {
+            {"eboot.bin",self.data(),self.size(),orbis_execution::app_bias,nullptr,0}};
+        const int prepared = maxps4_fex_engine_prepare_orbis_general(process,modules,1,"eboot.bin",&relocation,diagnostic,sizeof(diagnostic));
+        if (prepared) std::fprintf(stderr,"prepare: %s\n",diagnostic);
+        CHECK(prepared==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        uint64_t observed=0, logical_entry=0; uint32_t cpu=0;
+        CHECK(maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry)==0);
+        maxps4_fex_cpu_report report{};
+        CHECK(maxps4_fex_engine_last_cpu_report(process,&report)==0);
+        CHECK(observed==42 && report.exited==1 && report.exit_status==42);
+        std::puts("PASS general FEX execution of a SELF with plaintext blocks (fSELF) -> exit(42); encrypted SELF refused");
         maxps4_fex_engine_close(process);
     }
     {
