@@ -139,7 +139,7 @@ struct MaxPS4VideoOutView: View {
         .navigationTitle("VideoOut → Metal")
 #if MAXPS4_FEX_APP
         .onDisappear { session.stop() }
-        .onChange(of: scenePhase) { phase in if phase != .active { session.stop() } }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { session.stop() } }
 #endif
     }
 }

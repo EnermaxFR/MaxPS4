@@ -6,7 +6,7 @@ import Darwin
 // Native execution/close stay on the established serial FEX queue. Snapshot
 // and completion use the native concurrent VideoOut API, with an extra lock
 // to serialize callbacks against closing this source. Late callbacks see nil.
-final class MaxPS4VideoOutSource {
+final class MaxPS4VideoOutSource: @unchecked Sendable {
     struct Frame { let info: maxps4_videoout_frame; let bytes: Data }
     private let lock = NSLock()
     private var engine: OpaquePointer?
@@ -47,6 +47,7 @@ final class MaxPS4VideoOutSource {
     }
 
     private func close() {
+        dispatchPrecondition(condition: .onQueue(MaxPS4FEXMetalExecution.queue))
         lock.lock(); defer { lock.unlock() }
         ready = false
         if let engine { self.engine = nil; maxps4_fex_engine_close(engine) }
@@ -54,6 +55,7 @@ final class MaxPS4VideoOutSource {
 
     func run() -> String {
         // Called only on the serial FEX queue; close cannot overtake run_orbis.
+        dispatchPrecondition(condition: .onQueue(MaxPS4FEXMetalExecution.queue))
         defer { close() }
         do {
             guard let url = Bundle.main.url(forResource: "videoout", withExtension: "elf", subdirectory: "VideoOutDemo") else {
@@ -108,12 +110,15 @@ final class MaxPS4VideoOutSource {
     @Published private(set) var source: MaxPS4VideoOutSource?
     @Published private(set) var running = false
     @Published private(set) var report = "Aucune présentation effectuée."
+    // Stored separately so nonisolated deinit need not call an actor-isolated
+    // @Published accessor. The source itself serializes stop/close safely.
+    private var worker: MaxPS4VideoOutSource?
     private var generation = UUID()
 
     func start() {
         stop()
         let source = MaxPS4VideoOutSource(), id = UUID()
-        generation = id; self.source = source; running = true
+        generation = id; self.source = source; worker = source; running = true
         report = "Préparation FEX et attente de présentation Metal…"
         MaxPS4FEXMetalExecution.queue.async { [weak self] in
             let report = source.run()
@@ -125,9 +130,9 @@ final class MaxPS4VideoOutSource {
     }
     func rendererReport(_ text: String) { if running { report = text } }
     func stop() {
-        generation = UUID(); source?.stop(); source = nil; running = false
+        generation = UUID(); worker?.stop(); worker = nil; source = nil; running = false
         report = "Arrêt demandé ; aucun nouveau flip ne sera confirmé."
     }
-    deinit { source?.stop() }
+    deinit { worker?.stop() }
 }
 #endif
