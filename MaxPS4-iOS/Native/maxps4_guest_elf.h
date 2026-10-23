@@ -36,10 +36,11 @@ public:
     // Guest faults are not contained here: the FEX runtime contains those of
     // generated code on ARM64 hosts.
     static constexpr uint64_t generalAlignment = 1024 * 1024, generalStack = 1024 * 1024,
-                              generalSpan = 256 * 1024 * 1024;
+                              generalSpan = uint64_t(1536) * 1024 * 1024;
     // sceKernelMmap window after the stack (PS4 16 KiB pages), PROT_NONE in
     // the host until PS4VirtualMemory maps pages in it.
-    static constexpr uint64_t generalHeap = 32 * 1024 * 1024, generalHeapPage = 0x4000;
+    // Only reserved address space: games map their heap and GPU memory there.
+    static constexpr uint64_t generalHeap = uint64_t(1024) * 1024 * 1024, generalHeapPage = 0x4000;
     // Child thread slots after the mmap window (scePthreadCreate): each a
     // guarded RW region holding a stack of generalStack bytes with a private
     // copy of the static TLS (blocks, then the TCB) right above it.

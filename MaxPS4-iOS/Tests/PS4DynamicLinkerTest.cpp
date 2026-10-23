@@ -56,9 +56,18 @@ int main() {
     Program unknown; unknown.call("missingKernelNID"); unknown.bytes({0xf4});
     rejected(unknown.elf(),-ENOENT);
     assert(linker.diagnostic().find("missingKernelNID") != std::string::npos);
-    Program missing_fourth;
-    missing_fourth.call("sceKernelMmap"); missing_fourth.bytes({0xf4});
-    rejected(missing_fourth.elf(),-ENOTSUP);
+    for (const char* name : {"sceKernelMmap", "sceKernelPread", "sceKernelPwrite", "sceKernelGetdirentries"}) {
+        Program missing_fourth;
+        missing_fourth.call(name); missing_fourth.bytes({0xf4});
+        rejected(missing_fourth.elf(),-ENOTSUP);
+        Program stale_fourth;
+        stale_fourth.reg(1,0); stale_fourth.call("scePthreadSelf");
+        stale_fourth.call(name); stale_fourth.bytes({0xf4});
+        rejected(stale_fourth.elf(),-ENOTSUP);
+        Program explicit_fourth;
+        explicit_fourth.reg(1,0); explicit_fourth.call(name); explicit_fourth.bytes({0xf4});
+        assert(load(explicit_fourth.elf()) == 0);
+    }
     Program private_rcx;
     private_rcx.reg(1,123); private_rcx.call("scePthreadSelf");
     private_rcx.store(data+0x100,1); private_rcx.bytes({0xf4});

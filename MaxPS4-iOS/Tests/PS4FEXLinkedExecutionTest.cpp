@@ -856,7 +856,7 @@ int main(int argc, char** argv) {
     CHECK(maxps4_fex_engine_run_linked_ps4(engine,&result,&backend,&entry_out,&calls) == 0 && result == 1 && calls == 1);
     uint8_t preserved_bytes[48]{};
     CHECK(maxps4_fex_engine_read_ps4(engine,data+0x100,preserved_bytes,sizeof(preserved_bytes)) == 0);
-    for (size_t i = 0; i < sizeof(saved); ++i) CHECK(value(preserved_bytes+i*8) == 0x12340000+saved[i]);
+    for (size_t i = 0; i < sizeof(saved); ++i) CHECK(value(preserved_bytes+i*8) == 0x12340000ULL+saved[i]);
     std::puts("PASS System V callee-saved RBX/RBP/R12-R15 preserved through actual FEX syscall trampoline");
     file = combined();
     CHECK(maxps4_fex_engine_link_ps4(engine,file.data(),file.size(),1000,&entry_out,&imports) == 0 && imports == 5);
@@ -887,6 +887,37 @@ int main(int argc, char** argv) {
         CHECK(maxps4_fex_engine_read_ps4(engine,allocation,bytes,4) == 0 && !std::memcmp(bytes,pattern,4));
     }
     std::puts("PASS real FEX calls open/read/close/clock/mmap, register return, fourth and seventh ABI arguments");
+    Program writable;
+    writable.reg(7,data+0x180); writable.reg(6,0x602); writable.reg(2,0600);
+    writable.call("sceKernelOpen"); writable.store(data+0x100);
+    writable.bytes({0x48,0x89,0xc7}); // MOV RDI,RAX: use the returned descriptor.
+    writable.reg(6,data+0x2000); writable.reg(2,4);
+    writable.call("sceKernelWrite"); writable.store(data+0x108);
+    writable.reg(7,3); writable.reg(6,data+0x2000); writable.reg(2,2); writable.reg(1,2);
+    writable.call("sceKernelPwrite"); writable.store(data+0x110);
+    writable.reg(7,3); writable.reg(6,data+0x2100); writable.reg(2,4); writable.reg(1,0);
+    writable.call("sceKernelPread"); writable.store(data+0x118);
+    writable.reg(7,3); writable.call("sceKernelFsync"); writable.store(data+0x120);
+    writable.reg(7,3); writable.call("sceKernelClose"); writable.bytes({0xf4});
+    file = writable.elf();
+    const char savedata_path[] = "/savedata0/fixture";
+    std::memcpy(file.data()+data_file+0x180,savedata_path,sizeof(savedata_path));
+    std::memcpy(file.data()+data_file+0x2000,"ABCD",4);
+    CHECK(maxps4_fex_engine_link_ps4(engine,file.data(),file.size(),1000,&entry_out,&imports) == 0 && imports == 6);
+    CHECK(maxps4_fex_engine_mount(engine,"/savedata0",directory) == 0);
+    CHECK(maxps4_fex_engine_run_linked_ps4(engine,&result,&backend,&entry_out,&calls) == 0);
+    CHECK(result == 0 && calls == 6);
+    uint8_t savedata_results[40]{};
+    CHECK(maxps4_fex_engine_read_ps4(engine,data+0x100,savedata_results,sizeof(savedata_results)) == 0);
+    CHECK(value(savedata_results) == 3 && value(savedata_results+8) == 4 &&
+          value(savedata_results+16) == 2 && value(savedata_results+24) == 4 && value(savedata_results+32) == 0);
+    uint8_t savedata_bytes[4]{};
+    CHECK(maxps4_fex_engine_read_ps4(engine,data+0x2100,savedata_bytes,4) == 0);
+    CHECK(!std::memcmp(savedata_bytes,"ABAB",4));
+    const int savedata_host = ::open(host_path,O_RDONLY);
+    CHECK(savedata_host >= 0 && ::read(savedata_host,savedata_bytes,4) == 4 && ::close(savedata_host) == 0);
+    CHECK(!std::memcmp(savedata_bytes,"ABAB",4));
+    std::puts("PASS real FEX writes savedata, positioned I/O fourth argument, sync and matching host bytes");
     // A pointer with the numerical value of an application-host address must
     // still be treated as a logical guest pointer and return Orbis EFAULT.
     Program invalid_pointer;

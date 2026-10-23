@@ -85,6 +85,32 @@ int main() {
     uint64_t unchanged = 42;
     assert(dynamic.map(0, 1, 3, 0x1002, -1, 0, unchanged) == nomem && unchanged == 42);
     kernel.reset(); assert(dynamic.allocated() == 0);
+    // Direct memory: physical ranges allocated first-fit, then mapped.
+    constexpr uint64_t phys = 0x11200, where = 0x11208, name = 0x11210;
+    assert(invoke(S::direct_size, {}) == int64_t(5056ULL << 20));
+    assert(invoke(S::direct_allocate, {0, 1ULL << 30, 0x8000, 0, 0, phys}) == 0);
+    assert(memory.read(phys, word, 8) && get_le(word, 8) == 0);
+    assert(invoke(S::direct_allocate, {0, 1ULL << 30, 0x4000, 0x10000, 0, phys}) == 0);
+    assert(memory.read(phys, word, 8) && get_le(word, 8) == 0x10000);
+    assert(invoke(S::direct_allocate, {0, 0x8000, 0x4000, 0, 0, phys}) == kernel_error(again));
+    assert(invoke(S::direct_allocate, {0, 1ULL << 30, 0x1000, 0, 0, phys}) == kernel_error(inval));
+    put_le(word, 0, 0, 8); assert(memory.write(where, word, 8));
+    assert(invoke(S::direct_map, {where, 0x8000, 0x33, 0, 0, 0}) == 0 && memory.read(where, word, 8));
+    assert(memory.permitted(get_le(word, 8), 0x8000, 6)); // GPU+CPU read/write: CPU read/write.
+    assert(invoke(S::direct_map, {where, 0x8000, 3, 0, 0x20000, 0}) == kernel_error(inval)); // Not allocated.
+    assert(invoke(S::direct_map, {where, 0x4000, 7, 0, 0, 0}) == kernel_error(inval)); // Executable.
+    assert(invoke(S::direct_release, {0, 0x8000}) == 0 && invoke(S::direct_release, {0, 0x8000}) == kernel_error(noent));
+    // Flexible memory needs a name; POSIX mmap returns the address, or -1.
+    const char flexible[] = "heap";
+    assert(memory.write(name, flexible, sizeof(flexible)));
+    put_le(word, 0, 0, 8); assert(memory.write(where, word, 8));
+    assert(invoke(S::flexible_map, {where, 0x4000, 3, 0, name}) == 0 && memory.read(where, word, 8));
+    assert(memory.permitted(get_le(word, 8), 0x4000, 6));
+    assert(invoke(S::flexible_map, {where, 0x4000, 3, 0, 0}) == kernel_error(fault));
+    const int64_t anonymous = kernel.invoke(S::posix_mmap, {0, 0x4000, 3, 0x1002, uint64_t(-1LL), 0}, 1, true);
+    assert(anonymous > 0 && memory.permitted(uint64_t(anonymous), 0x4000, 6));
+    assert(kernel.invoke(S::posix_mmap, {0, 0x4000, 3, 0x2, 3, 0}, 1, true) == -1); // File mapping.
+    kernel.reset(); assert(dynamic.allocated() == 0);
     // Allocation must skip a staged ELF segment at the default virtual base.
     GuestELF high_image;
     guest_test::put(elf, PS4VirtualMemory::base, 80, 8);

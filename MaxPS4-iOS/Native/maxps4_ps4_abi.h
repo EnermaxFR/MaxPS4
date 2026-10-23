@@ -6,9 +6,9 @@ namespace maxps4::ps4 {
 // FreeBSD/Orbis errno numbers, independent of the host's errno namespace.
 enum Error : uint32_t {
     ok = 0, perm = 1, noent = 2, srch = 3, intr = 4, io = 5, badf = 9,
-    deadlk = 11, nomem = 12, access = 13, fault = 14, busy = 16,
+    deadlk = 11, nomem = 12, access = 13, fault = 14, busy = 16, exist = 17, xdev = 18, nospc = 28,
     inval = 22, mfile = 24, rofs = 30, again = 35, notsup = 45, timedout = 60,
-    loop = 62, nametoolong = 63, nosys = 78, overflow = 84,
+    loop = 62, nametoolong = 63, notempty = 66, nosys = 78, overflow = 84,
     notdir = 20, isdir = 21
 };
 constexpr int64_t kernel_error(Error e) {

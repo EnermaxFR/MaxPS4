@@ -36,25 +36,58 @@ bool PS4VirtualMemory::host_protect(uint64_t address, uint64_t length, uint8_t p
 }
 Error PS4VirtualMemory::map(uint64_t hint, uint64_t length, uint32_t protection,
     uint32_t flags, int32_t descriptor, int64_t offset, uint64_t& result) {
-    // Anonymous PRIVATE only. File mappings, shared/fixed mappings and hints
-    // need additional semantics; never pretend to implement them.
-    if (hint || flags != 0x1002U) return notsup;
+    // Anonymous PRIVATE only, never file mappings. General images (host
+    // pages) also take an address hint and MAP_FIXED (0x10); bounded images
+    // take neither: never pretend to implement them.
+    uint64_t window = 0, window_bytes = 0;
+    const bool host = image_.heap(window, window_bytes);
+    if ((hint && !host) || (flags != 0x1002U && !(host && flags == 0x1012U))) return notsup;
     if (descriptor != -1 || offset != 0) return inval;
+    return place(hint, length, page_size, protection, flags == 0x1012U, result);
+}
+void PS4VirtualMemory::release(uint64_t address, uint64_t size) {
+    // Every mapped page of [address, address + size), whatever its region.
+    for (uint64_t page = address; page < address + size; page += page_size)
+        if (range(page, page_size)) (void)unmap(page, page_size);
+}
+Error PS4VirtualMemory::place(uint64_t hint, uint64_t length, uint64_t alignment, uint32_t protection,
+    bool fixed, uint64_t& result) {
     uint8_t permission;
     Error e = permissions(protection, permission);
     if (e) return e;
     uint64_t size;
     if (!rounded(length, size)) return inval;
-    if (size > budget - used_ || regions_.size() >= 128) return nomem;
+    if (!alignment) alignment = page_size;
+    if (alignment < page_size || (alignment & (alignment - 1)) || alignment > (uint64_t{1} << 32)) return inval;
     // General images: a span of the image's mmap window (host = guest). Else
     // an available logical span, also excluding ELF segments. No MAP_FIXED
     // host operation can clobber the app: the window belongs to the image.
     uint64_t window = 0, window_bytes = 0;
     const bool host = image_.heap(window, window_bytes);
-    uint64_t candidate = host ? window : base;
+    if (size > (host ? host_budget : budget) - std::min(used_, host ? host_budget : budget) ||
+        regions_.size() >= region_limit) return nomem;
+    if (fixed) {
+        // MAP_FIXED replaces whatever the span held, as on the PS4.
+        if (!host || hint % page_size || hint < window || size > window_bytes || hint - window > window_bytes - size)
+            return inval;
+        release(hint, size);
+        if (size > host_budget - std::min(used_, host_budget)) return nomem;
+    }
+    auto align = [&](uint64_t value) {
+        return value > UINT64_MAX - (alignment - 1) ? UINT64_MAX : (value + alignment - 1) & ~(alignment - 1);
+    };
+    uint64_t start = host ? window : base;
+    if (host && hint > window && hint < window + window_bytes) start = hint; // A search start, not a demand.
+    uint64_t candidate = fixed ? hint : align(start);
+    bool wrapped = start == (host ? window : base);
     for (;;) {
         if (candidate > UINT64_MAX - size) return nomem;
-        if (host && candidate + size > window + window_bytes) return nomem;
+        if (host && candidate + size > window + window_bytes) {
+            if (wrapped) return nomem;
+            wrapped = true;
+            candidate = align(window);
+            continue;
+        }
         uint64_t next = candidate;
         auto exclude = [&](uint64_t address, uint64_t count) {
             if (count > UINT64_MAX - address) { next = UINT64_MAX; return; }
@@ -67,7 +100,8 @@ Error PS4VirtualMemory::map(uint64_t hint, uint64_t length, uint32_t protection,
         for (const auto& region : regions_) exclude(region.address, region.size);
         if (!host) for (const auto& segment : image_.segments()) exclude(segment.address, segment.memory_size);
         if (next == candidate) break;
-        candidate = next;
+        if (fixed) return nomem; // Still in use after release: not ours to replace.
+        candidate = align(next);
     }
     try {
         Region pending{candidate, size, nullptr, {}, std::vector<uint8_t>(size_t(size / page_size), permission)};
@@ -101,8 +135,25 @@ Error PS4VirtualMemory::unmap(uint64_t address, uint64_t length) {
     if (address % page_size || !rounded(length, size)) return inval;
     Region* region = range(address, size);
     if (!region) return nomem;
-    if (hosted(*region) && !host_protect(address, size, 0xff)) return nomem;
     const size_t first = size_t((address - region->address) / page_size);
+    if (hosted(*region)) {
+        // Host pages: the span leaves the region, which keeps what lies before
+        // and after it, so the span can be mapped again (MAP_FIXED included).
+        if (!host_protect(address, size, 0xff)) return nomem;
+        Region old = std::move(*region);
+        regions_.erase(regions_.begin() + (region - regions_.data()));
+        const size_t last = first + size_t(size / page_size);
+        auto keep = [&](size_t from, size_t to) {
+            if (from == to) return;
+            const uint64_t at = old.address + from * page_size;
+            regions_.push_back({at, (to - from) * page_size, reinterpret_cast<uint8_t*>(at), {},
+                std::vector<uint8_t>(old.pages.begin() + long(from), old.pages.begin() + long(to))});
+        };
+        keep(0, first);
+        keep(last, old.pages.size());
+        used_ -= size_t(size);
+        return ok;
+    }
     for (size_t i = first; i < first + size / page_size; ++i) {
         region->pages[i] = 0xff;
         if (!region->bytes.empty()) std::fill_n(region->bytes.begin() + i * page_size, page_size, uint8_t(0));

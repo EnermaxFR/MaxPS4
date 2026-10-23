@@ -1,7 +1,10 @@
 #include "maxps4_ps4_libkernel.h"
 #include "maxps4_fex_runtime.h"
 #include "maxps4_ps4_kernel_path.h"
+#include <algorithm>
 #include <cerrno>
+#include <cstdio>
+#include <dirent.h>
 #include <cstring>
 #include <fcntl.h>
 #include <new>
@@ -26,6 +29,10 @@ Error host_error(int e) {
     case EACCES: return access;
     case EFAULT: return fault;
     case EBUSY: return busy;
+    case EEXIST: return exist;
+    case EXDEV: return xdev;
+    case ENOSPC: return nospc;
+    case ENOTEMPTY: return notempty;
     case ENOTDIR: return notdir;
     case EISDIR: return isdir;
     case EINVAL: return inval;
@@ -60,7 +67,7 @@ constexpr uint8_t once_code[] = {
     0x31,0xc0, 0xc3};                          // 28 done: XOR EAX,EAX; RET
 static_assert(sizeof(once_code) == 0x2b, "pthread_once routine layout");
 // ABI metadata checked against shadPS4 kernel/file_system.{h,cpp}; original
-// implementation below. Only sceKernel variants, not POSIX errno/TLS variants.
+// implementation below. POSIX variants carry their errno/TLS convention.
 constexpr Binding bindings[] = {
     {"sceKernelOpen", "1G3lF1Gg1k8", PS4KernelService::open},
     {"sceKernelRead", "Cg4srZ6TKbU", PS4KernelService::read},
@@ -169,6 +176,29 @@ constexpr Binding bindings[] = {
     {"sigreturn", "mo0bFmWppIw", PS4KernelService::succeed, "libkernel", true},
     {"__pthread_cxa_finalize", "kbw4UHHSYy0", PS4KernelService::succeed, "libkernel", true},
     {"(libkernel hHlZQUnlxSM)", "hHlZQUnlxSM", PS4KernelService::succeed},
+    // Memory (shadPS4 kernel/memory.cpp).
+    {"sceKernelGetDirectMemorySize", "pO96TwzOm5E", PS4KernelService::direct_size},
+    {"sceKernelAllocateDirectMemory", "rTXw65xmLIA", PS4KernelService::direct_allocate},
+    {"sceKernelReleaseDirectMemory", "MBuItvba6z8", PS4KernelService::direct_release},
+    {"sceKernelMapDirectMemory", "L-Q3LEjIbgA", PS4KernelService::direct_map},
+    {"sceKernelMapNamedFlexibleMemory", "mL8NDH86iQI", PS4KernelService::flexible_map},
+    {"mmap", "BPE9s9vQQXo", PS4KernelService::posix_mmap, "libkernel", true},
+    {"msync", "tZY4+SZNFhA", PS4KernelService::succeed, "libkernel", true},
+    {"sceKernelMlock", "3k6kx-zOOSQ", PS4KernelService::succeed},
+    // Files (shadPS4 kernel/file_system.cpp).
+    {"sceKernelWrite", "4wSze92BhLI", PS4KernelService::write},
+    {"write", "FxVZqBAA7ks", PS4KernelService::write, "libkernel", true},
+    {"read", "DRuBt2pvICk", PS4KernelService::read, "libkernel", true},
+    {"sceKernelPread", "+r3rMFwItV4", PS4KernelService::pread},
+    {"sceKernelPwrite", "nKWi-N2HBV4", PS4KernelService::pwrite},
+    {"sceKernelFsync", "fTx66l5iWIA", PS4KernelService::fsync},
+    {"sceKernelFtruncate", "VW3TVZiM4-E", PS4KernelService::ftruncate},
+    {"sceKernelTruncate", "WlyEA-sLDf0", PS4KernelService::truncate},
+    {"sceKernelMkdir", "1-LFLmRFxxM", PS4KernelService::mkdir},
+    {"sceKernelRmdir", "naInUjYt3so", PS4KernelService::rmdir},
+    {"sceKernelRename", "52NcYU9+lEo", PS4KernelService::rename},
+    {"sceKernelUnlink", "AUXVxWeJU-A", PS4KernelService::unlink},
+    {"sceKernelGetdirentries", "taRWhTJFTgE", PS4KernelService::getdirentries},
     // Data objects, filled by PS4Libkernel::initialize_data. "MaxPS4errno" is
     // engine-internal (no game imports it): the per-thread errno cells.
     {"__stack_chk_guard", "f7uOxY9mM1U", PS4KernelService::stack_chk_guard, "libkernel", false, false, 8},
@@ -203,120 +233,146 @@ PS4KernelService resolve_libkernel(std::string_view symbol, std::string_view lib
     return PS4KernelService::unresolved;
 }
 PS4Libkernel::PS4Libkernel(PS4GuestMemory& memory, PS4VirtualMemory* dynamic)
-    : memory_(memory), dynamic_(dynamic), threads_(memory), started_us_(monotonic_us()) { files_.fill(-1); }
-PS4Libkernel::~PS4Libkernel() { reset(); }
+    : memory_(memory), dynamic_(dynamic), threads_(memory), started_us_(monotonic_us()) {}
+PS4Libkernel::~PS4Libkernel() {
+    reset();
+}
 void PS4Libkernel::close_files() {
-    for (int& fd : files_) { if (fd >= 0) ::close(fd); fd = -1; }
+    for (auto& file : files_) { if (file.fd >= 0) ::close(file.fd); file = File{}; }
 }
 void PS4Libkernel::reset() {
     std::lock_guard<std::mutex> guard(lock_);
     close_files();
-    if (root_ >= 0) ::close(root_);
-    root_ = -1;
+    for (auto& mount : mounts_) if (mount.root >= 0) { ::close(mount.root); mount.root = -1; }
     if (dynamic_) dynamic_->reset();
     threads_.reset();
     errno_table_ = errno_table_size_ = process_param_ = 0;
+    direct_.clear();
     started_us_ = monotonic_us();
 }
-int64_t PS4Libkernel::mount_app0(const char* directory) {
+int64_t PS4Libkernel::mount(const char* guest, const char* directory) {
     std::lock_guard<std::mutex> guard(lock_);
-    if (!directory || !*directory) return kernel_error(inval);
+    if (!guest || !directory || !*directory) return kernel_error(inval);
+    const auto target = std::find_if(mounts_.begin(), mounts_.end(),
+        [guest](const Mount& m) { return !std::strcmp(m.prefix, guest); });
+    if (target == mounts_.end()) return kernel_error(inval);
     const int fd = ::open(directory, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if (fd < 0) return kernel_error(host_error(errno));
     close_files();
-    if (root_ >= 0) ::close(root_);
-    root_ = fd;
+    if (target->root >= 0) ::close(target->root);
+    target->root = fd;
     return 0;
 }
-Error PS4Libkernel::pathname(uint64_t address, char* path) {
-    char validated[PS4KernelPath::max_path];
-    // The mount root itself is a legitimate directory for stat/open.
-    if (!memory_.read_cstring(address, validated, sizeof(validated))) return fault;
-    if (std::strcmp(validated, "/app0") == 0 || std::strcmp(validated, "/app0/") == 0) {
-        path[0] = '\0'; return ok;
+Error PS4Libkernel::resolve(uint64_t address, size_t& mount, char* relative) const {
+    char path[PS4KernelPath::max_path];
+    if (!memory_.read_cstring(address, path, sizeof(path))) return fault;
+    // Absolute virtual paths only; no "." or ".." components, no "//", no
+    // control characters or backslashes, no trailing "/" (except a mount root).
+    if (path[0] != '/') return inval;
+    size_t length = std::strlen(path);
+    for (size_t i = 1; i < length; ++i) {
+        const unsigned char byte = static_cast<unsigned char>(path[i]);
+        if (byte < 0x20 || byte == 0x7f || byte == '\\') return inval;
+        if (path[i] == '/' && path[i - 1] == '/') return inval;
+        if (path[i - 1] == '/' && path[i] == '.' &&
+            (path[i + 1] == '/' || !path[i + 1] || (path[i + 1] == '.' && (path[i + 2] == '/' || !path[i + 2]))))
+            return inval;
     }
-    switch (PS4KernelPath::read(memory_, address, validated)) {
-    case PS4KernelPathResult::invalid_guest_address: return fault;
-    case PS4KernelPathResult::invalid_path: return inval;
-    case PS4KernelPathResult::unsupported_mount: return noent;
-    case PS4KernelPathResult::ok: break;
+    for (size_t m = 0; m < mounts_.size(); ++m) {
+        const size_t n = std::strlen(mounts_[m].prefix);
+        if (std::strncmp(path, mounts_[m].prefix, n) || (path[n] && path[n] != '/')) continue;
+        const char* rest = path + n + (path[n] == '/' ? 1 : 0);
+        if (*rest && rest[std::strlen(rest) - 1] == '/') return inval;
+        mount = m;
+        std::strcpy(relative, rest);
+        return mounts_[m].root < 0 ? noent : ok;
     }
-    std::strcpy(path, validated + 6);
-    return ok;
+    return length > 1 && path[length - 1] == '/' ? inval : noent;
 }
-int PS4Libkernel::open_path(const char* path, bool directory, Error& error) const {
-    if (root_ < 0) { error = noent; return -1; }
+int PS4Libkernel::parent(size_t mount, const char* relative, char* leaf, Error& error) const {
     // Walk from a held directory descriptor; reject symlinks at EVERY component.
-    // Do not canonicalize then reopen a host path (a race can escape /app0).
-    HostFD parent(::fcntl(root_, F_DUPFD_CLOEXEC, 0));
-    if (parent.fd < 0) { error = host_error(errno); return -1; }
-    char relative[PS4KernelPath::max_path];
-    std::strcpy(relative, *path ? path : ".");
-    char* component = relative;
+    // Do not canonicalize then reopen a host path (a race can escape the mount).
+    HostFD directory(::fcntl(mounts_[mount].root, F_DUPFD_CLOEXEC, 0));
+    if (directory.fd < 0) { error = host_error(errno); return -1; }
+    char path[PS4KernelPath::max_path];
+    std::strcpy(path, *relative ? relative : ".");
+    char* component = path;
     while (char* separator = std::strchr(component, '/')) {
         *separator = '\0';
-        const int next = ::openat(parent.fd, component,
-            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        const int next = ::openat(directory.fd, component, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
         if (next < 0) { error = host_error(errno); return -1; }
-        ::close(parent.fd); parent.fd = next;
+        ::close(directory.fd); directory.fd = next;
         component = separator + 1;
     }
-    // NONBLOCK avoids blocking on FIFOs/devices before fstat rejects them.
-    const int fd = ::openat(parent.fd, component, O_RDONLY | O_CLOEXEC |
-        O_NOFOLLOW | O_NONBLOCK | (directory ? O_DIRECTORY : 0));
-    if (fd < 0) { error = host_error(errno); return -1; }
-    struct ::stat info{};
-    if (::fstat(fd, &info) != 0) { error = host_error(errno); ::close(fd); return -1; }
-    if (!S_ISREG(info.st_mode) && !S_ISDIR(info.st_mode)) {
-        error = notsup; ::close(fd); return -1;
-    }
-    error = ok; return fd;
+    std::strcpy(leaf, component);
+    error = ok;
+    const int result = directory.fd;
+    directory.fd = -1;
+    return result;
 }
 bool PS4Libkernel::writable(uint64_t address, size_t size) const {
     return address && memory_.permitted(address, size, 2) && !memory_.permitted(address, size, 1);
 }
+PS4Libkernel::File* PS4Libkernel::file(int32_t fd) {
+    return fd >= 3 && size_t(fd) < files_.size() && files_[fd].fd >= 0 ? &files_[fd] : nullptr;
+}
 int64_t PS4Libkernel::open(const PS4KernelCall& c) {
-    const uint32_t flags = uint32_t(c.rsi);
-    if ((flags & 3U) == 3U) return kernel_error(inval);
-    if (flags & (3U | 0x8U | 0x200U | 0x400U)) return kernel_error(rofs);
-    if (flags & ~0x20000U) return kernel_error(notsup); // Only RDONLY and DIRECTORY.
-    char path[PS4KernelPath::max_path];
-    Error e = pathname(c.rdi, path);
+    // FreeBSD flags: access mode (0/1/2), APPEND 8, SYNC 0x80, CREAT 0x200,
+    // TRUNC 0x400, EXCL 0x800, DIRECTORY 0x20000.
+    const uint32_t flags = uint32_t(c.rsi), access = flags & 3U;
+    if (access == 3U) return kernel_error(inval);
+    const bool writing = access != 0 || (flags & (0x8U | 0x200U | 0x400U));
+    size_t mount = 0;
+    char relative[PS4KernelPath::max_path], leaf[PS4KernelPath::max_path];
+    Error e = resolve(c.rdi, mount, relative);
     if (e) return kernel_error(e);
+    if (writing && !mounts_[mount].writable) return kernel_error(rofs);
+    if (flags & ~(3U | 0x8U | 0x80U | 0x200U | 0x400U | 0x800U | 0x20000U)) return kernel_error(notsup);
     size_t slot = 3; // Standard streams are not host stdin/stdout/stderr aliases.
-    while (slot < files_.size() && files_[slot] >= 0) ++slot;
+    while (slot < files_.size() && files_[slot].fd >= 0) ++slot;
     if (slot == files_.size()) return kernel_error(mfile);
-    const int fd = open_path(path, (flags & 0x20000U) != 0, e);
-    if (fd < 0) return kernel_error(e);
-    files_[slot] = fd;
+    HostFD directory(parent(mount, relative, leaf, e));
+    if (directory.fd < 0) return kernel_error(e);
+    // NONBLOCK avoids blocking on FIFOs/devices before fstat rejects them.
+    const int host_flags = (access == 0 ? O_RDONLY : access == 1 ? O_WRONLY : O_RDWR) |
+        ((flags & 0x8U) ? O_APPEND : 0) | ((flags & 0x80U) ? O_SYNC : 0) |
+        ((flags & 0x200U) ? O_CREAT : 0) | ((flags & 0x400U) ? O_TRUNC : 0) |
+        ((flags & 0x800U) ? O_EXCL : 0) | ((flags & 0x20000U) ? O_DIRECTORY : 0) |
+        O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK;
+    const int fd = ::openat(directory.fd, leaf, host_flags, 0666);
+    if (fd < 0) return kernel_error(host_error(errno));
+    struct ::stat info{};
+    if (::fstat(fd, &info) != 0) { const Error error = host_error(errno); ::close(fd); return kernel_error(error); }
+    if (!S_ISREG(info.st_mode) && !S_ISDIR(info.st_mode)) { ::close(fd); return kernel_error(notsup); }
+    files_[slot] = File{fd, access != 1, access != 0, S_ISDIR(info.st_mode), false, !mounts_[mount].writable, {}, 0};
     return int64_t(slot);
 }
 int64_t PS4Libkernel::close(int32_t fd) {
-    if (fd < 3 || size_t(fd) >= files_.size() || files_[fd] < 0) return kernel_error(badf);
-    const int host = files_[fd]; files_[fd] = -1;
+    File* f = file(fd);
+    if (!f) return kernel_error(badf);
+    const int host = f->fd;
+    *f = File{};
     // Never retry close after EINTR: the host descriptor may already be released.
     return ::close(host) == 0 ? 0 : kernel_error(host_error(errno));
 }
 int64_t PS4Libkernel::read(const PS4KernelCall& c) {
-    const int32_t fd = signed32(c.rdi);
-    if (fd < 3 || size_t(fd) >= files_.size() || files_[fd] < 0) return kernel_error(badf);
+    File* f = file(signed32(c.rdi));
+    if (!f || !f->readable) return kernel_error(badf);
     if (c.rdx > transfer_limit) return kernel_error(inval);
     const size_t count = size_t(c.rdx);
     if (count && !writable(c.rsi, count)) return kernel_error(fault);
-    struct ::stat info{};
-    if (::fstat(files_[fd], &info) != 0) return kernel_error(host_error(errno));
-    if (S_ISDIR(info.st_mode)) return kernel_error(isdir);
+    if (f->directory) return kernel_error(isdir);
     if (!count) return 0;
     std::vector<uint8_t> buffer(count); // Allocate before advancing file offset.
     ssize_t got;
-    do { got = ::read(files_[fd], buffer.data(), count); } while (got < 0 && errno == EINTR);
+    do { got = ::read(f->fd, buffer.data(), count); } while (got < 0 && errno == EINTR);
     if (got < 0) return kernel_error(host_error(errno));
     if (got && !memory_.write(c.rsi, buffer.data(), size_t(got))) return kernel_error(fault);
     return got;
 }
 int64_t PS4Libkernel::lseek(const PS4KernelCall& c) {
-    const int32_t fd = signed32(c.rdi);
-    if (fd < 3 || size_t(fd) >= files_.size() || files_[fd] < 0) return kernel_error(badf);
+    File* f = file(signed32(c.rdi));
+    if (!f) return kernel_error(badf);
     int whence;
     switch (uint32_t(c.rdx)) {
     case 0: whence = SEEK_SET; break;
@@ -324,30 +380,47 @@ int64_t PS4Libkernel::lseek(const PS4KernelCall& c) {
     case 2: whence = SEEK_END; break;
     default: return kernel_error(inval);
     }
+    if (f->directory) {
+        // A directory's offset is its position in the dirent records.
+        const int64_t base = whence == SEEK_SET ? 0 : whence == SEEK_CUR ? int64_t(f->position) : int64_t(f->entries.size());
+        const int64_t offset = signed64(c.rsi);
+        if (offset > INT64_MAX - base) return kernel_error(overflow);
+        if (offset < -base) return kernel_error(inval);
+        const int64_t target = base + offset;
+        if (target % 512) return kernel_error(inval);
+        f->position = uint64_t(target);
+        return target;
+    }
     static_assert(sizeof(off_t) == 8, "PS4 requires 64-bit file offsets");
-    const off_t result = ::lseek(files_[fd], signed64(c.rsi), whence);
+    const off_t result = ::lseek(f->fd, signed64(c.rsi), whence);
     return result < 0 ? kernel_error(host_error(errno)) : int64_t(result);
 }
 int64_t PS4Libkernel::stat(const PS4KernelCall& c, bool by_descriptor) {
     if (!writable(c.rsi, stat_size)) return kernel_error(fault);
     struct ::stat info{};
+    bool read_only = true;
     if (by_descriptor) {
-        const int32_t fd = signed32(c.rdi);
-        if (fd < 3 || size_t(fd) >= files_.size() || files_[fd] < 0) return kernel_error(badf);
-        if (::fstat(files_[fd], &info) != 0) return kernel_error(host_error(errno));
+        File* f = file(signed32(c.rdi));
+        if (!f) return kernel_error(badf);
+        if (::fstat(f->fd, &info) != 0) return kernel_error(host_error(errno));
+        read_only = f->read_only_mount;
     } else {
-        char path[PS4KernelPath::max_path];
-        Error e = pathname(c.rdi, path);
+        size_t mount = 0;
+        char relative[PS4KernelPath::max_path], leaf[PS4KernelPath::max_path];
+        Error e = resolve(c.rdi, mount, relative);
         if (e) return kernel_error(e);
-        HostFD fd(open_path(path, false, e));
-        if (fd.fd < 0) return kernel_error(e);
-        if (::fstat(fd.fd, &info) != 0) return kernel_error(host_error(errno));
+        HostFD directory(parent(mount, relative, leaf, e));
+        if (directory.fd < 0) return kernel_error(e);
+        if (::fstatat(directory.fd, leaf, &info, AT_SYMLINK_NOFOLLOW) != 0) return kernel_error(host_error(errno));
+        if (S_ISLNK(info.st_mode)) return kernel_error(loop);
+        if (!S_ISREG(info.st_mode) && !S_ISDIR(info.st_mode)) return kernel_error(notsup);
+        read_only = !mounts_[mount].writable;
     }
     uint8_t wire[stat_size] = {};
     // OrbisKernelStat is 120 bytes; encode fields explicitly, never copy host stat.
     put_le(wire, 0, info.st_dev, 4); put_le(wire, 4, info.st_ino, 4);
     const uint16_t mode = (S_ISDIR(info.st_mode) ? 0040000 : 0100000) |
-        (uint16_t(info.st_mode) & 0777U & ~0222U);
+        (uint16_t(info.st_mode) & 0777U & (read_only ? ~0222U : 0777U));
     put_le(wire, 8, mode, 2); put_le(wire, 10, info.st_nlink, 2);
     put_le(wire, 12, info.st_uid, 4); put_le(wire, 16, info.st_gid, 4);
 #if defined(__APPLE__)
@@ -363,6 +436,162 @@ int64_t PS4Libkernel::stat(const PS4KernelCall& c, bool by_descriptor) {
     put_le(wire, 72, info.st_size, 8); put_le(wire, 80, info.st_blocks, 8);
     put_le(wire, 88, info.st_blksize, 4);
     return memory_.write(c.rsi, wire, sizeof(wire)) ? 0 : kernel_error(fault);
+}
+int64_t PS4Libkernel::file_service(PS4KernelService service, const PS4KernelCall& c) {
+    using S = PS4KernelService;
+    switch (service) {
+    // write(fd, buffer, count) and pwrite(fd, buffer, count, offset). The
+    // game's stdout and stderr (1, 2) go to the engine's standard error.
+    case S::write: case S::pwrite: {
+        if (c.rdx > transfer_limit) return kernel_error(inval);
+        if (service == S::pwrite && signed64(c.rcx) < 0) return kernel_error(inval);
+        const size_t count = size_t(c.rdx);
+        std::vector<uint8_t> buffer(count);
+        if (count && !memory_.read(c.rsi, buffer.data(), count)) return kernel_error(fault);
+        const int32_t fd = signed32(c.rdi);
+        if ((fd == 1 || fd == 2) && service == S::write) {
+            if (count) std::fwrite(buffer.data(), 1, count, stderr);
+            return int64_t(count);
+        }
+        File* f = file(fd);
+        if (!f || !f->writable) return kernel_error(badf);
+        if (f->directory) return kernel_error(isdir);
+        ssize_t put;
+        do {
+            put = service == S::write ? ::write(f->fd, buffer.data(), count) :
+                ::pwrite(f->fd, buffer.data(), count, off_t(signed64(c.rcx)));
+        } while (put < 0 && errno == EINTR);
+        return put < 0 ? kernel_error(host_error(errno)) : int64_t(put);
+    }
+    // pread(fd, buffer, count, offset).
+    case S::pread: {
+        File* f = file(signed32(c.rdi));
+        if (!f || !f->readable) return kernel_error(badf);
+        if (c.rdx > transfer_limit || signed64(c.rcx) < 0) return kernel_error(inval);
+        const size_t count = size_t(c.rdx);
+        if (count && !writable(c.rsi, count)) return kernel_error(fault);
+        if (f->directory) return kernel_error(isdir);
+        std::vector<uint8_t> buffer(count);
+        ssize_t got;
+        do { got = ::pread(f->fd, buffer.data(), count, off_t(signed64(c.rcx))); } while (got < 0 && errno == EINTR);
+        if (got < 0) return kernel_error(host_error(errno));
+        if (got && !memory_.write(c.rsi, buffer.data(), size_t(got))) return kernel_error(fault);
+        return got;
+    }
+    case S::fsync: {
+        File* f = file(signed32(c.rdi));
+        if (!f) return kernel_error(badf);
+        return ::fsync(f->fd) == 0 ? 0 : kernel_error(host_error(errno));
+    }
+    case S::ftruncate: {
+        File* f = file(signed32(c.rdi));
+        if (!f || !f->writable) return kernel_error(badf);
+        if (signed64(c.rsi) < 0) return kernel_error(inval);
+        return ::ftruncate(f->fd, off_t(c.rsi)) == 0 ? 0 : kernel_error(host_error(errno));
+    }
+    // Path operations, on writable mounts only.
+    case S::truncate: case S::mkdir: case S::rmdir: case S::unlink: case S::rename: {
+        size_t mount = 0, other = 0;
+        char relative[PS4KernelPath::max_path], leaf[PS4KernelPath::max_path];
+        char relative2[PS4KernelPath::max_path], leaf2[PS4KernelPath::max_path];
+        Error e = resolve(c.rdi, mount, relative);
+        if (e) return kernel_error(e);
+        if (!mounts_[mount].writable) return kernel_error(rofs);
+        if (!*relative && service != S::truncate) return kernel_error(service == S::mkdir ? exist : busy);
+        HostFD directory(parent(mount, relative, leaf, e));
+        if (directory.fd < 0) return kernel_error(e);
+        int result = -1;
+        switch (service) {
+        case S::truncate: {
+            if (signed64(c.rsi) < 0) return kernel_error(inval);
+            HostFD target(::openat(directory.fd, leaf, O_WRONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK));
+            if (target.fd < 0) return kernel_error(host_error(errno));
+            struct ::stat info{};
+            if (::fstat(target.fd, &info) != 0) return kernel_error(host_error(errno));
+            if (!S_ISREG(info.st_mode)) return kernel_error(notsup);
+            result = ::ftruncate(target.fd, off_t(c.rsi));
+            break;
+        }
+        case S::mkdir: result = ::mkdirat(directory.fd, leaf, 0777); break;
+        case S::rmdir: result = ::unlinkat(directory.fd, leaf, AT_REMOVEDIR); break;
+        case S::unlink: result = ::unlinkat(directory.fd, leaf, 0); break;
+        default: { // rename(from, to): both in the same writable mount.
+            e = resolve(c.rsi, other, relative2);
+            if (e) return kernel_error(e);
+            if (other != mount) return kernel_error(xdev);
+            if (!*relative2) return kernel_error(busy);
+            HostFD directory2(parent(other, relative2, leaf2, e));
+            if (directory2.fd < 0) return kernel_error(e);
+            result = ::renameat(directory.fd, leaf, directory2.fd, leaf2);
+        }
+        }
+        return result == 0 ? 0 : kernel_error(host_error(errno));
+    }
+    // getdirentries(fd, buffer, bytes, s64* base): whole 512-byte blocks of
+    // FreeBSD dirent records {u32 fileno; u16 reclen; u8 type; u8 namlen;
+    // name}, each record 4-byte aligned and the last of a block stretched to
+    // its end (as shadPS4's NormalDirectory).
+    case S::getdirentries: {
+        File* f = file(signed32(c.rdi));
+        if (!f) return kernel_error(badf);
+        if (!f->directory) return kernel_error(inval);
+        if (c.rdx < 512 || c.rdx > transfer_limit) return kernel_error(inval);
+        if (c.rcx && !writable(c.rcx, 8)) return kernel_error(fault);
+        if (!f->listed) {
+            const int copy = ::fcntl(f->fd, F_DUPFD_CLOEXEC, 0);
+            if (copy < 0) return kernel_error(host_error(errno));
+            struct Listing {
+                DIR* value;
+                ~Listing() { if (value) ::closedir(value); }
+            } listing{::fdopendir(copy)};
+            if (!listing.value) { const Error error = host_error(errno); ::close(copy); return kernel_error(error); }
+            ::rewinddir(listing.value);
+            std::vector<uint8_t> entries;
+            size_t offset = 0, ceiling = 0, last = 0;
+            uint32_t number = 1;
+            for (;;) {
+                errno = 0;
+                const dirent* entry = ::readdir(listing.value);
+                if (!entry) {
+                    if (errno) return kernel_error(host_error(errno));
+                    break;
+                }
+                const size_t length = std::strlen(entry->d_name);
+                if (length > 255) continue;
+                const size_t record = (8 + length + 1 + 3) & ~size_t{3};
+                if (offset + record > ceiling) {
+                    if (ceiling) put_le(entries.data(), last + 4, get_le(entries.data() + last + 4, 2) + (ceiling - offset), 2);
+                    offset = ceiling;
+                    ceiling += 512;
+                    entries.resize(ceiling, 0);
+                }
+                last = offset;
+                put_le(entries.data(), offset, number++, 4);
+                put_le(entries.data(), offset + 4, record, 2);
+                entries[offset + 6] = entry->d_type == DT_DIR ? 4 : entry->d_type == DT_REG ? 8 :
+                    entry->d_type == DT_LNK ? 10 : 0; // FreeBSD DT_DIR / DT_REG / DT_LNK / DT_UNKNOWN.
+                entries[offset + 7] = uint8_t(length);
+                std::memcpy(entries.data() + offset + 8, entry->d_name, length);
+                offset += record;
+            }
+            if (ceiling) put_le(entries.data(), last + 4, get_le(entries.data() + last + 4, 2) + (ceiling - offset), 2);
+            f->entries = std::move(entries);
+            f->listed = true;
+        }
+        const uint64_t start = std::min<uint64_t>(f->position, f->entries.size());
+        const uint64_t count = std::min<uint64_t>(c.rdx & ~uint64_t{511}, f->entries.size() - start);
+        if (count && !writable(c.rsi, size_t(count))) return kernel_error(fault);
+        if (c.rcx) {
+            uint8_t wire[8];
+            put_le(wire, 0, start, 8);
+            if (!memory_.write(c.rcx, wire, 8)) return kernel_error(fault);
+        }
+        if (count && !memory_.write(c.rsi, f->entries.data() + start, size_t(count))) return kernel_error(fault);
+        f->position = start + count;
+        return int64_t(count);
+    }
+    default: return kernel_error(nosys);
+    }
 }
 int64_t PS4Libkernel::mmap(const PS4KernelCall& c) {
     if (!dynamic_) return kernel_error(nosys);
@@ -488,10 +717,116 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
         if (c.rdx && !write(c.rdx, c.rdi, 8)) return kernel_error(fault);
         if (c.r8 && !write(c.r8, 0, 4)) return kernel_error(fault);
         return 0;
+    case S::write: case S::pread: case S::pwrite: case S::fsync: case S::ftruncate: case S::truncate:
+    case S::mkdir: case S::rmdir: case S::rename: case S::unlink: case S::getdirentries: {
+        std::lock_guard<std::mutex> guard(lock_);
+        if (!threads_.known(thread)) return kernel_error(inval);
+        try { return file_service(service, c); } catch (const std::bad_alloc&) { return kernel_error(nomem); }
+    }
+    case S::direct_size: case S::direct_allocate: case S::direct_release:
+    case S::direct_map: case S::flexible_map: case S::posix_mmap:
+        return memory_service(service, c);
     case S::proc_param: return int64_t(process_param_);
     case S::module_info_from_addr: return kernel_error(srch);
     case S::succeed: return 0;
     default: handled = false; return 0;
+    }
+}
+int64_t PS4Libkernel::memory_service(PS4KernelService service, const PS4KernelCall& c) {
+    using S = PS4KernelService;
+    // The PS4's direct memory: 5056 MiB of physical address space.
+    constexpr uint64_t direct_total = uint64_t(5056) * 1024 * 1024, page = PS4VirtualMemory::page_size;
+    if (service == S::direct_size) return int64_t(direct_total);
+    std::lock_guard<std::mutex> guard(lock_);
+    if (!dynamic_) return kernel_error(nosys);
+    auto aligned = [&](uint64_t value) { return value % page == 0; };
+    // CPU read/write bits; GPU-only memory (0x10/0x20) is CPU read/write here,
+    // since the GPU is emulated on the CPU. Execution is refused.
+    auto cpu = [](uint64_t protection, uint32_t& out) {
+        if (protection & ~uint64_t{0x33}) return false;
+        out = uint32_t(protection & 3);
+        if (!out && (protection & 0x30)) out = 3;
+        return true;
+    };
+    auto read_pointer = [&](uint64_t address, uint64_t& value) {
+        uint8_t wire[8];
+        if (!address || !memory_.read(address, wire, 8)) return false;
+        value = get_le(wire, 8);
+        return true;
+    };
+    auto write_pointer = [&](uint64_t address, uint64_t value) {
+        uint8_t wire[8]; put_le(wire, 0, value, 8);
+        return memory_.write(address, wire, 8);
+    };
+    switch (service) {
+    // sceKernelAllocateDirectMemory(start, end, length, alignment, type, s64* physical):
+    // the first fit in [start, end), aligned.
+    case S::direct_allocate: {
+        const int64_t start = signed64(c.rdi), end = signed64(c.rsi);
+        const uint64_t length = c.rdx, alignment = c.rcx ? c.rcx : page;
+        if (start < 0 || end < 0 || !length || !aligned(length) || !aligned(alignment) ||
+            (alignment & (alignment - 1)) || uint32_t(c.r8) > 10 || !c.r9) return kernel_error(inval);
+        if (length > direct_total) return kernel_error(again);
+        const uint64_t limit = std::min<uint64_t>(uint64_t(end), direct_total);
+        uint64_t candidate = (uint64_t(start) + alignment - 1) & ~(alignment - 1);
+        for (const auto& [at, bytes] : direct_) {
+            if (at + bytes <= candidate) continue;
+            if (candidate + length <= at) break;
+            candidate = (at + bytes + alignment - 1) & ~(alignment - 1);
+        }
+        if (candidate > limit || length > limit - candidate) return kernel_error(again);
+        if (!write_pointer(c.r9, candidate)) return kernel_error(fault);
+        direct_[candidate] = length;
+        return 0;
+    }
+    // sceKernelReleaseDirectMemory(start, length): whole allocations in the range.
+    case S::direct_release: {
+        if (!aligned(c.rdi) || !c.rsi || !aligned(c.rsi)) return kernel_error(inval);
+        bool released = false;
+        for (auto it = direct_.lower_bound(c.rdi); it != direct_.end() && it->first < c.rdi + c.rsi;) {
+            it = direct_.erase(it);
+            released = true;
+        }
+        return released ? 0 : kernel_error(noent);
+    }
+    // sceKernelMapDirectMemory(void** address, length, protection, flags, physical, alignment):
+    // the physical range must be allocated; *address is a hint, or exact with MAP_FIXED.
+    case S::direct_map: {
+        uint64_t hint = 0;
+        uint32_t protection = 0;
+        if (!read_pointer(c.rdi, hint)) return kernel_error(fault);
+        if (!c.rsi || !aligned(c.rsi) || !aligned(c.r8) || !cpu(c.rdx, protection)) return kernel_error(inval);
+        auto owner = direct_.upper_bound(c.r8);
+        if (owner == direct_.begin() || std::prev(owner)->first + std::prev(owner)->second < c.r8 + c.rsi)
+            return kernel_error(inval);
+        uint64_t mapped = 0;
+        const Error e = dynamic_->place(hint, c.rsi, std::max<uint64_t>(c.r9, page), protection, (c.rcx & 0x10) != 0, mapped);
+        if (e) return kernel_error(e);
+        return write_pointer(c.rdi, mapped) ? 0 : (dynamic_->unmap(mapped, c.rsi), kernel_error(fault));
+    }
+    // sceKernelMapNamedFlexibleMemory(void** address, length, protection, flags, name).
+    case S::flexible_map: {
+        uint64_t hint = 0;
+        uint32_t protection = 0;
+        char name[32];
+        if (!read_pointer(c.rdi, hint)) return kernel_error(fault);
+        if (!c.r8 || !memory_.read_cstring(c.r8, name, sizeof(name))) return kernel_error(fault);
+        if (!c.rsi || !aligned(c.rsi) || !cpu(c.rdx, protection)) return kernel_error(inval);
+        uint64_t mapped = 0;
+        const Error e = dynamic_->place(hint, c.rsi, page, protection, (c.rcx & 0x10) != 0 && hint, mapped);
+        if (e) return kernel_error(e);
+        return write_pointer(c.rdi, mapped) ? 0 : (dynamic_->unmap(mapped, c.rsi), kernel_error(fault));
+    }
+    // mmap(address, length, protection, flags, fd, offset): anonymous mappings only.
+    case S::posix_mmap: {
+        uint32_t protection = 0;
+        if (!c.rsi || !cpu(c.rdx, protection)) return kernel_error(inval);
+        if (!(c.rcx & 0x1000) || signed32(c.r8) != -1) return kernel_error(nosys);
+        uint64_t mapped = 0;
+        const Error e = dynamic_->place(c.rdi, c.rsi, page, protection, (c.rcx & 0x10) != 0, mapped);
+        return e ? kernel_error(e) : int64_t(mapped);
+    }
+    default: return kernel_error(nosys);
     }
 }
 bool PS4Libkernel::initialize_data(PS4KernelService service, uint64_t address, uint64_t size) {
