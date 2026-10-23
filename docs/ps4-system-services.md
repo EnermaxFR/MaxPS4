@@ -6,18 +6,39 @@ function as an ARM64 host function. It does not make Kero Blaster playable.
 
 ## Filesystem
 
-`PS4Libkernel::mount_app0` mounts a host directory read-only. Guest descriptors
-3–255 have independent host descriptors and offsets; 0–2 are not host streams.
-`sceKernelOpen`, `sceKernelRead`, `sceKernelClose`, `sceKernelLseek`,
-`sceKernelStat` and `sceKernelFstat` work on regular files and directories.
-Open supports RDONLY and the PS4 DIRECTORY flag; writes/creation/truncation
-return EROFS and other flags return ENOTSUP. Reads are bounded to 1 MiB per call.
+`PS4Libkernel::mount_app0` mounts a host directory read-only. `mount` also
+supports writable `/savedata0`, `/download0` and `/temp0` directories. The C API
+`maxps4_fex_engine_mount` exposes these mounts after staging an image; staging
+resets all mounts. Guest descriptors 3–255 have independent host descriptors
+and offsets. Writes to guest stdout/stderr (1–2) go to host stderr; these
+descriptors do not alias host file descriptors for other operations.
+`sceKernelOpen`, `sceKernelRead`, `sceKernelWrite`, `sceKernelClose`,
+`sceKernelLseek`, `sceKernelStat` and `sceKernelFstat` work on regular files
+and directories, with file I/O rejecting directories. Open supports RDONLY,
+WRONLY, RDWR, APPEND, SYNC, CREAT, TRUNC, EXCL and DIRECTORY. Mutations on
+`/app0` return EROFS; unsupported flags (including NONBLOCK) return ENOTSUP.
+Transfers are bounded to 1 MiB per call.
 Seeking supports SET/CUR/END with signed 64-bit offsets. Invalid guest buffers
 are checked before read changes a file offset. Stat uses an explicit 120-byte
-little-endian Orbis layout, not the host struct, and clears write mode bits.
+little-endian Orbis layout, not the host struct, and clears write mode bits
+on the read-only mount, including for fstat.
 Linux does not supply birthtime through stat, so that field remains zero there.
 
-Paths must be absolute under `/app0`; its root accepts `/app0` and `/app0/`.
+`sceKernelPread`/`sceKernelPwrite` preserve the descriptor offset;
+`sceKernelFsync`, `sceKernelFtruncate` and `sceKernelTruncate` operate on host
+files. `sceKernelMkdir`, `sceKernelRmdir`, `sceKernelRename` and
+`sceKernelUnlink` operate within writable mounts. Rename across mounts returns
+EXDEV; mount roots cannot be removed or renamed. Mounts must already exist on
+the host; an unconfigured mount returns ENOENT.
+
+`sceKernelGetdirentries` returns a snapshot of directory entries encoded as
+FreeBSD dirents in complete 512-byte blocks (32-bit fileno, 16-bit record size,
+8-bit type and name length, NUL-terminated name, 4-byte record alignment).
+The optional base pointer receives the starting byte offset. Directory seeks
+must be nonnegative and block aligned; seeking to zero rereads the snapshot.
+
+Paths must be absolute under a configured mount; its root accepts either
+`/savedata0` or `/savedata0/`, for example.
 Traversal, duplicate separators and ambiguous components are rejected.
 Directory-relative `openat` walks reject symlinks at each component; special
 files (including FIFOs) are unsupported. Remount/reset closes descriptors;
@@ -30,8 +51,9 @@ by the owner. PS4 errors use Orbis errno numbers and signed `0x80020000 | errno`
 `resolve_libkernel` recognizes the implemented sceKernel names and NIDs only
 for library/module `libkernel`, version 1. ABI metadata was checked against
 [shadPS4 file_system.h](https://github.com/shadps4-emu/shadPS4/blob/main/src/core/libraries/kernel/file_system.h)
-and its registration table. POSIX variants are deliberately unresolved because
-their `-1`/thread-local errno convention differs. An ELF/PRX loader must decode
+and its registration table. POSIX variants such as `read` and `write` use
+`-1` with the calling thread's errno cell, as recorded by their export metadata.
+An ELF/PRX loader must decode
 library/module IDs before using the resolver. Encoded `nid#library#module`
 strings are not guessed. The result is a service ID, never a host code pointer.
 `invoke` consumes RDI/RSI/RDX/RCX/R8/R9 register values. Guest results are returned

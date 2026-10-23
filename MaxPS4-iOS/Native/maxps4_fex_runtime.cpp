@@ -1363,6 +1363,12 @@ extern "C" int64_t maxps4_fex_engine_mount_app0(maxps4_fex_engine* engine, const
     if (engine->staged_ps4.segments().empty()) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
     return engine->libkernel.mount_app0(directory);
 }
+extern "C" int64_t maxps4_fex_engine_mount(maxps4_fex_engine* engine, const char* guest, const char* directory) {
+    if (!engine) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
+    std::lock_guard lock(runtime_lock);
+    if (engine->staged_ps4.segments().empty()) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
+    return engine->libkernel.mount(guest, directory);
+}
 extern "C" int64_t maxps4_fex_engine_call_libkernel(maxps4_fex_engine* engine, uint32_t service,
     const maxps4_ps4_kernel_call* call, uint64_t guest_thread) {
     if (!engine || !call) return maxps4::ps4::kernel_error(maxps4::ps4::inval);

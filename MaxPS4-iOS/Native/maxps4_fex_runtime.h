@@ -33,6 +33,8 @@ uint32_t maxps4_ps4_resolve_libkernel(const char *symbol, const char *library,
 // Mount configuration is host-side. Return 0 or signed Orbis kernel error.
 // Must mount AFTER staging; each staging attempt resets all system services.
 int64_t maxps4_fex_engine_mount_app0(maxps4_fex_engine *engine, const char *directory);
+// The same for "/app0" (read-only), "/savedata0", "/download0" or "/temp0".
+int64_t maxps4_fex_engine_mount(maxps4_fex_engine *engine, const char *guest, const char *directory);
 // Explicit service dispatch, serialized against staging and engine accesses.
 // Returns a guest ABI result, including signed Orbis errors. Default bootstrap
 // guest thread identity is 1. No guest CPU import trampoline is installed.

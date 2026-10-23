@@ -47,6 +47,9 @@ enum class PS4KernelService : uint32_t {
     // Memory: direct memory (physical ranges, then mapped as zeroed host
     // pages; no aliasing), flexible memory and POSIX mmap.
     direct_size, direct_allocate, direct_release, direct_map, flexible_map, posix_mmap,
+    // Files beyond read-only /app0: writes (stdout/stderr go to the engine log),
+    // positioned I/O, sync, truncation, directories and their entries.
+    write, pread, pwrite, fsync, ftruncate, truncate, mkdir, rmdir, rename, unlink, getdirentries,
     // Accepted without effect, answering 0 (masks, priorities, heap API, ...).
     succeed,
     // Data objects (PS4KernelExport::data): filled by initialize_data().
@@ -93,9 +96,11 @@ public:
     ~PS4Libkernel();
     PS4Libkernel(const PS4Libkernel&) = delete;
     PS4Libkernel& operator=(const PS4Libkernel&) = delete;
-    // Host-side mount configuration, never a guest pathname. A failed mount
-    // preserves the previous mount. Successful remount closes guest descriptors.
-    int64_t mount_app0(const char* host_directory);
+    // Host-side mount configuration, never a guest pathname: /app0 (read-only),
+    // /savedata0, /download0 and /temp0 (writable). A failed mount preserves
+    // the previous one. A successful remount closes guest descriptors.
+    int64_t mount(const char* guest, const char* host_directory);
+    int64_t mount_app0(const char* host_directory) { return mount("/app0", host_directory); }
     void reset();
     // `posix`: the trampoline's token had posix_token; an Orbis error result
     // becomes -1 with that error in the thread's errno cell.
@@ -118,11 +123,27 @@ private:
     int64_t invoke_service(PS4KernelService service, const PS4KernelCall& call, uint64_t thread);
     int64_t extended(PS4KernelService service, const PS4KernelCall& call, uint64_t thread, bool& handled);
     std::mutex lock_;
-    int root_ = -1;
-    std::array<int, descriptor_limit> files_;
+    struct Mount { const char* prefix; bool writable; int root; };
+    std::array<Mount, 4> mounts_{{{"/app0", false, -1}, {"/savedata0", true, -1},
+                                  {"/download0", true, -1}, {"/temp0", true, -1}}};
+    // A guest descriptor: its host descriptor, access, and for a directory
+    // the FreeBSD dirent records (512-byte blocks) read by getdirentries.
+    struct File {
+        int fd = -1;
+        bool readable = false, writable = false, directory = false, listed = false, read_only_mount = true;
+        std::vector<uint8_t> entries;
+        uint64_t position = 0;
+    };
+    std::array<File, descriptor_limit> files_;
     void close_files();
-    ps4::Error pathname(uint64_t address, char* path);
-    int open_path(const char* path, bool directory, ps4::Error& error) const;
+    File* file(int32_t descriptor);
+    // A validated guest path: its mount and the path inside it ("" for the root).
+    ps4::Error resolve(uint64_t address, size_t& mount, char* relative) const;
+    // The directory holding `relative`'s last component (a new host
+    // descriptor) and that component ("." for the mount root). Every
+    // component is opened without following symbolic links.
+    int parent(size_t mount, const char* relative, char* leaf, ps4::Error& error) const;
+    int64_t file_service(PS4KernelService service, const PS4KernelCall& call);
     int64_t open(const PS4KernelCall& call);
     int64_t read(const PS4KernelCall& call);
     int64_t close(int32_t descriptor);
