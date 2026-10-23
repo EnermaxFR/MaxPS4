@@ -654,7 +654,13 @@ int main(int argc, char** argv) {
         const int prepared = maxps4_fex_engine_prepare_orbis_general(process,&module,1,"pad.elf",&relocation,diagnostic,sizeof(diagnostic));
         if (prepared) std::fprintf(stderr,"prepare Pad/VideoOut: %s\n",diagnostic);
         CHECK(prepared == 0 && maxps4_fex_engine_initialize(process) == 0);
+#if (defined(__aarch64__) || defined(__arm64__)) && !defined(VIXL_SIMULATOR)
         CHECK(maxps4_fex_engine_set_time_limit(process,10000) == 0);
+#else
+        // VIXL has no native signal watchdog; the test process is externally
+        // bounded by run-bounded.py, like the existing simulator wait tests.
+        CHECK(maxps4_fex_engine_set_time_limit(process,10000) == -ENOTSUP);
+#endif
         CHECK(maxps4_fex_engine_pad_update(process,0x4080,0,255,128,128,12,244,1) == 0);
         CHECK(maxps4_fex_engine_pad_update(process,1,0,0,0,0,0,0,1) == -EINVAL);
         size_t frames=0; bool saw_changed=false; int presenter_status=0;
