@@ -448,7 +448,11 @@ public:
         if (target == threads.end()) return kernel_error(srch);
         target->joining = true;
         changed.wait(guard, [&] { return target->finished || stopping; });
-        if (!target->finished) { target->joining = false; return kernel_error(intr); }
+        // Stopping (time limit or a child's fault): return to guest code, where
+        // the stop signals land, and leave the thread to finish(). A faulting
+        // child only exits once the main run is done, so joining it here would
+        // never return.
+        if (stopping) { target->joining = false; return kernel_error(intr); }
         // finish() may join hosts too: whoever moves the handle out joins it.
         std::thread host = std::move(target->host);
         const uint64_t value = target->value;

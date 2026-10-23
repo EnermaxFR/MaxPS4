@@ -146,6 +146,8 @@ static int animatedGuestTest() {
 }
 int main(int argc, char** argv) {
     using namespace ps4_linked_test;
+    // CI logs go to a file: keep every line written before a crash or a kill.
+    std::setvbuf(stdout,nullptr,_IONBF,0);
     if (argc==3 && !std::strcmp(argv[1],"--playable-evidence")) return playableTest(argv[2]);
     if (argc==3 && (!std::strcmp(argv[1],"--playable-bundle") || !std::strcmp(argv[1],"--animated-playable-bundle"))) {
         std::filesystem::create_directories(argv[2]);
