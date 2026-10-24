@@ -365,9 +365,10 @@ private:
         else offset = scalar(i.word0 & 0xff, i);
         std::uint64_t address;
         std::uint64_t limit = std::numeric_limits<std::uint64_t>::max();
-        if (i.opcode >= 8) { // s_buffer_load: V# base and NUM_RECORDS bytes
+        if (i.opcode >= 8) { // s_buffer_load: V# base; NUM_RECORDS counts STRIDE-byte records (bytes if 0)
             address = (std::uint64_t(s[base]) | std::uint64_t(s[base + 1] & 0xffff) << 32) + offset;
-            limit = s[base + 2];
+            const std::uint32_t stride = (s[base + 1] >> 16) & 0x3fff;
+            limit = stride ? std::uint64_t(s[base + 2]) * stride : s[base + 2];
         } else {
             address = ((std::uint64_t(s[base]) | std::uint64_t(s[base + 1]) << 32) & 0xffffffffffffull) + offset;
         }

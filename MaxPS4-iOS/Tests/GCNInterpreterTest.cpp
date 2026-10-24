@@ -73,7 +73,8 @@ int main() {
         GCNWave wave(arena.memory, 4);
         const std::uint32_t tsharp[8] = {0x120, 0x01000000, 0x4003, 0x9080032e, 0x6000, 0, 0, 0};
         const std::uint32_t ssharp[4] = {0x12, 0, 0x500000, 0};
-        const std::uint32_t vsharp[4] = {0x13000, 0, 16, 0};
+        // As Sonic Mania's constant buffers: STRIDE 16, one record (16 bytes).
+        const std::uint32_t vsharp[4] = {0x13000, 16u << 16, 1, 0};
         for (unsigned n = 0; n < 8; ++n) wave.s[n] = tsharp[n];
         for (unsigned n = 0; n < 4; ++n) { wave.s[8 + n] = ssharp[n]; wave.s[12 + n] = vsharp[n]; }
         wave.setExec(0x7); // lane 3 is a helper lane
