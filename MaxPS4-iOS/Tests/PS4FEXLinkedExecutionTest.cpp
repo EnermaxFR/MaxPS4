@@ -890,6 +890,30 @@ int main(int argc, char** argv) {
         maxps4_fex_engine_close(process);
     }
 #if (defined(__aarch64__) || defined(__arm64__)) && !defined(VIXL_SIMULATOR)
+    {
+        auto provider=orbis_execution::make(true), app=orbis_execution::make_general_unaligned_app();
+        const char* dependency[]={"provider.prx"};
+        const maxps4_orbis_module modules[]={
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,dependency,1},
+            {"provider.prx",provider.data(),provider.size(),orbis_execution::provider_bias,nullptr,0}};
+        maxps4_fex_engine* process=nullptr;
+        CHECK(maxps4_fex_engine_open(&process)==0 && maxps4_fex_engine_initialize(process)==0);
+        CHECK(maxps4_fex_engine_set_time_limit(process,10000)==0);
+        char diagnostic[512]{}; uint64_t relocation=0;
+        CHECK(maxps4_fex_engine_prepare_orbis_general(process,modules,2,"app.elf",&relocation,diagnostic,sizeof diagnostic)==0);
+        for(unsigned repeat=0;repeat<2;++repeat) {
+            uint64_t observed=0, logical_entry=0; uint32_t cpu=0;
+            const int ran=maxps4_fex_engine_run_orbis(process,&observed,&cpu,&logical_entry);
+            CHECK(ran==0 && observed==0x55667789 && cpu==MAXPS4_CPU_FEX_ARM64_JIT);
+            uint8_t bytes[8]{};
+            CHECK(maxps4_fex_engine_read_ps4(process,orbis_execution::unaligned_cell+relocation,bytes,8)==0 && value(bytes)==0x55667788);
+            CHECK(maxps4_fex_engine_read_ps4(process,orbis_execution::unaligned_store+relocation,bytes,8)==0 && value(bytes)==0x55667789);
+            maxps4_fex_guest_fault fault{};
+            CHECK(maxps4_fex_engine_last_guest_fault(process,&fault)==-ENOENT);
+        }
+        maxps4_fex_engine_close(process);
+        std::puts("PASS native ARM64 unaligned TSO loads/stores and LOCK ADD/CMPXCHG across cache lines, repeated execution");
+    }
     for (int fault = 0; fault < 2; ++fault) {
         // A child thread that never ends: when the entry exits, the run stops it
         // (no hang). One that faults while the entry joins it ends the run with

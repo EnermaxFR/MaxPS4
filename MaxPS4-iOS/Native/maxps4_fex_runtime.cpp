@@ -28,6 +28,8 @@
 #include <FEXCore/Core/X86Enums.h>
 #include <FEXCore/Debug/InternalThreadState.h>
 #include <FEXCore/HLE/SyscallHandler.h>
+#include <FEXCore/Utils/AllocatorHooks.h>
+#include <FEXCore/Utils/ArchHelpers/Arm64.h>
 #include <array>
 #include <cstring>
 #include <cstdio>
@@ -328,6 +330,7 @@ public:
     GuestFaultGuard(const GuestFaultGuard&) = delete;
     GuestFaultGuard& operator=(const GuestFaultGuard&) = delete;
     std::atomic<int> signal {0};
+    int32_t code = 0;
     uint64_t address = 0;
 private:
     static constexpr std::array<int, 5> signals {SIGSEGV, SIGBUS, SIGILL, SIGTRAP, SIGURG};
@@ -345,14 +348,52 @@ private:
 #endif
         auto* guard = active;
         if (guard && !guard->signal.load()) {
+            const bool in_jit = guard->context->IsAddressInCodeBuffer(guard->thread, pc);
+            // x86 permits unaligned accesses. ARM64 TSO loads/stores and locked
+            // operations can raise BUS_ADRALN for otherwise valid guest memory.
+            // This frontend must route those faults to FEX before containing
+            // actual guest faults, as the upstream Linux signal frontend does.
+            if (number == SIGBUS && info->si_code == BUS_ADRALN && in_jit) {
+                std::array<uint64_t,32> gprs{};
+#if defined(__APPLE__)
+                auto& saved = machine->uc_mcontext->__ss;
+                std::copy(std::begin(saved.__x),std::end(saved.__x),gprs.begin());
+                gprs[29]=saved.__fp; gprs[30]=saved.__lr; gprs[31]=saved.__sp;
+#else
+                auto& saved = machine->uc_mcontext;
+                std::copy(std::begin(saved.regs),std::end(saved.regs),gprs.begin());
+                gprs[31]=saved.sp;
+#endif
+                // FEX may backpatch a TSO access with ordered loads/stores.
+                // iOS uses distinct RW/RX aliases: patch RW, resume RX, and
+                // invalidate the executable alias as well as FEX's RW flush.
+                auto* writable=FEXCore::Allocator::GetWritableAddress(reinterpret_cast<void*>(pc));
+                const auto repaired=FEXCore::ArchHelpers::Arm64::HandleUnalignedAccess(guard->thread,
+                    FEXCore::ArchHelpers::Arm64::UnalignedHandlerType::HalfBarrier,
+                    reinterpret_cast<uintptr_t>(writable),gprs.data());
+                if (repaired) {
+#if defined(__APPLE__)
+                    std::copy_n(gprs.begin(),29,std::begin(saved.__x));
+                    saved.__fp=gprs[29]; saved.__lr=gprs[30]; saved.__sp=gprs[31];
+#else
+                    std::copy_n(gprs.begin(),31,std::begin(saved.regs));
+                    saved.sp=gprs[31];
+#endif
+                    if (reinterpret_cast<uintptr_t>(writable)!=pc)
+                        __builtin___clear_cache(reinterpret_cast<char*>(pc)-4,reinterpret_cast<char*>(pc)+8);
+                    pc+=*repaired;
+                    return;
+                }
+            }
             // JIT code keeps guest registers in host registers: spill them first.
             // The dispatcher's guest-signal stubs have already spilled.
             uint64_t stop = 0;
-            if (guard->context->IsAddressInCodeBuffer(guard->thread, pc))
+            if (in_jit)
                 stop = guard->config.ThreadStopHandlerAddressSpillSRA;
             else if (pc >= guard->config.DispatcherBegin && pc < guard->config.DispatcherEnd)
                 stop = guard->config.ThreadStopHandlerAddress;
             if (stop) {
+                guard->code = number == SIGURG ? 0 : info->si_code;
                 guard->address = number == SIGURG ? 0 : reinterpret_cast<uintptr_t>(info->si_addr);
                 guard->signal.store(number);
                 sp = guard->thread->CurrentFrame->ReturningStackLocation;
@@ -628,7 +669,7 @@ private:
                     const int signal = guard.signal.load();
                     // SIGURG only comes from finish(): a stop, not a fault.
                     if (signal && signal != SIGURG)
-                        fault = {signal, 0, guard.address, fex->CurrentFrame->State.rip};
+                        fault = {signal, guard.code, guard.address, fex->CurrentFrame->State.rip};
                 }
                 context->DestroyThread(fex);
             }
@@ -1013,7 +1054,7 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
         if (signal == SIGURG && engine->probe.exited) signal = 0;
         // RIP is the guest position FEX last stored (block granularity).
         if (threads && threads->faulted(child)) { engine->last_fault = child; signal = child.signal; }
-        else if (signal) engine->last_fault = {signal, 0, guard.address, state.rip};
+        else if (signal) engine->last_fault = {signal, guard.code, guard.address, state.rip};
         if (signal) {
             engine->frame_code_cached = false;
             return signal == SIGURG ? (engine->stop_requested.load() ? -ECANCELED : -ETIMEDOUT) :
