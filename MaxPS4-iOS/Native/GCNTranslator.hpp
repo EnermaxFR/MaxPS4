@@ -793,9 +793,10 @@ inline std::string gcnMetalEntryPoints(const GCNTranslation& vs, const GCNTransl
          "    if ((D.flags & GCN_DRAW_FLIP_Y) != 0u) o.position.y = -o.position.y;\n"
          "    return o;\n}\n"
          "struct GCNFragment { float4 color [[color(0)]]; uint coverage [[sample_mask]]; };\n"
-         "fragment GCNFragment gcn_fragment(GCNVaryings in [[stage_in]],\n"
+         "fragment GCNFragment gcn_fragment(GCNVaryings in [[stage_in]], uint sampleCoverage [[sample_mask]],\n"
          "    device const uchar* mem [[buffer(0)]], constant GCNDrawState& D [[buffer(1)]]) {\n"
-         "    const bool covered = !simd_is_helper_thread();\n"
+         // Incoming raster coverage is independent of later fragment kills.
+         "    const bool covered = sampleCoverage != 0u;\n"
          "    GCNLane L; gcn_clear(L);\n"
          "    for (uint k = 0u; k < 17u; ++k) L.user[k] = D.psUser[k];\n"
          "    L.exec = covered;\n"
@@ -826,9 +827,7 @@ inline std::string gcnMetalEntryPoints(const GCNTranslation& vs, const GCNTransl
     }
     s += "    GCNMemory M = { mem, D.base, D.size, D.ranges, D.rangeCount }; GCNQuad Q = { 0u };\n"
          "    " + psName + "(L, M, Q);\n"
-         // Keep Metal's helper status stable throughout the translated program.
-         // discard_fragment feeds back into simd_is_helper_thread on some GPU
-         // compilers. There are no fragment memory side effects or depth writes;
+         // There are no fragment memory side effects or depth writes;
          // a zero output sample mask suppresses the same colour writes.
          "    return { L.color[0], L.killed ? 0u : 0xffffffffu };\n}\n";
     return s;
