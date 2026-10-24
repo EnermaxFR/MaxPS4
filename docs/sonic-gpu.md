@@ -243,3 +243,23 @@ Metal**, then **Lancer le jeu avec Metal**. This path does not require
 on-screen directions/face buttons/Options or an iOS controller. Share the
 session report if startup, rendering or presentation fails. Game files and
 captures remain local; none are embedded in the IPA.
+
+### Device SIGBUS before the first submission
+
+The first device report returned `-EFAULT`, signal 10 (`SIGBUS` on Darwin),
+with zero Metal draws. The native frontend had been treating alignment
+exceptions from FEX-generated TSO/atomic instructions as fatal guest faults.
+The VIXL probe disables TSO lowering because its x86 host already supplies
+that ordering, so the Linux simulator does not exercise this hardware path.
+
+Native ARM64 `BUS_ADRALN` exceptions inside the JIT are now offered to
+FEX's unaligned-access handler before fault containment. Backpatching uses
+the writable code alias with half-barriers, invalidates the executable
+alias too, and resumes the original executable PC with the repaired host
+registers. Other signal codes and unhandled instructions still use the
+existing contained-fault path. A native regression covers eight-byte loads,
+stores, LOCK ADD and LOCK CMPXCHG crossing cache-line boundaries, including
+a second run of the same image. Build 1000176 also reports `si_code`, the
+memory fault address, relocation and relative RIP for further device triage.
+This fixes a missing frontend mechanism; another device run is still needed
+to determine whether it resolves the reported game startup fault.

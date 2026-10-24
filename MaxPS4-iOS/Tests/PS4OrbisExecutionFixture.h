@@ -239,6 +239,7 @@ inline std::vector<uint8_t> make_general_app(uint32_t cell=7) {
 //   1: MOV DWORD [RIP-10],0 - a store into its own read-only code (SIGSEGV)
 //   2: UD2                  - invalid opcode (SIGILL)
 //   3: JMP $                - endless loop (needs a time limit)
+//   4: LOCK ADD [RIP-8],1    - unaligned atomic write into read-only code
 // Each is followed by HLT, which must never be reached.
 inline std::vector<uint8_t> make_general_fault_app(int kind) {
     auto b=make(false);
@@ -247,10 +248,37 @@ inline std::vector<uint8_t> make_general_fault_app(int kind) {
     if (kind == 0) code={0x8b,0x84,0x24,0x00,0x10,0,0, 0xf4};
     else if (kind == 1) code={0xc7,0x05,0xf6,0xff,0xff,0xff,0,0,0,0, 0xf4};
     else if (kind == 2) code={0x0f,0x0b, 0xf4};
-    else code={0xeb,0xfe, 0xf4};
+    else if (kind == 3) code={0xeb,0xfe, 0xf4};
+    else code={0xf0,0x48,0x83,0x05,0xf8,0xff,0xff,0xff,1,0xf4};
     std::fill(b.begin()+0x200,b.begin()+0x300,0);
     std::copy(code.begin(),code.end(),b.begin()+0x200);
     put(b,64+32,code.size()); put(b,64+40,code.size());
+    return b;
+}
+// Eight-byte accesses at offset 63 of a cache line. x86 allows both ordinary
+// accesses and LOCKed operations here; ARM64 TSO/atomic instructions may trap.
+constexpr uint64_t unaligned_cell=data+0x13f, unaligned_store=data+0x17f;
+inline std::vector<uint8_t> make_general_unaligned_app() {
+    auto b=make(false);
+    std::vector<uint8_t> code;
+    auto emit=[&](std::initializer_list<uint8_t> op) { code.insert(code.end(),op); };
+    auto imm=[&](uint64_t n,size_t width) { for(size_t k=0;k<width;++k) code.push_back(uint8_t(n>>(8*k))); };
+    auto rip=[&](std::initializer_list<uint8_t> op,uint64_t target,size_t trailing=0) {
+        emit(op); imm(target-(entry+code.size()+4+trailing),4);
+    };
+    rip({0x48,0xc7,0x05},unaligned_cell,4); imm(0x11223344,4); // MOV qword [cell],imm32
+    rip({0x48,0x8b,0x05},unaligned_cell);                  // MOV RAX,[cell]
+    emit({0x48,0x83,0xc0,1});                             // ADD RAX,1
+    rip({0xf0,0x48,0x83,0x05},unaligned_cell,1); imm(1,1); // LOCK ADD qword [cell],1
+    emit({0xba}); imm(0x55667788,4);                      // MOV EDX,replacement
+    rip({0xf0,0x48,0x0f,0xb1,0x15},unaligned_cell);       // LOCK CMPXCHG [cell],RDX
+    rip({0x48,0x8b,0x05},unaligned_cell);                  // MOV RAX,[cell]
+    emit({0x48,0x83,0xc0,1});
+    rip({0x48,0x89,0x05},unaligned_store);                 // MOV [store],RAX
+    rip({0x48,0x8b,0x05},unaligned_store); emit({0xf4});
+    std::fill(b.begin()+0x200,b.begin()+0x300,0);
+    std::copy(code.begin(),code.end(),b.begin()+0x200);
+    orbis_fixture::put(b,64+32,code.size()); orbis_fixture::put(b,64+40,code.size());
     return b;
 }
 // sceKernelMmap (public NID PGhQHd-dzv8) from general code, seventh argument

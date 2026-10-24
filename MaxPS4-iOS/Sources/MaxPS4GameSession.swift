@@ -121,7 +121,8 @@ final class MaxPS4GameSource: @unchecked Sendable {
             if wasStopped { return "Arrêté après \(frames) images présentées. \(metal.report)" }
             var fault = maxps4_fex_guest_fault()
             _ = maxps4_fex_engine_last_guest_fault(opened, &fault)
-            return "Exécution terminée (\(ran)), backend \(backend), \(frames) images. \(metal.report)\nSignal \(fault.signal), RIP 0x\(String(fault.rip, radix: 16))."
+            let relativeRIP = fault.rip >= relocation ? fault.rip - relocation : fault.rip
+            return "Exécution terminée (\(ran)), backend \(backend), \(frames) images. \(metal.report)\nSignal \(fault.signal), code \(fault.code), adresse mémoire 0x\(String(fault.address, radix: 16)), RIP 0x\(String(fault.rip, radix: 16)).\nRelocation 0x\(String(relocation, radix: 16)), RIP relatif 0x\(String(relativeRIP, radix: 16))."
         } catch { return "Échec : \(error.localizedDescription)" }
     }
     private func failure(_ text: String, _ code: Int32) -> NSError {

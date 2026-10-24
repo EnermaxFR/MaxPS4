@@ -28,6 +28,8 @@
 #include <FEXCore/Core/X86Enums.h>
 #include <FEXCore/Debug/InternalThreadState.h>
 #include <FEXCore/HLE/SyscallHandler.h>
+#include <FEXCore/Utils/AllocatorHooks.h>
+#include <FEXCore/Utils/ArchHelpers/Arm64.h>
 #include <array>
 #include <cstring>
 #include <cstdio>
@@ -48,6 +50,7 @@
 #include <signal.h>
 #if defined(__APPLE__)
 #include <sys/ucontext.h>
+#include <libkern/OSCacheControl.h>
 #else
 #include <ucontext.h>
 #endif
@@ -285,8 +288,9 @@ public:
     GuestFaultGuard(FEXCore::Context::Context* context, FEXCore::Core::InternalThreadState* thread,
                     const FEXCore::SignalDelegatorConfig& config, uint32_t limit_ms,
                     bool install = true, std::function<void()> expire = {},
-                    const std::atomic<bool>* cancelled = nullptr)
-        : context(context), thread(thread), config(config) {
+                    const std::atomic<bool>* cancelled = nullptr,
+                    std::function<bool(uint64_t,size_t,uint32_t)> memory_access = {})
+        : context(context), thread(thread), config(config), memory_access(std::move(memory_access)) {
         if (!available) return;
         active = this;
         if (!install) return;
@@ -328,8 +332,30 @@ public:
     GuestFaultGuard(const GuestFaultGuard&) = delete;
     GuestFaultGuard& operator=(const GuestFaultGuard&) = delete;
     std::atomic<int> signal {0};
+    int32_t code = 0;
     uint64_t address = 0;
 private:
+    struct AlignmentAccess { uint64_t address; size_t bytes; uint32_t permissions; };
+    // Operand forms recognized by the pinned FEX unaligned handler. Include
+    // its ordinary-load/store backpatch forms for concurrent repair races.
+    static std::optional<AlignmentAccess> alignment_access(uint32_t i,const std::array<uint64_t,32>& gprs) {
+        size_t bytes=size_t{1}<<(i>>30);
+        uint32_t permissions=6; int64_t offset=0;
+        const auto is=[i](uint32_t mask,uint32_t opcode) { return (i&mask)==opcode; };
+        if (is(0xbfe0fc00,0x0860fc00) || is(0xbfff8000,0x887f8000) || is(0xbfe08000,0x88208000))
+            bytes=(i&(1u<<30)) ? 16 : 8; // CASPAL / exclusive pair (read-modify-write)
+        else if (is(0x3ffffc00,0x08dffc00) || is(0x3ffffc00,0x38bfc000)) permissions=4; // LDAR / LDAPR
+        else if (is(0x3ffffc00,0x089ffc00)) permissions=2; // STLR
+        else if (is(0x3fe00c00,0x19400000) || is(0x3fe00c00,0x19000000) ||
+                 is(0x3be00c00,0x38400000) || is(0x3be00c00,0x38000000)) {
+            permissions=(i&(1u<<22)) ? 4 : 2; // LDAPUR / STLUR / patched LDUR / STUR
+            offset=(i>>12)&0x1ff; if (offset&0x100) offset-=512;
+        } else if (is(0x3ffffc00,0x387f6800) || is(0x3ffffc00,0x383f6800))
+            permissions=(i&(1u<<22)) ? 4 : 2; // patched LDR / STR, register offset XZR
+        else if (!(is(0x3fe0fc00,0x08e0fc00) || is(0x3b200c00,0x38200000) ||
+                   is(0x3ffffc00,0x085ffc00) || is(0x3fe0fc00,0x0800fc00))) return std::nullopt;
+        return AlignmentAccess{gprs[(i>>5)&31]+offset,bytes,permissions};
+    }
     static constexpr std::array<int, 5> signals {SIGSEGV, SIGBUS, SIGILL, SIGTRAP, SIGURG};
     static inline std::array<struct sigaction, 5> previous {};
     static inline thread_local GuestFaultGuard* active = nullptr;
@@ -345,14 +371,67 @@ private:
 #endif
         auto* guard = active;
         if (guard && !guard->signal.load()) {
+            const bool in_jit = guard->context->IsAddressInCodeBuffer(guard->thread, pc);
+            // x86 permits unaligned accesses. ARM64 TSO loads/stores and locked
+            // operations can raise BUS_ADRALN for otherwise valid guest memory.
+            // This frontend must route those faults to FEX before containing
+            // actual guest faults, as the upstream Linux signal frontend does.
+            if (number == SIGBUS && info->si_code == BUS_ADRALN && in_jit) {
+                std::array<uint64_t,32> gprs{};
+#if defined(__APPLE__)
+                auto& saved = machine->uc_mcontext->__ss;
+                std::copy(std::begin(saved.__x),std::end(saved.__x),gprs.begin());
+                gprs[29]=saved.__fp; gprs[30]=saved.__lr; gprs[31]=saved.__sp;
+#else
+                auto& saved = machine->uc_mcontext;
+                std::copy(std::begin(saved.regs),std::end(saved.regs),gprs.begin());
+                gprs[31]=saved.sp;
+#endif
+                // FEX may backpatch a TSO access with ordered loads/stores.
+                // iOS uses distinct RW/RX aliases: patch RW, resume RX, and
+                // invalidate the executable alias as well as FEX's RW flush.
+                auto* writable=FEXCore::Allocator::GetWritableAddress(reinterpret_cast<void*>(pc));
+                const auto access=alignment_access(*static_cast<const uint32_t*>(writable),gprs);
+                std::optional<int32_t> repaired;
+                // Darwin may report BUS_ADRALN for protected memory too. Never
+                // emulate an atomic access or retry a patched store unless the
+                // entire guest operand has the required read/write permission.
+                if (access && guard->memory_access && guard->memory_access(access->address,access->bytes,access->permissions)) {
+#if defined(__APPLE__)
+                    FEXCore::Allocator::ScopedJITWriteProtect jit_write;
+#endif
+                    repaired=FEXCore::ArchHelpers::Arm64::HandleUnalignedAccess(guard->thread,
+                        FEXCore::ArchHelpers::Arm64::UnalignedHandlerType::HalfBarrier,
+                        reinterpret_cast<uintptr_t>(writable),gprs.data());
+                }
+                if (repaired) {
+#if defined(__APPLE__)
+                    std::copy_n(gprs.begin(),29,std::begin(saved.__x));
+                    saved.__fp=gprs[29]; saved.__lr=gprs[30]; saved.__sp=gprs[31];
+#else
+                    std::copy_n(gprs.begin(),31,std::begin(saved.regs));
+                    saved.sp=gprs[31];
+#endif
+                    if (reinterpret_cast<uintptr_t>(writable)!=pc) {
+#if defined(__APPLE__)
+                        sys_icache_invalidate(reinterpret_cast<void*>(pc-4),12);
+#else
+                        __builtin___clear_cache(reinterpret_cast<char*>(pc)-4,reinterpret_cast<char*>(pc)+8);
+#endif
+                    }
+                    pc+=*repaired;
+                    return;
+                }
+            }
             // JIT code keeps guest registers in host registers: spill them first.
             // The dispatcher's guest-signal stubs have already spilled.
             uint64_t stop = 0;
-            if (guard->context->IsAddressInCodeBuffer(guard->thread, pc))
+            if (in_jit)
                 stop = guard->config.ThreadStopHandlerAddressSpillSRA;
             else if (pc >= guard->config.DispatcherBegin && pc < guard->config.DispatcherEnd)
                 stop = guard->config.ThreadStopHandlerAddress;
             if (stop) {
+                guard->code = number == SIGURG ? 0 : info->si_code;
                 guard->address = number == SIGURG ? 0 : reinterpret_cast<uintptr_t>(info->si_addr);
                 guard->signal.store(number);
                 sp = guard->thread->CurrentFrame->ReturningStackLocation;
@@ -377,6 +456,7 @@ private:
     FEXCore::Context::Context* context;
     FEXCore::Core::InternalThreadState* thread;
     FEXCore::SignalDelegatorConfig config;
+    std::function<bool(uint64_t,size_t,uint32_t)> memory_access;
     size_t installed = 0;
     std::thread watchdog;
     std::mutex watch_lock;
@@ -623,12 +703,13 @@ private:
             if (auto* fex = context->CreateThread(thread.entry, thread.rsp)) {
                 if (setup.prepare(fex, thread.entry, thread.rsp, thread.fs) == 0) {
                     fex->CurrentFrame->State.gregs[FEXCore::X86State::REG_RDI] = thread.arg;
-                    GuestFaultGuard guard(context, fex, config, 0, false);
+                    GuestFaultGuard guard(context, fex, config, 0, false, {}, nullptr,
+                        [this](uint64_t a,size_t n,uint32_t p) { return memory.permitted(a,n,p); });
                     context->ExecuteThread(fex);
                     const int signal = guard.signal.load();
                     // SIGURG only comes from finish(): a stop, not a fault.
                     if (signal && signal != SIGURG)
-                        fault = {signal, 0, guard.address, fex->CurrentFrame->State.rip};
+                        fault = {signal, guard.code, guard.address, fex->CurrentFrame->State.rip};
                 }
                 context->DestroyThread(fex);
             }
@@ -999,7 +1080,12 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
                             engine->system_memory, engine->libkernel.threads(), page);
         engine->probe.threads = threads ? &*threads : nullptr;
         GuestFaultGuard guard(engine->context.get(), thread, engine->signals.GetConfig(), engine->time_limit_ms,
-                              true, [&threads] { if (threads) threads->interrupt(); }, &engine->stop_requested);
+                              true, [&threads] { if (threads) threads->interrupt(); }, &engine->stop_requested,
+                              [engine,stack_base,page](uint64_t a,size_t n,uint32_t p) {
+                                  if (engine->system_memory.permitted(a,n,p)) return true;
+                                  const auto low=reinterpret_cast<uintptr_t>(stack_base);
+                                  return a>=low && a-low<=page && n<=page-(a-low) && !(p&~6u);
+                              });
         engine->context->ExecuteThread(thread);
         int signal = guard.signal.load();
         // scePthreadExit on the main thread: the other threads carry on.
@@ -1013,7 +1099,7 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
         if (signal == SIGURG && engine->probe.exited) signal = 0;
         // RIP is the guest position FEX last stored (block granularity).
         if (threads && threads->faulted(child)) { engine->last_fault = child; signal = child.signal; }
-        else if (signal) engine->last_fault = {signal, 0, guard.address, state.rip};
+        else if (signal) engine->last_fault = {signal, guard.code, guard.address, state.rip};
         if (signal) {
             engine->frame_code_cached = false;
             return signal == SIGURG ? (engine->stop_requested.load() ? -ECANCELED : -ETIMEDOUT) :

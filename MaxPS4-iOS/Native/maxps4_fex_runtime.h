@@ -136,7 +136,7 @@ int32_t maxps4_fex_engine_last_cpu_report(const maxps4_fex_engine *engine,
 // when the last execution did not fault.
 typedef struct maxps4_fex_guest_fault {
     int32_t signal;
-    uint32_t reserved;
+    int32_t code; // host si_code (previously a reserved 32-bit slot)
     uint64_t address, rip;
 } maxps4_fex_guest_fault;
 int32_t maxps4_fex_engine_last_guest_fault(const maxps4_fex_engine *engine,
