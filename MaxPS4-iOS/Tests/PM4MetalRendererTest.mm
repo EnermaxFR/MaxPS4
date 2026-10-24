@@ -185,6 +185,18 @@ int main() {
         readback(saved,after); assert(std::memcmp(before,after,sizeof before)==0);
         id<MTLTexture> changed = [bridge copyTargetAtAddress:targetB width:width height:height];
         readback(changed,after); assert(std::memcmp(before,after,sizeof before)!=0);
+        // Clearing EXEC before a done export kills the pixel. The fragment
+        // sample mask must preserve the existing target, without reclassifying
+        // originally covered invocations as helper threads.
+        constexpr uint64_t killedPS=0x11600;
+        arena.code(killedPS,{0xbefe0480,0xf800180f,0x09080706,0xbf810000});
+        std::uint8_t green[sizeof before]{}; std::memcpy(green,after,sizeof green);
+        Stream killed;
+        killed.set(0x76,0x08,{std::uint32_t(killedPS>>8),0,0,0});
+        killed.words.insert(killed.words.end(),{0xc0012d00U,3,2});
+        assert([bridge submit:killed.words.data() count:killed.words.size()]==0);
+        readback([bridge copyTargetAtAddress:targetB width:width height:height],after);
+        assert(std::memcmp(green,after,sizeof green)==0);
         const uint32_t bad[]={0};
         assert([bridge submit:bad count:1]!=0 && bridge.failure);
         assert([bridge submit:s.words.data() count:s.words.size()]!=0);
