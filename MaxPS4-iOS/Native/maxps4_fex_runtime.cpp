@@ -441,12 +441,6 @@ public:
     // thread's PS4 identity (also what scePthreadSelf returns in it).
     int64_t create(const maxps4::PS4KernelCall& call) {
         using namespace maxps4::ps4;
-#if defined(VIXL_SIMULATOR)
-        // FEX's VIXL simulator belongs to the context's dispatcher: concurrent
-        // guest threads would share one simulated CPU.
-        (void)call;
-        return kernel_error(nosys);
-#endif
         if (!call.rdi || !image.translate(call.rdx, 1, 5)) return kernel_error(inval);
         bool detached = false;
         uint64_t stack = 0;
@@ -733,8 +727,9 @@ extern "C" int32_t maxps4_fex_engine_open(maxps4_fex_engine **out) {
         // x86 CI's upstream ARM64 simulator must use its real C++ ABI wrappers.
         FEXCore::Config::Set(FEXCore::Config::CONFIG_DISABLE_VIXL_INDIRECT_RUNTIME_CALLS, "0");
         // TSO loads are LDAPUR, which the simulator aborts on when a guest
-        // access crosses 16 bytes (hardware faults and FEX fixes it up). The
-        // simulator runs a single guest thread, so TSO ordering is moot.
+        // access crosses 16 bytes (hardware faults and FEX fixes it up). Each
+        // simulated access is an x86 host access, which keeps TSO ordering
+        // between guest threads (scripts/patch-fexcore-simulator-threads.py).
         FEXCore::Config::Set(FEXCore::Config::CONFIG_TSOENABLED, "0");
         // The simulator offers SVE, which no iPhone has; match the device so
         // that AVX takes the same 128-bit pair path.

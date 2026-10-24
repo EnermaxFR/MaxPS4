@@ -24,6 +24,8 @@ case "$(uname -m)" in
 esac
 python3 -B "$ROOT/MaxPS4-iOS/Tests/FEXDispatcherInitPatchTest.py" "$FEX"
 python3 -B "$ROOT/scripts/patch-fexcore-dispatcher-init.py" "$FEX"
+python3 -B "$ROOT/MaxPS4-iOS/Tests/FEXSimulatorThreadsPatchTest.py" "$FEX"
+python3 -B "$ROOT/scripts/patch-fexcore-simulator-threads.py" "$FEX"
 cmake -S "$FEX" -B "$OUT" -G Ninja \
   -DCMAKE_C_COMPILER="${CC:-clang}" -DCMAKE_CXX_COMPILER="${CXX:-clang++}" \
   -DCMAKE_BUILD_TYPE=Debug -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \

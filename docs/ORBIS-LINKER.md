@@ -232,8 +232,10 @@ Limites actuelles, à traiter avant tout code non fiable :
   Une faute confinée dans un thread arrête aussi le thread principal et devient
   le résultat de l'exécution. Ces trois services ne sont résolus que pour les
   images générales : une image bornée qui les importe est refusée. Sous le
-  simulateur VIXL, qui est unique par contexte FEX, `scePthreadCreate` répond
-  `ENOSYS`.
+  simulateur VIXL (CI x86), `scripts/patch-fexcore-simulator-threads.py` donne
+  à chaque thread hôte son propre simulateur et sérialise les instructions
+  atomiques ; une faute n'y est pas confinée et un thread ne peut pas y être
+  arrêté de force : la fin d'exécution attend que chaque thread se termine.
 - Pas de SYSCALL hors trampoline (l'exécution échoue avec `-EPERM`).
 - **Conteneur SELF** (`SelfImage.hpp`, disposition du chargeur de shadPS4
   `core/loader/elf.cpp`) : un SELF dont les blocs sont en clair (fSELF des

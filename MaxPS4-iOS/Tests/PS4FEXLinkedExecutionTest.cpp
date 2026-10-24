@@ -586,16 +586,8 @@ int main(int argc, char** argv) {
         CHECK(maxps4_fex_engine_last_cpu_report(process,&report)==0 || ran);
         std::printf("general guest threads: run=%d RAX=%llu exited=%u status=%d\n",ran,(unsigned long long)observed,
             report.exited,report.exit_status);
-#ifdef VIXL_SIMULATOR
-        // One simulated CPU per FEX context: scePthreadCreate answers ENOSYS
-        // and the entry exits with that error.
-        const int32_t refused = static_cast<int32_t>(0x80020000u + 78);
-        CHECK(ran==0 && report.exited==1 && report.exit_status==refused);
-        std::puts("PASS general FEX execution (VIXL simulator) -> scePthreadCreate refused with ENOSYS -> exit(error)");
-#else
         CHECK(ran==0 && observed==100 && report.exited==1 && report.exit_status==100);
         std::puts("PASS general FEX execution -> scePthreadCreate x2 (concurrent, own stacks) -> RET / scePthreadExit -> scePthreadJoin x2 -> exit(100)");
-#endif
         maxps4_fex_engine_close(process);
     }
     {

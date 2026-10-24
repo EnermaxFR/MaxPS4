@@ -230,10 +230,12 @@ int GuestELF::prepare_orbis_general(const std::vector<OrbisLinker::Input>& input
         if (high - low > generalSpan - tail - generalAlignment)
             return fail(-E2BIG, "image span exceeds the general address-space reservation");
         const auto size = static_cast<size_t>(high - low + tail + generalAlignment);
-        // x86-64 user addresses end at 2^47, but an ARM64 host (Linux 48-bit
-        // layout) places mappings above it. Try the default placement, then
-        // hints below the limit; without MAP_FIXED no mapping is ever replaced.
-        constexpr uint64_t user_end = uint64_t{1} << 47;
+        // GPU-visible memory (the mmap window) must fit the PS4's 40-bit GPU
+        // addresses: games keep them >> 8 in 32-bit fields and dereference
+        // them on the CPU. Linux places mappings near 2^47 (or above it on a
+        // 48-bit ARM64 layout). Try the default placement, then hints below
+        // the limit; without MAP_FIXED no mapping is ever replaced.
+        constexpr uint64_t user_end = uint64_t{1} << 40;
         auto reserve = [&](uint64_t hint) -> void* {
             void* mapped = ::mmap(reinterpret_cast<void*>(hint), size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
             if (mapped == MAP_FAILED || reinterpret_cast<uintptr_t>(mapped) <= user_end - size) return mapped;
@@ -243,13 +245,13 @@ int GuestELF::prepare_orbis_general(const std::vector<OrbisLinker::Input>& input
         void* reserved = reserve(0);
         for (uint64_t hint = uint64_t{1} << 36; reserved == MAP_FAILED && hint <= user_end - size; hint <<= 1)
             reserved = reserve(hint);
-        if (reserved == MAP_FAILED) return fail(-ENOMEM, "general address-space reservation failed below 2^47");
+        if (reserved == MAP_FAILED) return fail(-ENOMEM, "general address-space reservation failed below 2^40");
         // Owned from here: clear() releases it on every later failure. Guest and
         // host addresses coincide inside it (translate is the identity).
         arena = reserved; arena_size = size;
         guest_base = reinterpret_cast<uintptr_t>(reserved);
         const uint64_t base = (guest_base + generalAlignment - 1) & ~(generalAlignment - 1);
-        if (base + (high - low) + tail > (uint64_t{1} << 47))
+        if (base + (high - low) + tail > user_end)
             return fail(-E2BIG, "general reservation outside the user address range");
         auto moved = inputs;
         for (auto& input : moved) {
