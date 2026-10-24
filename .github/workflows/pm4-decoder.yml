@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'MaxPS4-iOS/Native/PM4*'
+      - 'MaxPS4-iOS/Native/maxps4_ps4_gnm*'
+      - 'MaxPS4-iOS/Native/maxps4_gnm_submission_abi.h'
       - 'MaxPS4-iOS/Native/maxps4_guest_elf*'
       - 'MaxPS4-iOS/Tests/PM4*'
       - 'MaxPS4-iOS/Tests/GuestRIPStoreAdmissionTest.cpp'
@@ -46,6 +48,11 @@ jobs:
             MaxPS4-iOS/Sources/MaxPS4MetalPipeline.swift MaxPS4-iOS/Tests/PM4MetalIntegrationTest.swift \
             build/pm4/bridge.o -lc++ -o build/pm4/integration-test
           build/pm4/integration-test
+          xcrun clang++ -std=c++17 -fobjc-arc -Wall -Wextra -Werror -pthread \
+            MaxPS4-iOS/Native/maxps4_guest_elf.cpp MaxPS4-iOS/Native/PM4MetalDrawBridge.mm \
+            MaxPS4-iOS/Tests/PM4GnmSubmissionMetalTest.mm -framework Foundation -framework Metal \
+            -o build/pm4/gnm-metal-test
+          build/pm4/gnm-metal-test
       - name: Compile actual bridge and Swift renderer for iPhone arm64
         run: |
           set -euo pipefail
@@ -55,6 +62,9 @@ jobs:
             -c MaxPS4-iOS/Native/PM4MetalDrawBridge.mm -o build/pm4/bridge-ios.o
           xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -target arm64-apple-ios18.0 -isysroot "$SDK" \
             -c MaxPS4-iOS/Native/maxps4_guest_elf.cpp -o build/pm4/guest-elf-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -fobjc-arc -Wall -Wextra -Werror \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" \
+            -c MaxPS4-iOS/Tests/PM4GnmSubmissionMetalTest.mm -o build/pm4/gnm-metal-ios.o
           swiftc -typecheck -D MAXPS4_FEX_APP -target arm64-apple-ios18.0 -sdk "$SDK" \
             -import-objc-header MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h \
             MaxPS4-iOS/Sources/MaxPS4GuestMemory.swift MaxPS4-iOS/Sources/MaxPS4CPUPrototype.swift \

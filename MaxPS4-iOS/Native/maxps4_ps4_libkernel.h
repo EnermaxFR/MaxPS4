@@ -6,6 +6,7 @@
 #include "maxps4_ps4_user_service.h"
 #include "maxps4_ps4_pad.h"
 #include "maxps4_ps4_gnm.h"
+#include "maxps4_ps4_gnm_queue.h"
 #include <array>
 #include <map>
 #include <mutex>
@@ -71,7 +72,8 @@ enum class PS4KernelService : uint32_t {
     video_event_id, video_event_data, video_event_count,
     user_initialize, user_terminate, user_initial, user_login_list, user_event, user_name,
     pad_init, pad_open, pad_close, pad_read, pad_read_state, pad_information, pad_handle,
-    gnm_draw_auto, gnm_draw_index, gnm_vgt, gnm_vs, gnm_ps350
+    gnm_draw_auto, gnm_draw_index, gnm_vgt, gnm_vs, gnm_ps350,
+    gnm_submit, gnm_allowed, gnm_done
 };
 // Token bit of a trampoline whose function follows the POSIX convention: -1
 // with the error in the calling thread's errno (__Error) instead of an Orbis
@@ -129,6 +131,7 @@ public:
     PS4Threads& threads() { return threads_; }
     PS4VideoOut& videoout() { return videoout_; }
     PS4Pad& pad() { return pad_; }
+    PS4GnmQueue& graphics() { return graphics_; }
     static constexpr int32_t abort_status = 134; // As a process killed by SIGABRT.
 private:
     PS4GuestMemory& memory_;
@@ -138,6 +141,7 @@ private:
     PS4UserService user_service_;
     PS4Pad pad_;
     PS4Gnm gnm_;
+    PS4GnmQueue graphics_;
     uint64_t errno_table_ = 0, errno_table_size_ = 0, process_param_ = 0;
     std::map<uint64_t, uint64_t> direct_; // Allocated physical ranges: start -> length.
     int64_t memory_service(PS4KernelService service, const PS4KernelCall& call);

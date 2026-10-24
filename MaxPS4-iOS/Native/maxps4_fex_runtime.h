@@ -4,6 +4,7 @@
 #include "maxps4_jit_memory.h"
 #include "OrbisLinkerBridge.h"
 #include "maxps4_ps4_videoout_abi.h"
+#include "maxps4_gnm_submission_abi.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -52,6 +53,18 @@ int64_t maxps4_fex_engine_graphics_event_ticket(maxps4_fex_engine *engine,
     uint64_t queue, uint64_t id, uint64_t *ticket);
 int64_t maxps4_fex_engine_complete_graphics_event(maxps4_fex_engine *engine,
     uint64_t ticket);
+// Explicitly attach/detach the native triangle diagnostic consumer (0/1).
+// It accepts no guest shader/register state, indexed draws, CCB or flips.
+// Default/restaged state is detached; detach cancels all outstanding tickets.
+// All three calls avoid the FEX runtime lock; caller retains engine and
+// serializes close. Snapshot capacity is in dwords; null/0 queries metadata.
+// Complete only the front ticket, after real GPU command completion. success=0
+// cancels remaining work and latches failure until reattachment/reset. This
+// never confirms presentation or emits GNM events without a command requesting it.
+int32_t maxps4_fex_engine_gnm_backend(maxps4_fex_engine* engine, uint32_t enabled);
+int32_t maxps4_fex_engine_gnm_snapshot(maxps4_fex_engine* engine,
+    maxps4_gnm_submission* submission, uint32_t* words, size_t capacity);
+int32_t maxps4_fex_engine_gnm_complete(maxps4_fex_engine* engine, uint64_t ticket, uint32_t success);
 // Concurrent host input. Values use PS4 button bits and 0..255 stick/trigger
 // samples (sticks centered at 128). No global execution lock is acquired.
 // Caller retains the engine and serializes against close; connected is 0 or 1.

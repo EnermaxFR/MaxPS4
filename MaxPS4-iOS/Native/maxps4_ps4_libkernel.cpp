@@ -196,6 +196,9 @@ constexpr Binding bindings[] = {
     {"sceGnmGetEqEventType", "UoYY0DWMC0U", PS4KernelService::event_data, "libSceGnmDriver"},
     {"scePadInit", "hv1luiJrqQM", PS4KernelService::pad_init, "libScePad"},
     {"sceGnmDrawIndexAuto", "GGsn7jMTxw4", PS4KernelService::gnm_draw_auto, "libSceGnmDriver"},
+    {"sceGnmSubmitCommandBuffers", "zwY0YV91TTI", PS4KernelService::gnm_submit, "libSceGnmDriver"},
+    {"sceGnmAreSubmitsAllowed", "b08AgtPlHPg", PS4KernelService::gnm_allowed, "libSceGnmDriver"},
+    {"sceGnmSubmitDone", "yvZ73uQUqrk", PS4KernelService::gnm_done, "libSceGnmDriver"},
     {"sceGnmDrawIndex", "HlTPoZ-oY7Y", PS4KernelService::gnm_draw_index, "libSceGnmDriver"},
     {"sceGnmSetVgtControl", "cFCp0NX8wf0", PS4KernelService::gnm_vgt, "libSceGnmDriver"},
     {"sceGnmSetVsShader", "gAhCn6UiU4Y", PS4KernelService::gnm_vs, "libSceGnmDriver"},
@@ -285,7 +288,7 @@ PS4KernelService resolve_libkernel(std::string_view symbol, std::string_view lib
     return PS4KernelService::unresolved;
 }
 PS4Libkernel::PS4Libkernel(PS4GuestMemory& memory, PS4VirtualMemory* dynamic)
-    : memory_(memory), dynamic_(dynamic), threads_(memory), videoout_(memory, threads_), user_service_(memory), pad_(memory), gnm_(memory), started_us_(monotonic_us()) {}
+    : memory_(memory), dynamic_(dynamic), threads_(memory), videoout_(memory, threads_), user_service_(memory), pad_(memory), gnm_(memory), graphics_(memory), started_us_(monotonic_us()) {}
 PS4Libkernel::~PS4Libkernel() {
     reset();
 }
@@ -299,6 +302,7 @@ void PS4Libkernel::reset() {
     videoout_.reset();
     user_service_.reset();
     pad_.reset();
+    graphics_.reset();
     if (dynamic_) dynamic_->reset();
     threads_.reset();
     errno_table_ = errno_table_size_ = process_param_ = 0;
@@ -720,6 +724,9 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     case S::user_initialize: return user_service_.initialize(c.rdi);
     case S::pad_init: return pad_.initialize();
     case S::gnm_draw_auto: return gnm_.draw_auto(c.rdi,uint32_t(c.rsi),uint32_t(c.rdx),uint32_t(c.rcx));
+    case S::gnm_submit: return graphics_.submit(uint32_t(c.rdi),c.rsi,c.rdx,c.rcx,c.r8);
+    case S::gnm_allowed: return graphics_.allowed();
+    case S::gnm_done: return graphics_.done();
     case S::gnm_draw_index: return gnm_.draw_index(c.rdi,uint32_t(c.rsi),uint32_t(c.rdx),c.rcx,uint32_t(c.r8));
     case S::gnm_vgt: return gnm_.vgt(c.rdi,uint32_t(c.rsi),uint32_t(c.rdx),uint32_t(c.rcx),uint32_t(c.r8));
     case S::gnm_vs: return gnm_.vs(c.rdi,uint32_t(c.rsi),c.rdx,uint32_t(c.rcx));
