@@ -1482,8 +1482,8 @@ extern "C" int32_t maxps4_fex_engine_videoout_snapshot(maxps4_fex_engine* engine
     return engine->libkernel.videoout().snapshot(*frame, pixels, capacity);
 }
 extern "C" int32_t maxps4_fex_engine_gnm_backend(maxps4_fex_engine* engine, uint32_t enabled) {
-    if (!engine || enabled>1) return -EINVAL;
-    return engine->libkernel.graphics().backend(enabled!=0);
+    if (!engine) return -EINVAL;
+    return engine->libkernel.graphics().backend(enabled);
 }
 extern "C" int32_t maxps4_fex_engine_gnm_snapshot(maxps4_fex_engine* engine,
     maxps4_gnm_submission* submission, uint32_t* words, size_t capacity) {

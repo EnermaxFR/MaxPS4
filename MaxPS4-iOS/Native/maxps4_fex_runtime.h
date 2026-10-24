@@ -55,6 +55,9 @@ int64_t maxps4_fex_engine_complete_graphics_event(maxps4_fex_engine *engine,
     uint64_t ticket);
 // Explicitly attach/detach the native triangle diagnostic consumer (0/1).
 // It accepts no guest shader/register state, indexed draws, CCB or flips.
+// 2 attaches the null backend instead (boot probe): it draws nothing and
+// queues no ticket; submissions apply their label writes and EOP interrupts,
+// and sceGnmSubmitAndFlipCommandBuffers then requests the VideoOut flip.
 // Default/restaged state is detached; detach cancels all outstanding tickets.
 // All three calls avoid the FEX runtime lock; caller retains engine and
 // serializes close. Snapshot capacity is in dwords; null/0 queries metadata.

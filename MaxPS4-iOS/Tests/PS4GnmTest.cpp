@@ -67,4 +67,36 @@ int main() {
     ps4::put_le(registers,4,0,4); assert(memory.write(out,registers,sizeof(registers)));
     assert(gnm.ps350(out,40,out)==0 && load(40)[2]==0x120);
     std::puts("PASS GNM guest command builders: indexed/auto draws, VS/PS350/VGT, exact PM4 and checked atomic copies");
+    // Compute shader and dispatch: SET_SH_REG/DISPATCH_DIRECT with the compute shader type.
+    for(size_t i=0;i<12;++i) ps4::put_le(registers,i*4,i==1 ? 0 : 0x120+i,4);
+    assert(memory.write(regs,registers,sizeof(registers)));
+    assert(gnm.cs(out,25,regs,0x40)==0); words=load(25);
+    assert(words[0]==0xc0027602 && words[1]==0x20c && words[2]==0x120 && words[4]==0xc0027602 && words[5]==0x212);
+    assert(words[6]==((0x122 & 0xfffffc3fU)|0x40) && words[8]==0xc0037602 && words[9]==0x207 && words[12]==0x126);
+    assert(words[13]==0xc00a1000 && gpu::decodePM4Type3(words.data(),25));
+    assert(gnm.cs(out,24,regs,0)==-1 && gnm.cs(out,25,regs,1)==-1 && gnm.cs(out,25,0,0)==-1);
+    assert(gnm.dispatch(out,9,4,2,1,0x9)==0); words=load(9);
+    const uint32_t dispatchExpected[]={0xc0031503,4,2,1,9,0xc0021000,0,0,0};
+    for(size_t i=0;i<9;++i) assert(words[i]==dispatchExpected[i]);
+    assert(gnm.dispatch(out,8,4,2,1,0)==-1 && gnm.dispatch(out,9,0x80000000U,1,1,0)==-1);
+    // Embedded VS, flip-done wait and debug markers are exact-size streams.
+    assert(gnm.embedded_vs(out,29,0)==0); words=load(29);
+    commands=gpu::interpretPM4(words.data(),words.size());
+    assert(commands.valid && commands.writes.size()==7 && commands.writes[2].value==0xc0000 && commands.writes[6].value==4);
+    assert(gnm.embedded_vs(out,29,1)==ps4::signed32(0x8eee00ffU) && gnm.embedded_vs(out,28,0)==-1);
+    assert(gnm.wait_flip_done(out,7)==0 && load(7)[0]==0xc0051000 && gnm.wait_flip_done(out,6)==-1);
+    assert(gnm.pop_marker(out,6)==0); words=load(6);
+    assert(words[0]==0xc0041000 && words[1]==0x68750002 && gnm.pop_marker(out,7)==-1);
+    const char marker[]="Frame";
+    assert(memory.write(regs,marker,sizeof(marker)));
+    // strlen 5: ((5+8)>>2) + ((5+12)>>3)*2 = 7 payload-1 words, 9 in all.
+    assert(gnm.push_marker(out,8,regs)==-1 && gnm.push_marker(out,9,regs)==0); words=load(9);
+    assert(words[0]==0xc0071000 && words[1]==0x68750001 && words[2]==0x6d617246 && words[3]==0x65 && words[8]==0);
+    assert(gnm.push_marker(out,9,0)==-1 && gpu::decodePM4Type3(words.data(),9));
+    // Default state: the context clear, then a NOP up to 256 dwords.
+    assert(gnm.init_default_state350(out,255)==0 && gnm.init_default_state350(out,300)==256);
+    words=load(256);
+    assert(words[0]==0xc0012800 && words[3]==0xc0001200 && words[5]==0xc0055800 && words[11]==10);
+    assert(words[12]==0xc0f21000 && gpu::decodePM4Type3(words.data(),256));
+    std::puts("PASS GNM compute shader/dispatch, embedded VS, flip-done wait, markers and default state streams");
 }

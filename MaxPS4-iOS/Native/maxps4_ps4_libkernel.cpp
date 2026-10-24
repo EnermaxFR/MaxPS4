@@ -199,10 +199,18 @@ constexpr Binding bindings[] = {
     {"sceGnmSubmitCommandBuffers", "zwY0YV91TTI", PS4KernelService::gnm_submit, "libSceGnmDriver"},
     {"sceGnmAreSubmitsAllowed", "b08AgtPlHPg", PS4KernelService::gnm_allowed, "libSceGnmDriver"},
     {"sceGnmSubmitDone", "yvZ73uQUqrk", PS4KernelService::gnm_done, "libSceGnmDriver"},
+    {"sceGnmSubmitAndFlipCommandBuffers", "xbxNatawohc", PS4KernelService::gnm_submit_flip, "libSceGnmDriver"},
     {"sceGnmDrawIndex", "HlTPoZ-oY7Y", PS4KernelService::gnm_draw_index, "libSceGnmDriver"},
     {"sceGnmSetVgtControl", "cFCp0NX8wf0", PS4KernelService::gnm_vgt, "libSceGnmDriver"},
     {"sceGnmSetVsShader", "gAhCn6UiU4Y", PS4KernelService::gnm_vs, "libSceGnmDriver"},
     {"sceGnmSetPsShader350", "5uFKckiJYRM", PS4KernelService::gnm_ps350, "libSceGnmDriver"},
+    {"sceGnmSetCsShaderWithModifier", "Kx-h-nWQJ8A", PS4KernelService::gnm_cs, "libSceGnmDriver"},
+    {"sceGnmDispatchDirect", "0BzLGljcwBo", PS4KernelService::gnm_dispatch, "libSceGnmDriver"},
+    {"sceGnmSetEmbeddedVsShader", "+AFvOEXrKJk", PS4KernelService::gnm_embedded_vs, "libSceGnmDriver"},
+    {"sceGnmInsertWaitFlipDone", "1qXLHIpROPE", PS4KernelService::gnm_wait_flip, "libSceGnmDriver"},
+    {"sceGnmInsertPushMarker", "W1Etj-jlW7Y", PS4KernelService::gnm_push_marker, "libSceGnmDriver"},
+    {"sceGnmInsertPopMarker", "7qZVNgEu+SY", PS4KernelService::gnm_pop_marker, "libSceGnmDriver"},
+    {"sceGnmDrawInitDefaultHardwareState350", "yb2cRhagD1I", PS4KernelService::gnm_init350, "libSceGnmDriver"},
     {"scePadOpen", "xk0AcarP3V4", PS4KernelService::pad_open, "libScePad"},
     {"scePadClose", "6ncge5+l5Qs", PS4KernelService::pad_close, "libScePad"},
     {"scePadRead", "q1cHNfGycLI", PS4KernelService::pad_read, "libScePad"},
@@ -735,13 +743,44 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     case S::user_initialize: return user_service_.initialize(c.rdi);
     case S::pad_init: return pad_.initialize();
     case S::gnm_draw_auto: return gnm_.draw_auto(c.rdi,uint32_t(c.rsi),uint32_t(c.rdx),uint32_t(c.rcx));
-    case S::gnm_submit: return graphics_.submit(uint32_t(c.rdi),c.rsi,c.rdx,c.rcx,c.r8);
+    case S::gnm_submit:
+    case S::gnm_submit_flip: {
+        // Flip arguments after the VideoOut handle (R9): buffer index, flip
+        // mode and flip argument, the seventh to ninth System V arguments.
+        uint8_t stack[24];
+        const bool flip = service == S::gnm_submit_flip;
+        if (flip && !graphics_.null_backend()) return PS4GnmQueue::error(0x3fff);
+        if (flip && (!c.rsp || c.rsp > UINT64_MAX - 32 || !memory_.read(c.rsp + 8, stack, sizeof(stack))))
+            return PS4GnmQueue::error(0x1000);
+        uint32_t interrupts = 0;
+        PS4GnmQueue::PreparedFlip prepared;
+        const int64_t result = graphics_.submit(uint32_t(c.rdi),c.rsi,c.rdx,c.rcx,c.r8,&interrupts,
+                                                flip ? &prepared : nullptr);
+        if (result) return result;
+        if (interrupts) threads_.graphics_interrupt();
+        if (!flip) return 0;
+        if (const int64_t e = videoout_.submit(c.r9, signed32(get_le(stack, 4)), signed32(get_le(stack + 8, 4)),
+                                               get_le(stack + 16, 8))) return e;
+        // The work is already retired: what prepareFlip asks for happens now.
+        uint8_t value[4];
+        put_le(value, 0, prepared.value, 4);
+        if (prepared.label && !memory_.write(prepared.address, value, sizeof(value))) return PS4GnmQueue::error(0x1000);
+        if (prepared.interrupt) threads_.graphics_interrupt();
+        return 0;
+    }
     case S::gnm_allowed: return graphics_.allowed();
     case S::gnm_done: return graphics_.done();
     case S::gnm_draw_index: return gnm_.draw_index(c.rdi,uint32_t(c.rsi),uint32_t(c.rdx),c.rcx,uint32_t(c.r8));
     case S::gnm_vgt: return gnm_.vgt(c.rdi,uint32_t(c.rsi),uint32_t(c.rdx),uint32_t(c.rcx),uint32_t(c.r8));
     case S::gnm_vs: return gnm_.vs(c.rdi,uint32_t(c.rsi),c.rdx,uint32_t(c.rcx));
     case S::gnm_ps350: return gnm_.ps350(c.rdi,uint32_t(c.rsi),c.rdx);
+    case S::gnm_cs: return gnm_.cs(c.rdi,uint32_t(c.rsi),c.rdx,uint32_t(c.rcx));
+    case S::gnm_dispatch: return gnm_.dispatch(c.rdi,uint32_t(c.rsi),uint32_t(c.rdx),uint32_t(c.rcx),uint32_t(c.r8),uint32_t(c.r9));
+    case S::gnm_embedded_vs: return gnm_.embedded_vs(c.rdi,uint32_t(c.rsi),uint32_t(c.rdx));
+    case S::gnm_wait_flip: return gnm_.wait_flip_done(c.rdi,uint32_t(c.rsi));
+    case S::gnm_push_marker: return gnm_.push_marker(c.rdi,uint32_t(c.rsi),c.rdx);
+    case S::gnm_pop_marker: return gnm_.pop_marker(c.rdi,uint32_t(c.rsi));
+    case S::gnm_init350: return gnm_.init_default_state350(c.rdi,uint32_t(c.rsi));
     case S::pad_open: return pad_.open(signed32(c.rdi), signed32(c.rsi), signed32(c.rdx), c.rcx);
     case S::pad_close: return pad_.close(signed32(c.rdi));
     case S::pad_handle: return pad_.get_handle(signed32(c.rdi), signed32(c.rsi), signed32(c.rdx));

@@ -74,6 +74,10 @@ enum class PS4KernelService : uint32_t {
     pad_init, pad_open, pad_close, pad_read, pad_read_state, pad_information, pad_handle,
     gnm_draw_auto, gnm_draw_index, gnm_vgt, gnm_vs, gnm_ps350,
     gnm_submit, gnm_allowed, gnm_done,
+    // sceGnmSubmitAndFlipCommandBuffers: null GPU backend only (the flip is
+    // requested once the work is retired, at submission).
+    gnm_submit_flip,
+    gnm_cs, gnm_dispatch, gnm_embedded_vs, gnm_wait_flip, gnm_push_marker, gnm_pop_marker, gnm_init350,
     // What a game's own libc.prx needs from libSceLibcInternal.
     heap_trace_info,
     // libSceSystemService (shadPS4 system_service.cpp): settings of an

@@ -645,6 +645,15 @@ Error PS4Threads::graphics_event_complete(uint64_t ticket) {
     changed_.notify_all();
     return ok;
 }
+void PS4Threads::graphics_interrupt() {
+    {
+        std::lock_guard<std::mutex> lock(guard_);
+        for (auto& queue : equeues_) if (queue.token)
+            for (auto& event : queue.events)
+                if (event.used && event.filter == -14 && event.id == 0x40) { event.data = event.id; event.triggered = true; }
+    }
+    changed_.notify_all();
+}
 Error PS4Threads::video_event_add(uint64_t handle, uint64_t source, uint64_t id, uint64_t user_data) {
     std::lock_guard<std::mutex> lock(guard_);
     auto* queue = find_equeue(handle);

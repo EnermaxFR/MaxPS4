@@ -91,6 +91,8 @@ public:
     ps4::Error graphics_event_delete(uint64_t handle, uint64_t id);
     ps4::Error graphics_event_ticket(uint64_t handle, uint64_t id, uint64_t& ticket);
     ps4::Error graphics_event_complete(uint64_t ticket);
+    // An end-of-pipe interrupt: triggers every registered EOP event (id 0x40).
+    void graphics_interrupt();
     ps4::Error video_event_add(uint64_t queue, uint64_t source, uint64_t id, uint64_t user_data);
     ps4::Error video_event_delete(uint64_t queue, uint64_t source, uint64_t id);
     void video_event_remove_source(uint64_t source);

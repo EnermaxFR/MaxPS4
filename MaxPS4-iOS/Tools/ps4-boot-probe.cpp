@@ -3,7 +3,8 @@
 // Loads <dir>/sce_module/*.prx then <dir>/eboot.bin, links them with the
 // engine's HLE (prepare_orbis_general) in import probe mode, so that every
 // missing import is a stub reported on stderr at its first call, mounts <dir> as /app0 and runs the
-// entry point through FEX. Prints the link diagnostic, the run status and
+// entry point through FEX with the null GPU backend (nothing is drawn: frames
+// hold only what the CPU wrote). Prints the link diagnostic, the run status and
 // the guest fault. A display thread sends 60 Hz vblanks and completes every
 // flip; with a frame directory, it saves one presented frame in 30 there as
 // frame-NNNN.png (at most 100). Game files are only read.
@@ -173,6 +174,8 @@ int main(int argc, char** argv) {
     if (prepared) { maxps4_fex_engine_close(engine); return 1; }
     std::printf("relocation 0x%llx\n", (unsigned long long)relocation);
     if (int64_t e = maxps4_fex_engine_mount_app0(engine, root.c_str())) std::printf("montage /app0 : %lld\n", (long long)e);
+    // Null GPU: submissions draw nothing but signal their labels, EOP events and flips.
+    if (int e = maxps4_fex_engine_gnm_backend(engine, 2)) std::printf("GPU nul refusé (%d)\n", e);
     if (int e = maxps4_fex_engine_initialize(engine)) { std::printf("JIT FEX indisponible (%d)\n", e); return 1; }
     uint64_t value = 0, entry = 0;
     uint32_t backend = 0;

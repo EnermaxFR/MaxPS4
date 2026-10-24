@@ -234,18 +234,25 @@ int GuestELF::prepare_orbis_general(const std::vector<OrbisLinker::Input>& input
         // addresses: games keep them >> 8 in 32-bit fields and dereference
         // them on the CPU. Linux places mappings near 2^47 (or above it on a
         // 48-bit ARM64 layout). Try the default placement, then hints below
-        // the limit; without MAP_FIXED no mapping is ever replaced.
-        constexpr uint64_t user_end = uint64_t{1} << 40;
+        // the limit; without MAP_FIXED no mapping is ever replaced. Where
+        // nothing fits below 2^40 (AddressSanitizer's x86-64 shadow covers it),
+        // fall back to the x86-64 user limit, 2^47.
+        uint64_t user_end = 0;
         auto reserve = [&](uint64_t hint) -> void* {
             void* mapped = ::mmap(reinterpret_cast<void*>(hint), size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
             if (mapped == MAP_FAILED || reinterpret_cast<uintptr_t>(mapped) <= user_end - size) return mapped;
             ::munmap(mapped, size);
             return MAP_FAILED;
         };
-        void* reserved = reserve(0);
-        for (uint64_t hint = uint64_t{1} << 36; reserved == MAP_FAILED && hint <= user_end - size; hint <<= 1)
-            reserved = reserve(hint);
-        if (reserved == MAP_FAILED) return fail(-ENOMEM, "general address-space reservation failed below 2^40");
+        void* reserved = MAP_FAILED;
+        for (const unsigned bits : {40U, 47U}) {
+            user_end = uint64_t{1} << bits;
+            reserved = reserve(0);
+            for (uint64_t hint = uint64_t{1} << 36; reserved == MAP_FAILED && hint <= user_end - size; hint <<= 1)
+                reserved = reserve(hint);
+            if (reserved != MAP_FAILED) break;
+        }
+        if (reserved == MAP_FAILED) return fail(-ENOMEM, "general address-space reservation failed below 2^47");
         // Owned from here: clear() releases it on every later failure. Guest and
         // host addresses coincide inside it (translate is the identity).
         arena = reserved; arena_size = size;
