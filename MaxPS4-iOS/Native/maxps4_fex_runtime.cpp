@@ -4,6 +4,8 @@
 #include "maxps4_orbis_v4_execution_gate.h"
 #include <algorithm>
 #include <iterator>
+#include <filesystem>
+#include <fstream>
 #include "maxps4_jit_memory.h"
 #include "maxps4_guest_elf.h"
 #include "SelfImage.hpp"
@@ -1445,6 +1447,58 @@ extern "C" int64_t maxps4_fex_engine_mount_app0(maxps4_fex_engine* engine, const
     std::lock_guard lock(runtime_lock);
     if (engine->staged_ps4.segments().empty()) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
     return engine->libkernel.mount_app0(directory);
+}
+extern "C" int32_t maxps4_fex_engine_load_game(maxps4_fex_engine* engine, const char* directory,
+    uint64_t* relocation, char* diagnostic, size_t capacity) {
+    if (relocation) *relocation = 0;
+    if (diagnostic && capacity) diagnostic[0] = 0;
+    if (!engine || !directory) return -EINVAL;
+    auto report = [&](const std::string& text) {
+        if (diagnostic && capacity) { const size_t n = std::min(capacity - 1, text.size()); std::memcpy(diagnostic, text.data(), n); diagnostic[n] = 0; }
+    };
+    struct Module { std::string name; std::vector<uint8_t> bytes; maxps4::OrbisMetadata metadata;
+                    std::vector<std::string> dependencies; std::vector<const char*> pointers; };
+    try {
+        const std::filesystem::path root(directory);
+        std::vector<std::filesystem::path> files;
+        std::error_code error;
+        for (const auto& entry : std::filesystem::directory_iterator(root / "sce_module", error))
+            if (entry.path().extension() == ".prx") files.push_back(entry.path());
+        std::sort(files.begin(), files.end());
+        files.push_back(root / "eboot.bin");
+        // Providers first (the linker wants a module's dependencies before it).
+        std::vector<Module> modules(files.size());
+        for (size_t i = 0; i < files.size(); ++i) {
+            std::ifstream in(files[i], std::ios::binary);
+            if (!in) { report(files[i].filename().string() + ": unreadable"); return -ENOENT; }
+            modules[i].bytes.assign(std::istreambuf_iterator<char>(in), {});
+            modules[i].name = files[i].filename().string();
+            if (!modules[i].metadata.parse(modules[i].bytes.data(), modules[i].bytes.size())) {
+                report(modules[i].name + ": " + modules[i].metadata.error);
+                return -ENOEXEC;
+            }
+        }
+        // 1 MiB aligned, 1 MiB apart, as ps4-orbis-analyze places them.
+        std::vector<maxps4_orbis_module> table;
+        uint64_t bias = 0x400000;
+        for (auto& m : modules) {
+            for (const auto& needed : m.metadata.needed)
+                for (const auto& other : modules)
+                    if (&other != &m && other.name == needed) m.dependencies.push_back(needed);
+            for (const auto& d : m.dependencies) m.pointers.push_back(d.c_str());
+            table.push_back({m.name.c_str(), m.bytes.data(), m.bytes.size(), bias, m.pointers.data(), m.pointers.size()});
+            uint64_t end = 0;
+            for (const auto& s : m.metadata.segments)
+                if (s.type == 1 || s.type == 0x61000010) end = std::max(end, s.address + s.memsz);
+            bias += ((end + 0xfffff) & ~uint64_t{0xfffff}) + 0x100000;
+        }
+        const int32_t prepared = maxps4_fex_engine_prepare_orbis_general(engine, table.data(), table.size(),
+                                                                         "eboot.bin", relocation, diagnostic, capacity);
+        if (prepared) return prepared;
+        const int64_t mounted = maxps4_fex_engine_mount_app0(engine, root.string().c_str());
+        return mounted ? int32_t(mounted) : 0;
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
+    catch (const std::filesystem::filesystem_error&) { report("directory not readable"); return -ENOENT; }
 }
 extern "C" int64_t maxps4_fex_engine_mount(maxps4_fex_engine* engine, const char* guest, const char* directory) {
     if (!engine) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
