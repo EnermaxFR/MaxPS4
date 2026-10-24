@@ -5,90 +5,49 @@ struct MaxPS4GameDirectoryView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var importing = false
     @State private var playing = false
+    @State private var showingJIT = false
     @State private var directory: URL?
-    @State private var busy = false
-    @State private var inspectionCompleted = false
-    @State private var report = "Sélectionnez un dossier contenant eboot.bin, les PRX et les données déjà accessibles par des moyens autorisés."
-    @State private var launchReport = ""
+    @State private var importError: String?
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Pré-démarrage du jeu PS4").font(.title2.bold())
-                    Text("Lecture seule du dossier source. Aucun déchiffrement PKG/PFS, aucune clé ou licence utilisée.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                    Button("Sélectionner le dossier accessible…") { importing = true }
-                        .buttonStyle(.borderedProminent).disabled(busy)
+            ZStack {
+                MaxPS4Background()
+                VStack(alignment: .leading, spacing: 24) {
+                    Image(systemName: "gamecontroller.fill").font(.system(size: 44)).foregroundStyle(.cyan)
+                    Text("À toi de jouer").font(.system(size: 32, weight: .black, design: .rounded))
+                    Text("Choisis le dossier complet du jeu, avec eboot.bin, sce_module et ses données.")
+                        .foregroundStyle(.white.opacity(0.65))
                     if let directory {
-                        Text(directory.lastPathComponent).font(.headline)
-                        Button("Tester le jeu avec Metal") { playing = true }
-                            .buttonStyle(.borderedProminent).disabled(busy)
-                        Button("Actualiser le précontrôle") { inspect(directory) }
-                            .buttonStyle(.bordered).disabled(busy)
-                        Button("Lancement expérimental FEX — diagnostic") { launch(directory) }
-                            .buttonStyle(.bordered).disabled(busy || !inspectionCompleted)
-                        Text("Le runtime exige maxps4.json avec un graphe PRX et des biais explicites. Les formats ou instructions non pris en charge sont refusés avant le dispatch. Un succès CPU ne prouve pas le démarrage du jeu.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Label(directory.lastPathComponent, systemImage: "folder.fill")
+                            .font(.headline).foregroundStyle(.cyan)
+                            .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 20))
+                        Button { playing = true } label: {
+                            Label("Continuer", systemImage: "play.fill").frame(maxWidth: .infinity).padding(.vertical, 8)
+                        }.buttonStyle(.borderedProminent).tint(.blue)
                     }
-                    if busy { ProgressView("Diagnostic en cours…") }
-                    ShareLink(item: report + (launchReport.isEmpty ? "" : "\n\n" + launchReport)) {
-                        Label("Exporter le rapport texte", systemImage: "square.and.arrow.up")
-                    }.disabled(busy)
-                    Text(report).font(.system(.footnote, design: .monospaced)).textSelection(.enabled)
-                    if !launchReport.isEmpty {
-                        Text(launchReport).font(.system(.footnote, design: .monospaced)).textSelection(.enabled)
-                    }
-                }.padding().frame(maxWidth: .infinity, alignment: .leading)
+                    Button(directory == nil ? "Choisir le dossier du jeu" : "Changer de dossier") { importing = true }
+                        .buttonStyle(.bordered).tint(.cyan)
+                    if let importError { Text(importError).font(.footnote).foregroundStyle(.orange) }
+                    Spacer(minLength: 20)
+                    Button { showingJIT = true } label: { Label("Activer le JIT avec StikDebug", systemImage: "bolt.fill") }
+                        .font(.footnote).tint(.cyan)
+                }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
             }
-            .navigationTitle("Dossier de jeu")
-            .toolbar { Button("Fermer") { dismiss() }.disabled(busy) }
+            .navigationTitle("Jouer").navigationBarTitleDisplayMode(.inline)
+            .toolbar { Button("Fermer") { dismiss() } }
         }
+        .preferredColorScheme(.dark)
         .fileImporter(isPresented: $importing, allowedContentTypes: [.folder]) { result in
             switch result {
-            case .success(let url):
-                directory = url
-                inspect(url)
-            case .failure:
-                report = "Sélection du dossier impossible ; aucune exécution."
-                inspectionCompleted = false
+            case .success(let url): directory = url; importError = nil
+            case .failure(let error): importError = "Sélection impossible : \(error.localizedDescription)"
             }
         }
+        .sheet(isPresented: $showingJIT) { MaxPS4JITSetupView() }
         .fullScreenCover(isPresented: $playing) {
             if let directory { MaxPS4GameView(directory: directory) }
-        }
-    }
-
-    private func inspect(_ url: URL) {
-        busy = true
-        inspectionCompleted = false
-        launchReport = ""
-        Task {
-            let result = await Task.detached(priority: .utility) {
-                let scoped = url.startAccessingSecurityScopedResource()
-                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                return MaxPS4OrbisAnalyzer.inspectDirectory(url: url)
-            }.value
-            report = result.text
-            inspectionCompleted = result.inspectionCompleted
-            busy = false
-        }
-    }
-
-    private func launch(_ url: URL) {
-        busy = true
-        Task {
-            let result = await Task.detached(priority: .utility) {
-                let scoped = url.startAccessingSecurityScopedResource()
-                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                // Recheck before attempting the existing bounded runtime path.
-                let preflight = MaxPS4OrbisAnalyzer.inspectDirectory(url: url)
-                guard preflight.inspectionCompleted else { return preflight.text }
-                return "Tentative expérimentale — fichiers du dossier sélectionné\n" +
-                    MaxPS4FEXDiagnostic.executeOrbisDirectory(url: url)
-            }.value
-            launchReport = result
-            busy = false
         }
     }
 }
