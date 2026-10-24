@@ -89,7 +89,13 @@ int main() {
         const std::string source = gcnMetalPrelude() + vs.source + ps.source +
                                    gcnMetalEntryPoints(vs, ps, "vs_program", "ps_program", psInputAddr, inputCntl);
         MTLCompileOptions* options = [MTLCompileOptions new];
-        options.fastMathEnabled = NO;
+        if (@available(macOS 15.0, iOS 18.0, *)) options.mathMode = MTLMathModeSafe;
+        else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            options.fastMathEnabled = NO;
+#pragma clang diagnostic pop
+        }
         NSError* error = nil;
         id<MTLLibrary> library = [device newLibraryWithSource:[NSString stringWithUTF8String:source.c_str()] options:options error:&error];
         if (!library) {
