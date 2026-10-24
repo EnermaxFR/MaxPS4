@@ -141,6 +141,30 @@ int main() {
             ok = compare(name, pixels, arena.bytes.data() + (address - Arena::start)) && ok;
         }
         assert(ok);
+        // Identical stream with target-compatible draws sharing tile memory.
+        // State changes (pipeline/scissor), target switches, repeated batches
+        // and the first clear must match the original single-draw passes.
+        PM4DrawStats batchStats;
+        PM4DrawCollector batchCollector(arena.memory, batchStats);
+        PM4MetalRenderer batched(device, arena.memory, nil, 0);
+        assert(metal.renderPasses == 3);
+        for (unsigned iteration = 0; iteration < 3; ++iteration) {
+            id<MTLCommandBuffer> batch = [queue commandBuffer];
+            batched.beginBatch();
+            batchCollector.execute(s.words.data(), s.words.size(), [&](const PM4Draw& draw) {
+                assert(batched.encode(draw, batch));
+            });
+            batched.endBatch();
+            [batch commit]; [batch waitUntilCompleted];
+            assert(batch.status == MTLCommandBufferStatusCompleted && !batch.error);
+            assert(batched.renderPasses == 2 * (iteration + 1));
+            for (const auto address : {targetA, targetB}) {
+                std::uint8_t pixels[width * height * 4]{};
+                readPixels(device, queue, batched.target(address), pixels);
+                assert(compare("batched draws", pixels, arena.bytes.data() + (address - Arena::start)));
+            }
+        }
+        std::puts("PASS batching: 3 draws in 2 passes, identical pixels across 3 submissions");
         // Isolate cross-command-buffer rendering from the bridge/display copy.
         PM4DrawStats separateStats;
         PM4DrawCollector separateCollector(arena.memory,separateStats);
@@ -178,6 +202,10 @@ int main() {
         readback(saved,before);
         const bool bridgeB=compare("app bridge B",before,arena.bytes.data()+(targetB-Arena::start));
         assert(separateOK && bridgeA && bridgeB);
+        assert([bridge submit:s.words.data() count:s.words.size()]==0);
+        assert([bridge.report containsString:@"5 passes"]);
+        readback([bridge copyTargetAtAddress:targetB width:width height:height],after);
+        assert(compare("batched app bridge",after,arena.bytes.data()+(targetB-Arena::start)));
         Stream next;
         next.set(0x76,0x08,{std::uint32_t(greenPS>>8),0,0,0});
         next.words.insert(next.words.end(),{0xc0012d00U,3,2});

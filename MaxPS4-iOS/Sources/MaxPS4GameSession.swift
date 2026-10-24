@@ -19,7 +19,10 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private var displayed = 0
 
     func input(_ buttons: UInt32) {
-        lock.lock(); defer { lock.unlock() }
+        // The display-copy worker may hold the engine lock while the GPU ends
+        // a copy. The 60 Hz poll retries the latest input without blocking UI.
+        guard lock.try() else { return }
+        defer { lock.unlock() }
         self.buttons = buttons
         if ready, !stopped, let engine {
             _ = maxps4_fex_engine_pad_update(engine, buttons, 128, 128, 128, 128, 0, 0, 1)

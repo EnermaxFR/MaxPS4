@@ -39,11 +39,13 @@ struct GameMetalState {
         id<MTLCommandBuffer> command = [s.queue commandBuffer];
         if (!command) { s.error = "Metal command buffer allocation"; return -ENOMEM; }
         const unsigned failed = s.stats.failed;
+        s.renderer.beginBatch();
         s.collector.execute(words, count, [&](const PM4Draw& draw) {
             if (s.stats.failed != failed) return;
             if (s.renderer.encode(draw, command)) ++s.stats.rendered;
             else s.stats.fail(s.renderer.error);
         });
+        s.renderer.endBatch();
         if (s.stats.failed != failed) { s.error = s.stats.error; return -ENOTSUP; }
         [command commit];
         [command waitUntilCompleted];
@@ -84,7 +86,7 @@ struct GameMetalState {
     auto& s = *state_;
     std::lock_guard<std::mutex> lock(s.mutex);
     if (!s.error.empty()) return [NSString stringWithUTF8String:s.error.c_str()];
-    return [NSString stringWithFormat:@"Metal : %u dessins, %u rendus, %u échecs", s.stats.draws, s.stats.rendered, s.stats.failed];
+    return [NSString stringWithFormat:@"Metal : %u dessins, %u rendus, %u échecs, %u passes", s.stats.draws, s.stats.rendered, s.stats.failed, s.renderer.renderPasses];
 }
 - (NSString*)failure {
     auto& s = *state_;

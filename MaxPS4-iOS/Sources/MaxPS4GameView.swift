@@ -10,6 +10,12 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
     private var presentation: MaxPS4VideoOutPresentation?
     private var activeID: UUID?
     private var lastTexture: MTLTexture?
+    private let snapshots = DispatchQueue(label: "com.enermaxfr.maxps4.display-copy", qos: .userInteractive)
+    private var snapshotID: UUID?
+    private var reportTime = ProcessInfo.processInfo.systemUptime
+    private var reportFrames = 0
+    private var preparationSeconds = 0.0
+    private var needsRedraw = true
     var report: (String) -> Void
     var failed: (String) -> Void
     init(device: MTLDevice, report: @escaping (String) -> Void, failed: @escaping (String) -> Void) throws {
@@ -19,18 +25,43 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
         super.init()
     }
     func use(_ source: MaxPS4GameSource?) {
-        if self.source !== source { cancel(); self.source = source; lastTexture = nil }
+        if self.source !== source {
+            cancel(); self.source = source; lastTexture = nil
+            needsRedraw = true
+            reportTime = ProcessInfo.processInfo.systemUptime; reportFrames = 0; preparationSeconds = 0
+        }
     }
-    func cancel() { presentation?.cancel(); presentation = nil; activeID = nil }
-    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+    func cancel() { snapshotID = nil; presentation?.cancel(); presentation = nil; activeID = nil }
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) { needsRedraw = true }
     func draw(in view: MTKView) {
-        guard activeID == nil, view.drawableSize.width > 0, view.drawableSize.height > 0 else { return }
-        var frame: MaxPS4GameSource.Frame?
-        do { frame = try source?.snapshot() }
-        catch { failed(error.localizedDescription); return }
+        guard activeID == nil, snapshotID == nil, !view.isPaused,
+              view.drawableSize.width > 0, view.drawableSize.height > 0, let source else { return }
+        let id = UUID(); snapshotID = id
+        snapshots.async { [weak self, weak view, source] in
+            let started = ProcessInfo.processInfo.systemUptime
+            let result = Result { try source.snapshot() }
+            let elapsed = ProcessInfo.processInfo.systemUptime - started
+            DispatchQueue.main.async { [weak self, weak view] in
+                guard let self, let view, self.snapshotID == id,
+                      self.source === source, !view.isPaused else {
+                    if case .success(let frame?) = result { source.complete(ticket: frame.info.ticket, presented: false) }
+                    return
+                }
+                self.snapshotID = nil
+                switch result {
+                case .success(let frame):
+                    if frame != nil { self.preparationSeconds += elapsed }
+                    self.present(frame, source: source, in: view)
+                case .failure(let error): self.failed(error.localizedDescription)
+                }
+            }
+        }
+    }
+    private func present(_ frame: MaxPS4GameSource.Frame?, source: MaxPS4GameSource, in view: MTKView) {
+        guard frame != nil || needsRedraw else { return }
         guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable else { return }
         guard let command = queue.makeCommandBuffer(), let encoder = command.makeRenderCommandEncoder(descriptor: pass) else {
-            if let frame { source?.complete(ticket: frame.info.ticket, presented: false) }
+            if let frame { source.complete(ticket: frame.info.ticket, presented: false) }
             failed("Création de la présentation Metal impossible."); return
         }
         let texture = frame?.texture ?? lastTexture
@@ -38,14 +69,26 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
             MaxPS4VideoOutMetal.encode(encoder: encoder, pipeline: pipeline, texture: texture, output: view.drawableSize)
         }
         encoder.endEncoding()
-        if let frame, let source {
+        if let frame {
             let id = UUID(); activeID = id
             let gate = MaxPS4VideoOutPresentation { [weak self, source] displayed in
                 let accepted = source.complete(ticket: frame.info.ticket, presented: displayed)
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.activeID == id else { return }
                     self.activeID = nil; self.presentation = nil
-                    if accepted { self.report("Image \(frame.info.ticket) · \(frame.report)") }
+                    if accepted {
+                        self.reportFrames += 1
+                        let now = ProcessInfo.processInfo.systemUptime
+                        let elapsed = now - self.reportTime
+                        // Report once per second instead of invalidating the
+                        // entire SwiftUI game view for every displayed frame.
+                        if elapsed >= 1 {
+                            let fps = Double(self.reportFrames) / elapsed
+                            let ms = self.preparationSeconds * 1000 / Double(self.reportFrames)
+                            self.report(String(format: "%.1f images/s · préparation image %.2f ms · ", fps, ms) + frame.report)
+                            self.reportTime = now; self.reportFrames = 0; self.preparationSeconds = 0
+                        }
+                    }
                     else { self.failed("Présentation Metal interrompue ; session arrêtée.") }
                 }
             }
@@ -55,6 +98,7 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
             DispatchQueue.global().asyncAfter(deadline: .now() + 3) { gate.cancel() }
         }
         lastTexture = texture
+        needsRedraw = false
         command.present(drawable); command.commit()
     }
 }

@@ -24,11 +24,16 @@ public:
     // Encodes one draw as a render pass into `commands`. False with `error`
     // set (and nothing encoded) when the draw cannot be expressed.
     bool encode(const PM4Draw& draw, id<MTLCommandBuffer> commands);
+    // Opt-in for a single submission: consecutive draws to the same texture
+    // share a render pass. Always end the batch before committing commands.
+    void beginBatch() { endBatch(); batching_ = true; }
+    void endBatch();
     // The texture holding colour target `address`, or nil if never drawn.
     id<MTLTexture> target(std::uint64_t address) const;
     std::string error;
     unsigned pipelinesBuilt = 0;
     unsigned lastRanges = 0; // memory ranges copied for the last draw (copy mode)
+    unsigned renderPasses = 0;
 
 private:
     using PipelineKey = std::tuple<std::uint64_t, std::uint64_t, std::uint32_t, std::uint32_t, std::uint32_t, std::string, unsigned, std::uint32_t, unsigned>;
@@ -39,6 +44,10 @@ private:
     std::uint64_t guestBase_;
     std::map<PipelineKey, id<MTLRenderPipelineState>> pipelines_;
     std::map<std::uint64_t, Target> targets_;
+    bool batching_ = false;
+    id<MTLRenderCommandEncoder> encoder_ = nil;
+    id<MTLCommandBuffer> commands_ = nil;
+    id<MTLTexture> attachment_ = nil;
     id<MTLRenderPipelineState> pipeline(const PM4Draw& draw, MTLPixelFormat format);
     bool fail(const std::string& message) { error = message; return false; }
 };

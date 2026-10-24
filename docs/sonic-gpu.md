@@ -242,7 +242,12 @@ choose **Continuer**, then **Jouer**. Session reports remain available under
 **Détails de la session**. This path does not require
 `maxps4.json` (the separate bounded CPU diagnostic still does). Use the
 on-screen directions/face buttons/Options or an iOS controller. Share the
-session report if startup, rendering or presentation fails. Game files and
+session report if startup, rendering or presentation fails. The live report
+updates once per second with confirmed displayed frames/s, average image
+preparation time and Metal draw/pass counts. Display copies run on a dedicated
+worker with at most one pending request; only a confirmed presentation retires
+the flip. Consecutive same-target draws within a submission share a Metal render
+pass; submission retirement still waits for GPU completion. Game files and
 captures remain local; none are embedded in the IPA.
 
 ### Device SIGBUS before the first submission

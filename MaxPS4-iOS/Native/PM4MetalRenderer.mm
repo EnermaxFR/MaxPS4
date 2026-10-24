@@ -86,6 +86,11 @@ id<MTLRenderPipelineState> PM4MetalRenderer::pipeline(const PM4Draw& d, MTLPixel
     return state;
 }
 
+void PM4MetalRenderer::endBatch() {
+    [encoder_ endEncoding];
+    encoder_ = nil; commands_ = nil; attachment_ = nil; batching_ = false;
+}
+
 bool PM4MetalRenderer::encode(const PM4Draw& d, id<MTLCommandBuffer> commands) {
     error.clear();
     if (d.swap > 1) return fail("colour target component swap " + std::to_string(d.swap));
@@ -129,13 +134,22 @@ bool PM4MetalRenderer::encode(const PM4Draw& d, id<MTLCommandBuffer> commands) {
         target = {[device_ newTextureWithDescriptor:descriptor], true};
         if (!target.texture) return fail("colour target texture");
     }
+    if (encoder_ && (commands_ != commands || attachment_ != target.texture)) {
+        [encoder_ endEncoding]; encoder_ = nil;
+    }
+    id<MTLRenderCommandEncoder> encoder = encoder_;
+    if (!encoder) {
     MTLRenderPassDescriptor* pass = [MTLRenderPassDescriptor renderPassDescriptor];
     pass.colorAttachments[0].texture = target.texture;
     pass.colorAttachments[0].loadAction = target.fresh ? MTLLoadActionClear : MTLLoadActionLoad;
     pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0);
     pass.colorAttachments[0].storeAction = MTLStoreActionStore;
+    encoder = [commands renderCommandEncoderWithDescriptor:pass];
+    if (!encoder) return fail("render encoder");
     target.fresh = false;
-    id<MTLRenderCommandEncoder> encoder = [commands renderCommandEncoderWithDescriptor:pass];
+    ++renderPasses;
+    if (batching_) { encoder_ = encoder; commands_ = commands; attachment_ = target.texture; }
+    }
     [encoder setRenderPipelineState:state];
     // PA_CL_VPORT: x = xscale * ndc + xoffset. A positive Y scale points NDC +1 down: flip it.
     const float xs = d.viewport[0], xo = d.viewport[1], ys = d.viewport[2], yo = d.viewport[3];
@@ -158,7 +172,7 @@ bool PM4MetalRenderer::encode(const PM4Draw& d, id<MTLCommandBuffer> commands) {
                            offset:0 atIndex:2];
     const NSUInteger count = d.primitive == 0x11 ? NSUInteger(d.indices.size() / 3 * 6) : NSUInteger(d.indices.size());
     [encoder drawPrimitives:d.primitive == 6 ? MTLPrimitiveTypeTriangleStrip : MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:count];
-    [encoder endEncoding];
+    if (!batching_) [encoder endEncoding];
     return true;
 }
 
