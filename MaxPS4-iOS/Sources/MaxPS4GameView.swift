@@ -101,11 +101,14 @@ struct MaxPS4GameView: View {
     @StateObject private var session = MaxPS4GameSession()
     @State private var device = MTLCreateSystemDefaultDevice()
     @State private var touch: UInt32 = 0
+    @State private var hasLaunched = false
     private let poll = Timer.publish(every: 1.0 / 60, on: .main, in: .common).autoconnect()
 #endif
     var body: some View {
         NavigationStack {
-            ScrollView {
+            ZStack {
+                MaxPS4Background()
+                ScrollView {
                 VStack(spacing: 14) {
                     Text(directory.lastPathComponent).font(.headline)
 #if MAXPS4_FEX_APP
@@ -115,10 +118,17 @@ struct MaxPS4GameView: View {
                             report: session.presented, failed: session.failed)
                             .aspectRatio(16.0 / 9.0, contentMode: .fit)
                             .accessibilityIdentifier("maxps4.game.surface")
-                        Button(session.running ? "Arrêter" : "Lancer le jeu avec Metal") {
+                        Button(session.running ? "Arrêter" : "Jouer") {
                             touch = 0
-                            if session.running { session.stop() } else { session.start(url: directory, device: device) }
+                            if session.running { session.stop() } else {
+                                hasLaunched = true
+                                session.start(url: directory, device: device)
+                            }
                         }.buttonStyle(.borderedProminent)
+                        if hasLaunched && !session.running {
+                            Text("Session terminée. Consulte les détails si le jeu ne s’est pas lancé.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
                         HStack {
                             VStack {
                                 control("↑", bit: 0x10)
@@ -130,9 +140,11 @@ struct MaxPS4GameView: View {
                                 HStack { control("□", bit: 0x8000); control("✕", bit: 0x4000); control("○", bit: 0x2000) }
                             }
                         }.disabled(!session.running)
-                        Text(session.report).font(.footnote).textSelection(.enabled)
-                        ShareLink(item: session.report) { Label("Partager le résultat", systemImage: "square.and.arrow.up") }
-                        Text("Session expérimentale. Activer le JIT avec StikDebug avant le lancement. Manette iOS ou commandes tactiles.")
+                        DisclosureGroup("Détails de la session") {
+                            Text(session.report).font(.footnote.monospaced()).textSelection(.enabled)
+                            ShareLink(item: session.report) { Label("Partager le rapport", systemImage: "square.and.arrow.up") }
+                        }.tint(.cyan)
+                        Text("Manette iOS ou commandes tactiles. JIT requis.")
                             .font(.caption).foregroundStyle(.secondary)
                     } else { Text("Metal indisponible sur cet appareil.") }
 #else
@@ -140,9 +152,10 @@ struct MaxPS4GameView: View {
 #endif
                 }.padding()
             }
-            .navigationTitle("Test du jeu")
+                }
+            .navigationTitle("Jeu")
             .toolbar { Button("Fermer") { dismiss() } }
-        }
+        }.preferredColorScheme(.dark)
 #if MAXPS4_FEX_APP
         .onReceive(poll) { _ in
             guard session.running, scenePhase == .active else { return }

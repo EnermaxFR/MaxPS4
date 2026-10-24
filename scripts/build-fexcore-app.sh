@@ -91,7 +91,7 @@ for symbol in maxps4_fex_test_ps4_libkernel maxps4_fex_engine_open maxps4_fex_en
     exit 1
   fi
 done
-for symbol in maxps4_fex_test_ps4_libkernel maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_cpuid maxps4_fex_engine_run_elf maxps4_jit_begin; do
+for symbol in maxps4_fex_engine_open maxps4_fex_engine_initialize maxps4_fex_engine_probe maxps4_fex_engine_load_game maxps4_fex_engine_run_orbis maxps4_fex_engine_gnm_host_consumer maxps4_jit_begin; do
   if ! grep -q "_${symbol}$" build/diagnostics/fex-app-imports.txt; then
     echo "Missing required app import: ${symbol}" >&2
     exit 1

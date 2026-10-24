@@ -236,9 +236,10 @@ implemented by this path. A device run is required before claiming Sonic is
 playable.
 
 To test: install the CI `MaxPS4-FEXCore-SideStore` IPA, activate JIT with
-StikDebug, open **Dossier de jeu**, select the directory containing
-`eboot.bin`, `sce_module` and the game data, choose **Tester le jeu avec
-Metal**, then **Lancer le jeu avec Metal**. This path does not require
+StikDebug from **Accueil → Activer le JIT**, open **Accueil → Jouer**, select
+the directory containing `eboot.bin`, `sce_module` and the game data,
+choose **Continuer**, then **Jouer**. Session reports remain available under
+**Détails de la session**. This path does not require
 `maxps4.json` (the separate bounded CPU diagnostic still does). Use the
 on-screen directions/face buttons/Options or an iOS controller. Share the
 session report if startup, rendering or presentation fails. Game files and
