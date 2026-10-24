@@ -13,6 +13,7 @@ on:
       - 'MaxPS4-iOS/Tests/GuestRIPStoreAdmissionTest.cpp'
       - 'MaxPS4-iOS/Tests/GuestELFFixture.h'
       - 'MaxPS4-iOS/Sources/MaxPS4Metal*'
+      - 'MaxPS4-iOS/Sources/MaxPS4Game*'
       - 'MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h'
       - 'MaxPS4-iOS/project.yml'
       - '.github/workflows/pm4-decoder.yml'
@@ -74,6 +75,7 @@ jobs:
             -framework Foundation -framework Metal -o build/pm4/gcn-metal-test
           build/pm4/gcn-metal-test
           xcrun clang++ -std=c++17 -fobjc-arc -Wall -Wextra -Werror MaxPS4-iOS/Native/PM4MetalRenderer.mm \
+            MaxPS4-iOS/Native/PM4GameMetalBridge.mm \
             MaxPS4-iOS/Tests/PM4MetalRendererTest.mm -framework Foundation -framework Metal -o build/pm4/pm4-metal-renderer-test
           build/pm4/pm4-metal-renderer-test
       - name: Compile actual bridge and Swift renderer for iPhone arm64
@@ -86,6 +88,12 @@ jobs:
           xcrun --sdk iphoneos clang++ -std=c++17 -fobjc-arc -Wall -Wextra -Werror \
             -target arm64-apple-ios18.0 -isysroot "$SDK" \
             -c MaxPS4-iOS/Native/PM4MetalRenderer.mm -o build/pm4/pm4-metal-renderer-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -fobjc-arc -Wall -Wextra -Werror \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" \
+            -c MaxPS4-iOS/Native/PM4GameMetalBridge.mm -o build/pm4/game-metal-bridge-ios.o
+          swiftc -typecheck -D MAXPS4_FEX_APP -target arm64-apple-ios18.0 -sdk "$SDK" \
+            -import-objc-header MaxPS4-iOS/Native/MaxPS4-Bridging-Header.h \
+            MaxPS4-iOS/Sources/*.swift
           xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -target arm64-apple-ios18.0 -isysroot "$SDK" \
             -c MaxPS4-iOS/Native/maxps4_guest_elf.cpp -o build/pm4/guest-elf-ios.o
           xcrun --sdk iphoneos clang++ -std=c++17 -fobjc-arc -Wall -Wextra -Werror \

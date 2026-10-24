@@ -78,6 +78,8 @@ int main() {
     assert(video.unregister_buffers(port, 0) == PS4VideoOut::error(9));
     maxps4_videoout_frame frame{};
     assert(video.snapshot(frame, nullptr, 0) == 0 && frame.ticket && frame.port == port);
+    maxps4_videoout_frame target{}; uint64_t target_address=0;
+    assert(video.target(target,target_address)==0 && target.ticket==frame.ticket && target_address==pixels);
     assert(frame.width == 3 && frame.height == 2 && frame.pitch_in_pixels == 4 && frame.byte_count == 32 && frame.pixel_format == PS4VideoOut::rgba);
     const uint64_t cancelled = frame.ticket;
     uint8_t snapshot[32]; std::memset(snapshot, 0xa5, sizeof(snapshot));
@@ -118,6 +120,7 @@ int main() {
     const uint64_t stale = frame.ticket;
     assert(video.close(port) == 0);
     assert(video.snapshot(frame, nullptr, 0) == -EAGAIN && frame.ticket == 0);
+    assert(video.target(target,target_address)==-EAGAIN && !target.ticket && !target_address);
     assert(video.complete(stale, true) == PS4VideoOut::error(1));
     assert(poll() == ok && read(count, 4) == 2);
     assert(read(events + 8, 2) != 0xfff3 && read(events + 32 + 8, 2) != 0xfff3);

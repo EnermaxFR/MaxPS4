@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct MaxPS4GameDirectoryView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var importing = false
+    @State private var playing = false
     @State private var directory: URL?
     @State private var busy = false
     @State private var inspectionCompleted = false
@@ -21,6 +22,8 @@ struct MaxPS4GameDirectoryView: View {
                         .buttonStyle(.borderedProminent).disabled(busy)
                     if let directory {
                         Text(directory.lastPathComponent).font(.headline)
+                        Button("Tester le jeu avec Metal") { playing = true }
+                            .buttonStyle(.borderedProminent).disabled(busy)
                         Button("Actualiser le précontrôle") { inspect(directory) }
                             .buttonStyle(.bordered).disabled(busy)
                         Button("Lancement expérimental FEX — diagnostic") { launch(directory) }
@@ -50,6 +53,9 @@ struct MaxPS4GameDirectoryView: View {
                 report = "Sélection du dossier impossible ; aucune exécution."
                 inspectionCompleted = false
             }
+        }
+        .fullScreenCover(isPresented: $playing) {
+            if let directory { MaxPS4GameView(directory: directory) }
         }
     }
 

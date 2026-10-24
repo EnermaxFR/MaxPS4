@@ -67,6 +67,19 @@ int64_t maxps4_fex_engine_complete_graphics_event(maxps4_fex_engine *engine,
 // cancels remaining work and latches failure until reattachment/reset. This
 // never confirms presentation or emits GNM events without a command requesting it.
 int32_t maxps4_fex_engine_gnm_backend(maxps4_fex_engine* engine, uint32_t enabled);
+// Backend 4: synchronous app consumer. Attach after load_game, before run.
+// Return zero only after GPU completion. No GNM reentry from the callback.
+// Caller owns context until run returns and the backend is detached.
+typedef int32_t (*maxps4_gnm_host_consumer)(void*, const uint32_t*, size_t);
+int32_t maxps4_fex_engine_gnm_host_consumer(maxps4_fex_engine* engine,
+    void* context, maxps4_gnm_host_consumer consumer);
+// Checked guest-memory copy. Safe from a synchronous host-consumer callback;
+// caller serializes against engine close and guest memory mutation.
+int32_t maxps4_fex_engine_read_memory(maxps4_fex_engine* engine,
+    uint64_t address, void* destination, size_t bytes);
+// Pending flip metadata and its registered colour-target address, no CPU copy.
+int32_t maxps4_fex_engine_videoout_target(maxps4_fex_engine* engine,
+    maxps4_videoout_frame* frame, uint64_t* address);
 int32_t maxps4_fex_engine_gnm_snapshot(maxps4_fex_engine* engine,
     maxps4_gnm_submission* submission, uint32_t* words, size_t capacity);
 int32_t maxps4_fex_engine_gnm_complete(maxps4_fex_engine* engine, uint64_t ticket, uint32_t success);
@@ -135,6 +148,11 @@ int32_t maxps4_fex_engine_last_guest_fault(const maxps4_fex_engine *engine,
 // guest instruction is. -ENOTSUP for a nonzero limit where faults cannot be
 // contained (non-ARM64 host or VIXL simulator).
 int32_t maxps4_fex_engine_set_time_limit(maxps4_fex_engine *engine, uint32_t milliseconds);
+// Concurrent sticky cancellation, including a request before run starts.
+// Runs return -ECANCELED. Interruption during execution requires native ARM64
+// fault containment, as for set_time_limit; HLE waits are woken before stopping.
+// Engine remains owned by the worker until run returns; close is not concurrent.
+int32_t maxps4_fex_engine_request_stop(maxps4_fex_engine* engine);
 int32_t maxps4_fex_engine_cpuid(maxps4_fex_engine *engine, uint32_t leaf,
                               uint32_t subleaf, uint32_t out[4]);
 // Compatibility synthetic ELF fixture routed through run_elf; no host syscalls.

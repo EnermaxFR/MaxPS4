@@ -6,6 +6,7 @@
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 #include "../Native/PM4MetalRenderer.h"
+#include "../Native/PM4GameMetalBridge.h"
 #include "../Native/PM4SoftwareRenderer.hpp"
 #include "GCNTestPrograms.h"
 #include <cassert>
@@ -127,6 +128,47 @@ int main() {
             ok = compare(name, pixels, arena.bytes.data() + (address - Arena::start)) && ok;
         }
         assert(ok);
+        // The app bridge receives separate submissions; register state must
+        // persist. It returns immutable cropped display copies, not live targets.
+        Arena* reader = &arena;
+        MaxPS4GameMetalBridge* bridge = [[MaxPS4GameMetalBridge alloc] initWithDevice:device
+            reader:^BOOL(uint64_t address, void* destination, size_t count) {
+                return reader->memory.read(address,destination,count);
+            }];
+        assert(bridge && !bridge.failure);
+        for (const auto& packet : decodePM4Type3(s.words.data(),s.words.size()).packets)
+            assert([bridge submit:s.words.data()+packet.headerWord count:packet.payloadCount+1]==0);
+        auto readback = [&](id<MTLTexture> source, std::uint8_t* pixels) {
+            auto* desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:source.pixelFormat
+                width:width height:height mipmapped:NO];
+            desc.storageMode = MTLStorageModeShared;
+            id<MTLTexture> readable = [device newTextureWithDescriptor:desc];
+            id<MTLCommandBuffer> command = [queue commandBuffer];
+            id<MTLBlitCommandEncoder> blit = [command blitCommandEncoder];
+            [blit copyFromTexture:source sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0,0,0)
+                sourceSize:MTLSizeMake(width,height,1) toTexture:readable destinationSlice:0 destinationLevel:0
+                destinationOrigin:MTLOriginMake(0,0,0)];
+            [blit endEncoding]; [command commit]; [command waitUntilCompleted];
+            assert(command.status==MTLCommandBufferStatusCompleted && !command.error);
+            [readable getBytes:pixels bytesPerRow:width*4 fromRegion:MTLRegionMake2D(0,0,width,height) mipmapLevel:0];
+        };
+        id<MTLTexture> saved = [bridge copyTargetAtAddress:targetB width:width height:height];
+        assert(saved && ![bridge copyTargetAtAddress:0 width:width height:height]);
+        assert(![bridge copyTargetAtAddress:targetA width:width+1 height:height]);
+        std::uint8_t before[width*height*4]{}, after[sizeof before]{};
+        readback(saved,before);
+        assert(compare("app bridge",before,arena.bytes.data()+(targetB-Arena::start)));
+        Stream next;
+        next.set(0x76,0x08,{std::uint32_t(greenPS>>8),0,0,0});
+        next.words.insert(next.words.end(),{0xc0012d00U,3,2});
+        assert([bridge submit:next.words.data() count:next.words.size()]==0);
+        readback(saved,after); assert(std::memcmp(before,after,sizeof before)==0);
+        id<MTLTexture> changed = [bridge copyTargetAtAddress:targetB width:width height:height];
+        readback(changed,after); assert(std::memcmp(before,after,sizeof before)!=0);
+        const uint32_t bad[]={0};
+        assert([bridge submit:bad count:1]!=0 && bridge.failure);
+        assert([bridge submit:s.words.data() count:s.words.size()]!=0);
+        std::puts("PASS app Metal bridge: persistent submissions, GPU completion, display copies, failure latch");
         // Scene A: green where the second draw's scissor allowed, gradient elsewhere.
         const std::uint8_t* a = arena.bytes.data() + (targetA - Arena::start);
         assert(a[1] == 255 && a[2] == 0 && a[4 * 8 + 2] == 135 && a[4 * 8 + 1] == 0);

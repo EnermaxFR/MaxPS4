@@ -199,17 +199,47 @@ memory ranges `PM4ResourceScan.hpp` finds). `GCNMetalTest` and
 `PM4MetalRendererTest` match the software renderer on a real GPU (worst
 channel difference 0).
 
-In progress, not yet compiled or run: `maxps4_fex_engine_load_game` (shared
-game-directory loader, `maxps4_fex_runtime.cpp/.h`) and the boot probe
-switched to it. Build it in WSL (`~/maxps4/ps4-linked-rel`, target
-`maxps4-boot-probe`) and rerun the probe before relying on it.
+Validated in WSL: `maxps4_fex_engine_load_game` (shared game-directory
+loader, `maxps4_fex_runtime.cpp/.h`) and the boot probe switched to it.
+After synchronizing the WSL source copy with this branch, the
+`maxps4-boot-probe` target in `~/maxps4/ps4-linked-rel` builds and the probe
+renders Sonic Mania's SEGA logo at 1920x1080 with the software backend.
+The capture at flip 60 reports 122 draws, 61 rendered and zero failures.
+The initial frames are black; this validation took about seven minutes
+under the simulator, so a short run with a black first frame does not
+establish a renderer failure. The probe now captures the first 30 frames
+before sampling one in 30, and its usage names the frame-directory argument
+correctly. Keep captures and logs outside `/tmp` to retain them across WSL
+restarts. This validates the loader and software path, not iPhone Metal.
 
-Remaining to show Sonic Mania on the iPhone:
-1. GNM backend 4 ("host"): retire like the null backend and keep copies of
-   submitted DCB words for the app (`gnm_host_take`); C APIs to read guest
-   memory and a VideoOut buffer's address.
-2. An Objective-C++ bridge owning PM4DrawCollector + PM4MetalRenderer that
-   renders taken submissions and returns the texture of the flipped buffer.
-3. A Swift game session (run on the FEX queue: open, set_import_probe,
-   load_game, backend 4, initialize, run_orbis) with a view sending vblanks,
-   presenting that texture and completing flips; add the .mm to project.yml.
+The app path is now wired for device testing:
+1. GNM backend 4 ("host") calls an attached synchronous consumer with owned
+   DCB copies. It retires label writes and EOP events only after successful
+   GPU completion. A consumer error latches submission failure until reset.
+2. `PM4GameMetalBridge.mm` owns a persistent PM4DrawCollector and
+   PM4MetalRenderer. Guest reads use the checked runtime memory-copy API.
+   Display snapshots are immutable GPU texture copies, cropped to VideoOut
+   dimensions, so later rendering cannot modify an in-flight drawable.
+3. `MaxPS4GameSession.swift` loads a selected game directory on the serial
+   FEX queue, attaches backend 4, initializes FEX and runs the game. Its
+   concurrent host APIs provide vblanks, pad updates and explicit flip
+   confirmation only after both Metal completion and drawable presentation.
+   Closing/backgrounding requests cancellation; engine close happens only
+   after execution returns. Both app targets include the Metal .mm files.
+
+The host consumer deliberately waits for GPU completion per submission. It
+is a first correctness path, not a performance claim. Existing renderer
+limits still apply (no depth/clipping/tiling/compute, instance 0). The game
+session uses the same unresolved-import probe mode as the Linux diagnostic;
+missing services may still prevent further gameplay. No audio output is
+implemented by this path. A device run is required before claiming Sonic is
+playable.
+
+To test: install the CI `MaxPS4-FEXCore-SideStore` IPA, activate JIT with
+StikDebug, open **Dossier de jeu**, select the directory containing
+`eboot.bin`, `sce_module` and the game data, choose **Tester le jeu avec
+Metal**, then **Lancer le jeu avec Metal**. This path does not require
+`maxps4.json` (the separate bounded CPU diagnostic still does). Use the
+on-screen directions/face buttons/Options or an iOS controller. Share the
+session report if startup, rendering or presentation fails. Game files and
+captures remain local; none are embedded in the IPA.

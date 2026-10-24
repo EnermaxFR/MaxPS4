@@ -27,6 +27,8 @@ targets:
       - path: Resources/VideoOutDemo
         type: folder
       - path: Native/PM4MetalDrawBridge.mm
+      - path: Native/PM4GameMetalBridge.mm
+      - path: Native/PM4MetalRenderer.mm
       - path: Native/PS4PKGBridge.cpp
       - path: Native/OrbisAnalysisBridge.cpp
       - path: Native/OrbisLinkerBridge.cpp
@@ -72,6 +74,8 @@ targets:
       - path: Resources/VideoOutDemo
         type: folder
       - path: Native/PM4MetalDrawBridge.mm
+      - path: Native/PM4GameMetalBridge.mm
+      - path: Native/PM4MetalRenderer.mm
       - path: Native/PS4PKGBridge.cpp
       - path: Native/OrbisAnalysisBridge.cpp
       - path: Native/OrbisLinkerBridge.cpp

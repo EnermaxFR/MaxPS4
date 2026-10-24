@@ -7,7 +7,7 @@
 // executed on the CPU by the GCN interpreter, render targets written linearly).
 // Prints the link diagnostic, the run status and
 // the guest fault. A display thread sends 60 Hz vblanks and completes every
-// flip; with a frame directory, it saves one presented frame in 30 there as
+// flip; with a frame directory, it saves the first 30 frames, then one in 30 as
 // frame-NNNN.png (at most 100). Game files are only read.
 #include "../Native/maxps4_fex_runtime.h"
 #include <algorithm>
@@ -99,7 +99,7 @@ void display(maxps4_fex_engine* engine, const std::string& directory, std::atomi
         if (maxps4_fex_engine_videoout_snapshot(engine, &frame, nullptr, 0)) continue;
         pixels.resize(frame.byte_count);
         if (maxps4_fex_engine_videoout_snapshot(engine, &frame, pixels.data(), pixels.size())) continue;
-        if (flips % 30 == 0 && !directory.empty() && saved < 100) {
+        if ((flips < 30 || flips % 30 == 0) && !directory.empty() && saved < 100) {
             char name[32];
             std::snprintf(name, sizeof name, "/frame-%04u.png", saved++);
             const bool ok = write_png(directory + name, frame, pixels);
@@ -119,7 +119,7 @@ void display(maxps4_fex_engine* engine, const std::string& directory, std::atomi
 }
 
 int main(int argc, char** argv) {
-    if (argc < 2) { std::fputs("usage: ps4-boot-probe <dossier du jeu> [millisecondes]\n", stderr); return 2; }
+    if (argc < 2) { std::fputs("usage: ps4-boot-probe <dossier du jeu> [dossier des images]\n", stderr); return 2; }
     const std::filesystem::path root = std::filesystem::absolute(argv[1]);
     const std::string frames = argc > 2 ? argv[2] : "";
     if (!frames.empty()) std::filesystem::create_directories(frames);
