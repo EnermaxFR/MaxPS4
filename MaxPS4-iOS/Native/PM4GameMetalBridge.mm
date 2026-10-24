@@ -64,7 +64,7 @@ struct GameMetalState {
     auto* descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:source.pixelFormat
         width:width height:height mipmapped:NO];
     descriptor.usage = MTLTextureUsageShaderRead;
-    descriptor.storageMode = MTLStorageModePrivate;
+    descriptor.storageMode = MTLStorageModeShared;
     id<MTLTexture> texture = [s.device newTextureWithDescriptor:descriptor];
     id<MTLCommandBuffer> command = [s.queue commandBuffer];
     id<MTLBlitCommandEncoder> blit = texture && command ? [command blitCommandEncoder] : nil;

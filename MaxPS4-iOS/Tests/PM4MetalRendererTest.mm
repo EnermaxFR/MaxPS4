@@ -139,6 +139,11 @@ int main() {
         for (const auto& packet : decodePM4Type3(s.words.data(),s.words.size()).packets)
             assert([bridge submit:s.words.data()+packet.headerWord count:packet.payloadCount+1]==0);
         auto readback = [&](id<MTLTexture> source, std::uint8_t* pixels) {
+            assert(source);
+            if (source.storageMode == MTLStorageModeShared) {
+                [source getBytes:pixels bytesPerRow:width*4 fromRegion:MTLRegionMake2D(0,0,width,height) mipmapLevel:0];
+                return;
+            }
             auto* desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:source.pixelFormat
                 width:width height:height mipmapped:NO];
             desc.storageMode = MTLStorageModeShared;
@@ -156,8 +161,11 @@ int main() {
         assert(saved && ![bridge copyTargetAtAddress:0 width:width height:height]);
         assert(![bridge copyTargetAtAddress:targetA width:width+1 height:height]);
         std::uint8_t before[width*height*4]{}, after[sizeof before]{};
+        readback([bridge copyTargetAtAddress:targetA width:width height:height],after);
+        const bool bridgeA=compare("app bridge A",after,arena.bytes.data()+(targetA-Arena::start));
         readback(saved,before);
-        assert(compare("app bridge",before,arena.bytes.data()+(targetB-Arena::start)));
+        const bool bridgeB=compare("app bridge B",before,arena.bytes.data()+(targetB-Arena::start));
+        assert(bridgeA && bridgeB);
         Stream next;
         next.set(0x76,0x08,{std::uint32_t(greenPS>>8),0,0,0});
         next.words.insert(next.words.end(),{0xc0012d00U,3,2});

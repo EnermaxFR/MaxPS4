@@ -1087,11 +1087,12 @@ int main(int argc, char** argv) {
         CHECK(maxps4_fex_engine_initialize(process)==0);
         CHECK(maxps4_fex_engine_prepare_orbis_general(process,spinning,2,"app.elf",&relocation,diagnostic,sizeof diagnostic)==0);
         const auto start=std::chrono::steady_clock::now();
+        int stop_status=-1; // joined before reading; no CHECK/return inside the worker
         std::thread stop([&] { std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            CHECK(maxps4_fex_engine_request_stop(process)==0); });
+            stop_status=maxps4_fex_engine_request_stop(process); });
         const int ran=maxps4_fex_engine_run_orbis(process,&value,&cpu,&entry);
         stop.join();
-        CHECK(ran==-ECANCELED && std::chrono::steady_clock::now()-start<std::chrono::seconds(10));
+        CHECK(stop_status==0 && ran==-ECANCELED && std::chrono::steady_clock::now()-start<std::chrono::seconds(10));
         maxps4_fex_engine_close(process);
         std::puts("PASS concurrent cancellation interrupts a running native guest without closing its engine");
 #endif
