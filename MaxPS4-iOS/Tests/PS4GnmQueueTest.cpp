@@ -118,6 +118,14 @@ int main() {
     put(addresses,base,8); put(sizes,28+sizeof(sync),4);
     put(base+28+8,UINT64_MAX-3,4); put(base+28+12,(1U<<29)|0xffff,4);
     assert(queue.submit(1,addresses,sizes,0,0,&interrupts)==PS4GnmQueue::error(0x1000));
-    assert(queue.backend(PS4GnmQueue::diagnostic)==0 && !queue.null_backend());
+    // Software backend: same retirement, and the draw reaches the renderer
+    // (skipped here: no colour target is bound).
+    put(addresses,base,8); put(sizes,28+sizeof(sync),4); put(base+28+8,uint32_t(labels),4); put(base+28+12,(1U<<29)|(2U<<24),4);
+    assert(queue.backend(4)==-EINVAL && queue.backend(PS4GnmQueue::software)==0 && queue.null_backend());
+    assert(queue.software_stats().draws==0);
+    assert(queue.submit(1,addresses,sizes,0,0,&interrupts)==0 && interrupts==1);
+    const auto stats=queue.software_stats();
+    assert(stats.draws==1 && stats.skipped==1 && stats.failed==0 && stats.error.empty());
+    assert(queue.backend(PS4GnmQueue::diagnostic)==0 && !queue.null_backend() && queue.software_stats().draws==0);
     std::puts("PASS GNM null backend: label writes, EOP interrupt count, no ticket, CCB ignored, prepareFlip label/interrupt, bad address refused");
 }
