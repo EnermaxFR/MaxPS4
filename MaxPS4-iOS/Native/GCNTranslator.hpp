@@ -825,12 +825,7 @@ inline std::string gcnMetalEntryPoints(const GCNTranslation& vs, const GCNTransl
     }
     s += "    GCNMemory M = { mem, D.base, D.size, D.ranges, D.rangeCount }; GCNQuad Q = { 0u };\n"
          "    " + psName + "(L, M, Q);\n"
-#ifdef MAXPS4_DIAG_EXEC
-         "    if (L.killed) return float4(1,0,1,1);\n"
-         "    if ((L.colorWritten & 1u) == 0u) return float4(0,1,1,1);\n"
-#else
          "    if (L.killed) discard_fragment();\n"
-#endif
          "    return L.color[0];\n}\n";
     return s;
 }
