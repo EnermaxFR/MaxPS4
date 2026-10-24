@@ -686,8 +686,10 @@ GCN_FN void gcn_clear(thread GCNLane& L) {
     L.pos = float4(0.0f); L.exec = true; L.quadLane = 0u; L.colorWritten = 0u; L.killed = false;
 }
 // Per-draw state at buffer(1): the guest memory window at buffer(0) starts
-// at guest address `base`; user SGPRs of each stage.
-struct GCNDrawState { ulong base; ulong size; uint vsUser[16]; uint psUser[17]; };
+// at guest address `base`; user SGPRs of each stage; GCN_DRAW_* flags.
+struct GCNDrawState { ulong base; ulong size; uint vsUser[16]; uint psUser[17]; uint flags; };
+#define GCN_DRAW_RECT_LIST 1u
+#define GCN_DRAW_FLIP_Y 2u
 GCN_FN float gf(uint x) { return as_type<float>(x); }
 GCN_FN uint gu(float f) { return as_type<uint>(f); }
 GCN_FN ulong gcn_u64(uint lo, uint hi) { return ulong(lo) | (ulong(hi) << 32); }
@@ -740,9 +742,13 @@ GCN_FN uint gcn_quad_shuffle(thread GCNQuad& Q, thread GCNLane& L, uint value, u
 
 // Metal entry points gcn_vertex and gcn_fragment around a translated vertex
 // and pixel program (their sources must follow gcnMetalPrelude()). Buffers:
-// 0 the guest memory window, 1 GCNDrawState. psInputAddr is
-// SPI_PS_INPUT_ADDR and inputCntl SPI_PS_INPUT_CNTL_0..31, read when the
-// pipeline is built. The fragment returns colour target 0.
+// 0 the guest memory window, 1 GCNDrawState, 2 (vertex) the vertex indices.
+// Vertex invocation n runs the VS on indices[n]; with GCN_DRAW_RECT_LIST, six
+// invocations per three indices draw each rectangle, its fourth corner being
+// v1 + v2 - v0 (the VS runs on the three given corners); GCN_DRAW_FLIP_Y
+// negates clip-space y. psInputAddr is SPI_PS_INPUT_ADDR and inputCntl
+// SPI_PS_INPUT_CNTL_0..31, read when the pipeline is built. The fragment
+// returns colour target 0.
 inline std::string gcnMetalEntryPoints(const GCNTranslation& vs, const GCNTranslation& ps, const std::string& vsName,
                                        const std::string& psName, std::uint32_t psInputAddr, const std::uint32_t inputCntl[32]) {
     std::uint32_t flatParams = 0;
@@ -753,17 +759,35 @@ inline std::string gcnMetalEntryPoints(const GCNTranslation& vs, const GCNTransl
         if ((vs.params >> p) & 1)
             s += "    float4 p" + std::to_string(p) + " [[user(locn" + std::to_string(p) + ")" + ((flatParams >> p) & 1 ? ", flat" : "") + "]];\n";
     s += "};\n"
-         "vertex GCNVaryings gcn_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],\n"
-         "    device const uchar* mem [[buffer(0)]], constant GCNDrawState& D [[buffer(1)]]) {\n"
+         "GCN_FN GCNVaryings gcn_run_vertex(uint index, uint iid, device const uchar* mem, constant GCNDrawState& D) {\n"
          "    GCNLane L; gcn_clear(L);\n"
          "    for (uint k = 0u; k < 16u; ++k) L.user[k] = D.vsUser[k];\n"
-         "    L.vinit[0] = vid; L.vinit[3] = iid;\n"
+         "    L.vinit[0] = index; L.vinit[3] = iid;\n"
          "    GCNMemory M = { mem, D.base, D.size }; GCNQuad Q = { 0u };\n"
          "    " + vsName + "(L, M, Q);\n"
          "    GCNVaryings o; o.position = L.pos;\n";
     for (unsigned p = 0; p < 32; ++p)
         if ((vs.params >> p) & 1) s += "    o.p" + std::to_string(p) + " = L.param[" + std::to_string(p) + "];\n";
     s += "    return o;\n}\n"
+         "vertex GCNVaryings gcn_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],\n"
+         "    device const uchar* mem [[buffer(0)]], constant GCNDrawState& D [[buffer(1)]],\n"
+         "    device const uint* indices [[buffer(2)]]) {\n"
+         "    GCNVaryings o;\n"
+         "    if ((D.flags & GCN_DRAW_RECT_LIST) != 0u) {\n"
+         "        uint first = 3u * (vid / 6u); uint k = vid % 6u;\n"
+         "        uint corner = k == 0u ? 0u : k == 1u ? 1u : k == 2u ? 2u : k == 3u ? 2u : k == 4u ? 1u : 3u;\n"
+         "        if (corner < 3u) o = gcn_run_vertex(indices[first + corner], iid, mem, D);\n"
+         "        else {\n"
+         "            GCNVaryings a = gcn_run_vertex(indices[first], iid, mem, D);\n"
+         "            GCNVaryings b = gcn_run_vertex(indices[first + 1u], iid, mem, D);\n"
+         "            GCNVaryings c = gcn_run_vertex(indices[first + 2u], iid, mem, D);\n"
+         "            o.position = b.position + c.position - a.position;\n";
+    for (unsigned p = 0; p < 32; ++p)
+        if ((vs.params >> p) & 1) s += "            o.p" + std::to_string(p) + " = b.p" + std::to_string(p) + " + c.p" + std::to_string(p) + " - a.p" + std::to_string(p) + ";\n";
+    s += "        }\n"
+         "    } else o = gcn_run_vertex(indices[vid], iid, mem, D);\n"
+         "    if ((D.flags & GCN_DRAW_FLIP_Y) != 0u) o.position.y = -o.position.y;\n"
+         "    return o;\n}\n"
          "fragment float4 gcn_fragment(GCNVaryings in [[stage_in]],\n"
          "    device const uchar* mem [[buffer(0)]], constant GCNDrawState& D [[buffer(1)]]) {\n"
          "    GCNLane L; gcn_clear(L);\n"

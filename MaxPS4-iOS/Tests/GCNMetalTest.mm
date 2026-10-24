@@ -15,7 +15,7 @@ using namespace gcn_test;
 namespace {
 constexpr std::uint64_t pixelProgram = 0x11000, texture = 0x14000, target = 0x18000;
 constexpr unsigned width = 16, height = 8;
-struct DrawState { std::uint64_t base, size; std::uint32_t vsUser[16], psUser[17]; std::uint32_t pad; };
+struct DrawState { std::uint64_t base, size; std::uint32_t vsUser[16], psUser[17]; std::uint32_t flags; };
 struct Stream {
     std::vector<std::uint32_t> words;
     void set(std::uint8_t opcode, std::uint32_t offset, std::initializer_list<std::uint32_t> values) {
@@ -132,6 +132,8 @@ int main() {
         [encoder setFragmentBuffer:memory offset:0 atIndex:0];
         [encoder setVertexBytes:&state length:sizeof state atIndex:1];
         [encoder setFragmentBytes:&state length:sizeof state atIndex:1];
+        const std::uint32_t indices[3] = {0, 1, 2};
+        [encoder setVertexBytes:indices length:sizeof indices atIndex:2];
         [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
         [encoder endEncoding]; [buffer commit]; [buffer waitUntilCompleted];
         assert(buffer.status == MTLCommandBufferStatusCompleted && !buffer.error);
