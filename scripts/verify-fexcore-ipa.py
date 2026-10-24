@@ -65,6 +65,7 @@ def verify(path):
         main = ipa.read(prefix + 'MaxPS4')
         assert b'maxps4.openGameDirectory' in main, 'Game launch entry not present in compiled app'
         assert b'maxps4.activateJIT' in main, 'JIT activation entry not present in compiled app'
+        assert b'maxps4.game.controls' in main, 'On-screen game controls missing from compiled app'
         runtime = ipa.read(framework + 'MaxPS4FEXRuntime')
         kind, libraries, _, imports, _ = macho(main)
         rkind, dependencies, exports, unresolved, identifiers = macho(runtime)

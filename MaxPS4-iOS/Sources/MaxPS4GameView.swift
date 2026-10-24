@@ -118,6 +118,10 @@ struct MaxPS4GameView: View {
                             report: session.presented, failed: session.failed)
                             .aspectRatio(16.0 / 9.0, contentMode: .fit)
                             .accessibilityIdentifier("maxps4.game.surface")
+                            .overlay {
+                                if session.running { screenControls }
+                            }
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
                         Button(session.running ? "Arrêter" : "Jouer") {
                             touch = 0
                             if session.running { session.stop() } else {
@@ -129,17 +133,6 @@ struct MaxPS4GameView: View {
                             Text("Session terminée. Consulte les détails si le jeu ne s’est pas lancé.")
                                 .font(.footnote).foregroundStyle(.secondary)
                         }
-                        HStack {
-                            VStack {
-                                control("↑", bit: 0x10)
-                                HStack { control("←", bit: 0x80); control("↓", bit: 0x40); control("→", bit: 0x20) }
-                            }
-                            Spacer()
-                            VStack {
-                                HStack { control("Options", bit: 0x8); control("△", bit: 0x1000) }
-                                HStack { control("□", bit: 0x8000); control("✕", bit: 0x4000); control("○", bit: 0x2000) }
-                            }
-                        }.disabled(!session.running)
                         DisclosureGroup("Détails de la session") {
                             Text(session.report).font(.footnote.monospaced()).textSelection(.enabled)
                             ShareLink(item: session.report) { Label("Partager le rapport", systemImage: "square.and.arrow.up") }
@@ -188,11 +181,54 @@ struct MaxPS4GameView: View {
 #endif
     }
 #if MAXPS4_FEX_APP
-    private func control(_ name: String, bit: UInt32) -> some View {
-        Text(name).frame(minWidth: 44, minHeight: 44)
-            .background(touch & bit != 0 ? Color.blue : Color.gray.opacity(0.2))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .accessibilityLabel(name).accessibilityAddTraits(.isButton)
+    private var screenControls: some View {
+        GeometryReader { geometry in
+            let size = max(44, min(56, (geometry.size.width - 32) / 6))
+            VStack(spacing: 0) {
+                control("Options", label: "Options", bit: 0x8, size: 44)
+                Spacer(minLength: 0)
+            }.frame(maxWidth: .infinity)
+            HStack(alignment: .bottom, spacing: 0) {
+                VStack(spacing: 0) {
+                    control("↑", label: "Haut", bit: 0x10, size: size)
+                    HStack(spacing: 0) {
+                        control("←", label: "Gauche", bit: 0x80, size: size)
+                        Color.clear.frame(width: size, height: size).allowsHitTesting(false)
+                        control("→", label: "Droite", bit: 0x20, size: size)
+                    }
+                    control("↓", label: "Bas", bit: 0x40, size: size)
+                }
+                Spacer(minLength: 0)
+                VStack(spacing: 0) {
+                    control("△", label: "Triangle", bit: 0x1000, size: size)
+                    HStack(spacing: 0) {
+                        control("□", label: "Carré", bit: 0x8000, size: size)
+                        Color.clear.frame(width: size, height: size).allowsHitTesting(false)
+                        control("○", label: "Rond", bit: 0x2000, size: size)
+                    }
+                    control("✕", label: "Croix, sauter", bit: 0x4000, size: size)
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        }
+        .padding(6)
+        .accessibilityIdentifier("maxps4.game.controls")
+    }
+
+    private func control(_ name: String, label: String, bit: UInt32, size: CGFloat) -> some View {
+        let pressed = touch & bit != 0
+        return Text(name)
+            .font(.system(size: name == "Options" ? 10 : 22, weight: .bold, design: .rounded))
+            .foregroundStyle(.white.opacity(pressed ? 1 : 0.85))
+            .frame(width: size, height: size)
+            .background(pressed ? Color.cyan.opacity(0.50) : Color.black.opacity(0.25), in: Circle())
+            .overlay(Circle().stroke(pressed ? Color.cyan : Color.white.opacity(0.35), lineWidth: 1))
+            .shadow(color: .purple.opacity(pressed ? 0.45 : 0.15), radius: 6)
+            .contentShape(Circle())
+            .accessibilityLabel(label).accessibilityAddTraits(.isButton)
+            .accessibilityAction {
+                touch |= bit; session.input(touch)
+                touch &= ~bit
+            }
             .gesture(DragGesture(minimumDistance: 0)
                 .onChanged { _ in touch |= bit; session.input(touch) }
                 .onEnded { _ in touch &= ~bit; session.input(touch) })
