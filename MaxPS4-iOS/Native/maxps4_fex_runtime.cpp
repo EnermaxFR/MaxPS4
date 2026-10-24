@@ -367,6 +367,11 @@ private:
                 // FEX may backpatch a TSO access with ordered loads/stores.
                 // iOS uses distinct RW/RX aliases: patch RW, resume RX, and
                 // invalidate the executable alias as well as FEX's RW flush.
+#if defined(__APPLE__)
+                // macOS MAP_JIT needs the per-thread write phase; iOS's
+                // dual-mapped provider defines this guard as a no-op.
+                FEXCore::Allocator::ScopedJITWriteProtect jit_write;
+#endif
                 auto* writable=FEXCore::Allocator::GetWritableAddress(reinterpret_cast<void*>(pc));
                 const auto repaired=FEXCore::ArchHelpers::Arm64::HandleUnalignedAccess(guard->thread,
                     FEXCore::ArchHelpers::Arm64::UnalignedHandlerType::HalfBarrier,
