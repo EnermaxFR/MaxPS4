@@ -128,6 +128,21 @@ int main() {
             ok = compare(name, pixels, arena.bytes.data() + (address - Arena::start)) && ok;
         }
         assert(ok);
+        // Isolate cross-command-buffer rendering from the bridge/display copy.
+        PM4DrawStats separateStats;
+        PM4DrawCollector separateCollector(arena.memory,separateStats);
+        PM4MetalRenderer separate(device,arena.memory,nil,0);
+        for (const auto& packet : decodePM4Type3(s.words.data(),s.words.size()).packets) {
+            id<MTLCommandBuffer> command = [queue commandBuffer];
+            separateCollector.execute(s.words.data()+packet.headerWord,packet.payloadCount+1,[&](const PM4Draw& d) {
+                assert(separate.encode(d,command));
+            });
+            [command commit]; [command waitUntilCompleted];
+            assert(command.status==MTLCommandBufferStatusCompleted && !command.error);
+        }
+        std::uint8_t separatePixels[width*height*4]{};
+        [separate.target(targetB) getBytes:separatePixels bytesPerRow:width*4 fromRegion:MTLRegionMake2D(0,0,width,height) mipmapLevel:0];
+        const bool separateOK=compare("separate command buffers",separatePixels,arena.bytes.data()+(targetB-Arena::start));
         // The app bridge receives separate submissions; register state must
         // persist. It returns immutable cropped display copies, not live targets.
         Arena* reader = &arena;
@@ -165,7 +180,7 @@ int main() {
         const bool bridgeA=compare("app bridge A",after,arena.bytes.data()+(targetA-Arena::start));
         readback(saved,before);
         const bool bridgeB=compare("app bridge B",before,arena.bytes.data()+(targetB-Arena::start));
-        assert(bridgeA && bridgeB);
+        assert(separateOK && bridgeA && bridgeB);
         Stream next;
         next.set(0x76,0x08,{std::uint32_t(greenPS>>8),0,0,0});
         next.words.insert(next.words.end(),{0xc0012d00U,3,2});

@@ -3,6 +3,11 @@
 #include <cerrno>
 #include <memory>
 #include <mutex>
+#ifdef MAXPS4_VALIDATE_METAL_COPIES
+#include <cassert>
+#include <cstring>
+#include <vector>
+#endif
 
 using namespace maxps4::gpu;
 namespace {
@@ -78,6 +83,12 @@ struct GameMetalState {
     if (command.status != MTLCommandBufferStatusCompleted || command.error) {
         s.error = "Metal display copy failed"; return nil;
     }
+#ifdef MAXPS4_VALIDATE_METAL_COPIES
+    std::vector<uint8_t> before(size_t(width)*height*4), after(before.size());
+    [source getBytes:before.data() bytesPerRow:width*4 fromRegion:MTLRegionMake2D(0,0,width,height) mipmapLevel:0];
+    [texture getBytes:after.data() bytesPerRow:width*4 fromRegion:MTLRegionMake2D(0,0,width,height) mipmapLevel:0];
+    assert(std::memcmp(before.data(),after.data(),before.size())==0 && "display copy changed rendered pixels");
+#endif
     return texture;
 }
 - (NSString*)report {
