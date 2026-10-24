@@ -86,7 +86,7 @@ struct MaxPS4JITSetupView: View {
             if maxps4_jit_state() == 2 { verify() }
 #endif
         }
-        .onChange(of: scenePhase) { _, phase in
+        .onChange(of: scenePhase) { phase in
             guard phase == .active, requested else { return }
             detail = MaxPS4StikActivation.confirmation()
             verify()
