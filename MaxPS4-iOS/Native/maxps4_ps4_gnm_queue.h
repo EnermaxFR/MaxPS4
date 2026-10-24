@@ -44,7 +44,10 @@ public:
         if (kind>host) return -EINVAL;
         std::lock_guard<std::mutex> lock(lock_);
         if (kind==host && !host_consumer_) return -EINVAL;
-        if (kind!=kind_) clear();
+        if (kind!=kind_) {
+            clear();
+            if (kind_==host) { host_context_=nullptr; host_consumer_=nullptr; }
+        }
         kind_=kind; failed_=false;
         return 0;
     }

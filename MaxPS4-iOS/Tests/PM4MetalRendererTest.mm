@@ -34,6 +34,19 @@ struct Stream {
         set(0x69, 0x191, {0});
     }
 };
+void readPixels(id<MTLDevice> device, id<MTLCommandQueue> queue, id<MTLTexture> texture, std::uint8_t* pixels) {
+    assert(texture);
+    constexpr unsigned rowBytes=256;
+    id<MTLBuffer> buffer=[device newBufferWithLength:rowBytes*height options:MTLResourceStorageModeShared];
+    id<MTLCommandBuffer> command=[queue commandBuffer];
+    id<MTLBlitCommandEncoder> blit=[command blitCommandEncoder];
+    [blit copyFromTexture:texture sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0,0,0)
+        sourceSize:MTLSizeMake(width,height,1) toBuffer:buffer destinationOffset:0
+        destinationBytesPerRow:rowBytes destinationBytesPerImage:rowBytes*height];
+    [blit endEncoding]; [command commit]; [command waitUntilCompleted];
+    assert(command.status==MTLCommandBufferStatusCompleted && !command.error);
+    for(unsigned y=0;y<height;++y) std::memcpy(pixels+y*width*4,static_cast<const uint8_t*>(buffer.contents)+y*rowBytes,width*4);
+}
 bool compare(const char* scene, const std::uint8_t* metal, const std::uint8_t* software) {
     int worst = 0;
     for (unsigned n = 0; n < width * height * 4; ++n) worst = std::max(worst, std::abs(int(metal[n]) - int(software[n])));
@@ -141,7 +154,7 @@ int main() {
             assert(command.status==MTLCommandBufferStatusCompleted && !command.error);
         }
         std::uint8_t separatePixels[width*height*4]{};
-        [separate.target(targetB) getBytes:separatePixels bytesPerRow:width*4 fromRegion:MTLRegionMake2D(0,0,width,height) mipmapLevel:0];
+        readPixels(device,queue,separate.target(targetB),separatePixels);
         const bool separateOK=compare("separate command buffers",separatePixels,arena.bytes.data()+(targetB-Arena::start));
         // The app bridge receives separate submissions; register state must
         // persist. It returns immutable cropped display copies, not live targets.
@@ -154,23 +167,7 @@ int main() {
         for (const auto& packet : decodePM4Type3(s.words.data(),s.words.size()).packets)
             assert([bridge submit:s.words.data()+packet.headerWord count:packet.payloadCount+1]==0);
         auto readback = [&](id<MTLTexture> source, std::uint8_t* pixels) {
-            assert(source);
-            if (source.storageMode == MTLStorageModeShared) {
-                [source getBytes:pixels bytesPerRow:width*4 fromRegion:MTLRegionMake2D(0,0,width,height) mipmapLevel:0];
-                return;
-            }
-            auto* desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:source.pixelFormat
-                width:width height:height mipmapped:NO];
-            desc.storageMode = MTLStorageModeShared;
-            id<MTLTexture> readable = [device newTextureWithDescriptor:desc];
-            id<MTLCommandBuffer> command = [queue commandBuffer];
-            id<MTLBlitCommandEncoder> blit = [command blitCommandEncoder];
-            [blit copyFromTexture:source sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0,0,0)
-                sourceSize:MTLSizeMake(width,height,1) toTexture:readable destinationSlice:0 destinationLevel:0
-                destinationOrigin:MTLOriginMake(0,0,0)];
-            [blit endEncoding]; [command commit]; [command waitUntilCompleted];
-            assert(command.status==MTLCommandBufferStatusCompleted && !command.error);
-            [readable getBytes:pixels bytesPerRow:width*4 fromRegion:MTLRegionMake2D(0,0,width,height) mipmapLevel:0];
+            readPixels(device,queue,source,pixels);
         };
         id<MTLTexture> saved = [bridge copyTargetAtAddress:targetB width:width height:height];
         assert(saved && ![bridge copyTargetAtAddress:0 width:width height:height]);

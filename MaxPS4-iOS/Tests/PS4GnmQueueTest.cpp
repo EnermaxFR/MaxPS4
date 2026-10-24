@@ -148,6 +148,8 @@ int main() {
     assert(interrupts==0 && host.calls==2 && queue.allowed()==0);
     assert(memory.read(labels,label_bytes,sizeof label_bytes) && ps4::get_le(label_bytes,8)==0);
     assert(queue.submit(1,addresses,sizes,0,0)==PS4GnmQueue::error(0x10ff) && host.calls==2);
+    assert(queue.backend(PS4GnmQueue::none)==0 && queue.backend(PS4GnmQueue::host)==-EINVAL);
+    assert(queue.host_consumer(&host,consume)==0 && queue.backend(PS4GnmQueue::host)==0);
     queue.reset(); assert(queue.backend(PS4GnmQueue::host)==-EINVAL);
     std::puts("PASS GNM host backend: synchronous consumer, GPU-before-label ordering, failure latch, detach and reset");
     std::puts("PASS GNM null backend: label writes, EOP interrupt count, no ticket, CCB ignored, prepareFlip label/interrupt, bad address refused");
