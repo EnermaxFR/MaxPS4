@@ -55,6 +55,9 @@ int64_t maxps4_fex_engine_complete_graphics_event(maxps4_fex_engine *engine,
     uint64_t ticket);
 // Explicitly attach/detach the native triangle diagnostic consumer (0/1).
 // It accepts no guest shader/register state, indexed draws, CCB or flips.
+// 2 attaches the null backend instead (boot probe): it draws nothing and
+// queues no ticket; submissions apply their label writes and EOP interrupts,
+// and sceGnmSubmitAndFlipCommandBuffers then requests the VideoOut flip.
 // Default/restaged state is detached; detach cancels all outstanding tickets.
 // All three calls avoid the FEX runtime lock; caller retains engine and
 // serializes close. Snapshot capacity is in dwords; null/0 queries metadata.
@@ -204,6 +207,13 @@ int32_t maxps4_fex_engine_prepare_orbis(maxps4_fex_engine *engine,
 int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine *engine,
     const maxps4_orbis_module *modules, size_t count, const char *root,
     uint64_t *relocation, char *diagnostic, size_t capacity);
+// Diagnostic boot probe for later prepare_orbis_general calls (0: off, the
+// default). When on, every import that neither a given module nor the HLE
+// provides gets a stub: a function writes "missing import <library> <NID>"
+// to stderr on its first call and returns 0, a data object is 64 zero bytes.
+// Every HLE call of a run is also traced to stderr with its result.
+// It shows how far a game gets; it never makes it correct.
+int32_t maxps4_fex_engine_set_import_probe(maxps4_fex_engine *engine, uint32_t enabled);
 // Optional bounded RGBA8 output/input contract for an admitted SCE process.
 // buttons: left=1, right=2, up=4, down=8, action=16. No host pointer returned.
 // Invalid configuration clears previous output. Dimensions <=320x240; disjoint RW/non-X.

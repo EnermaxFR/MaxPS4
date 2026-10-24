@@ -69,16 +69,29 @@ enum class PS4KernelService : uint32_t {
     video_open, video_close, video_attribute, video_register, video_unregister,
     video_submit, video_pending, video_flip_status, video_vblank_status,
     video_add_flip, video_add_vblank, video_delete_flip, video_delete_vblank,
-    video_event_id, video_event_data, video_event_count,
+    video_event_id, video_event_data, video_event_count, video_resolution,
     user_initialize, user_terminate, user_initial, user_login_list, user_event, user_name,
     pad_init, pad_open, pad_close, pad_read, pad_read_state, pad_information, pad_handle,
     gnm_draw_auto, gnm_draw_index, gnm_vgt, gnm_vs, gnm_ps350,
-    gnm_submit, gnm_allowed, gnm_done
+    gnm_submit, gnm_allowed, gnm_done,
+    // sceGnmSubmitAndFlipCommandBuffers: null GPU backend only (the flip is
+    // requested once the work is retired, at submission).
+    gnm_submit_flip,
+    gnm_cs, gnm_dispatch, gnm_embedded_vs, gnm_wait_flip, gnm_push_marker, gnm_pop_marker, gnm_init350,
+    // What a game's own libc.prx needs from libSceLibcInternal.
+    heap_trace_info,
+    // libSceSystemService (shadPS4 system_service.cpp): settings of an
+    // English console, a foreground application status, no system events.
+    system_param_int, system_status, system_event
 };
 // Token bit of a trampoline whose function follows the POSIX convention: -1
 // with the error in the calling thread's errno (__Error) instead of an Orbis
 // kernel error code.
 constexpr uint32_t posix_token = 0x40000000;
+// Tokens from missing_import_token on are the boot probe's stubs (see
+// maxps4_fex_engine_set_import_probe): token - missing_import_token indexes
+// the engine's list of stubbed imports. Never a PS4KernelService.
+constexpr uint32_t missing_import_token = 0x20000000;
 // Services only general images get: elsewhere their imports stay unresolved.
 // A condition wait needs another thread to end it.
 constexpr bool general_only(PS4KernelService service) {
@@ -98,6 +111,7 @@ struct PS4KernelExport {
     uint32_t data = 0;
     const uint8_t* code = nullptr;
     size_t code_size = 0;
+    const char* module = nullptr; // When it is not the library's own name.
 };
 const PS4KernelExport* libkernel_exports(size_t& count);
 // Library/module/version are decoded by an ELF/PRX loader before resolution.
@@ -143,6 +157,7 @@ private:
     PS4Gnm gnm_;
     PS4GnmQueue graphics_;
     uint64_t errno_table_ = 0, errno_table_size_ = 0, process_param_ = 0;
+    uint64_t heap_trace_ = 0; // sceLibcHeapGetTraceInfo's zeroed tables, mapped on first use.
     std::map<uint64_t, uint64_t> direct_; // Allocated physical ranges: start -> length.
     int64_t memory_service(PS4KernelService service, const PS4KernelCall& call);
     int64_t posix_result(int64_t result, uint64_t thread);

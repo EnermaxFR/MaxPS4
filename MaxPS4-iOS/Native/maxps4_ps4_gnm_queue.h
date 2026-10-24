@@ -5,38 +5,57 @@
 #include "PM4MetalDrawPlan.hpp"
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <deque>
 #include <mutex>
 #include <new>
 
 namespace maxps4 {
-// The only currently attachable backend is the existing native triangle
-// diagnostic pipeline. Its preflight refuses all guest shader/register state.
-// Queue acceptance means owned work enqueued, never GPU or display completion.
+// Backend 1 is the existing native triangle diagnostic pipeline. Its preflight
+// refuses all guest shader/register state; acceptance means owned work
+// enqueued, never GPU or display completion.
+// Backend 2 (null, for the boot probe) draws nothing: it retires decodable
+// work at submission, applying only its synchronization packets (EOP/EOS/
+// RELEASE_MEM label writes and WRITE_DATA to memory) and counting the EOP
+// interrupts they request. Waits (WAIT_REG_MEM) and constant buffers are
+// ignored.
 class PS4GnmQueue final {
 public:
     static constexpr size_t buffer_limit=16, word_limit=65536, queue_limit=4;
+    static constexpr uint32_t none=0, diagnostic=1, null=2;
     static int64_t error(uint32_t code) { return ps4::signed32(0x80d10000U|code); }
     explicit PS4GnmQueue(PS4GuestMemory& memory) : memory_(memory) {}
-    int32_t backend(bool enabled) {
+    int32_t backend(uint32_t kind) {
+        if (kind>null) return -EINVAL;
         std::lock_guard<std::mutex> lock(lock_);
-        if (!enabled) { clear(); enabled_=false; }
-        else { enabled_=true; failed_=false; }
+        if (kind!=kind_) clear();
+        kind_=kind; failed_=false;
         return 0;
     }
+    bool null_backend() { std::lock_guard<std::mutex> lock(lock_); return kind_==null; }
     int64_t allowed() {
         std::lock_guard<std::mutex> lock(lock_);
-        return enabled_ && !failed_ && !sealed_ && jobs_.size()<queue_limit ? 1 : 0;
+        return kind_ && !failed_ && !sealed_ && jobs_.size()<queue_limit ? 1 : 0;
     }
+    // What the last DCB of sceGnmSubmitAndFlipCommandBuffers asks for once the
+    // flip is done: its final 64 dwords are a "prepareFlip" NOP that the
+    // driver turns into a label write and/or an EOP interrupt.
+    struct PreparedFlip { bool label=false, interrupt=false; uint64_t address=0; uint32_t value=0; };
+    // `interrupts` (null backend only) receives the EOP interrupts requested;
+    // a non-null `flip` requires the prepareFlip packet and receives it.
     int64_t submit(uint32_t count, uint64_t addresses, uint64_t sizes,
-                   uint64_t constant_addresses, uint64_t constant_sizes) {
+                   uint64_t constant_addresses, uint64_t constant_sizes, uint32_t* interrupts=nullptr,
+                   PreparedFlip* flip=nullptr) {
+        if (interrupts) *interrupts=0;
+        if (flip) *flip={};
         std::lock_guard<std::mutex> lock(lock_);
-        if (!enabled_ || failed_) return error(0x10ff);
+        if (!kind_ || failed_) return error(0x10ff);
         if (sealed_ || jobs_.size()>=queue_limit || next_==UINT64_MAX) return error(0x1001);
         if (!count || count>buffer_limit || !addresses || !sizes || (addresses&7) || (sizes&3)) return error(0x1000);
         // Constant-engine packets/synchronization are not implemented. Never
-        // ignore non-null CCB tables, even if they happen to contain zero sizes.
-        if (constant_addresses || constant_sizes) return error(0x3fff);
+        // ignore non-null CCB tables, even if they happen to contain zero sizes,
+        // unless nothing is drawn.
+        if ((constant_addresses || constant_sizes) && kind_!=null) return error(0x3fff);
         try {
             std::array<uint8_t,buffer_limit*8> address_bytes{};
             std::array<uint8_t,buffer_limit*4> size_bytes{};
@@ -55,6 +74,13 @@ public:
                 if (!gpu::decodePM4Type3(words.data(),words.size())) return error(0x3013);
                 job.words.insert(job.words.end(),words.begin(),words.end());
             }
+            if (kind_==null) {
+                if (flip && !prepared_flip(job.words,*flip)) return error(0x1000);
+                const auto retired=retire(job.words);
+                if (retired<0) return error(0x1000);
+                if (interrupts) *interrupts=uint32_t(retired);
+                ++next_; return 0;
+            }
             const auto plan=gpu::planPM4Triangles(job.words.data(),job.words.size());
             if (plan.error!=gpu::PM4MetalError::none) return error(0x3fff);
             job.info={next_,uint32_t(job.words.size()),uint32_t(plan.drawCount)};
@@ -63,7 +89,7 @@ public:
     }
     int64_t done() {
         std::lock_guard<std::mutex> lock(lock_);
-        if (!enabled_ || failed_) return error(0x10ff);
+        if (!kind_ || failed_) return error(0x10ff);
         sealed_=!jobs_.empty(); return 0;
     }
     int32_t snapshot(maxps4_gnm_submission& info, uint32_t* words, size_t capacity) {
@@ -85,14 +111,68 @@ public:
         if (jobs_.empty()) sealed_=false;
         return 0;
     }
-    void reset() { std::lock_guard<std::mutex> lock(lock_); clear(); enabled_=false; }
+    void reset() { std::lock_guard<std::mutex> lock(lock_); clear(); kind_=none; }
 private:
     struct Job { maxps4_gnm_submission info{}; std::vector<uint32_t> words; };
     void clear() { jobs_.clear(); sealed_=failed_=false; }
+    // NOP payload types (shadPS4 PM4CmdNop::PayloadType): PrepareFlip,
+    // PrepareFlipLabel, PrepareFlipInterrupt, PrepareFlipInterruptLabel.
+    static bool prepared_flip(const std::vector<uint32_t>& words, PreparedFlip& flip) {
+        if (words.size()<64) return false;
+        const uint32_t* p=words.data()+words.size()-64;
+        if (p[0]!=0xc03e1000U) return false;
+        switch (p[1]) {
+        case 0x68750777U: return true;
+        case 0x68750778U: // 32-bit label value, dword-aligned address
+            if (p[2]&3) return false;
+            flip={true,false,p[2]|uint64_t(p[3])<<32,p[4]}; return true;
+        case 0x68750780U: flip={false,true,0,0}; return true;
+        case 0x68750781U: // EOP: 16 address high bits
+            flip={true,true,(p[2]&~3U)|uint64_t(p[3]&0xffff)<<32,p[4]}; return true;
+        default: return false;
+        }
+    }
+    // Null backend: the memory writes of decoded (complete) packets, in order.
+    // Returns the EOP interrupts requested, or -1 on an unwritable address.
+    int64_t retire(const std::vector<uint32_t>& words) {
+        const auto decoded=gpu::decodePM4Type3(words.data(),words.size());
+        int64_t interrupts=0;
+        auto store=[&](uint64_t address, uint64_t value, size_t bytes) {
+            uint8_t wire[8]; ps4::put_le(wire,0,value,bytes);
+            return memory_.write(address,wire,bytes);
+        };
+        // DATA_SEL: 1 = 32-bit data, 2 = 64-bit data, 3 = GPU clock counter.
+        auto release=[&](uint64_t address, uint32_t data_sel, uint32_t int_sel, uint32_t lo, uint32_t hi) {
+            if (data_sel==1 && !store(address,lo,4)) return false;
+            if (data_sel==2 && !store(address,lo|uint64_t(hi)<<32,8)) return false;
+            if (data_sel==3 && !store(address,uint64_t(std::chrono::steady_clock::now().time_since_epoch().count()),8)) return false;
+            if (int_sel) ++interrupts;
+            return true;
+        };
+        for (const auto& packet : decoded.packets) {
+            const uint32_t* p=words.data()+packet.payloadWord;
+            const size_t n=packet.payloadCount;
+            bool ok=true;
+            if (packet.opcode==0x47 && n>=5) // EVENT_WRITE_EOP
+                ok=release(p[1]|uint64_t(p[2]&0xffff)<<32,p[2]>>29,(p[2]>>24)&3,p[3],p[4]);
+            else if (packet.opcode==0x49 && n>=6) // RELEASE_MEM
+                ok=release(p[2]|uint64_t(p[3]&0xffff)<<32,p[1]>>29,(p[1]>>24)&3,p[4],p[5]);
+            else if (packet.opcode==0x48 && n>=4 && (p[2]>>29)==2) // EVENT_WRITE_EOS, store data
+                ok=store(p[1]|uint64_t(p[2]&0xffff)<<32,p[3],4);
+            else if (packet.opcode==0x37 && n>=3) { // WRITE_DATA, DST_SEL memory
+                const uint32_t dst=(p[0]>>8)&0xf;
+                if (dst==1 || dst==2 || dst==5)
+                    for (size_t i=3;ok && i<n;++i) ok=store((p[1]|uint64_t(p[2])<<32)+4*(i-3),p[i],4);
+            }
+            if (!ok) return -1;
+        }
+        return interrupts;
+    }
     PS4GuestMemory& memory_;
     std::mutex lock_;
     std::deque<Job> jobs_;
     uint64_t next_=1;
-    bool enabled_=false, sealed_=false, failed_=false;
+    uint32_t kind_=none;
+    bool sealed_=false, failed_=false;
 };
 }

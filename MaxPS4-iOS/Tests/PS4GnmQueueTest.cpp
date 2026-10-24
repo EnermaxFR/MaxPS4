@@ -79,4 +79,45 @@ int main() {
     }
     consumer.join(); assert(queue.snapshot(info,nullptr,0)==-EAGAIN);
     std::puts("PASS GNM bounded owned queue: validation, immutable multi-DCB copies, FIFO, sealing, failure, reset and concurrency");
+    // Null backend: a draw, EVENT_WRITE_EOP (32-bit label, interrupt), RELEASE_MEM
+    // (64-bit label, no interrupt), WRITE_DATA to memory and EOS; CCB ignored.
+    constexpr uint64_t labels=base+0x200;
+    assert(queue.backend(7)==-EINVAL && queue.backend(PS4GnmQueue::null)==0 && queue.null_backend());
+    assert(writer.draw_auto(base,7,3,0)==0);
+    const uint32_t sync[]={
+        0xc0044700,0x504,uint32_t(labels),(1U<<29)|(2U<<24),0x1234,0,
+        0xc0054900,0x504,2U<<29,uint32_t(labels+8),0,0x89abcdef,0x01234567,
+        0xc0033700,5U<<8,uint32_t(labels+16),0,0x55,
+        0xc0034800,0x504,uint32_t(labels+24),2U<<29,0x77};
+    for(size_t i=0;i<sizeof(sync)/4;++i) put(base+28+4*i,sync[i],4);
+    put(sizes,28+sizeof(sync),4);
+    uint32_t interrupts=9;
+    assert(queue.submit(1,addresses,sizes,addresses,sizes,&interrupts)==0 && interrupts==1);
+    auto get=[&](uint64_t at,size_t bytes) { uint8_t wire[8]{}; assert(memory.read(at,wire,bytes)); return ps4::get_le(wire,bytes); };
+    assert(get(labels,4)==0x1234 && get(labels+8,8)==0x0123456789abcdefULL && get(labels+16,4)==0x55 && get(labels+24,4)==0x77);
+    assert(queue.snapshot(info,nullptr,0)==-EAGAIN && queue.allowed()==1 && queue.done()==0 && queue.allowed()==1);
+    // A flip needs the trailing 64-dword prepareFlip NOP; it reports its label.
+    PS4GnmQueue::PreparedFlip flip;
+    assert(queue.submit(1,addresses,sizes,0,0,&interrupts,&flip)==PS4GnmQueue::error(0x1000));
+    constexpr uint64_t flipped=base+0x400; // a copy with room for the 256-byte tail
+    assert(writer.draw_auto(flipped,7,3,0)==0);
+    for(size_t i=0;i<sizeof(sync)/4;++i) put(flipped+28+4*i,sync[i],4);
+    put(addresses,flipped,8);
+    const uint64_t tail=flipped+28+sizeof(sync);
+    put(tail,0xc03e1000,4); put(tail+4,0x68750778,4); put(tail+8,uint32_t(labels+32),4); put(tail+12,0,4); put(tail+16,0x99,4);
+    for(uint64_t at=tail+20;at<tail+256;at+=4) put(at,0,4);
+    put(sizes,28+sizeof(sync)+256,4);
+    assert(queue.submit(1,addresses,sizes,0,0,&interrupts,&flip)==0 && interrupts==1);
+    assert(flip.label && !flip.interrupt && flip.address==labels+32 && flip.value==0x99);
+    put(tail+4,0x68750781,4); put(tail+12,0xffff0000,4);
+    assert(queue.submit(1,addresses,sizes,0,0,&interrupts,&flip)==0 && flip.label && flip.interrupt && flip.address==labels+32);
+    put(tail+4,0x68750777,4);
+    assert(queue.submit(1,addresses,sizes,0,0,&interrupts,&flip)==0 && !flip.label && !flip.interrupt);
+    put(tail+4,0x12345678,4);
+    assert(queue.submit(1,addresses,sizes,0,0,&interrupts,&flip)==PS4GnmQueue::error(0x1000));
+    put(addresses,base,8); put(sizes,28+sizeof(sync),4);
+    put(base+28+8,UINT64_MAX-3,4); put(base+28+12,(1U<<29)|0xffff,4);
+    assert(queue.submit(1,addresses,sizes,0,0,&interrupts)==PS4GnmQueue::error(0x1000));
+    assert(queue.backend(PS4GnmQueue::diagnostic)==0 && !queue.null_backend());
+    std::puts("PASS GNM null backend: label writes, EOP interrupt count, no ticket, CCB ignored, prepareFlip label/interrupt, bad address refused");
 }

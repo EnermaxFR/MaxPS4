@@ -199,10 +199,18 @@ constexpr Binding bindings[] = {
     {"sceGnmSubmitCommandBuffers", "zwY0YV91TTI", PS4KernelService::gnm_submit, "libSceGnmDriver"},
     {"sceGnmAreSubmitsAllowed", "b08AgtPlHPg", PS4KernelService::gnm_allowed, "libSceGnmDriver"},
     {"sceGnmSubmitDone", "yvZ73uQUqrk", PS4KernelService::gnm_done, "libSceGnmDriver"},
+    {"sceGnmSubmitAndFlipCommandBuffers", "xbxNatawohc", PS4KernelService::gnm_submit_flip, "libSceGnmDriver"},
     {"sceGnmDrawIndex", "HlTPoZ-oY7Y", PS4KernelService::gnm_draw_index, "libSceGnmDriver"},
     {"sceGnmSetVgtControl", "cFCp0NX8wf0", PS4KernelService::gnm_vgt, "libSceGnmDriver"},
     {"sceGnmSetVsShader", "gAhCn6UiU4Y", PS4KernelService::gnm_vs, "libSceGnmDriver"},
     {"sceGnmSetPsShader350", "5uFKckiJYRM", PS4KernelService::gnm_ps350, "libSceGnmDriver"},
+    {"sceGnmSetCsShaderWithModifier", "Kx-h-nWQJ8A", PS4KernelService::gnm_cs, "libSceGnmDriver"},
+    {"sceGnmDispatchDirect", "0BzLGljcwBo", PS4KernelService::gnm_dispatch, "libSceGnmDriver"},
+    {"sceGnmSetEmbeddedVsShader", "+AFvOEXrKJk", PS4KernelService::gnm_embedded_vs, "libSceGnmDriver"},
+    {"sceGnmInsertWaitFlipDone", "1qXLHIpROPE", PS4KernelService::gnm_wait_flip, "libSceGnmDriver"},
+    {"sceGnmInsertPushMarker", "W1Etj-jlW7Y", PS4KernelService::gnm_push_marker, "libSceGnmDriver"},
+    {"sceGnmInsertPopMarker", "7qZVNgEu+SY", PS4KernelService::gnm_pop_marker, "libSceGnmDriver"},
+    {"sceGnmDrawInitDefaultHardwareState350", "yb2cRhagD1I", PS4KernelService::gnm_init350, "libSceGnmDriver"},
     {"scePadOpen", "xk0AcarP3V4", PS4KernelService::pad_open, "libScePad"},
     {"scePadClose", "6ncge5+l5Qs", PS4KernelService::pad_close, "libScePad"},
     {"scePadRead", "q1cHNfGycLI", PS4KernelService::pad_read, "libScePad"},
@@ -231,6 +239,9 @@ constexpr Binding bindings[] = {
     {"sceVideoOutGetEventId", "U2JJtSqNKZI", PS4KernelService::video_event_id, "libSceVideoOut"},
     {"sceVideoOutGetEventData", "rWUTcKdkUzQ", PS4KernelService::video_event_data, "libSceVideoOut"},
     {"sceVideoOutGetEventCount", "Mt4QHHkxkOc", PS4KernelService::video_event_count, "libSceVideoOut"},
+    {"sceVideoOutGetResolutionStatus", "6kPnj51T62Y", PS4KernelService::video_resolution, "libSceVideoOut"},
+    // Flips follow the host display; a requested rate changes nothing.
+    {"sceVideoOutSetFlipRate", "CBiu4mCE1DA", PS4KernelService::succeed, "libSceVideoOut"},
     // Memory (shadPS4 kernel/memory.cpp).
     {"sceKernelGetDirectMemorySize", "pO96TwzOm5E", PS4KernelService::direct_size},
     {"sceKernelAllocateDirectMemory", "rTXw65xmLIA", PS4KernelService::direct_allocate},
@@ -238,6 +249,14 @@ constexpr Binding bindings[] = {
     {"sceKernelMapDirectMemory", "L-Q3LEjIbgA", PS4KernelService::direct_map},
     {"sceKernelMapNamedFlexibleMemory", "mL8NDH86iQI", PS4KernelService::flexible_map},
     {"mmap", "BPE9s9vQQXo", PS4KernelService::posix_mmap, "libkernel", true},
+    {"sceLibcHeapGetTraceInfo", "NWtTN10cJzE", PS4KernelService::heap_trace_info, "libSceLibcInternalExt",
+     false, false, 0, nullptr, 0, "libSceLibcInternal"},
+    {"sceSystemServiceParamGetInt", "fZo48un7LK4", PS4KernelService::system_param_int, "libSceSystemService"},
+    {"sceSystemServiceGetStatus", "rPo6tV8D9bM", PS4KernelService::system_status, "libSceSystemService"},
+    {"sceSystemServiceReceiveEvent", "656LMQSrg6U", PS4KernelService::system_event, "libSceSystemService"},
+    {"sceSystemServiceHideSplashScreen", "Vo5V8KAwCmk", PS4KernelService::succeed, "libSceSystemService"},
+    // System modules are part of the HLE: loading one has nothing to do.
+    {"sceSysmoduleLoadModule", "g8cM39EUZ6o", PS4KernelService::succeed, "libSceSysmodule"},
     {"msync", "tZY4+SZNFhA", PS4KernelService::succeed, "libkernel", true},
     {"sceKernelMlock", "3k6kx-zOOSQ", PS4KernelService::succeed},
     // Files (shadPS4 kernel/file_system.cpp).
@@ -305,7 +324,7 @@ void PS4Libkernel::reset() {
     graphics_.reset();
     if (dynamic_) dynamic_->reset();
     threads_.reset();
-    errno_table_ = errno_table_size_ = process_param_ = 0;
+    errno_table_ = errno_table_size_ = process_param_ = heap_trace_ = 0;
     direct_.clear();
     started_us_ = monotonic_us();
 }
@@ -724,13 +743,44 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     case S::user_initialize: return user_service_.initialize(c.rdi);
     case S::pad_init: return pad_.initialize();
     case S::gnm_draw_auto: return gnm_.draw_auto(c.rdi,uint32_t(c.rsi),uint32_t(c.rdx),uint32_t(c.rcx));
-    case S::gnm_submit: return graphics_.submit(uint32_t(c.rdi),c.rsi,c.rdx,c.rcx,c.r8);
+    case S::gnm_submit:
+    case S::gnm_submit_flip: {
+        // Flip arguments after the VideoOut handle (R9): buffer index, flip
+        // mode and flip argument, the seventh to ninth System V arguments.
+        uint8_t stack[24];
+        const bool flip = service == S::gnm_submit_flip;
+        if (flip && !graphics_.null_backend()) return PS4GnmQueue::error(0x3fff);
+        if (flip && (!c.rsp || c.rsp > UINT64_MAX - 32 || !memory_.read(c.rsp + 8, stack, sizeof(stack))))
+            return PS4GnmQueue::error(0x1000);
+        uint32_t interrupts = 0;
+        PS4GnmQueue::PreparedFlip prepared;
+        const int64_t result = graphics_.submit(uint32_t(c.rdi),c.rsi,c.rdx,c.rcx,c.r8,&interrupts,
+                                                flip ? &prepared : nullptr);
+        if (result) return result;
+        if (interrupts) threads_.graphics_interrupt();
+        if (!flip) return 0;
+        if (const int64_t e = videoout_.submit(c.r9, signed32(get_le(stack, 4)), signed32(get_le(stack + 8, 4)),
+                                               get_le(stack + 16, 8))) return e;
+        // The work is already retired: what prepareFlip asks for happens now.
+        uint8_t value[4];
+        put_le(value, 0, prepared.value, 4);
+        if (prepared.label && !memory_.write(prepared.address, value, sizeof(value))) return PS4GnmQueue::error(0x1000);
+        if (prepared.interrupt) threads_.graphics_interrupt();
+        return 0;
+    }
     case S::gnm_allowed: return graphics_.allowed();
     case S::gnm_done: return graphics_.done();
     case S::gnm_draw_index: return gnm_.draw_index(c.rdi,uint32_t(c.rsi),uint32_t(c.rdx),c.rcx,uint32_t(c.r8));
     case S::gnm_vgt: return gnm_.vgt(c.rdi,uint32_t(c.rsi),uint32_t(c.rdx),uint32_t(c.rcx),uint32_t(c.r8));
     case S::gnm_vs: return gnm_.vs(c.rdi,uint32_t(c.rsi),c.rdx,uint32_t(c.rcx));
     case S::gnm_ps350: return gnm_.ps350(c.rdi,uint32_t(c.rsi),c.rdx);
+    case S::gnm_cs: return gnm_.cs(c.rdi,uint32_t(c.rsi),c.rdx,uint32_t(c.rcx));
+    case S::gnm_dispatch: return gnm_.dispatch(c.rdi,uint32_t(c.rsi),uint32_t(c.rdx),uint32_t(c.rcx),uint32_t(c.r8),uint32_t(c.r9));
+    case S::gnm_embedded_vs: return gnm_.embedded_vs(c.rdi,uint32_t(c.rsi),uint32_t(c.rdx));
+    case S::gnm_wait_flip: return gnm_.wait_flip_done(c.rdi,uint32_t(c.rsi));
+    case S::gnm_push_marker: return gnm_.push_marker(c.rdi,uint32_t(c.rsi),c.rdx);
+    case S::gnm_pop_marker: return gnm_.pop_marker(c.rdi,uint32_t(c.rsi));
+    case S::gnm_init350: return gnm_.init_default_state350(c.rdi,uint32_t(c.rsi));
     case S::pad_open: return pad_.open(signed32(c.rdi), signed32(c.rsi), signed32(c.rdx), c.rcx);
     case S::pad_close: return pad_.close(signed32(c.rdi));
     case S::pad_handle: return pad_.get_handle(signed32(c.rdi), signed32(c.rsi), signed32(c.rdx));
@@ -753,6 +803,7 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     case S::video_unregister: return videoout_.unregister_buffers(c.rdi, signed32(c.rsi));
     case S::video_submit: return videoout_.submit(c.rdi, signed32(c.rsi), signed32(c.rdx), c.rcx);
     case S::video_pending: return videoout_.pending(c.rdi);
+    case S::video_resolution: return videoout_.resolution(c.rdi, c.rsi);
     case S::video_flip_status: return videoout_.flip_status(c.rdi, c.rsi);
     case S::video_vblank_status: return videoout_.vblank_status(c.rdi, c.rsi);
     case S::video_add_flip: case S::video_add_vblank:
@@ -850,6 +901,44 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     case S::direct_map: case S::flexible_map: case S::posix_mmap:
         return memory_service(service, c);
     case S::proc_param: return int64_t(process_param_);
+    // sceLibcHeapGetTraceInfo(info{u64 size; u32 flag, get_segment_info;
+    // u64* mspace_atomic_id_mask; u64* mstate_table}), as shadPS4: no segment
+    // info, a zero mask and a zeroed 64-entry table that libc's heap updates.
+    case S::heap_trace_info: {
+        uint8_t size[8];
+        if (!c.rdi || !memory_.read(c.rdi, size, 8)) return kernel_error(fault);
+        if (get_le(size, 8) < 0x20) return kernel_error(inval);
+        std::lock_guard<std::mutex> guard(lock_);
+        if (!heap_trace_ && (!dynamic_ ||
+                dynamic_->place(0, PS4VirtualMemory::page_size, 0, 3, false, heap_trace_))) {
+            heap_trace_ = 0;
+            return kernel_error(nomem);
+        }
+        return write(c.rdi + 12, 0, 4) && write(c.rdi + 16, heap_trace_, 8) &&
+               write(c.rdi + 24, heap_trace_ + 8, 8) ? 0 : kernel_error(fault);
+    }
+    // sceSystemServiceParamGetInt(id, s32* value): language 1 (English US),
+    // cross to enter (1000), UTC with default formats and no parental level.
+    case S::system_param_int: {
+        constexpr int64_t parameter_error = int32_t(0x80A10003);
+        int32_t value = 0;
+        switch (c.rdi) {
+        case 1: value = 1; break;
+        case 2: case 3: case 4: case 5: case 7: value = 0; break;
+        case 1000: value = 1; break;
+        default: return parameter_error;
+        }
+        if (!c.rsi) return parameter_error;
+        return write(c.rsi, uint32_t(value), 4) ? 0 : kernel_error(fault);
+    }
+    // sceSystemServiceGetStatus(status): no events, in the foreground, CPU
+    // mode 7 normal (offset 6); 128 reserved bytes stay zero.
+    case S::system_status: {
+        if (!c.rdi) return int32_t(0x80A10003);
+        const uint8_t status[136] = {0, 0, 0, 0, 0, 0, 1};
+        return memory_.write(c.rdi, status, sizeof(status)) ? 0 : kernel_error(fault);
+    }
+    case S::system_event: return int32_t(0x80A10004); // No event.
     case S::module_info_from_addr: return kernel_error(srch);
     case S::succeed: return 0;
     default: handled = false; return 0;
@@ -868,6 +957,9 @@ int64_t PS4Libkernel::memory_service(PS4KernelService service, const PS4KernelCa
     auto cpu = [](uint64_t protection, uint32_t& out) {
         if (protection & ~uint64_t{0x33}) return false;
         out = uint32_t(protection & 3);
+        // x86 pages are never write-only (games map CPU-write + GPU memory,
+        // 0x32, for frame buffers), and the emulated GPU reads on the CPU.
+        if (out & 2) out = 3;
         if (!out && (protection & 0x30)) out = 3;
         return true;
     };

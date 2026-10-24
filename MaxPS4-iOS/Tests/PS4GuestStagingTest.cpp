@@ -48,6 +48,9 @@ int main() {
     guest_test::put(broken, 240, 72, 8); guest_test::put(broken, 251, 128, 8);
     std::fill(broken.begin() + 176, broken.begin() + 232, 0);
     guest_test::put(broken, 7, 176, 4);
+    // An empty PT_TLS declares no TLS: only a sized one is a blocker.
+    CHECK(mapped.stage_ps4(broken.data(), broken.size()) == 0 && mapped.ps4_blockers() == 5);
+    guest_test::put(broken, 8, 216, 8);
     CHECK(mapped.stage_ps4(broken.data(), broken.size()) == 0 && mapped.ps4_blockers() == 7);
     for (uint64_t flag : {0x100802ULL, 0x100808ULL, 0x100810ULL}) {
         broken = self; guest_test::put(broken, flag, 32, 8);

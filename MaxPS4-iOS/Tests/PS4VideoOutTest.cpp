@@ -46,7 +46,7 @@ int main() {
     assert(video.add_event(full_queue, port, 6, 0) == PS4VideoOut::error(0x100c));
     assert(queues.user_event_delete(full_queue, 0) == ok && video.add_event(full_queue, port, 6, 0) == 0);
     assert(video.set_attribute(0x1000, PS4VideoOut::rgba, 1, 0, 3, 2, 4) == PS4VideoOut::error(2));
-    assert(video.set_attribute(attribute, PS4VideoOut::rgba, 0, 0, 3, 2, 4) == 0);
+    assert(video.set_attribute(attribute, PS4VideoOut::rgba, 2, 0, 3, 2, 4) == 0);
     write(addresses, pixels); write(addresses + 8, pixels + 0x100);
     assert(video.register_buffers(port, 0, addresses, 2, attribute) == PS4VideoOut::error(7));
     write(attribute + 4, 1, 4); write(attribute, 0, 4);
