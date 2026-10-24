@@ -97,6 +97,7 @@ struct MaxPS4GameView: View {
     let directory: URL
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @State private var showingMenu = false
 #if MAXPS4_FEX_APP
     @StateObject private var session = MaxPS4GameSession()
     @State private var device = MTLCreateSystemDefaultDevice()
@@ -105,53 +106,92 @@ struct MaxPS4GameView: View {
     private let poll = Timer.publish(every: 1.0 / 60, on: .main, in: .common).autoconnect()
 #endif
     var body: some View {
-        NavigationStack {
-            ZStack {
-                MaxPS4Background()
-                ScrollView {
-                VStack(spacing: 14) {
-                    Text(directory.lastPathComponent).font(.headline)
+        ZStack {
+            Color.black.ignoresSafeArea()
 #if MAXPS4_FEX_APP
-                    if let device {
-                        GameMetalSurface(device: device, source: session.source,
-                            active: session.running && scenePhase == .active,
-                            report: session.presented, failed: session.failed)
-                            .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                            .accessibilityIdentifier("maxps4.game.surface")
-                            .overlay {
-                                if session.running { screenControls }
-                            }
-                            .clipShape(RoundedRectangle(cornerRadius: 16))
-                        Button(session.running ? "Arrêter" : "Jouer") {
-                            touch = 0
-                            if session.running { session.stop() } else {
-                                hasLaunched = true
-                                session.start(url: directory, device: device)
-                            }
-                        }.buttonStyle(.borderedProminent)
-                        if hasLaunched && !session.running {
-                            Text("Session terminée. Consulte les détails si le jeu ne s’est pas lancé.")
+            if let device {
+                GameMetalSurface(device: device, source: session.source,
+                    active: session.running && scenePhase == .active,
+                    report: session.presented, failed: session.failed)
+                    .ignoresSafeArea()
+                    .accessibilityIdentifier("maxps4.game.surface")
+                if session.running && !showingMenu { screenControls }
+                if !session.running {
+                    VStack(spacing: 18) {
+                        Text(directory.lastPathComponent).font(.title2.bold())
+                        if hasLaunched {
+                            Text("Session terminée. Consulte le menu pour les détails.")
                                 .font(.footnote).foregroundStyle(.secondary)
                         }
-                        DisclosureGroup("Détails de la session") {
-                            Text(session.report).font(.footnote.monospaced()).textSelection(.enabled)
-                            ShareLink(item: session.report) { Label("Partager le rapport", systemImage: "square.and.arrow.up") }
-                        }.tint(.cyan)
-                        Text("Manette iOS ou commandes tactiles. JIT requis.")
+                        Button(hasLaunched ? "Rejouer" : "Jouer") {
+                            touch = 0; hasLaunched = true
+                            session.start(url: directory, device: device)
+                        }.buttonStyle(.borderedProminent).tint(.cyan)
+                        Text("Tourne l’iPhone pour jouer en paysage.")
                             .font(.caption).foregroundStyle(.secondary)
-                    } else { Text("Metal indisponible sur cet appareil.") }
-#else
-                    Text("Le runtime FEX n’est pas inclus dans cette compilation.")
-#endif
-                }.padding()
-            }
+                    }
+                    .padding(28)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+                    .padding(24)
                 }
-            .navigationTitle("Jeu")
-            .toolbar { Button("Fermer") { dismiss() } }
-        }.preferredColorScheme(.dark)
+            } else { Text("Metal indisponible sur cet appareil.") }
+#else
+            Text("Le runtime FEX n’est pas inclus dans cette compilation.")
+#endif
+            VStack {
+                HStack {
+                    Button {
+#if MAXPS4_FEX_APP
+                        touch = 0; session.input(0)
+#endif
+                        showingMenu = true
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.headline).frame(width: 44, height: 44)
+                            .background(.black.opacity(0.35), in: Circle())
+                            .overlay(Circle().stroke(.cyan.opacity(0.4)))
+                    }
+                    .accessibilityLabel("Menu du jeu")
+                    .accessibilityIdentifier("maxps4.game.menu")
+                    Spacer()
+                }
+                Spacer()
+            }.padding(12)
+        }
+        .preferredColorScheme(.dark)
+        .statusBarHidden(true)
+        .persistentSystemOverlays(.hidden)
+        .sheet(isPresented: $showingMenu) {
+            NavigationStack {
+                ZStack {
+                    MaxPS4Background()
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 22) {
+                            Text(directory.lastPathComponent).font(.title2.bold())
+                            Button("Revenir au jeu") { showingMenu = false }
+                                .buttonStyle(.borderedProminent).tint(.cyan)
+#if MAXPS4_FEX_APP
+                            if session.running {
+                                Button("Arrêter la session", role: .destructive) {
+                                    touch = 0; session.stop(); showingMenu = false
+                                }
+                            }
+                            DisclosureGroup("Détails de la session") {
+                                Text(session.report).font(.footnote.monospaced()).textSelection(.enabled)
+                                ShareLink(item: session.report) { Label("Partager le rapport", systemImage: "square.and.arrow.up") }
+                            }.tint(.cyan)
+#endif
+                            Button("Quitter le jeu", role: .destructive) { dismiss() }
+                        }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .navigationTitle("Menu du jeu").navigationBarTitleDisplayMode(.inline)
+                .toolbar { Button("Fermer") { showingMenu = false } }
+            }.preferredColorScheme(.dark)
+        }
 #if MAXPS4_FEX_APP
         .onReceive(poll) { _ in
-            guard session.running, scenePhase == .active else { return }
+            guard session.running, scenePhase == .active, !showingMenu else { return }
             var buttons = touch
             for controller in GCController.controllers() {
                 if let pad = controller.extendedGamepad {
