@@ -3,6 +3,9 @@ on:
   pull_request:
     paths:
       - 'MaxPS4-iOS/Native/PM4*'
+      - 'MaxPS4-iOS/Native/GCN*'
+      - 'MaxPS4-iOS/Tests/GCN*'
+      - 'MaxPS4-iOS/Tools/gcn-shader-inventory.cpp'
       - 'MaxPS4-iOS/Native/maxps4_ps4_gnm*'
       - 'MaxPS4-iOS/Native/maxps4_gnm_submission_abi.h'
       - 'MaxPS4-iOS/Native/maxps4_guest_elf*'
@@ -31,6 +34,9 @@ jobs:
           /tmp/pm4-guest-test
           c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Native/maxps4_guest_elf.cpp MaxPS4-iOS/Tests/GuestRIPStoreAdmissionTest.cpp -o /tmp/rip-store-test
           /tmp/rip-store-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/GCNDecoderTest.cpp -o /tmp/gcn-decoder-test
+          /tmp/gcn-decoder-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic MaxPS4-iOS/Tools/gcn-shader-inventory.cpp -o /tmp/gcn-shader-inventory
   metal-bridge:
     runs-on: macos-latest
     steps:

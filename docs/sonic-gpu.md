@@ -120,3 +120,46 @@ test alone does not execute GPU work. A separate macOS test runs the real GNM
 writer, owned queue, Metal bridge and GPU command completion, then checks red
 pixels before acknowledging the ticket. It explicitly skips GPU readback when
 no Metal device is available. Neither test executes a PS4 shader or a game.
+
+## Null backend, submit-and-flip and the remaining command writers
+
+The boot probe attaches a third consumer, the null backend (kind 2). It draws
+nothing: each decodable submission is retired at once, applying only its
+synchronization packets (EVENT_WRITE_EOP, RELEASE_MEM and EVENT_WRITE_EOS
+label writes, WRITE_DATA to memory) and triggering registered EOP events.
+Waits and constant buffers are ignored. Frames therefore hold only what the
+CPU wrote.
+
+`sceGnmSubmitAndFlipCommandBuffers` is accepted by the null backend only.
+The last DCB must end with the 64-dword prepareFlip NOP (`0xc03e1000`), as
+on hardware; its payload type selects what happens once the flip request
+is accepted by VideoOut: nothing, a 32-bit label write, an EOP interrupt,
+or both. A missing or unknown packet refuses the submission.
+
+Seven more writers are implemented because Sonic Mania reserves their space
+in its DCBs (an unimplemented stub would leave zero dwords there, which the
+PM4 framing refuses): `sceGnmSetCsShaderWithModifier`,
+`sceGnmDispatchDirect`, `sceGnmSetEmbeddedVsShader`,
+`sceGnmInsertWaitFlipDone`, `sceGnmInsertPushMarker`,
+`sceGnmInsertPopMarker` and `sceGnmDrawInitDefaultHardwareState350`.
+Known gaps: the embedded VS has a null program address (its code is not in
+guest memory), the flip-done wait is a same-size NOP (no VideoOut buffer
+labels yet), and the 3.50 default state writes only the context clear, not
+the register defaults.
+
+## GCN shader decoding
+
+`GCNDecoder.hpp` frames Sea Islands instructions in every encoding family
+(scalar, SMRD, VOP1/2/3/C, VINTRP, DS, MUBUF/MTBUF, MIMG, EXP), with
+literals, names opcodes and disassembles them. `locateGCNProgram` finds a
+Sony-compiled program's bounds the way a GPU backend must at run time: the
+prologue `s_mov_b32 vcc_hi, N` puts the OrbShdr binary information at
+dword (N + 1) * 2, which records the code length.
+
+`Tools/gcn-shader-inventory.cpp` runs this over a game's shader binaries,
+read locally and never committed. On Sonic Mania's 40 `.sb` files every
+program decodes with no unknown opcode: 73 distinct instructions, mostly
+VALU float math, `v_interp_p1/p2`, `image_sample`, `exp` (with
+`v_cvt_pkrtz_f16_f32` compressed colour exports), scalar buffer loads and
+fetch-shader calls (`s_swappc_b64`). That set bounds the first translator.
+Nothing is translated or executed yet.
