@@ -163,3 +163,28 @@ VALU float math, `v_interp_p1/p2`, `image_sample`, `exp` (with
 `v_cvt_pkrtz_f16_f32` compressed colour exports), scalar buffer loads and
 fetch-shader calls (`s_swappc_b64`). That set bounds the first translator.
 Nothing is translated or executed yet.
+
+## Software GPU backend (first real frames)
+
+`GCNInterpreter.hpp` executes one GCN wave (up to 64 lanes) on the CPU with
+real EXEC/VCC masks: scalar and vector ALU, scalar and buffer loads (bounds
+from NUM_RECORDS, in STRIDE units when the V# has a stride), linear image
+sampling with bilinear filtering, quad swizzles for derivatives,
+interpolation from attribute planes, and exports. Code is fetched from
+guest memory as it runs, so a fetch shader reached with `s_swappc_b64`
+needs no special case. Each sampled texture is copied once per draw.
+
+`PM4SoftwareRenderer.hpp` keeps PM4 register state across submissions and
+executes indexed and automatic draws (triangle list/strip, rect list)
+through the real vertex and pixel programs: viewport, screen scissor,
+rasterization in 8x8 tiles of 2x2 quads with the top-left rule, PS input
+VGPRs from SPI_PS_INPUT_ADDR, colour target 0 in 8_8_8_8 UNORM with
+COMP_SWAP, target mask and basic blending. Limits: no clipping, depth,
+culling or PS4 tiling (targets are written linearly; only the display reads
+them), instance 0 only, compute dispatches counted but not run.
+
+GNM backend 3 (software) is the null backend plus this renderer. With it
+the boot probe saves Sonic Mania's SEGA logo at 1920x1080: the game's own
+CPU-drawn 424x240 screen, scaled by its real `none_vv`/fetch/`none_p`
+shaders. It takes about five seconds per frame under the VIXL simulator;
+it is a correctness reference for the Metal path, not a playable renderer.
