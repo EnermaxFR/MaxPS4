@@ -41,6 +41,8 @@ jobs:
           /tmp/gcn-interpreter-test
           c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PM4SoftwareRendererTest.cpp -o /tmp/pm4-software-test
           /tmp/pm4-software-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PM4ResourceScanTest.cpp -o /tmp/pm4-resource-scan-test
+          /tmp/pm4-resource-scan-test
           c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/GCNTranslatorTest.cpp -o /tmp/gcn-translator-test
           /tmp/gcn-translator-test /tmp/gcn-generated.inc
           c++ -std=c++17 -Wall -Wextra -Werror -pedantic -pthread -fsanitize=address,undefined -fno-omit-frame-pointer \

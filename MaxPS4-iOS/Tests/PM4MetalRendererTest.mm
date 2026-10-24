@@ -97,11 +97,11 @@ int main() {
         s.set(0x79, 0x242, {4});
         s.words.insert(s.words.end(), {0xc0002a00U, 0});                                    // INDEX_TYPE 16-bit
         s.words.insert(s.words.end(), {0xc0042700U, 3, std::uint32_t(indexBuffer), 0, 3, 0}); // DRAW_INDEX_2
-        // Metal reads guest memory as it is before either renderer draws.
-        id<MTLBuffer> guest = [device newBufferWithBytes:arena.bytes.data() length:arena.bytes.size() options:MTLResourceStorageModeShared];
         PM4DrawStats metalStats;
         PM4DrawCollector collector(arena.memory, metalStats);
-        PM4MetalRenderer metal(device, arena.memory, guest, Arena::start);
+        // No guest window: each draw gets copies of the ranges its programs read,
+        // taken from guest memory as it is before either renderer draws.
+        PM4MetalRenderer metal(device, arena.memory, nil, 0);
         id<MTLCommandQueue> queue = [device newCommandQueue];
         id<MTLCommandBuffer> commands = [queue commandBuffer];
         collector.execute(s.words.data(), s.words.size(), [&](const PM4Draw& d) {
@@ -112,6 +112,8 @@ int main() {
         if (!metalStats.error.empty()) std::printf("metal: %s\n", metalStats.error.c_str());
         assert(commands.status == MTLCommandBufferStatusCompleted && !commands.error);
         assert(metalStats.draws == 3 && metalStats.rendered == 3 && metalStats.failed == 0 && metal.pipelinesBuilt == 3);
+        // Scene B read the vertex table and vertices (one merged range) and the texture.
+        assert(metal.lastRanges == 2);
         PM4SoftwareRenderer software(arena.memory);
         software.execute(s.words.data(), s.words.size());
         if (!software.stats.error.empty()) std::printf("software: %s\n", software.stats.error.c_str());

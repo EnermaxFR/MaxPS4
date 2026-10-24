@@ -1,13 +1,16 @@
 #import "PM4MetalRenderer.h"
 #include "GCNTranslator.hpp"
+#include "PM4ResourceScan.hpp"
+#include <algorithm>
+#include <cstring>
 #include <cmath>
 #include <vector>
 
 namespace maxps4::gpu {
 namespace {
 // Must match GCNDrawState in gcnMetalPrelude().
-struct DrawState { std::uint64_t base, size; std::uint32_t vsUser[16], psUser[17]; std::uint32_t flags; };
-static_assert(sizeof(DrawState) == 152, "GCNDrawState layout");
+struct DrawState { std::uint64_t base, size; std::uint32_t vsUser[16], psUser[17]; std::uint32_t flags, rangeCount; std::uint64_t ranges[48]; };
+static_assert(sizeof(DrawState) == 544, "GCNDrawState layout");
 constexpr std::uint32_t rectList = 1, flipY = 2;
 
 // CB_BLEND factor codes to Metal (ZERO..ONE_MINUS_DST_COLOR); others refused.
@@ -91,6 +94,31 @@ bool PM4MetalRenderer::encode(const PM4Draw& d, id<MTLCommandBuffer> commands) {
     if (d.scissor[2] <= d.scissor[0] || d.scissor[3] <= d.scissor[1]) return true; // nothing visible
     id<MTLRenderPipelineState> state = pipeline(d, format);
     if (!state) return false;
+    DrawState drawState{};
+    id<MTLBuffer> memory = guest_;
+    if (memory) { drawState.base = guestBase_; drawState.size = memory.length; }
+    else {
+        // Copies of the ranges this draw's programs read, packed 256-byte aligned.
+        const auto ranges = scanDrawResources(code_, d);
+        if (ranges.size() > 16) return fail("more than 16 memory ranges");
+        std::uint64_t total = 0;
+        for (const auto& r : ranges) total += (r.size + 255) & ~std::uint64_t{255};
+        if (total > (256ull << 20)) return fail("draw reads more than 256 MiB");
+        memory = [device_ newBufferWithLength:std::max<std::uint64_t>(total, 256) options:MTLResourceStorageModeShared];
+        if (!memory) return fail("memory buffer");
+        std::uint64_t offset = 0;
+        auto* bytes = static_cast<std::uint8_t*>(memory.contents);
+        for (std::size_t k = 0; k < ranges.size(); ++k) {
+            // An unreadable range stays zero rather than exposing anything else.
+            if (!code_.read(ranges[k].base, bytes + offset, ranges[k].size)) std::memset(bytes + offset, 0, ranges[k].size);
+            drawState.ranges[3 * k] = ranges[k].base;
+            drawState.ranges[3 * k + 1] = ranges[k].size;
+            drawState.ranges[3 * k + 2] = offset;
+            offset += (ranges[k].size + 255) & ~std::uint64_t{255};
+        }
+        drawState.rangeCount = std::uint32_t(ranges.size());
+        lastRanges = drawState.rangeCount;
+    }
     Target& target = targets_[d.target];
     if (!target.texture || target.texture.width != d.pitch || target.texture.height != d.height ||
         target.texture.pixelFormat != format) {
@@ -118,12 +146,10 @@ bool PM4MetalRenderer::encode(const PM4Draw& d, id<MTLCommandBuffer> commands) {
     [encoder setViewport:viewport];
     [encoder setScissorRect:MTLScissorRect{d.scissor[0], d.scissor[1], d.scissor[2] - d.scissor[0], d.scissor[3] - d.scissor[1]}];
     [encoder setCullMode:MTLCullModeNone];
-    DrawState drawState{};
-    drawState.base = guestBase_; drawState.size = guest_.length;
     for (unsigned k = 0; k < 16; ++k) { drawState.vsUser[k] = d.vsUser[k]; drawState.psUser[k] = d.psUser[k]; }
     drawState.flags = (d.primitive == 0x11 ? rectList : 0) | (ys > 0 ? flipY : 0);
-    [encoder setVertexBuffer:guest_ offset:0 atIndex:0];
-    [encoder setFragmentBuffer:guest_ offset:0 atIndex:0];
+    [encoder setVertexBuffer:memory offset:0 atIndex:0];
+    [encoder setFragmentBuffer:memory offset:0 atIndex:0];
     [encoder setVertexBytes:&drawState length:sizeof drawState atIndex:1];
     [encoder setFragmentBytes:&drawState length:sizeof drawState atIndex:1];
     const std::size_t bytes = d.indices.size() * sizeof(std::uint32_t);

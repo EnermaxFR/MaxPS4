@@ -671,7 +671,7 @@ using namespace metal;
 #define GCN_FN inline
 struct GCNRes8 { uint d[8]; };
 struct GCNRes4 { uint d[4]; };
-struct GCNMemory { device const uchar* p; ulong base; ulong size; };
+struct GCNMemory { device const uchar* p; ulong base; ulong size; constant ulong* ranges; uint count; };
 struct GCNQuad { uint unused; };
 struct GCNLane {
     uint user[17]; uint vinit[24]; bool exec; uint quadLane;
@@ -685,9 +685,11 @@ GCN_FN void gcn_clear(thread GCNLane& L) {
     for (uint k = 0u; k < 8u; ++k) L.color[k] = float4(0.0f);
     L.pos = float4(0.0f); L.exec = true; L.quadLane = 0u; L.colorWritten = 0u; L.killed = false;
 }
-// Per-draw state at buffer(1): the guest memory window at buffer(0) starts
-// at guest address `base`; user SGPRs of each stage; GCN_DRAW_* flags.
-struct GCNDrawState { ulong base; ulong size; uint vsUser[16]; uint psUser[17]; uint flags; };
+// Per-draw state at buffer(1): guest memory at buffer(0) is either one window
+// starting at guest address `base` (rangeCount 0) or rangeCount copied ranges
+// as (guest start, length, offset in the buffer) triples; user SGPRs of each
+// stage; GCN_DRAW_* flags.
+struct GCNDrawState { ulong base; ulong size; uint vsUser[16]; uint psUser[17]; uint flags; uint rangeCount; ulong ranges[48]; };
 #define GCN_DRAW_RECT_LIST 1u
 #define GCN_DRAW_FLIP_Y 2u
 GCN_FN float gf(uint x) { return as_type<float>(x); }
@@ -713,18 +715,20 @@ GCN_FN uint gcn_popcount(uint v) { return popcount(v); }
 GCN_FN uint gcn_bfrev(uint a) { return reverse_bits(a); }
 GCN_FN uint gcn_ffbh(uint a) { return a == 0u ? 0xffffffffu : clz(a); }
 GCN_FN uint gcn_ffbl(uint a) { return a == 0u ? 0xffffffffu : ctz(a); }
-GCN_FN uint gcn_ld32(GCNMemory M, ulong a) {
-    if (a < M.base || a - M.base > M.size || M.size - (a - M.base) < 4ul) return 0u;
-    return *(device const uint*)(M.p + (a - M.base));
+GCN_FN bool gcn_locate(GCNMemory M, ulong a, ulong n, thread ulong& offset) {
+    if (M.count == 0u) {
+        if (a < M.base || a - M.base > M.size || M.size - (a - M.base) < n) return false;
+        offset = a - M.base; return true;
+    }
+    for (uint k = 0u; k < M.count; ++k) {
+        ulong start = M.ranges[3u * k]; ulong length = M.ranges[3u * k + 1u];
+        if (a >= start && a - start <= length && length - (a - start) >= n) { offset = M.ranges[3u * k + 2u] + (a - start); return true; }
+    }
+    return false;
 }
-GCN_FN uint gcn_ld16(GCNMemory M, ulong a) {
-    if (a < M.base || a - M.base > M.size || M.size - (a - M.base) < 2ul) return 0u;
-    return uint(*(device const ushort*)(M.p + (a - M.base)));
-}
-GCN_FN uint gcn_ld8(GCNMemory M, ulong a) {
-    if (a < M.base || a - M.base >= M.size) return 0u;
-    return uint(M.p[a - M.base]);
-}
+GCN_FN uint gcn_ld32(GCNMemory M, ulong a) { ulong o = 0ul; if (!gcn_locate(M, a, 4ul, o)) return 0u; return *(device const uint*)(M.p + o); }
+GCN_FN uint gcn_ld16(GCNMemory M, ulong a) { ulong o = 0ul; if (!gcn_locate(M, a, 2ul, o)) return 0u; return uint(*(device const ushort*)(M.p + o)); }
+GCN_FN uint gcn_ld8(GCNMemory M, ulong a) { ulong o = 0ul; if (!gcn_locate(M, a, 1ul, o)) return 0u; return uint(M.p[o]); }
 // Attributes arrive interpolated by Metal: p1 is a no-op, p2 the value.
 GCN_FN float gcn_interp1(thread GCNLane& L, uint attr, uint chan, float i) { return 0.0f; }
 GCN_FN float gcn_interp2(thread GCNLane& L, uint attr, uint chan, float j, float previous) { return L.attr[attr & 31u][chan & 3u]; }
@@ -763,7 +767,7 @@ inline std::string gcnMetalEntryPoints(const GCNTranslation& vs, const GCNTransl
          "    GCNLane L; gcn_clear(L);\n"
          "    for (uint k = 0u; k < 16u; ++k) L.user[k] = D.vsUser[k];\n"
          "    L.vinit[0] = index; L.vinit[3] = iid;\n"
-         "    GCNMemory M = { mem, D.base, D.size }; GCNQuad Q = { 0u };\n"
+         "    GCNMemory M = { mem, D.base, D.size, D.ranges, D.rangeCount }; GCNQuad Q = { 0u };\n"
          "    " + vsName + "(L, M, Q);\n"
          "    GCNVaryings o; o.position = L.pos;\n";
     for (unsigned p = 0; p < 32; ++p)
@@ -818,7 +822,7 @@ inline std::string gcnMetalEntryPoints(const GCNTranslation& vs, const GCNTransl
         else if (bit == 14) s += at + "1u;\n";
         reg += sizes[bit];
     }
-    s += "    GCNMemory M = { mem, D.base, D.size }; GCNQuad Q = { 0u };\n"
+    s += "    GCNMemory M = { mem, D.base, D.size, D.ranges, D.rangeCount }; GCNQuad Q = { 0u };\n"
          "    " + psName + "(L, M, Q);\n"
          "    if (L.killed) discard_fragment();\n"
          "    return L.color[0];\n}\n";

@@ -66,6 +66,18 @@ int main() {
         rt::GCNLane L; L.user[0] = std::uint32_t(fetchShader); L.user[2] = std::uint32_t(vertexTable); L.vinit[0] = 2;
         rt::vs_fetch(L, M, unusedQuad);
         assert(L.pos[0] == 5 && L.pos[1] == 6 && L.param[0][0] == 5 * 9 + 6);
+        // The same program on copies of two ranges only (the V# table, then the
+        // vertices) packed at other offsets, as the Metal renderer feeds the GPU.
+        std::vector<unsigned char> packed(0x100 + 0x40, 0);
+        std::memcpy(packed.data(), arena.bytes.data() + (vertexTable - Arena::start), 16);
+        std::memcpy(packed.data() + 0x100, arena.bytes.data() + (0x10e00 - Arena::start), 48);
+        const rt::ulong ranges[6] = {vertexTable, 16, 0, 0x10e00, 48, 0x100};
+        rt::GCNMemory P{packed.data(), 0, 0, ranges, 2};
+        rt::GCNLane R; R.user[0] = std::uint32_t(fetchShader); R.user[2] = std::uint32_t(vertexTable); R.vinit[0] = 2;
+        rt::vs_fetch(R, P, unusedQuad);
+        assert(R.pos[0] == 5 && R.pos[1] == 6 && R.param[0][0] == 5 * 9 + 6);
+        // Outside every range reads zero.
+        assert(rt::gcn_ld32(P, 0x10e00 + 48) == 0 && rt::gcn_ld32(P, Arena::start) == 0);
     }
     // The pixel quad: four lanes on four threads in lockstep, lane 3 a helper.
     {

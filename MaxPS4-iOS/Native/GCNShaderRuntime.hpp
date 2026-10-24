@@ -38,8 +38,9 @@ struct uint4 {
 };
 struct GCNRes8 { uint d[8]; };
 struct GCNRes4 { uint d[4]; };
-// A guest memory window: guest address `base` is p[0].
-struct GCNMemory { const unsigned char* p; ulong base; ulong size; };
+// Guest memory as seen by translated code: one window or a table of ranges
+// (see gcn_locate).
+struct GCNMemory { const unsigned char* p; ulong base; ulong size; const ulong* ranges = nullptr; uint count = 0; };
 struct GCNPlane { float p0, p10, p20; };
 struct GCNLane {
     uint user[17] = {};    // user SGPRs, then (pixel) the primitive mask
@@ -90,18 +91,23 @@ GCN_FN uint gcn_popcount(uint v) { uint n = 0; for (; v; v &= v - 1) ++n; return
 GCN_FN uint gcn_bfrev(uint a) { uint r = 0; for (uint b = 0; b < 32; ++b) r |= ((a >> b) & 1u) << (31 - b); return r; }
 GCN_FN uint gcn_ffbh(uint a) { if (!a) return 0xffffffffu; uint n = 0; while (!((a << n) & 0x80000000u)) ++n; return n; }
 GCN_FN uint gcn_ffbl(uint a) { if (!a) return 0xffffffffu; uint n = 0; while (!((a >> n) & 1u)) ++n; return n; }
-GCN_FN uint gcn_ld32(GCNMemory M, ulong a) {
-    if (a < M.base || a - M.base > M.size || M.size - (a - M.base) < 4) return 0;
-    uint v; std::memcpy(&v, M.p + (a - M.base), 4); return v;
+// Guest address `a`, `n` bytes long, as an offset into M.p: either the one
+// window [base, base + size) at p[0], or one of `count` ranges given as
+// (guest start, length, offset in p) triples.
+GCN_FN bool gcn_locate(GCNMemory M, ulong a, ulong n, ulong& offset) {
+    if (M.count == 0) {
+        if (a < M.base || a - M.base > M.size || M.size - (a - M.base) < n) return false;
+        offset = a - M.base; return true;
+    }
+    for (uint k = 0; k < M.count; ++k) {
+        const ulong start = M.ranges[3 * k], length = M.ranges[3 * k + 1];
+        if (a >= start && a - start <= length && length - (a - start) >= n) { offset = M.ranges[3 * k + 2] + (a - start); return true; }
+    }
+    return false;
 }
-GCN_FN uint gcn_ld16(GCNMemory M, ulong a) {
-    if (a < M.base || a - M.base > M.size || M.size - (a - M.base) < 2) return 0;
-    std::uint16_t v; std::memcpy(&v, M.p + (a - M.base), 2); return v;
-}
-GCN_FN uint gcn_ld8(GCNMemory M, ulong a) {
-    if (a < M.base || a - M.base >= M.size) return 0;
-    return M.p[a - M.base];
-}
+GCN_FN uint gcn_ld32(GCNMemory M, ulong a) { ulong o; if (!gcn_locate(M, a, 4, o)) return 0; uint v; std::memcpy(&v, M.p + o, 4); return v; }
+GCN_FN uint gcn_ld16(GCNMemory M, ulong a) { ulong o; if (!gcn_locate(M, a, 2, o)) return 0; std::uint16_t v; std::memcpy(&v, M.p + o, 2); return v; }
+GCN_FN uint gcn_ld8(GCNMemory M, ulong a) { ulong o; if (!gcn_locate(M, a, 1, o)) return 0; return M.p[o]; }
 #define GCN_SHARED_SOURCE(...) __VA_ARGS__
 #include "GCNShaderRuntimeShared.inc"
 #undef GCN_SHARED_SOURCE
