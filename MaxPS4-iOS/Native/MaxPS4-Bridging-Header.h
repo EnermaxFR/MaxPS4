@@ -1,6 +1,7 @@
 #pragma once
 #include "maxps4_fex_runtime.h"
 #include "PM4MetalDrawBridge.h"
+#include "PM4GameMetalBridge.h"
 #include "PS4PKGBridge.h"
 
 // Existing passive sysctl probe; debugger presence is not JIT permission.

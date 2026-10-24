@@ -104,6 +104,13 @@ public:
         } catch (const std::bad_alloc&) { return error(0x100c); }
         return 0;
     }
+    // Metadata of the pending flip, without copying CPU surface pixels.
+    int32_t target(maxps4_videoout_frame& info, uint64_t& address) {
+        info={}; address=0;
+        std::lock_guard<std::mutex> lock(guard_);
+        if (!frame_.ticket) return -EAGAIN;
+        info=frame_; address=buffers_[frame_.buffer_index].address; return 0;
+    }
     int32_t snapshot(maxps4_videoout_frame& info, uint8_t* pixels, size_t capacity) {
         info = {};
         std::lock_guard<std::mutex> lock(guard_);

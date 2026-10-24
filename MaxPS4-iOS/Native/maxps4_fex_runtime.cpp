@@ -284,7 +284,8 @@ public:
 #endif
     GuestFaultGuard(FEXCore::Context::Context* context, FEXCore::Core::InternalThreadState* thread,
                     const FEXCore::SignalDelegatorConfig& config, uint32_t limit_ms,
-                    bool install = true, std::function<void()> expire = {})
+                    bool install = true, std::function<void()> expire = {},
+                    const std::atomic<bool>* cancelled = nullptr)
         : context(context), thread(thread), config(config) {
         if (!available) return;
         active = this;
@@ -295,11 +296,15 @@ public:
         sigemptyset(&action.sa_mask);
         for (; installed < signals.size(); ++installed)
             if (::sigaction(signals[installed], &action, &previous[installed]) != 0) break;
-        if (limit_ms && installed == signals.size()) {
+        if ((limit_ms || cancelled) && installed == signals.size()) {
             const pthread_t target = ::pthread_self();
-            watchdog = std::thread([this, target, limit_ms, expire = std::move(expire)] {
+            watchdog = std::thread([this, target, limit_ms, cancelled, expire = std::move(expire)] {
                 std::unique_lock lock(watch_lock);
-                if (watch.wait_for(lock, std::chrono::milliseconds(limit_ms), [this] { return finished; })) return;
+                const auto start = std::chrono::steady_clock::now();
+                while (!finished && !(cancelled && cancelled->load()) &&
+                       (!limit_ms || std::chrono::steady_clock::now() - start < std::chrono::milliseconds(limit_ms)))
+                    watch.wait_for(lock, std::chrono::milliseconds(10), [this] { return finished; });
+                if (finished) return;
                 if (expire) expire();
                 while (!finished && !signal.load()) {
                     ::pthread_kill(target, SIGURG);
@@ -686,6 +691,7 @@ struct maxps4_fex_engine {
     maxps4_fex_cpu_report cpu_report{};
     maxps4_fex_guest_fault last_fault{};
     uint32_t time_limit_ms = 0; // 0: no limit.
+    std::atomic<bool> stop_requested{false};
     maxps4::GuestFrame frame;
     uint64_t frame_sequence = 0;
     bool frame_code_cached = false;
@@ -822,6 +828,10 @@ extern "C" int32_t maxps4_fex_engine_set_time_limit(maxps4_fex_engine* engine,
     engine->time_limit_ms = milliseconds;
     return 0;
 }
+extern "C" int32_t maxps4_fex_engine_request_stop(maxps4_fex_engine* engine) {
+    if (!engine) return -EINVAL;
+    engine->stop_requested=true; return 0;
+}
 extern "C" int32_t maxps4_fex_engine_cpuid(maxps4_fex_engine *engine,
                                           uint32_t leaf, uint32_t subleaf,
                                           uint32_t out[4]) {
@@ -877,6 +887,7 @@ struct PM4Request {
 };
 int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     uint64_t* result, uint32_t* backend, const PM4Request* submission, bool linked = false, bool persistent_frame = false) {
+    if (engine->stop_requested.load()) return -ECANCELED;
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
     // FEX still uses rebased host addresses for the admitted instruction set.
     // Check the logical PS4 entry via the shared guest-memory contract before
@@ -988,7 +999,7 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
                             engine->system_memory, engine->libkernel.threads(), page);
         engine->probe.threads = threads ? &*threads : nullptr;
         GuestFaultGuard guard(engine->context.get(), thread, engine->signals.GetConfig(), engine->time_limit_ms,
-                              true, [&threads] { if (threads) threads->interrupt(); });
+                              true, [&threads] { if (threads) threads->interrupt(); }, &engine->stop_requested);
         engine->context->ExecuteThread(thread);
         int signal = guard.signal.load();
         // scePthreadExit on the main thread: the other threads carry on.
@@ -1005,7 +1016,7 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
         else if (signal) engine->last_fault = {signal, 0, guard.address, state.rip};
         if (signal) {
             engine->frame_code_cached = false;
-            return signal == SIGURG ? -ETIMEDOUT :
+            return signal == SIGURG ? (engine->stop_requested.load() ? -ECANCELED : -ETIMEDOUT) :
                 signal == SIGSEGV || signal == SIGBUS ? -EFAULT : -EILSEQ;
         }
         // The last thread ended after the main thread's scePthreadExit: exit(0).
@@ -1538,6 +1549,23 @@ extern "C" int32_t maxps4_fex_engine_videoout_snapshot(maxps4_fex_engine* engine
 extern "C" int32_t maxps4_fex_engine_gnm_backend(maxps4_fex_engine* engine, uint32_t enabled) {
     if (!engine) return -EINVAL;
     return engine->libkernel.graphics().backend(enabled);
+}
+extern "C" int32_t maxps4_fex_engine_gnm_host_consumer(maxps4_fex_engine* engine,
+    void* context, maxps4_gnm_host_consumer consumer) {
+    if (!engine) return -EINVAL;
+    return engine->libkernel.graphics().host_consumer(context,consumer);
+}
+extern "C" int32_t maxps4_fex_engine_read_memory(maxps4_fex_engine* engine,
+    uint64_t address, void* destination, size_t bytes) {
+    if (!engine || !destination || !bytes || bytes > (256ull << 20)) return -EINVAL;
+    return engine->system_memory.read(address,destination,bytes) ? 0 : -EFAULT;
+}
+extern "C" int32_t maxps4_fex_engine_videoout_target(maxps4_fex_engine* engine,
+    maxps4_videoout_frame* frame, uint64_t* address) {
+    if (frame) *frame={};
+    if (address) *address=0;
+    if (!engine || !frame || !address) return -EINVAL;
+    return engine->libkernel.videoout().target(*frame,*address);
 }
 extern "C" int32_t maxps4_fex_engine_gnm_snapshot(maxps4_fex_engine* engine,
     maxps4_gnm_submission* submission, uint32_t* words, size_t capacity) {

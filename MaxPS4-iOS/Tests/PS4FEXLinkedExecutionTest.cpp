@@ -1060,6 +1060,43 @@ int main(int argc, char** argv) {
     }
     std::puts("SKIP guest fault containment and time limit: need native ARM64 JIT code (not the VIXL simulator)");
 #endif
+    {
+        auto provider = orbis_execution::make(true);
+        auto app = orbis_execution::make_general_app(9);
+        const char* dependency[] = {"provider.prx"};
+        const maxps4_orbis_module modules[] = {
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,dependency,1},
+            {"provider.prx",provider.data(),provider.size(),orbis_execution::provider_bias,nullptr,0}};
+        maxps4_fex_engine* process = nullptr;
+        CHECK(maxps4_fex_engine_request_stop(nullptr)==-EINVAL);
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        char diagnostic[512]{}; uint64_t relocation=0, value=99, entry=99; uint32_t cpu=99;
+        CHECK(maxps4_fex_engine_prepare_orbis_general(process,modules,2,"app.elf",&relocation,diagnostic,sizeof diagnostic)==0);
+        CHECK(maxps4_fex_engine_request_stop(process)==0);
+        CHECK(maxps4_fex_engine_run_orbis(process,&value,&cpu,&entry)==-ECANCELED && !value && !cpu && !entry);
+        CHECK(maxps4_fex_engine_run_orbis(process,&value,&cpu,&entry)==-ECANCELED);
+        maxps4_fex_engine_close(process);
+        std::puts("PASS sticky cancellation before execution; no guest instructions run");
+#if (defined(__aarch64__) || defined(__arm64__)) && !defined(VIXL_SIMULATOR)
+        app = orbis_execution::make_general_fault_app(3); // infinite JMP loop
+        const maxps4_orbis_module spinning[] = {
+            {"app.elf",app.data(),app.size(),orbis_execution::app_bias,dependency,1},
+            {"provider.prx",provider.data(),provider.size(),orbis_execution::provider_bias,nullptr,0}};
+        CHECK(maxps4_fex_engine_open(&process)==0);
+        CHECK(maxps4_fex_engine_initialize(process)==0);
+        CHECK(maxps4_fex_engine_prepare_orbis_general(process,spinning,2,"app.elf",&relocation,diagnostic,sizeof diagnostic)==0);
+        const auto start=std::chrono::steady_clock::now();
+        int stop_status=-1; // joined before reading; no CHECK/return inside the worker
+        std::thread stop([&] { std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            stop_status=maxps4_fex_engine_request_stop(process); });
+        const int ran=maxps4_fex_engine_run_orbis(process,&value,&cpu,&entry);
+        stop.join();
+        CHECK(stop_status==0 && ran==-ECANCELED && std::chrono::steady_clock::now()-start<std::chrono::seconds(10));
+        maxps4_fex_engine_close(process);
+        std::puts("PASS concurrent cancellation interrupts a running native guest without closing its engine");
+#endif
+    }
     maxps4_fex_engine* engine = nullptr;
     std::puts("BEGIN real FEX context and linked Orbis execution");
     CHECK(maxps4_fex_engine_open(&engine) == 0 && engine);

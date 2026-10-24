@@ -27,15 +27,27 @@ namespace maxps4 {
 class PS4GnmQueue final {
 public:
     static constexpr size_t buffer_limit=16, word_limit=65536, queue_limit=4;
-    static constexpr uint32_t none=0, diagnostic=1, null=2, software=3;
+    static constexpr uint32_t none=0, diagnostic=1, null=2, software=3, host=4;
+    using HostConsumer = int32_t (*)(void*, const uint32_t*, size_t);
+    // Called synchronously before retirement. The consumer must copy resources
+    // and finish GPU work before returning; it must not reenter this queue.
+    int32_t host_consumer(void* context, HostConsumer consumer) {
+        std::lock_guard<std::mutex> lock(lock_);
+        if (kind_ == host) return -EBUSY;
+        host_context_=context; host_consumer_=consumer; return 0;
+    }
     static int64_t error(uint32_t code) { return ps4::signed32(0x80d10000U|code); }
     explicit PS4GnmQueue(PS4GuestMemory& memory) : memory_(memory),
         guest_{[this](uint64_t a, void* d, size_t n) { return memory_.read(a,d,n); },
                [this](uint64_t a, const void* d, size_t n) { return memory_.write(a,d,n); }} {}
     int32_t backend(uint32_t kind) {
-        if (kind>software) return -EINVAL;
+        if (kind>host) return -EINVAL;
         std::lock_guard<std::mutex> lock(lock_);
-        if (kind!=kind_) clear();
+        if (kind==host && !host_consumer_) return -EINVAL;
+        if (kind!=kind_) {
+            clear();
+            if (kind_==host) { host_context_=nullptr; host_consumer_=nullptr; }
+        }
         kind_=kind; failed_=false;
         return 0;
     }
@@ -94,6 +106,9 @@ public:
                     if (!renderer_) renderer_=std::make_unique<gpu::PM4SoftwareRenderer>(guest_);
                     renderer_->execute(job.words.data(),job.words.size());
                 }
+                if (kind_==host && host_consumer_(host_context_,job.words.data(),job.words.size())) {
+                    failed_=true; return error(0x10ff);
+                }
                 const auto retired=retire(job.words);
                 if (retired<0) return error(0x1000);
                 if (interrupts) *interrupts=uint32_t(retired);
@@ -129,7 +144,10 @@ public:
         if (jobs_.empty()) sealed_=false;
         return 0;
     }
-    void reset() { std::lock_guard<std::mutex> lock(lock_); clear(); kind_=none; }
+    void reset() {
+        std::lock_guard<std::mutex> lock(lock_); clear(); kind_=none;
+        host_context_=nullptr; host_consumer_=nullptr;
+    }
 private:
     struct Job { maxps4_gnm_submission info{}; std::vector<uint32_t> words; };
     void clear() { jobs_.clear(); sealed_=failed_=false; renderer_.reset(); }
@@ -194,5 +212,7 @@ private:
     uint64_t next_=1;
     uint32_t kind_=none;
     bool sealed_=false, failed_=false;
+    void* host_context_=nullptr;
+    HostConsumer host_consumer_=nullptr;
 };
 }

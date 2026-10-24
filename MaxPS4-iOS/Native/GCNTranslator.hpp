@@ -33,7 +33,7 @@ struct GCNTranslation {
     std::uint32_t params = 0;    // vertex: parameters exported (bit N)
     std::uint32_t attributes = 0, flat = 0; // pixel: attributes read, of which flat
     std::uint8_t colors = 0;     // pixel: MRTs exported
-    bool position = false, quad = false;
+    bool position = false, quad = false, mayKill = false;
     explicit operator bool() const { return error.empty(); }
 };
 
@@ -41,7 +41,25 @@ class GCNTranslator {
 public:
     GCNTranslator(const GCNMemory& memory, const GCNTranslateOptions& options) : memory_(memory), options_(options) {}
     GCNTranslation translate(std::uint64_t entry) {
-        if (explore(entry)) emit(entry);
+        if (explore(entry)) {
+            // A Sony prologue may precede the initial EXEC save with scalar
+            // moves (typically the OrbShdr offset in vcc_hi) or NOPs.
+            for (auto pc=entry;;) {
+                const auto found=code_.find(pc);
+                if (found==code_.end()) break;
+                const auto& i=found->second.i;
+                const unsigned d=(i.word0>>16)&127;
+                if (i.encoding==GCNEncoding::sop1 && i.opcode==4 && (i.word0&255)==126 && d<103) {
+                    savedEntryExec_=d; break;
+                }
+                if (!((i.encoding==GCNEncoding::sop1 && i.opcode==3 && d<126) ||
+                      (i.encoding==GCNEncoding::sopp && i.opcode==0))) break;
+                pc+=4*i.size;
+            }
+            emit(entry);
+            out_.mayKill=execMayKill_ || (restoresEntryExec_ &&
+                (scalarWrites_[savedEntryExec_]!=1 || scalarWrites_[savedEntryExec_+1]!=1));
+        }
         if (!out_.error.empty()) out_.source.clear();
         return out_;
     }
@@ -56,6 +74,9 @@ private:
     std::map<std::uint64_t, std::uint64_t> calls_; // s_swappc address -> target
     std::set<unsigned> sregs_, vregs_;
     std::string body_;
+    std::map<unsigned,unsigned> scalarWrites_;
+    unsigned savedEntryExec_=128;
+    bool safeExecWrite_=false, restoresEntryExec_=false, execMayKill_=false;
 
     bool fail(const std::string& message) { if (out_.error.empty()) out_.error = message; return false; }
     static std::string hex(std::uint64_t v, const char* suffix = "u") {
@@ -136,10 +157,14 @@ private:
     std::string source(unsigned code, const GCNInstruction& i) { return code >= 256 ? v(code - 256) : scalar(code, i); }
     void setScalar(unsigned d, const std::string& value) {
         if (d > 127) { fail("unsupported scalar destination"); return; }
+        ++scalarWrites_[d];
+        if (d>=126 && !safeExecWrite_) execMayKill_=true;
         body_ += s(d) + " = " + value + "; ";
     }
     void setScalar64(unsigned d, const std::string& value) {
         if (d > 126) { fail("unsupported scalar destination"); return; }
+        ++scalarWrites_[d]; ++scalarWrites_[d+1];
+        if (d>=125 && !safeExecWrite_) execMayKill_=true;
         body_ += "{ ulong w = " + value + "; " + s(d) + " = uint(w); " + s(d + 1) + " = uint(w >> 32); } ";
     }
     static const char* ex() { return "((s126 & 1u) != 0u)"; }
@@ -278,20 +303,26 @@ private:
         const GCNInstruction& i = in.i;
         const unsigned d = (i.word0 >> 16) & 0x7f, a = i.word0 & 0xff;
         auto saveexec = [&](const std::string& op) {
+            execMayKill_=true;
             body_ += "{ ulong X = " + scalar64(a, i) + "; ulong E = gcn_u64(s126, s127); ulong r = " + op + "; ";
             setScalar64(d, "E");
             body_ += s(126) + " = uint(r); " + s(127) + " = uint(r >> 32); scc = " + any("r != 0ul") + "; }";
         };
         switch (i.opcode) {
         case 3: setScalar(d, scalar(a, i)); break;
-        case 4: setScalar64(d, scalar64(a, i)); break;
+        case 4:
+            safeExecWrite_=d==126 && a==savedEntryExec_;
+            restoresEntryExec_|=safeExecWrite_;
+            setScalar64(d, scalar64(a, i)); safeExecWrite_=false; break;
         case 5: body_ += "if (scc) "; setScalar(d, scalar(a, i)); break;
         case 6: body_ += "if (scc) "; setScalar64(d, scalar64(a, i)); break;
         case 7: body_ += "{ uint r = ~" + scalar(a, i) + "; "; setScalar(d, "r"); body_ += "scc = r != 0u; }"; break;
         case 8: body_ += "{ ulong r = ~" + scalar64(a, i) + "; "; setScalar64(d, "r"); body_ += "scc = " + any("r != 0ul") + "; }"; break;
         case 10: // s_wqm_b64: this lane is on if any lane of its quad is
             body_ += "{ bool on = " + any(scalar64(a, i) + " != 0ul") + "; ";
-            setScalar64(d, "on ? 1ul : 0ul"); body_ += "scc = on; }"; break;
+            safeExecWrite_=d==126 && a==126;
+            setScalar64(d, "on ? 1ul : 0ul"); safeExecWrite_=false;
+            body_ += "scc = on; }"; break;
         case 11: setScalar(d, "gcn_bfrev(" + scalar(a, i) + ")"); break;
         case 15: body_ += "{ uint r = gcn_popcount(" + scalar(a, i) + "); "; setScalar(d, "r"); body_ += "scc = r != 0u; }"; break;
         case 19: setScalar(d, "gcn_ffbl(" + scalar(a, i) + ")"); break;
@@ -432,7 +463,7 @@ private:
             } else return false;
             body_ += "{ bool cr = false; if (" + E + ") { " + load + "cr = " + r + "; } ";
             setScalar64(sdst, "cr ? 1ul : 0ul");
-            if (family & 1) body_ += "s126 = cr ? 1u : 0u; " + s(127) + " = 0u; ";
+            if (family & 1) { execMayKill_=true; body_ += "s126 = cr ? 1u : 0u; " + s(127) + " = 0u; "; }
             body_ += "}";
             return out_.error.empty();
         }
@@ -792,11 +823,15 @@ inline std::string gcnMetalEntryPoints(const GCNTranslation& vs, const GCNTransl
          "    } else o = gcn_run_vertex(indices[vid], iid, mem, D);\n"
          "    if ((D.flags & GCN_DRAW_FLIP_Y) != 0u) o.position.y = -o.position.y;\n"
          "    return o;\n}\n"
-         "fragment float4 gcn_fragment(GCNVaryings in [[stage_in]],\n"
+         "struct GCNFragment { float4 color [[color(0)]]; uint coverage [[sample_mask]]; };\n";
+    s += std::string("fragment ")+(ps.mayKill ? "GCNFragment" : "float4")+
+         " gcn_fragment(GCNVaryings in [[stage_in]], uint sampleCoverage [[sample_mask]],\n"
          "    device const uchar* mem [[buffer(0)]], constant GCNDrawState& D [[buffer(1)]]) {\n"
+         // Incoming raster coverage is independent of later fragment kills.
+         "    const bool covered = sampleCoverage != 0u;\n"
          "    GCNLane L; gcn_clear(L);\n"
          "    for (uint k = 0u; k < 17u; ++k) L.user[k] = D.psUser[k];\n"
-         "    L.exec = !simd_is_helper_thread();\n"
+         "    L.exec = covered;\n"
          "    L.quadLane = (uint(in.position.x) & 1u) | ((uint(in.position.y) & 1u) << 1);\n";
     for (unsigned a = 0; a < 32; ++a) {
         if (!((ps.attributes >> a) & 1)) continue;
@@ -823,9 +858,11 @@ inline std::string gcnMetalEntryPoints(const GCNTranslation& vs, const GCNTransl
         reg += sizes[bit];
     }
     s += "    GCNMemory M = { mem, D.base, D.size, D.ranges, D.rangeCount }; GCNQuad Q = { 0u };\n"
-         "    " + psName + "(L, M, Q);\n"
-         "    if (L.killed) discard_fragment();\n"
-         "    return L.color[0];\n}\n";
+         "    " + psName + "(L, M, Q);\n";
+    // An ordinary shader's saved-EXEC/WQM/restore sequence cannot kill a
+    // covered pixel. Do not ask Metal to suppress helpers again at export.
+    s += ps.mayKill ? "    return { L.color[0], L.killed ? 0u : 0xffffffffu };\n}\n"
+                    : "    return L.color[0];\n}\n";
     return s;
 }
 } // namespace maxps4::gpu
