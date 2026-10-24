@@ -794,9 +794,10 @@ inline std::string gcnMetalEntryPoints(const GCNTranslation& vs, const GCNTransl
          "    return o;\n}\n"
          "fragment float4 gcn_fragment(GCNVaryings in [[stage_in]],\n"
          "    device const uchar* mem [[buffer(0)]], constant GCNDrawState& D [[buffer(1)]]) {\n"
+         "    const bool covered = !simd_is_helper_thread();\n"
          "    GCNLane L; gcn_clear(L);\n"
          "    for (uint k = 0u; k < 17u; ++k) L.user[k] = D.psUser[k];\n"
-         "    L.exec = !simd_is_helper_thread();\n"
+         "    L.exec = covered;\n"
          "    L.quadLane = (uint(in.position.x) & 1u) | ((uint(in.position.y) & 1u) << 1);\n";
     for (unsigned a = 0; a < 32; ++a) {
         if (!((ps.attributes >> a) & 1)) continue;
@@ -824,7 +825,12 @@ inline std::string gcnMetalEntryPoints(const GCNTranslation& vs, const GCNTransl
     }
     s += "    GCNMemory M = { mem, D.base, D.size, D.ranges, D.rangeCount }; GCNQuad Q = { 0u };\n"
          "    " + psName + "(L, M, Q);\n"
+#ifdef MAXPS4_DIAG_EXEC
+         "    if (L.killed) return float4(1,0,1,1);\n"
+         "    if ((L.colorWritten & 1u) == 0u) return float4(0,1,1,1);\n"
+#else
          "    if (L.killed) discard_fragment();\n"
+#endif
          "    return L.color[0];\n}\n";
     return s;
 }

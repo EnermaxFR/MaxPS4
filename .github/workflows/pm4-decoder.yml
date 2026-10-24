@@ -74,7 +74,7 @@ jobs:
           xcrun clang++ -std=c++17 -fobjc-arc -Wall -Wextra -Werror MaxPS4-iOS/Tests/GCNMetalTest.mm \
             -framework Foundation -framework Metal -o build/pm4/gcn-metal-test
           build/pm4/gcn-metal-test
-          xcrun clang++ -std=c++17 -fobjc-arc -Wall -Wextra -Werror -DMAXPS4_VALIDATE_METAL_COPIES MaxPS4-iOS/Native/PM4MetalRenderer.mm \
+          xcrun clang++ -std=c++17 -fobjc-arc -Wall -Wextra -Werror -DMAXPS4_VALIDATE_METAL_COPIES -DMAXPS4_DIAG_EXEC MaxPS4-iOS/Native/PM4MetalRenderer.mm \
             MaxPS4-iOS/Native/PM4GameMetalBridge.mm \
             MaxPS4-iOS/Tests/PM4MetalRendererTest.mm -framework Foundation -framework Metal -o build/pm4/pm4-metal-renderer-test
           build/pm4/pm4-metal-renderer-test
