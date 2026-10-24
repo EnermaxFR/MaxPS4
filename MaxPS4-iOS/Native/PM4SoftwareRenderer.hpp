@@ -105,6 +105,7 @@ private:
             }
         } else for (std::uint32_t k = 0; k < count; ++k) indices[k] = k;
         GCNCodeCache vsCache, psCache;
+        GCNImageCache images; // textures as they are for this draw
         std::vector<Vertex> vertices;
         if (!runVertices(indices, vertices, vsCache)) return;
         std::vector<std::array<Vertex, 3>> triangles;
@@ -120,11 +121,11 @@ private:
             triangles.push_back({vertices[k + 2], vertices[k + 1], fourth});
         }
         bool ok = true;
-        for (const auto& triangle : triangles) if (!rasterize(triangle, psCache)) { ok = false; break; }
+        for (const auto& triangle : triangles) if (!rasterize(triangle, psCache, images)) { ok = false; break; }
         if (ok) ++stats.rendered;
     }
 
-    bool rasterize(const std::array<Vertex, 3>& t, GCNCodeCache& cache) {
+    bool rasterize(const std::array<Vertex, 3>& t, GCNCodeCache& cache, GCNImageCache& images) {
         // Viewport transform (PA_CL_VPORT_*, PA_CL_VTE_CNTL).
         const std::uint32_t vte = context_[0x206];
         float sx[3], sy[3], sz[3], rw[3];
@@ -184,6 +185,7 @@ private:
         for (int ty = minY & ~7; ty < maxY; ty += 8) {
             for (int tx = minX & ~7; tx < maxX; tx += 8) {
                 GCNWave wave(memory_, 64, &cache);
+                wave.images = &images;
                 std::uint64_t covered = 0;
                 for (unsigned lane = 0; lane < 64; ++lane) {
                     const unsigned quad = lane >> 2;

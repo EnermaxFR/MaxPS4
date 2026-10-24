@@ -35,6 +35,9 @@ struct GCNExport {
 };
 // Decoded instructions by guest address, shared by the waves of one draw.
 using GCNCodeCache = std::unordered_map<std::uint64_t, GCNInstruction>;
+// Texture level-0 copies by base address, valid while guest memory does not
+// change (one draw); image stores through the same wave drop their entry.
+using GCNImageCache = std::unordered_map<std::uint64_t, std::vector<std::uint8_t>>;
 
 namespace gcn_detail {
 inline float f32(std::uint32_t v) { float f; std::memcpy(&f, &v, 4); return f; }
@@ -120,6 +123,7 @@ public:
     std::string error;
     // Pixel shaders: the parameter plane of attribute `attr`, channel `chan`.
     std::function<GCNAttributePlane(unsigned attr, unsigned chan)> attribute;
+    GCNImageCache* images = nullptr;
 
     std::uint32_t& v(unsigned reg, unsigned lane) { return v_[std::size_t(reg & 0xff) * maxLanes + lane]; }
     std::uint64_t exec() const { return std::uint64_t(s[126]) | std::uint64_t(s[127]) << 32; }
@@ -715,8 +719,21 @@ private:
         unsigned bytes = 0;
         imageBytes(t.dfmt, bytes);
         std::uint8_t data[16] = {};
-        const std::uint64_t address = t.base + (std::uint64_t(std::uint32_t(y)) * t.pitch + std::uint32_t(x)) * bytes;
-        if (!memory_.read(address, data, bytes)) return fail("unreadable texel");
+        const std::uint64_t offset = (std::uint64_t(std::uint32_t(y)) * t.pitch + std::uint32_t(x)) * bytes;
+        const std::vector<std::uint8_t>* surface = nullptr;
+        if (images) {
+            // Whole level 0 read once per cache lifetime (one draw).
+            const std::size_t size = std::size_t(t.pitch) * t.height * bytes;
+            auto found = images->find(t.base);
+            if (found == images->end() || found->second.size() != size) {
+                std::vector<std::uint8_t> copy(size);
+                if (memory_.read(t.base, copy.data(), size)) found = images->insert_or_assign(t.base, std::move(copy)).first;
+                else found = images->end();
+            }
+            if (found != images->end()) surface = &found->second;
+        }
+        if (surface && offset + bytes <= surface->size()) std::memcpy(data, surface->data() + offset, bytes);
+        else if (!memory_.read(t.base + offset, data, bytes)) return fail("unreadable texel");
         std::uint32_t raw = 0;
         std::memcpy(&raw, data, std::min(bytes, 4u));
         auto unorm = [](std::uint32_t value, unsigned bits) { return float(value) / float((1u << bits) - 1); };
@@ -814,6 +831,7 @@ private:
                         const float f = std::fmin(std::fmax(gcn_detail::f32(v(vdata + in++, lane)), 0.0f), 1.0f);
                         packed |= std::uint32_t(std::lround(f * 255.0f)) << (8 * n);
                     }
+                    if (images) images->erase(t.base);
                     if (!memory_.write(t.base + (std::uint64_t(y) * t.pitch + x) * 4, &packed, 4)) return fail("unwritable image store");
                     continue;
                 }

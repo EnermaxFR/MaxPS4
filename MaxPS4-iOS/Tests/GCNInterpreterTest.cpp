@@ -71,6 +71,8 @@ int main() {
         for (unsigned row = 0; row < 2; ++row) for (unsigned x = 0; x < 4; ++x) arena.put16(0x12000 + 2 * (row * 4 + x), texels[x]);
         arena.put(0x13000, u32(2.0f));
         GCNWave wave(arena.memory, 4);
+        GCNImageCache images; // texels come from one copy of the surface
+        wave.images = &images;
         const std::uint32_t tsharp[8] = {0x120, 0x01000000, 0x4003, 0x9080032e, 0x6000, 0, 0, 0};
         const std::uint32_t ssharp[4] = {0x12, 0, 0x500000, 0};
         // As Sonic Mania's constant buffers: STRIDE 16, one record (16 bytes).
@@ -86,6 +88,7 @@ int main() {
         };
         if (!wave.run(0x10000)) { std::printf("%s\n", wave.error.c_str()); assert(false); }
         assert(wave.exports.size() == 2 && wave.exports[1].compressed && wave.exports[1].done);
+        assert(images.size() == 1 && images.begin()->first == 0x12000 && images.begin()->second.size() == 4 * 2 * 2);
         assert(wave.exports[1].mask == 0x7 && wave.exports[0].mask == 0x7 && wave.exec() == 0x7);
         for (unsigned lane = 0; lane < 4; ++lane) assert(near(f32(wave.exports[0].value[0][lane]), 0.125f));
         // u = 0.25: halfway between red and green, red doubled to 1.0; u = 0.375: green.
