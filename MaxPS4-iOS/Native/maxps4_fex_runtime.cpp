@@ -50,6 +50,7 @@
 #include <signal.h>
 #if defined(__APPLE__)
 #include <sys/ucontext.h>
+#include <libkern/OSCacheControl.h>
 #else
 #include <ucontext.h>
 #endif
@@ -411,8 +412,13 @@ private:
                     std::copy_n(gprs.begin(),31,std::begin(saved.regs));
                     saved.sp=gprs[31];
 #endif
-                    if (reinterpret_cast<uintptr_t>(writable)!=pc)
+                    if (reinterpret_cast<uintptr_t>(writable)!=pc) {
+#if defined(__APPLE__)
+                        sys_icache_invalidate(reinterpret_cast<void*>(pc-4),12);
+#else
                         __builtin___clear_cache(reinterpret_cast<char*>(pc)-4,reinterpret_cast<char*>(pc)+8);
+#endif
+                    }
                     pc+=*repaired;
                     return;
                 }
