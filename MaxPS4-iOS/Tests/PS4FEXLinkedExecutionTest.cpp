@@ -1034,7 +1034,7 @@ int main(int argc, char** argv) {
         CHECK(maxps4_fex_engine_last_guest_fault(process,&fault)==-ENOENT && !fault.signal);
         CHECK(maxps4_fex_engine_set_time_limit(process,3600*1000+1)==-EINVAL);
         CHECK(maxps4_fex_engine_set_time_limit(process,200)==0);
-        for (int kind = 0; kind < 4; ++kind) {
+        for (int kind = 0; kind < 5; ++kind) {
             auto app = orbis_execution::make_general_fault_app(kind);
             const char* dependency[] = {"provider.prx"};
             const maxps4_orbis_module modules[] = {
@@ -1059,6 +1059,7 @@ int main(int argc, char** argv) {
                   kind==2 ? fault.signal==SIGILL || fault.signal==SIGTRAP : fault.signal==SIGSEGV || fault.signal==SIGBUS);
             CHECK(fault.rip>=code); // Entry block, or the startup stub placed after the image.
             if (kind==1) CHECK(fault.address==code);
+            if (kind==4) CHECK(fault.address==code+1);
             if (kind==0) CHECK(fault.address>code);
         }
         // Recovery: the next image runs normally and clears the fault record.
