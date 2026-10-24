@@ -1,73 +1,44 @@
 #pragma once
 // Software execution of graphics PM4 streams through the GCN interpreter:
-// register state, indexed/automatic draws (triangle list/strip, rect list),
-// the real vertex and pixel programs, viewport, scissor, rasterization in
-// 8x8 tiles of 2x2 quads, and colour target 0 writes (8_8_8_8 UNORM).
+// the draws PM4DrawCollector describes run their real vertex and pixel
+// programs, with viewport, scissor, rasterization in 8x8 tiles of 2x2 quads
+// and colour target 0 writes (8_8_8_8 UNORM).
 // Known limits, each reported or documented rather than guessed: no
 // clipping (triangles with w <= 0 are dropped), no depth/stencil, no
 // culling, colour target 0 only, render targets written linearly (PS4
 // tiling is not implemented; only the display reads these buffers), and
 // compute dispatches are counted but not run, instance 0 only. A reference,
 // not a fast path.
-#include "GCNInterpreter.hpp"
-#include "PM4Type3Decoder.hpp"
-#include <array>
+#include "PM4DrawCollector.hpp"
 #include <cmath>
-#include <string>
-#include <vector>
 
 namespace maxps4::gpu {
 class PM4SoftwareRenderer {
 public:
-    struct Stats { unsigned draws = 0, rendered = 0, skipped = 0, failed = 0, dispatches = 0; std::string error; };
-    explicit PM4SoftwareRenderer(const GCNMemory& memory) : memory_(memory) {}
+    using Stats = PM4DrawStats;
+    explicit PM4SoftwareRenderer(const GCNMemory& memory) : memory_(memory), collector_(memory, stats) {}
     Stats stats;
     // Executes one submission; register state persists across submissions.
     void execute(const std::uint32_t* words, std::size_t count) {
-        const auto parsed = decodePM4Type3(words, count);
-        if (!parsed) { fail("unframed PM4 stream"); return; }
-        for (const auto& packet : parsed.packets) {
-            const std::uint32_t* data = words + packet.payloadWord;
-            const std::size_t n = packet.payloadCount;
-            switch (packet.opcode) {
-            case 0x69: setRegisters(context_, data, n); break;
-            case 0x76: setRegisters(shader_, data, n); break;
-            case 0x79: setRegisters(uconfig_, data, n); break;
-            case 0x12: context_.fill(0); break;                           // CLEAR_STATE
-            case 0x2a: indexBytes_ = (data[0] & 3) == 1 ? 4 : 2; break;     // INDEX_TYPE
-            case 0x27: if (n >= 4) draw(data[3], true, (std::uint64_t(data[1]) | std::uint64_t(data[2] & 0xffff) << 32)); break;
-            case 0x2d: if (n >= 1) draw(data[0], false, 0); break;
-            case 0x15: ++stats.dispatches; break;
-            default: break; // synchronization and prefetch packets: nothing to draw
-            }
-        }
+        collector_.execute(words, count, [&](const PM4Draw& d) { if (render(d)) ++stats.rendered; });
     }
-    // Registers are kept by offset from their bank base (context 0xa000,
-    // shader 0x2c00, uconfig 0xc000).
-    std::uint32_t context(unsigned offset) const { return context_[offset & 0x3ff]; }
+    std::uint32_t context(unsigned offset) const { return collector_.context(offset); }
 
 private:
     struct Vertex { float pos[4] = {0, 0, 0, 1}; std::array<std::array<float, 4>, 32> param{}; };
     const GCNMemory& memory_;
-    std::array<std::uint32_t, 0x400> context_{}, shader_{}, uconfig_{};
-    unsigned indexBytes_ = 2;
+    PM4DrawCollector collector_;
 
-    static void setRegisters(std::array<std::uint32_t, 0x400>& bank, const std::uint32_t* data, std::size_t n) {
-        for (std::size_t k = 1; k < n; ++k) if (data[0] + k - 1 < bank.size()) bank[data[0] + k - 1] = data[k];
-    }
-    void fail(const std::string& message) { ++stats.failed; if (stats.error.empty()) stats.error = message; }
     static float f(std::uint32_t x) { return gcn_detail::f32(x); }
 
-    bool runVertices(const std::vector<std::uint32_t>& indices, std::vector<Vertex>& out, GCNCodeCache& cache) {
-        const std::uint64_t program = (std::uint64_t(shader_[0x48]) | std::uint64_t(shader_[0x49]) << 32) << 8;
-        const unsigned users = (shader_[0x4b] >> 1) & 0x1f;
-        out.assign(indices.size(), Vertex{});
-        for (std::size_t first = 0; first < indices.size(); first += 64) {
-            const unsigned lanes = unsigned(std::min<std::size_t>(64, indices.size() - first));
+    bool runVertices(const PM4Draw& d, std::vector<Vertex>& out, GCNCodeCache& cache) {
+        out.assign(d.indices.size(), Vertex{});
+        for (std::size_t first = 0; first < d.indices.size(); first += 64) {
+            const unsigned lanes = unsigned(std::min<std::size_t>(64, d.indices.size() - first));
             GCNWave wave(memory_, lanes, &cache);
-            for (unsigned k = 0; k < users && k < 16; ++k) wave.s[k] = shader_[0x4c + k];
-            for (unsigned lane = 0; lane < lanes; ++lane) { wave.v(0, lane) = indices[first + lane]; wave.v(3, lane) = 0; }
-            if (!wave.run(program)) { fail("VS: " + wave.error); return false; }
+            for (unsigned k = 0; k < d.vsUserCount; ++k) wave.s[k] = d.vsUser[k];
+            for (unsigned lane = 0; lane < lanes; ++lane) { wave.v(0, lane) = d.indices[first + lane]; wave.v(3, lane) = 0; }
+            if (!wave.run(d.vs)) { stats.fail("VS: " + wave.error); return false; }
             for (const auto& e : wave.exports) {
                 for (unsigned lane = 0; lane < lanes; ++lane) {
                     if (!((e.mask >> lane) & 1)) continue;
@@ -86,31 +57,14 @@ private:
         return true;
     }
 
-    void draw(std::uint32_t count, bool indexed, std::uint64_t indexAddress) {
-        ++stats.draws;
-        if (!(context_[0x8e] & 0xf) || !context_[0x318]) { ++stats.skipped; return; } // no colour target 0 output
-        const std::uint32_t info = context_[0x31c];
-        if (((info >> 2) & 0x1f) != 0xa || ((info >> 8) & 7) != 0) { fail("colour target format"); return; }
-        const unsigned primitive = uconfig_[0x242];
-        if (primitive != 4 && primitive != 6 && primitive != 0x11) { fail("primitive type " + std::to_string(primitive)); return; }
-        if (!count || count > (1u << 20)) { fail("draw count"); return; }
-        std::vector<std::uint32_t> indices(count);
-        if (indexed) {
-            std::vector<std::uint8_t> bytes(std::size_t(count) * indexBytes_);
-            if (!memory_.read(indexAddress, bytes.data(), bytes.size())) { fail("unreadable index buffer"); return; }
-            for (std::uint32_t k = 0; k < count; ++k) {
-                std::uint32_t value = 0;
-                std::memcpy(&value, bytes.data() + std::size_t(k) * indexBytes_, indexBytes_);
-                indices[k] = value + context_[0x102]; // VGT_INDX_OFFSET
-            }
-        } else for (std::uint32_t k = 0; k < count; ++k) indices[k] = k;
+    bool render(const PM4Draw& d) {
         GCNCodeCache vsCache, psCache;
         GCNImageCache images; // textures as they are for this draw
         std::vector<Vertex> vertices;
-        if (!runVertices(indices, vertices, vsCache)) return;
+        if (!runVertices(d, vertices, vsCache)) return false;
         std::vector<std::array<Vertex, 3>> triangles;
-        if (primitive == 4) for (std::size_t k = 0; k + 2 < vertices.size(); k += 3) triangles.push_back({vertices[k], vertices[k + 1], vertices[k + 2]});
-        else if (primitive == 6) for (std::size_t k = 0; k + 2 < vertices.size(); ++k) triangles.push_back({vertices[k], vertices[k + 1], vertices[k + 2]});
+        if (d.primitive == 4) for (std::size_t k = 0; k + 2 < vertices.size(); k += 3) triangles.push_back({vertices[k], vertices[k + 1], vertices[k + 2]});
+        else if (d.primitive == 6) for (std::size_t k = 0; k + 2 < vertices.size(); ++k) triangles.push_back({vertices[k], vertices[k + 1], vertices[k + 2]});
         else for (std::size_t k = 0; k + 2 < vertices.size(); k += 3) {
             // A rectangle from three corners; the fourth is v1 + v2 - v0.
             Vertex fourth;
@@ -120,14 +74,13 @@ private:
             triangles.push_back({vertices[k], vertices[k + 1], vertices[k + 2]});
             triangles.push_back({vertices[k + 2], vertices[k + 1], fourth});
         }
-        bool ok = true;
-        for (const auto& triangle : triangles) if (!rasterize(triangle, psCache, images)) { ok = false; break; }
-        if (ok) ++stats.rendered;
+        for (const auto& triangle : triangles) if (!rasterize(d, triangle, psCache, images)) return false;
+        return true;
     }
 
-    bool rasterize(const std::array<Vertex, 3>& t, GCNCodeCache& cache, GCNImageCache& images) {
+    bool rasterize(const PM4Draw& d, const std::array<Vertex, 3>& t, GCNCodeCache& cache, GCNImageCache& images) {
         // Viewport transform (PA_CL_VPORT_*, PA_CL_VTE_CNTL).
-        const std::uint32_t vte = context_[0x206];
+        const std::uint32_t vte = d.vte;
         float sx[3], sy[3], sz[3], rw[3];
         for (unsigned k = 0; k < 3; ++k) {
             const float w = t[k].pos[3];
@@ -135,18 +88,14 @@ private:
             const bool divide = !((vte >> 8) & 1);
             const float x = divide ? t[k].pos[0] / w : t[k].pos[0], y = divide ? t[k].pos[1] / w : t[k].pos[1];
             const float z = t[k].pos[2] / w;
-            sx[k] = ((vte & 1) ? x * f(context_[0x10f]) : x) + ((vte & 2) ? f(context_[0x110]) : 0);
-            sy[k] = ((vte & 4) ? y * f(context_[0x111]) : y) + ((vte & 8) ? f(context_[0x112]) : 0);
-            sz[k] = ((vte & 16) ? z * f(context_[0x113]) : z) + ((vte & 32) ? f(context_[0x114]) : 0);
+            sx[k] = ((vte & 1) ? x * d.viewport[0] : x) + ((vte & 2) ? d.viewport[1] : 0);
+            sy[k] = ((vte & 4) ? y * d.viewport[2] : y) + ((vte & 8) ? d.viewport[3] : 0);
+            sz[k] = ((vte & 16) ? z * d.viewport[4] : z) + ((vte & 32) ? d.viewport[5] : 0);
             rw[k] = 1.0f / w;
         }
         const float area = (sx[1] - sx[0]) * (sy[2] - sy[0]) - (sx[2] - sx[0]) * (sy[1] - sy[0]);
         if (area == 0 || !std::isfinite(area)) return true;
-        // Colour target 0 (CB_COLOR0_*): pitch in 8-pixel units, slice in 64-pixel units.
-        const unsigned pitch = ((context_[0x319] & 0x7ff) + 1) * 8;
-        const unsigned height = unsigned((std::uint64_t((context_[0x31a] & 0x3fffff) + 1) * 64) / pitch);
-        int minX = int(context_[0x0c] & 0xffff), minY = int(context_[0x0c] >> 16);
-        int maxX = std::min<int>(int(context_[0x0d] & 0xffff), int(pitch)), maxY = std::min<int>(int(context_[0x0d] >> 16), int(height));
+        int minX = int(d.scissor[0]), minY = int(d.scissor[1]), maxX = int(d.scissor[2]), maxY = int(d.scissor[3]);
         minX = std::max(minX, int(std::floor(std::min({sx[0], sx[1], sx[2]}))));
         minY = std::max(minY, int(std::floor(std::min({sy[0], sy[1], sy[2]}))));
         maxX = std::min(maxX, int(std::ceil(std::max({sx[0], sx[1], sx[2]}))) + 1);
@@ -162,15 +111,10 @@ private:
             return (dy == 0 && dx < 0) || dy > 0;
         };
         const bool own[3] = {owns(1, 2), owns(2, 0), owns(0, 1)};
-        const std::uint32_t inputs = context_[0x1b4] ? context_[0x1b4] : context_[0x1b3];
-        const std::uint64_t program = (std::uint64_t(shader_[0x08]) | std::uint64_t(shader_[0x09]) << 32) << 8;
-        const unsigned users = (shader_[0x0b] >> 1) & 0x1f;
-        const std::uint64_t base = std::uint64_t(context_[0x318]) << 8;
-        const unsigned swap = (context_[0x31c] >> 11) & 3, mask = context_[0x8e] & 0xf;
         // Parameter planes as the parameter cache would hold them.
         std::array<std::array<GCNAttributePlane, 4>, 32> planes{};
         for (unsigned attr = 0; attr < 32; ++attr) {
-            const std::uint32_t cntl = context_[0x191 + attr];
+            const std::uint32_t cntl = d.inputCntl[attr];
             const unsigned param = cntl & 0x1f;
             for (unsigned c = 0; c < 4; ++c) {
                 if (cntl & 0x20) { // DEFAULT_VAL: (0,0,0,0), (0,0,0,1), (1,1,1,0), (1,1,1,1)
@@ -203,7 +147,7 @@ private:
                     static const unsigned sizes[16] = {2, 2, 2, 3, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1};
                     unsigned reg = 0;
                     for (unsigned bit = 0; bit < 16; ++bit) {
-                        if (!((inputs >> bit) & 1)) continue;
+                        if (!((d.psInputAddr >> bit) & 1)) continue;
                         float value[3] = {0, 0, 0};
                         if (bit <= 2) { value[0] = pi; value[1] = pj; }
                         else if (bit == 3) { value[0] = qs; value[1] = q1; value[2] = q2; }
@@ -219,29 +163,27 @@ private:
                     }
                 }
                 if (!covered) continue;
-                for (unsigned k = 0; k < users && k < 16; ++k) wave.s[k] = shader_[0x0c + k];
+                for (unsigned k = 0; k < d.psUserCount; ++k) wave.s[k] = d.psUser[k];
                 wave.setExec(covered);
                 wave.attribute = [&](unsigned attr, unsigned chan) { return planes[attr & 31][chan & 3]; };
-                if (!wave.run(program)) { fail("PS: " + wave.error); return false; }
+                if (!wave.run(d.ps)) { stats.fail("PS: " + wave.error); return false; }
                 for (const auto& e : wave.exports) {
                     if (e.target != 0) continue;
-                    if (!writeColor(e, covered, tx, ty, base, pitch, swap, mask)) return false;
+                    if (!writeColor(d, e, covered, tx, ty)) return false;
                 }
             }
         }
         return true;
     }
 
-    bool writeColor(const GCNExport& e, std::uint64_t covered, int tx, int ty, std::uint64_t base,
-                    unsigned pitch, unsigned swap, unsigned mask) {
-        const std::uint32_t blend = context_[0x1e0];
+    bool writeColor(const PM4Draw& d, const GCNExport& e, std::uint64_t covered, int tx, int ty) {
         for (unsigned row = 0; row < 8; ++row) {
             // Rows of the tile with no covered pixel may lie past the target.
             const std::uint64_t rowLanes = 0x3333ull << (16 * (row >> 1)) << (2 * (row & 1));
             if (!(covered & e.mask & rowLanes)) continue;
             std::uint8_t pixels[32];
-            const std::uint64_t address = base + (std::uint64_t(ty + int(row)) * pitch + std::uint64_t(tx)) * 4;
-            if (!memory_.read(address, pixels, sizeof pixels)) { fail("unreadable colour target"); return false; }
+            const std::uint64_t address = d.target + (std::uint64_t(ty + int(row)) * d.pitch + std::uint64_t(tx)) * 4;
+            if (!memory_.read(address, pixels, sizeof pixels)) { stats.fail("unreadable colour target"); return false; }
             bool changed = false;
             for (unsigned column = 0; column < 8; ++column) {
                 const unsigned lane = ((row >> 1) * 4 + (column >> 1)) * 4 + (column & 1) + 2 * (row & 1);
@@ -255,16 +197,16 @@ private:
                 static const unsigned order[4][4] = {{0, 1, 2, 3}, {2, 1, 0, 3}, {3, 2, 1, 0}, {1, 2, 3, 0}};
                 std::uint8_t* p = pixels + 4 * column;
                 float dst[4];
-                for (unsigned k = 0; k < 4; ++k) dst[k] = float(p[order[swap][k]]) / 255.0f;
-                if ((blend >> 30) & 1) blendColor(blend, c, dst);
+                for (unsigned k = 0; k < 4; ++k) dst[k] = float(p[order[d.swap][k]]) / 255.0f;
+                if ((d.blend >> 30) & 1) blendColor(d.blend, c, dst);
                 for (unsigned k = 0; k < 4; ++k) {
-                    if (!((mask >> k) & 1)) continue;
+                    if (!((d.mask >> k) & 1)) continue;
                     const float v = std::isnan(c[k]) ? 0.0f : std::fmin(std::fmax(c[k], 0.0f), 1.0f);
-                    p[order[swap][k]] = std::uint8_t(std::lround(v * 255.0f));
+                    p[order[d.swap][k]] = std::uint8_t(std::lround(v * 255.0f));
                 }
                 changed = true;
             }
-            if (changed && !memory_.write(address, pixels, sizeof pixels)) { fail("unwritable colour target"); return false; }
+            if (changed && !memory_.write(address, pixels, sizeof pixels)) { stats.fail("unwritable colour target"); return false; }
         }
         return true;
     }

@@ -124,6 +124,10 @@ public:
     // Pixel shaders: the parameter plane of attribute `attr`, channel `chan`.
     std::function<GCNAttributePlane(unsigned attr, unsigned chan)> attribute;
     GCNImageCache* images = nullptr;
+    // Called with the whole extent of every memory resource an instruction
+    // addresses (scalar loads, V#, T#), whatever EXEC: a draw's GPU copy of
+    // guest memory is built from these (PM4ResourceScan.hpp).
+    std::function<void(std::uint64_t base, std::uint64_t bytes)> resource;
 
     std::uint32_t& v(unsigned reg, unsigned lane) { return v_[std::size_t(reg & 0xff) * maxLanes + lane]; }
     std::uint64_t exec() const { return std::uint64_t(s[126]) | std::uint64_t(s[127]) << 32; }
@@ -375,6 +379,10 @@ private:
             limit = stride ? std::uint64_t(s[base + 2]) * stride : s[base + 2];
         } else {
             address = ((std::uint64_t(s[base]) | std::uint64_t(s[base + 1]) << 32) & 0xffffffffffffull) + offset;
+        }
+        if (resource) {
+            if (i.opcode >= 8) resource(address - offset, limit);
+            else resource(address, 4ull * count);
         }
         for (unsigned n = 0; n < count; ++n) {
             std::uint32_t value = 0;
@@ -666,6 +674,7 @@ private:
         else return false;
         unsigned channels = 1, bits = 32;
         if (format && !bufferLayout(dfmt, channels, bits)) return fail("buffer data format " + std::to_string(dfmt));
+        if (resource) resource(base, stride ? std::uint64_t(records) * stride : records);
         for (unsigned lane = 0; lane < lanes_; ++lane) {
             if (!active(lane)) continue;
             const std::uint32_t index = idxen ? v(vaddr, lane) : 0;
@@ -805,6 +814,7 @@ private:
         if (t.tiling != 8) return fail("tiled image (tile mode " + std::to_string(t.tiling) + ")");
         unsigned bytes;
         if (!imageBytes(t.dfmt, bytes)) return fail("image data format " + std::to_string(t.dfmt));
+        if (resource) resource(t.base, std::uint64_t(t.pitch) * t.height * bytes);
         const unsigned op = i.opcode;
         // Address layout: [offset][bias][compare] coordinates [lod/clamp].
         unsigned first = 0;

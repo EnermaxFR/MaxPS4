@@ -188,3 +188,28 @@ the boot probe saves Sonic Mania's SEGA logo at 1920x1080: the game's own
 CPU-drawn 424x240 screen, scaled by its real `none_vv`/fetch/`none_p`
 shaders. It takes about five seconds per frame under the VIXL simulator;
 it is a correctness reference for the Metal path, not a playable renderer.
+
+## Metal path status and next steps (handoff, 2026-10-24)
+
+Done and validated on CI (PR #250): `GCNTranslator.hpp` (GCN -> one portable
+function, C++ via `GCNShaderRuntime.hpp`, MSL via `gcnMetalPrelude()`),
+`PM4DrawCollector.hpp` (PM4Draw plans), `PM4MetalRenderer.mm` (translated
+pipelines, one texture per colour target, rect lists, per-draw copies of the
+memory ranges `PM4ResourceScan.hpp` finds). `GCNMetalTest` and
+`PM4MetalRendererTest` match the software renderer on a real GPU (worst
+channel difference 0).
+
+In progress, not yet compiled or run: `maxps4_fex_engine_load_game` (shared
+game-directory loader, `maxps4_fex_runtime.cpp/.h`) and the boot probe
+switched to it. Build it in WSL (`~/maxps4/ps4-linked-rel`, target
+`maxps4-boot-probe`) and rerun the probe before relying on it.
+
+Remaining to show Sonic Mania on the iPhone:
+1. GNM backend 4 ("host"): retire like the null backend and keep copies of
+   submitted DCB words for the app (`gnm_host_take`); C APIs to read guest
+   memory and a VideoOut buffer's address.
+2. An Objective-C++ bridge owning PM4DrawCollector + PM4MetalRenderer that
+   renders taken submissions and returns the texture of the flipped buffer.
+3. A Swift game session (run on the FEX queue: open, set_import_probe,
+   load_game, backend 4, initialize, run_orbis) with a view sending vblanks,
+   presenting that texture and completing flips; add the .mm to project.yml.

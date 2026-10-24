@@ -220,6 +220,13 @@ int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine *engine,
 // Every HLE call of a run is also traced to stderr with its result.
 // It shows how far a game gets; it never makes it correct.
 int32_t maxps4_fex_engine_set_import_probe(maxps4_fex_engine *engine, uint32_t enabled);
+// A game directory as the boot probe loads it: <directory>/sce_module/*.prx
+// (sorted) then <directory>/eboot.bin, each module's DT_NEEDED resolved among
+// them, placed 1 MiB aligned and apart from 0x400000, linked with
+// prepare_orbis_general, then <directory> mounted as /app0. Files are only
+// read. Returns 0, a negative errno, or the failing call's status.
+int32_t maxps4_fex_engine_load_game(maxps4_fex_engine *engine, const char *directory,
+    uint64_t *relocation, char *diagnostic, size_t capacity);
 // Optional bounded RGBA8 output/input contract for an admitted SCE process.
 // buttons: left=1, right=2, up=4, down=8, action=16. No host pointer returned.
 // Invalid configuration clears previous output. Dimensions <=320x240; disjoint RW/non-X.

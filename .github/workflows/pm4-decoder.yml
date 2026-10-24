@@ -41,6 +41,13 @@ jobs:
           /tmp/gcn-interpreter-test
           c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PM4SoftwareRendererTest.cpp -o /tmp/pm4-software-test
           /tmp/pm4-software-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PM4ResourceScanTest.cpp -o /tmp/pm4-resource-scan-test
+          /tmp/pm4-resource-scan-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/GCNTranslatorTest.cpp -o /tmp/gcn-translator-test
+          /tmp/gcn-translator-test /tmp/gcn-generated.inc
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -pthread -fsanitize=address,undefined -fno-omit-frame-pointer \
+            '-DGCN_GENERATED="/tmp/gcn-generated.inc"' MaxPS4-iOS/Tests/GCNTranslatorHarness.cpp -o /tmp/gcn-translator-harness
+          /tmp/gcn-translator-harness
   metal-bridge:
     runs-on: macos-latest
     steps:
@@ -63,6 +70,12 @@ jobs:
             MaxPS4-iOS/Tests/PM4GnmSubmissionMetalTest.mm -framework Foundation -framework Metal \
             -o build/pm4/gnm-metal-test
           build/pm4/gnm-metal-test
+          xcrun clang++ -std=c++17 -fobjc-arc -Wall -Wextra -Werror MaxPS4-iOS/Tests/GCNMetalTest.mm \
+            -framework Foundation -framework Metal -o build/pm4/gcn-metal-test
+          build/pm4/gcn-metal-test
+          xcrun clang++ -std=c++17 -fobjc-arc -Wall -Wextra -Werror MaxPS4-iOS/Native/PM4MetalRenderer.mm \
+            MaxPS4-iOS/Tests/PM4MetalRendererTest.mm -framework Foundation -framework Metal -o build/pm4/pm4-metal-renderer-test
+          build/pm4/pm4-metal-renderer-test
       - name: Compile actual bridge and Swift renderer for iPhone arm64
         run: |
           set -euo pipefail
@@ -70,6 +83,9 @@ jobs:
           xcrun --sdk iphoneos clang++ -std=c++17 -fobjc-arc -Wall -Wextra -Werror \
             -target arm64-apple-ios18.0 -isysroot "$SDK" \
             -c MaxPS4-iOS/Native/PM4MetalDrawBridge.mm -o build/pm4/bridge-ios.o
+          xcrun --sdk iphoneos clang++ -std=c++17 -fobjc-arc -Wall -Wextra -Werror \
+            -target arm64-apple-ios18.0 -isysroot "$SDK" \
+            -c MaxPS4-iOS/Native/PM4MetalRenderer.mm -o build/pm4/pm4-metal-renderer-ios.o
           xcrun --sdk iphoneos clang++ -std=c++17 -Wall -Wextra -Werror -target arm64-apple-ios18.0 -isysroot "$SDK" \
             -c MaxPS4-iOS/Native/maxps4_guest_elf.cpp -o build/pm4/guest-elf-ios.o
           xcrun --sdk iphoneos clang++ -std=c++17 -fobjc-arc -Wall -Wextra -Werror \
