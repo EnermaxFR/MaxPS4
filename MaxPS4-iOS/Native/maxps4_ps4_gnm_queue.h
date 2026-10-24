@@ -3,10 +3,12 @@
 #include "maxps4_ps4_abi.h"
 #include "maxps4_gnm_submission_abi.h"
 #include "PM4MetalDrawPlan.hpp"
+#include "PM4SoftwareRenderer.hpp"
 #include <array>
 #include <cerrno>
 #include <chrono>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <new>
 
@@ -19,20 +21,31 @@ namespace maxps4 {
 // RELEASE_MEM label writes and WRITE_DATA to memory) and counting the EOP
 // interrupts they request. Waits (WAIT_REG_MEM) and constant buffers are
 // ignored.
+// Backend 3 (software, for the boot probe) is the null backend that also
+// executes each submission with the PM4 software renderer (GCN interpreter)
+// before retiring it, so colour targets receive what the game drew.
 class PS4GnmQueue final {
 public:
     static constexpr size_t buffer_limit=16, word_limit=65536, queue_limit=4;
-    static constexpr uint32_t none=0, diagnostic=1, null=2;
+    static constexpr uint32_t none=0, diagnostic=1, null=2, software=3;
     static int64_t error(uint32_t code) { return ps4::signed32(0x80d10000U|code); }
-    explicit PS4GnmQueue(PS4GuestMemory& memory) : memory_(memory) {}
+    explicit PS4GnmQueue(PS4GuestMemory& memory) : memory_(memory),
+        guest_{[this](uint64_t a, void* d, size_t n) { return memory_.read(a,d,n); },
+               [this](uint64_t a, const void* d, size_t n) { return memory_.write(a,d,n); }} {}
     int32_t backend(uint32_t kind) {
-        if (kind>null) return -EINVAL;
+        if (kind>software) return -EINVAL;
         std::lock_guard<std::mutex> lock(lock_);
         if (kind!=kind_) clear();
         kind_=kind; failed_=false;
         return 0;
     }
-    bool null_backend() { std::lock_guard<std::mutex> lock(lock_); return kind_==null; }
+    // True for both backends that retire work at submission (null, software).
+    bool null_backend() { std::lock_guard<std::mutex> lock(lock_); return kind_>=null; }
+    // Software backend counters and its first error (empty when none).
+    gpu::PM4SoftwareRenderer::Stats software_stats() {
+        std::lock_guard<std::mutex> lock(lock_);
+        return renderer_ ? renderer_->stats : gpu::PM4SoftwareRenderer::Stats{};
+    }
     int64_t allowed() {
         std::lock_guard<std::mutex> lock(lock_);
         return kind_ && !failed_ && !sealed_ && jobs_.size()<queue_limit ? 1 : 0;
@@ -55,7 +68,7 @@ public:
         // Constant-engine packets/synchronization are not implemented. Never
         // ignore non-null CCB tables, even if they happen to contain zero sizes,
         // unless nothing is drawn.
-        if ((constant_addresses || constant_sizes) && kind_!=null) return error(0x3fff);
+        if ((constant_addresses || constant_sizes) && kind_<null) return error(0x3fff);
         try {
             std::array<uint8_t,buffer_limit*8> address_bytes{};
             std::array<uint8_t,buffer_limit*4> size_bytes{};
@@ -74,8 +87,13 @@ public:
                 if (!gpu::decodePM4Type3(words.data(),words.size())) return error(0x3013);
                 job.words.insert(job.words.end(),words.begin(),words.end());
             }
-            if (kind_==null) {
+            if (kind_>=null) {
                 if (flip && !prepared_flip(job.words,*flip)) return error(0x1000);
+                if (kind_==software) {
+                    // Draw before the work's labels and interrupts, as the GPU does.
+                    if (!renderer_) renderer_=std::make_unique<gpu::PM4SoftwareRenderer>(guest_);
+                    renderer_->execute(job.words.data(),job.words.size());
+                }
                 const auto retired=retire(job.words);
                 if (retired<0) return error(0x1000);
                 if (interrupts) *interrupts=uint32_t(retired);
@@ -114,7 +132,7 @@ public:
     void reset() { std::lock_guard<std::mutex> lock(lock_); clear(); kind_=none; }
 private:
     struct Job { maxps4_gnm_submission info{}; std::vector<uint32_t> words; };
-    void clear() { jobs_.clear(); sealed_=failed_=false; }
+    void clear() { jobs_.clear(); sealed_=failed_=false; renderer_.reset(); }
     // NOP payload types (shadPS4 PM4CmdNop::PayloadType): PrepareFlip,
     // PrepareFlipLabel, PrepareFlipInterrupt, PrepareFlipInterruptLabel.
     static bool prepared_flip(const std::vector<uint32_t>& words, PreparedFlip& flip) {
@@ -169,6 +187,8 @@ private:
         return interrupts;
     }
     PS4GuestMemory& memory_;
+    gpu::GCNMemory guest_;
+    std::unique_ptr<gpu::PM4SoftwareRenderer> renderer_;
     std::mutex lock_;
     std::deque<Job> jobs_;
     uint64_t next_=1;

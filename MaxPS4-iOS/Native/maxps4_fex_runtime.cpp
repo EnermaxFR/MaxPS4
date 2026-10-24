@@ -1495,6 +1495,20 @@ extern "C" int32_t maxps4_fex_engine_gnm_complete(maxps4_fex_engine* engine, uin
     if (!engine || success>1) return -EINVAL;
     return engine->libkernel.graphics().complete(ticket,success!=0);
 }
+extern "C" int32_t maxps4_fex_engine_gnm_software_status(maxps4_fex_engine* engine, uint32_t* draws,
+    uint32_t* rendered, uint32_t* failed, char* error, size_t capacity) {
+    if (!engine) return -EINVAL;
+    const auto stats = engine->libkernel.graphics().software_stats();
+    if (draws) *draws = stats.draws;
+    if (rendered) *rendered = stats.rendered;
+    if (failed) *failed = stats.failed;
+    if (error && capacity) {
+        const size_t n = std::min(capacity - 1, stats.error.size());
+        std::memcpy(error, stats.error.data(), n);
+        error[n] = 0;
+    }
+    return 0;
+}
 extern "C" int32_t maxps4_fex_engine_pad_update(maxps4_fex_engine* engine, uint32_t buttons,
     uint8_t lx, uint8_t ly, uint8_t rx, uint8_t ry, uint8_t l2, uint8_t r2, uint32_t connected) {
     if (!engine || connected > 1) return -EINVAL;

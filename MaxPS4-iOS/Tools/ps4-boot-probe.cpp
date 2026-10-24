@@ -3,8 +3,9 @@
 // Loads <dir>/sce_module/*.prx then <dir>/eboot.bin, links them with the
 // engine's HLE (prepare_orbis_general) in import probe mode, so that every
 // missing import is a stub reported on stderr at its first call, mounts <dir> as /app0 and runs the
-// entry point through FEX with the null GPU backend (nothing is drawn: frames
-// hold only what the CPU wrote). Prints the link diagnostic, the run status and
+// entry point through FEX with the software GPU backend (each submission is
+// executed on the CPU by the GCN interpreter, render targets written linearly).
+// Prints the link diagnostic, the run status and
 // the guest fault. A display thread sends 60 Hz vblanks and completes every
 // flip; with a frame directory, it saves one presented frame in 30 there as
 // frame-NNNN.png (at most 100). Game files are only read.
@@ -123,6 +124,11 @@ void display(maxps4_fex_engine* engine, const std::string& directory, std::atomi
             const bool ok = write_png(directory + name, frame, pixels);
             std::fprintf(stderr, "flip %llu : %ux%u format 0x%x%s -> %s%s\n", (unsigned long long)flips,
                 frame.width, frame.height, frame.pixel_format, frame.tiled ? " tiled" : "", name + 1, ok ? "" : " (échec)");
+            uint32_t draws = 0, rendered = 0, failed = 0;
+            char error[160] = {};
+            maxps4_fex_engine_gnm_software_status(engine, &draws, &rendered, &failed, error, sizeof error);
+            std::fprintf(stderr, "GPU logiciel : %u dessins, %u rendus, %u échecs%s%s\n", draws, rendered, failed,
+                error[0] ? " ; premier : " : "", error);
         }
         ++flips;
         maxps4_fex_engine_videoout_complete(engine, frame.ticket, 1);
@@ -174,8 +180,8 @@ int main(int argc, char** argv) {
     if (prepared) { maxps4_fex_engine_close(engine); return 1; }
     std::printf("relocation 0x%llx\n", (unsigned long long)relocation);
     if (int64_t e = maxps4_fex_engine_mount_app0(engine, root.c_str())) std::printf("montage /app0 : %lld\n", (long long)e);
-    // Null GPU: submissions draw nothing but signal their labels, EOP events and flips.
-    if (int e = maxps4_fex_engine_gnm_backend(engine, 2)) std::printf("GPU nul refusé (%d)\n", e);
+    // Software GPU: submissions are drawn on the CPU, then signal their labels, EOP events and flips.
+    if (int e = maxps4_fex_engine_gnm_backend(engine, 3)) std::printf("GPU logiciel refusé (%d)\n", e);
     if (int e = maxps4_fex_engine_initialize(engine)) { std::printf("JIT FEX indisponible (%d)\n", e); return 1; }
     uint64_t value = 0, entry = 0;
     uint32_t backend = 0;
