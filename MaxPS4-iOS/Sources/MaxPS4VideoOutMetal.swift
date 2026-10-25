@@ -50,17 +50,18 @@ enum MaxPS4VideoOutMetal {
         return texture
     }
 
-    static func viewport(width: Int, height: Int, output: CGSize) -> MTLViewport {
-        let scale = min(output.width / CGFloat(max(width, 1)), output.height / CGFloat(max(height, 1)))
+    static func viewport(width: Int, height: Int, output: CGSize, fill: Bool = false) -> MTLViewport {
+        let x = output.width / CGFloat(max(width, 1)), y = output.height / CGFloat(max(height, 1))
+        let scale = fill ? max(x, y) : min(x, y)
         let w = CGFloat(width) * scale, h = CGFloat(height) * scale
         return MTLViewport(originX: Double((output.width - w) / 2), originY: Double((output.height - h) / 2),
                            width: Double(w), height: Double(h), znear: 0, zfar: 1)
     }
 
     static func encode(encoder: MTLRenderCommandEncoder, pipeline: MTLRenderPipelineState,
-                       texture: MTLTexture, output: CGSize) {
+                       texture: MTLTexture, output: CGSize, fill: Bool = false) {
         encoder.setRenderPipelineState(pipeline)
-        encoder.setViewport(viewport(width: texture.width, height: texture.height, output: output))
+        encoder.setViewport(viewport(width: texture.width, height: texture.height, output: output, fill: fill))
         encoder.setFragmentTexture(texture, index: 0)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
     }
