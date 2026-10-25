@@ -53,3 +53,21 @@ CPU sanitizer regressions, 819,200 texture comparisons, actual Metal pixel
 comparisons (worst channel difference 0), iPhone bridge compilation and Swift
 frontend checks. No IPA was generated or replaced. The on-device CPU time and
 frame rate of this retained CPU change have not been measured.
+
+## Reused resource-scanner workspace
+
+The renderer now owns a reusable single-lane scanner instead of constructing
+temporary waves and vectors per draw. Registers, flags, callbacks, errors and
+exports are reset between stages. The instruction cache is cleared before
+every draw; only allocated storage is retained. Resource bytes and code are
+read again. Tests change shader code and descriptors, remove user SGPRs and
+recover from an unreadable program to detect stale state.
+
+An interleaved, warmed local Clang `-O2` fixture benchmark measured 2.586 us/draw
+with fresh scanner storage and 1.711 us/draw when reused. This measures scanner
+work alone, not the full renderer or game frame rate. Sanitizers passed.
+
+The portrait display keeps the original aspect ratio without cropping. Only
+landscape uses centered aspect-fill cropping; native resolution is unchanged.
+The orientation change passed the targeted VideoOut Metal workflow
+[40161216429](https://github.com/EnermaxFR/MaxPS4/actions/runs/40161216429).

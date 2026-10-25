@@ -130,7 +130,7 @@ bool PM4MetalRenderer::encode(const PM4Draw& d, id<MTLCommandBuffer> commands) {
     if (memory) { drawState.base = guestBase_; drawState.size = memory.length; }
     else {
         // Copies of the ranges this draw's programs read, packed 256-byte aligned.
-        const auto ranges = scanDrawResources(code_, d);
+        const auto& ranges = scanner_.scan(d);
         if (ranges.size() > 16) return fail("more than 16 memory ranges");
         std::uint64_t total = 0;
         for (const auto& r : ranges) total += (r.size + 255) & ~std::uint64_t{255};

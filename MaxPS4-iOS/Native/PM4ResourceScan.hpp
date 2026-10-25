@@ -12,22 +12,29 @@
 namespace maxps4::gpu {
 struct PM4Range { std::uint64_t base = 0, size = 0; };
 
-inline std::vector<PM4Range> scanDrawResources(const GCNMemory& memory, const PM4Draw& d) {
+class PM4ResourceScanner {
+public:
+    explicit PM4ResourceScanner(const GCNMemory& memory) : wave_(memory, 1, &cache_) {}
+    PM4ResourceScanner(const PM4ResourceScanner&) = delete;
+    PM4ResourceScanner& operator=(const PM4ResourceScanner&) = delete;
+    // Valid until the next scan. Only storage is reused: code, descriptors and
+    // guest values are read again on every draw. Not a concurrent scanner.
+    const std::vector<PM4Range>& scan(const PM4Draw& d) {
     constexpr std::uint64_t largest = 256ull << 20;
-    std::vector<PM4Range> found;
+    found_.clear(); merged_.clear(); cache_.clear();
     auto note = [&](std::uint64_t base, std::uint64_t bytes) {
-        if (bytes && bytes <= largest && base + bytes > base) found.push_back({base, bytes});
+        if (bytes && bytes <= largest && base + bytes > base) found_.push_back({base, bytes});
     };
-    GCNCodeCache cache;
+    auto& wave = wave_;
     {
-        GCNWave wave(memory, 1, &cache);
+        wave.reset();
         wave.resource = note;
         for (unsigned k = 0; k < d.vsUserCount; ++k) wave.s[k] = d.vsUser[k];
         wave.v(0, 0) = d.indices.empty() ? 0 : d.indices[0];
         wave.run(d.vs); // a failure keeps what was found before it
     }
     {
-        GCNWave wave(memory, 1, &cache);
+        wave.reset();
         wave.resource = note;
         for (unsigned k = 0; k < d.psUserCount; ++k) wave.s[k] = d.psUser[k];
         const float x = float(d.scissor[0] + d.scissor[2]) / 2, y = float(d.scissor[1] + d.scissor[3]) / 2;
@@ -45,13 +52,23 @@ inline std::vector<PM4Range> scanDrawResources(const GCNMemory& memory, const PM
         wave.run(d.ps);
     }
     // Sorted, with overlapping or nearly adjacent (4 KiB) ranges merged.
-    std::sort(found.begin(), found.end(), [](const PM4Range& a, const PM4Range& b) { return a.base < b.base; });
-    std::vector<PM4Range> merged;
-    for (const auto& r : found) {
-        if (!merged.empty() && r.base <= merged.back().base + merged.back().size + 4096) {
-            merged.back().size = std::max(merged.back().size, r.base + r.size - merged.back().base);
-        } else merged.push_back(r);
+    wave.resource = {}; // Do not retain the callback to this scan's stack.
+    std::sort(found_.begin(), found_.end(), [](const PM4Range& a, const PM4Range& b) { return a.base < b.base; });
+    for (const auto& r : found_) {
+        if (!merged_.empty() && r.base <= merged_.back().base + merged_.back().size + 4096) {
+            merged_.back().size = std::max(merged_.back().size, r.base + r.size - merged_.back().base);
+        } else merged_.push_back(r);
     }
-    return merged;
+    return merged_;
+    }
+private:
+    GCNCodeCache cache_;
+    GCNWave wave_;
+    std::vector<PM4Range> found_, merged_;
+};
+
+inline std::vector<PM4Range> scanDrawResources(const GCNMemory& memory, const PM4Draw& d) {
+    PM4ResourceScanner scanner(memory);
+    return scanner.scan(d);
 }
 } // namespace maxps4::gpu

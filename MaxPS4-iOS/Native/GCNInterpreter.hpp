@@ -145,6 +145,15 @@ public:
     std::uint64_t vccMask() const { return std::uint64_t(s[106]) | std::uint64_t(s[107]) << 32; }
     unsigned lanes() const { return lanes_; }
 
+    // Reuse allocated lane/export storage, but never reuse runtime values or
+    // callbacks. The owner decides the lifetime of the external code cache.
+    void reset() {
+        s.fill(0); scc = false; exports.clear(); error.clear();
+        std::fill(v_.begin(), v_.end(), 0);
+        attribute = {}; resource = {}; images = nullptr;
+        setExec(lanes_ == 64 ? ~0ull : ((1ull << lanes_) - 1));
+    }
+
     // Runs from `pc` until s_endpgm. False with `error` set on anything not
     // implemented or invalid (unmapped code or data, unsupported formats).
     bool run(std::uint64_t pc, std::size_t maxInstructions = 1u << 20) {

@@ -11,6 +11,7 @@
 #ifdef __OBJC__
 #import <Metal/Metal.h>
 #include "PM4DrawCollector.hpp"
+#include "PM4ResourceScan.hpp"
 #include <map>
 #include <string>
 #include <tuple>
@@ -20,7 +21,7 @@ class PM4MetalRenderer {
 public:
     // `guest` nil: each draw copies the memory ranges its programs read.
     PM4MetalRenderer(id<MTLDevice> device, const GCNMemory& code, id<MTLBuffer> guest, std::uint64_t guestBase)
-        : device_(device), code_(code), guest_(guest), guestBase_(guestBase) {}
+        : device_(device), code_(code), guest_(guest), guestBase_(guestBase), scanner_(code) {}
     // Encodes one draw as a render pass into `commands`. False with `error`
     // set (and nothing encoded) when the draw cannot be expressed.
     bool encode(const PM4Draw& draw, id<MTLCommandBuffer> commands);
@@ -43,6 +44,7 @@ private:
     const GCNMemory& code_;
     id<MTLBuffer> guest_;
     std::uint64_t guestBase_;
+    PM4ResourceScanner scanner_;
     std::map<PipelineKey, id<MTLRenderPipelineState>> pipelines_;
     std::map<std::uint64_t, Target> targets_;
     bool batching_ = false;
