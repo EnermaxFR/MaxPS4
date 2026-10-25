@@ -75,12 +75,13 @@ final class MaxPS4GameSource: @unchecked Sendable {
             maxps4_fex_engine_close(engine)
         }
     }
-    func run(url: URL, device: MTLDevice) -> String {
+    func run(url: URL, device: MTLDevice, progress: @escaping @Sendable (String) -> Void) -> String {
         dispatchPrecondition(condition: .onQueue(MaxPS4FEXMetalExecution.queue))
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         defer { close() }
         do {
+            progress("Ouverture du moteur…")
             var opened: OpaquePointer?
             let status = maxps4_fex_engine_open(&opened)
             guard status == 0, let opened else { throw failure("Ouverture FEX", status) }
@@ -92,12 +93,14 @@ final class MaxPS4GameSource: @unchecked Sendable {
             _ = maxps4_fex_engine_set_import_probe(opened, 1)
             var diagnostic = [CChar](repeating: 0, count: 2048)
             var relocation: UInt64 = 0
+            progress("Lecture du dossier et chargement de eboot.bin et des PRX…")
             let loaded = url.path.withCString { path in
                 diagnostic.withUnsafeMutableBufferPointer {
                     maxps4_fex_engine_load_game(opened, path, &relocation, $0.baseAddress, $0.count)
                 }
             }
             guard loaded == 0 else { throw failure(String(cString: diagnostic), loaded) }
+            progress("Jeu chargé. Préparation du rendu Metal…")
             guard let metal = MaxPS4GameMetalBridge(device: device, reader: { address, destination, count in
                 maxps4_fex_engine_read_memory(opened, address, destination, count) == 0
             }) else { throw failure("Création du renderer Metal", -ENOMEM) }
@@ -109,6 +112,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
             guard attached == 0 else { throw failure("Connexion GNM", attached) }
             let graphics = maxps4_fex_engine_gnm_backend(opened, 4)
             guard graphics == 0 else { throw failure("Backend Metal", graphics) }
+            progress("Initialisation du JIT…")
             let initialized = maxps4_fex_engine_initialize(opened)
             guard initialized == 0 else { throw failure("Activer le JIT avec StikDebug puis réessayer", initialized) }
             lock.lock()
@@ -117,6 +121,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
             if ready { _ = maxps4_fex_engine_pad_update(opened, buttons, 128, 128, 128, 128, 0, 0, 1) }
             lock.unlock()
             if cancelled { return "Arrêté." }
+            progress("Jeu en cours d’exécution. En attente de la première image…")
             var value: UInt64 = 0, entry: UInt64 = 0
             var backend: UInt32 = 0
             let ran = maxps4_fex_engine_run_orbis(opened, &value, &backend, &entry)
@@ -136,6 +141,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
 @MainActor final class MaxPS4GameSession: ObservableObject {
     @Published private(set) var source: MaxPS4GameSource?
     @Published private(set) var running = false
+    @Published private(set) var hasPresented = false
     @Published private(set) var report = "Activer le JIT avec StikDebug avant de lancer le jeu."
     private var worker: MaxPS4GameSource?
     private var generation = UUID()
@@ -143,9 +149,15 @@ final class MaxPS4GameSource: @unchecked Sendable {
         stop()
         let source = MaxPS4GameSource(), id = UUID()
         generation = id; self.source = source; worker = source; running = true
+        hasPresented = false
         report = "Chargement du jeu et préparation Metal…"
         MaxPS4FEXMetalExecution.queue.async { [weak self] in
-            let result = source.run(url: url, device: device)
+            let result = source.run(url: url, device: device) { [weak self] text in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.generation == id, self.running else { return }
+                    self.report = text
+                }
+            }
             DispatchQueue.main.async {
                 guard let self, self.generation == id else { return }
                 self.report = result; self.running = false
@@ -153,7 +165,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
         }
     }
     func input(_ buttons: UInt32) { worker?.input(buttons) }
-    func presented(_ text: String) { if running { report = text } }
+    func presented(_ text: String) { if running { hasPresented = true; report = text } }
     func failed(_ text: String) { stop(); report = text }
     func stop() {
         generation = UUID(); worker?.stop(); worker = nil; source = nil; running = false

@@ -12,6 +12,7 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
     private var lastTexture: MTLTexture?
     private let snapshots = DispatchQueue(label: "com.enermaxfr.maxps4.display-copy", qos: .userInteractive)
     private var snapshotID: UUID?
+    private var pendingFrame: MaxPS4GameSource.Frame?
     private var reportTime = ProcessInfo.processInfo.systemUptime
     private var reportFrames = 0
     private var preparationSeconds = 0.0
@@ -31,11 +32,25 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
             reportTime = ProcessInfo.processInfo.systemUptime; reportFrames = 0; preparationSeconds = 0
         }
     }
-    func cancel() { snapshotID = nil; presentation?.cancel(); presentation = nil; activeID = nil }
+    func cancel() {
+        snapshotID = nil
+        if let pendingFrame { source?.complete(ticket: pendingFrame.info.ticket, presented: false) }
+        pendingFrame = nil
+        presentation?.cancel(); presentation = nil; activeID = nil
+    }
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) { needsRedraw = true }
     func draw(in view: MTKView) {
-        guard activeID == nil, snapshotID == nil, !view.isPaused,
+        guard activeID == nil, !view.isPaused,
               view.drawableSize.width > 0, view.drawableSize.height > 0, let source else { return }
+        // Acquire the drawable and encode only inside MTKView's draw cycle.
+        // The worker hands off an immutable texture; it never renders directly.
+        if let frame = pendingFrame {
+            pendingFrame = nil
+            present(frame, source: source, in: view)
+            return
+        }
+        if needsRedraw, lastTexture != nil { present(nil, source: source, in: view) }
+        guard snapshotID == nil else { return }
         let id = UUID(); snapshotID = id
         snapshots.async { [weak self, weak view, source] in
             let started = ProcessInfo.processInfo.systemUptime
@@ -50,8 +65,11 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
                 self.snapshotID = nil
                 switch result {
                 case .success(let frame):
-                    if frame != nil { self.preparationSeconds += elapsed }
-                    self.present(frame, source: source, in: view)
+                    if let frame {
+                        self.preparationSeconds += elapsed
+                        self.pendingFrame = frame
+                        view.draw()
+                    }
                 case .failure(let error): self.failed(error.localizedDescription)
                 }
             }
@@ -59,7 +77,10 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
     }
     private func present(_ frame: MaxPS4GameSource.Frame?, source: MaxPS4GameSource, in view: MTKView) {
         guard frame != nil || needsRedraw else { return }
-        guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable else { return }
+        guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable else {
+            pendingFrame = frame // Retry the same ticket on the next draw cycle.
+            return
+        }
         guard let command = queue.makeCommandBuffer(), let encoder = command.makeRenderCommandEncoder(descriptor: pass) else {
             if let frame { source.complete(ticket: frame.info.ticket, presented: false) }
             failed("Création de la présentation Metal impossible."); return
@@ -160,6 +181,15 @@ struct MaxPS4GameView: View {
                     .ignoresSafeArea()
                     .accessibilityIdentifier("maxps4.game.surface")
                 if session.running && !showingMenu { screenControls }
+                if session.running && !session.hasPresented {
+                    VStack(spacing: 12) {
+                        ProgressView().tint(.cyan)
+                        Text(session.report).font(.footnote).multilineTextAlignment(.center)
+                    }
+                    .padding(20)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+                    .padding(30).allowsHitTesting(false)
+                }
                 if !session.running {
                     VStack(spacing: 18) {
                         Text(directory.lastPathComponent).font(.title2.bold())
