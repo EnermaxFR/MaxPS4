@@ -17,6 +17,8 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
     private var reportFrames = 0
     private var preparationSeconds = 0.0
     private var needsRedraw = true
+    private var retryTicket: UInt64 = 0
+    private var presentationRetries = 0
     var report: (String) -> Void
     var failed: (String) -> Void
     init(device: MTLDevice, report: @escaping (String) -> Void, failed: @escaping (String) -> Void) throws {
@@ -29,6 +31,7 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
         if self.source !== source {
             cancel(); self.source = source; lastTexture = nil
             needsRedraw = true
+            retryTicket = 0; presentationRetries = 0
             reportTime = ProcessInfo.processInfo.systemUptime; reportFrames = 0; preparationSeconds = 0
         }
     }
@@ -91,13 +94,39 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
         }
         encoder.endEncoding()
         if let frame {
+            if retryTicket != frame.info.ticket {
+                retryTicket = frame.info.ticket; presentationRetries = 0
+            }
             let id = UUID(); activeID = id
-            let gate = MaxPS4VideoOutPresentation { [weak self, source] displayed in
-                let accepted = source.complete(ticket: frame.info.ticket, presented: displayed)
+            let gate = MaxPS4VideoOutPresentation(outcome: { [weak self, source] outcome in
                 DispatchQueue.main.async { [weak self] in
-                    guard let self, self.activeID == id else { return }
+                    guard let self, self.activeID == id else {
+                        source.complete(ticket: frame.info.ticket, presented: false)
+                        return
+                    }
                     self.activeID = nil; self.presentation = nil
-                    if accepted {
+                    if outcome == .notDisplayed || outcome == .timedOut {
+                        if self.presentationRetries < 2 {
+                            self.presentationRetries += 1
+                            self.pendingFrame = frame
+                            self.report("Image non confirmée. Nouvelle tentative \(self.presentationRetries)/2…")
+                            return // Keep the native flip pending; never confirm a dropped image.
+                        }
+                    }
+                    guard outcome == .presented else {
+                        source.complete(ticket: frame.info.ticket, presented: false)
+                        let reason: String
+                        switch outcome {
+                        case .gpuFailed: reason = "échec de la commande GPU"
+                        case .notDisplayed: reason = "image non affichée (horodatage nul ou invalide)"
+                        case .timedOut: reason = "aucune confirmation de présentation dans le délai prévu"
+                        case .cancelled: reason = "présentation annulée"
+                        case .presented: reason = ""
+                        }
+                        self.failed("Présentation Metal : \(reason), ticket \(frame.info.ticket), \(self.presentationRetries) nouvelle(s) tentative(s).")
+                        return
+                    }
+                    if source.complete(ticket: frame.info.ticket, presented: true) {
                         self.reportFrames += 1
                         let now = ProcessInfo.processInfo.systemUptime
                         let elapsed = now - self.reportTime
@@ -110,13 +139,13 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
                             self.reportTime = now; self.reportFrames = 0; self.preparationSeconds = 0
                         }
                     }
-                    else { self.failed("Présentation Metal interrompue ; session arrêtée.") }
+                    else { self.failed("Image affichée, mais confirmation VideoOut refusée pour le ticket \(frame.info.ticket).") }
                 }
-            }
+            })
             presentation = gate
             drawable.addPresentedHandler { gate.drawablePresented(at: $0.presentedTime) }
             command.addCompletedHandler { gate.gpuFinished($0.status == .completed && $0.error == nil) }
-            DispatchQueue.global().asyncAfter(deadline: .now() + 3) { gate.cancel() }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 3) { gate.expire() }
         }
         lastTexture = texture
         needsRedraw = false
