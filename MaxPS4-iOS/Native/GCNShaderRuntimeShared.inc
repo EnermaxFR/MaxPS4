@@ -151,23 +151,29 @@ GCN_FN float4 gcn_texel_at(GCNMemory M, GCNRes8 t, int x, int y, bool resolved, 
 }
 GCN_FN float4 gcn_texel(GCNMemory M, GCNRes8 t, int x, int y) { return gcn_texel_at(M, t, x, y, false, 0ul); }
 GCN_FN int gcn_wrap(int x, int size, uint mode, GCN_THREAD bool& border) {
-    if (mode == 0u) { int m = x % size; return m < 0 ? m + size : m; }
-    if (mode == 1u) { int period = 2 * size; int m = x % period; if (m < 0) m += period; return m < size ? m : period - 1 - m; }
+    // In-range coordinates, the common case, skip the integer division.
+    if (mode == 0u) { if (x >= 0 && x < size) return x; int m = x % size; return m < 0 ? m + size : m; }
+    if (mode == 1u) {
+        int period = 2 * size; int m = x;
+        if (m < 0 || m >= period) { m = x % period; if (m < 0) m += period; }
+        return m < size ? m : period - 1 - m;
+    }
     if (mode == 2u) return x < 0 ? 0 : (x >= size ? size - 1 : x);
     if (mode == 3u) { int m = x < 0 ? -x - 1 : x; return m >= size ? size - 1 : m; }
     if (x < 0 || x >= size) border = true;
     return x < 0 ? 0 : (x >= size ? size - 1 : x);
 }
+GCN_FN float4 gcn_border_color(GCNRes4 s) {
+    uint type = s.d[3] >> 30;
+    if (type == 1u) return float4(0.0f, 0.0f, 0.0f, 1.0f);
+    if (type == 2u) return float4(1.0f, 1.0f, 1.0f, 1.0f);
+    return float4(0.0f, 0.0f, 0.0f, 0.0f);
+}
 GCN_FN float4 gcn_fetch_at(GCNMemory M, GCNRes8 t, GCNRes4 s, int x, int y, bool resolved, ulong offset) {
     int w = int(t.d[2] & 0x3fffu) + 1; int h = int((t.d[2] >> 14) & 0x3fffu) + 1;
     bool border = false;
     int ax = gcn_wrap(x, w, s.d[0] & 7u, border); int ay = gcn_wrap(y, h, (s.d[0] >> 3) & 7u, border);
-    if (border) {
-        uint type = s.d[3] >> 30;
-        if (type == 1u) return float4(0.0f, 0.0f, 0.0f, 1.0f);
-        if (type == 2u) return float4(1.0f, 1.0f, 1.0f, 1.0f);
-        return float4(0.0f, 0.0f, 0.0f, 0.0f);
-    }
+    if (border) return gcn_border_color(s);
     return gcn_texel_at(M, t, ax, ay, resolved, offset);
 }
 GCN_FN float4 gcn_fetch(GCNMemory M, GCNRes8 t, GCNRes4 s, int x, int y) { return gcn_fetch_at(M, t, s, x, y, false, 0ul); }
@@ -180,8 +186,15 @@ GCN_FN float4 gcn_sample_at(GCNMemory M, GCNRes8 t, GCNRes4 s, bool unorm, float
     float fx = x - 0.5f; float fy = y - 0.5f;
     int x0 = int(gcn_floor(fx)); int y0 = int(gcn_floor(fy));
     float ax = fx - float(x0); float ay = fy - float(y0);
-    float4 c00 = gcn_fetch_at(M, t, s, x0, y0, resolved, offset); float4 c10 = gcn_fetch_at(M, t, s, x0 + 1, y0, resolved, offset);
-    float4 c01 = gcn_fetch_at(M, t, s, x0, y0 + 1, resolved, offset); float4 c11 = gcn_fetch_at(M, t, s, x0 + 1, y0 + 1, resolved, offset);
+    // gcn_fetch_at for the four taps, each axis wrapped once rather than per tap.
+    int iw = int(w); int ih = int(h); uint mx = s.d[0] & 7u; uint my = (s.d[0] >> 3) & 7u;
+    bool bx0 = false; bool bx1 = false; bool by0 = false; bool by1 = false;
+    int wx0 = gcn_wrap(x0, iw, mx, bx0); int wx1 = gcn_wrap(x0 + 1, iw, mx, bx1);
+    int wy0 = gcn_wrap(y0, ih, my, by0); int wy1 = gcn_wrap(y0 + 1, ih, my, by1);
+    float4 c00 = bx0 || by0 ? gcn_border_color(s) : gcn_texel_at(M, t, wx0, wy0, resolved, offset);
+    float4 c10 = bx1 || by0 ? gcn_border_color(s) : gcn_texel_at(M, t, wx1, wy0, resolved, offset);
+    float4 c01 = bx0 || by1 ? gcn_border_color(s) : gcn_texel_at(M, t, wx0, wy1, resolved, offset);
+    float4 c11 = bx1 || by1 ? gcn_border_color(s) : gcn_texel_at(M, t, wx1, wy1, resolved, offset);
     float4 r;
     for (uint n = 0u; n < 4u; ++n)
         r[n] = (c00[n] * (1.0f - ax) + c10[n] * ax) * (1.0f - ay) + (c01[n] * (1.0f - ax) + c11[n] * ax) * ay;
