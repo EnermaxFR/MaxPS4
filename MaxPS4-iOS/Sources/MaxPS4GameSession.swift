@@ -9,6 +9,7 @@ import Darwin
 final class MaxPS4GameSource: @unchecked Sendable {
     struct Frame { let info: maxps4_videoout_frame; let texture: MTLTexture; let report: String }
     private let lock = NSLock()
+    private let inputLock = NSLock()
     private var engine: OpaquePointer?
     private var bridge: MaxPS4GameMetalBridge?
     private var stopped = false
@@ -24,21 +25,27 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private func tick(at time: TimeInterval) {
         guard lock.try() else { return }
         defer { lock.unlock() }
-        guard ready, !stopped, let engine, vblankClock.due(at: time) else { return }
+        guard ready, !stopped, let engine else { return }
+        sendInputLocked(engine)
+        guard vblankClock.due(at: time) else { return }
         _ = maxps4_fex_engine_videoout_vblank(engine, port)
     }
 
     func input(_ buttons: UInt32) {
-        // The display-copy worker may hold the engine lock while the GPU ends
-        // a copy. The 60 Hz poll retries the latest input without blocking UI.
+        // Retain the latest state even when another engine API owns the lock.
+        // The independent timer retries it without waiting for a displayed frame.
+        inputLock.lock(); self.buttons = buttons; inputLock.unlock()
         guard lock.try() else { return }
         defer { lock.unlock() }
-        self.buttons = buttons
         if ready, !stopped, let engine {
-            _ = maxps4_fex_engine_pad_update(engine, buttons, 128, 128, 128, 128, 0, 0, 1)
+            sendInputLocked(engine)
         }
     }
-    func snapshot() throws -> Frame? {
+    private func sendInputLocked(_ engine: OpaquePointer) {
+        inputLock.lock(); let latest = buttons; inputLock.unlock()
+        _ = maxps4_fex_engine_pad_update(engine, latest, 128, 128, 128, 128, 0, 0, 1)
+    }
+    private func snapshotTarget() throws -> (maxps4_videoout_frame, UInt64, MaxPS4GameMetalBridge)? {
         lock.lock(); defer { lock.unlock() }
         guard ready, !stopped, let engine, let bridge else { return nil }
         if let failure = bridge.failure { throw self.failure(failure, -EIO) }
@@ -47,6 +54,12 @@ final class MaxPS4GameSource: @unchecked Sendable {
         if status == -EAGAIN { return nil }
         guard status == 0, info.ticket != 0 else { throw failure("VideoOut", status) }
         port = info.port
+        return (info, address, bridge)
+    }
+    func snapshot() throws -> Frame? {
+        guard let (info, address, bridge) = try snapshotTarget() else { return nil }
+        // The retained bridge owns the texture copy. No engine pointer is used
+        // here, so GPU completion need not block pad updates, vblank or stop.
         guard let texture = bridge.copyTarget(address: address, width: info.width, height: info.height) else {
             if missingSince == nil { missingSince = Date() }
             if Date().timeIntervalSince(missingSince!) > 5 {
@@ -129,7 +142,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
             lock.lock()
             bridge = metal; ready = !stopped
             let cancelled = stopped
-            if ready { _ = maxps4_fex_engine_pad_update(opened, buttons, 128, 128, 128, 128, 0, 0, 1) }
+            if ready { sendInputLocked(opened) }
             if ready {
                 let timer = DispatchSource.makeTimerSource(queue: vblanks)
                 timer.schedule(deadline: .now(), repeating: 1.0 / 60, leeway: .milliseconds(1))
