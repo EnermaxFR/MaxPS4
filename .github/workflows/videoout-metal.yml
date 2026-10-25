@@ -20,6 +20,7 @@ jobs:
         run: |
           mkdir -p build/videoout
           swiftc -parse-as-library MaxPS4-iOS/Sources/MaxPS4VideoOutPresentation.swift \
+            MaxPS4-iOS/Sources/MaxPS4VideoOutClock.swift \
             MaxPS4-iOS/Tests/VideoOutPresentationTest.swift -o build/videoout/presentation-test
           build/videoout/presentation-test
       - name: Test actual offscreen Metal pixels when a device is available

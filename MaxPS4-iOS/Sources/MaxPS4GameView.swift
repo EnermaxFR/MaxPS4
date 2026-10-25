@@ -98,8 +98,8 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
                 retryTicket = frame.info.ticket; presentationRetries = 0
             }
             let id = UUID(); activeID = id
-            let gate = MaxPS4VideoOutPresentation(outcome: { [weak self, source] outcome in
-                DispatchQueue.main.async { [weak self] in
+            let gate = MaxPS4VideoOutPresentation(outcome: { [weak self, weak view, source] outcome in
+                DispatchQueue.main.async { [weak self, weak view] in
                     guard let self, self.activeID == id else {
                         source.complete(ticket: frame.info.ticket, presented: false)
                         return
@@ -138,6 +138,9 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
                             self.report(String(format: "%.1f images/s · préparation image %.2f ms · ", fps, ms) + frame.report)
                             self.reportTime = now; self.reportFrames = 0; self.preparationSeconds = 0
                         }
+                        // Start preparing the next image now, rather than losing
+                        // another refresh interval before the MTK timer runs.
+                        if let view, !view.isPaused { self.draw(in: view) }
                     }
                     else { self.failed("Image affichée, mais confirmation VideoOut refusée pour le ticket \(frame.info.ticket).") }
                 }

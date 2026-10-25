@@ -17,6 +17,16 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private var missingSince: Date?
     private var buttons: UInt32 = 0
     private var displayed = 0
+    private var vblankClock = MaxPS4VideoOutClock()
+    private var vblankTimer: DispatchSourceTimer?
+    private let vblanks = DispatchQueue(label: "com.enermaxfr.maxps4.vblank", qos: .userInteractive)
+
+    private func tick(at time: TimeInterval) {
+        guard lock.try() else { return }
+        defer { lock.unlock() }
+        guard ready, !stopped, let engine, vblankClock.due(at: time) else { return }
+        _ = maxps4_fex_engine_videoout_vblank(engine, port)
+    }
 
     func input(_ buttons: UInt32) {
         // The display-copy worker may hold the engine lock while the GPU ends
@@ -32,7 +42,6 @@ final class MaxPS4GameSource: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard ready, !stopped, let engine, let bridge else { return nil }
         if let failure = bridge.failure { throw self.failure(failure, -EIO) }
-        _ = maxps4_fex_engine_videoout_vblank(engine, port)
         var info = maxps4_videoout_frame(), address: UInt64 = 0
         let status = maxps4_fex_engine_videoout_target(engine, &info, &address)
         if status == -EAGAIN { return nil }
@@ -59,6 +68,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
     func stop() {
         lock.lock()
         stopped = true; ready = false
+        vblankTimer?.cancel(); vblankTimer = nil
         if let engine { _ = maxps4_fex_engine_request_stop(engine) }
         lock.unlock()
         // close runs after run_orbis returns, never while FEX/GPU uses memory.
@@ -68,6 +78,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(MaxPS4FEXMetalExecution.queue))
         lock.lock(); defer { lock.unlock() }
         ready = false
+        vblankTimer?.cancel(); vblankTimer = nil
         if let engine {
             _ = maxps4_fex_engine_gnm_backend(engine, 0)
             _ = maxps4_fex_engine_gnm_host_consumer(engine, nil, nil)
@@ -119,6 +130,12 @@ final class MaxPS4GameSource: @unchecked Sendable {
             bridge = metal; ready = !stopped
             let cancelled = stopped
             if ready { _ = maxps4_fex_engine_pad_update(opened, buttons, 128, 128, 128, 128, 0, 0, 1) }
+            if ready {
+                let timer = DispatchSource.makeTimerSource(queue: vblanks)
+                timer.schedule(deadline: .now(), repeating: 1.0 / 60, leeway: .milliseconds(1))
+                timer.setEventHandler { [weak self] in self?.tick(at: ProcessInfo.processInfo.systemUptime) }
+                vblankTimer = timer; timer.resume()
+            }
             lock.unlock()
             if cancelled { return "Arrêté." }
             progress("Jeu en cours d’exécution. En attente de la première image…")

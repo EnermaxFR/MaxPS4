@@ -2,6 +2,19 @@ import Foundation
 
 @main struct VideoOutPresentationTest {
     static func main() {
+        for hz in [60, 120] {
+            var clock = MaxPS4VideoOutClock()
+            var ticks = 0
+            for index in 0..<hz {
+                let time = Double(index) / Double(hz)
+                if clock.due(at: time) { ticks += 1 }
+                precondition(!clock.due(at: time), "A manual redraw cannot add another vblank")
+            }
+            precondition(ticks == 60, "60/120 Hz hosts must produce 60 guest vblanks")
+            precondition(clock.due(at: 2), "Clock resumes after a GPU stall")
+            precondition(!clock.due(at: 2), "Missed intervals must not create an event burst")
+            precondition(!clock.due(at: .nan))
+        }
         for reversed in [false, true] {
             var results: [Bool] = []
             let gate = MaxPS4VideoOutPresentation { results.append($0) }
