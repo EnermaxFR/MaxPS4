@@ -64,7 +64,17 @@ fragment float4 metal_sample_fragment(GCNVaryings in [[stage_in]], texture2d<flo
         };
         const std::string noShuffle = "GCN_FN uint gcn_no_shuffle(uint value, uint lane) { return value + lane; }\n";
         const std::string noMask = replaced(replaced(entry, "uint sampleCoverage [[sample_mask]],", ""), "sampleCoverage != 0u", "true");
-        struct Variant { const char* name; std::string source; const char* fragment; bool draws; };
+        const std::string entryOnly = replaced(entry, "    ps_program(L, M, Q);\n", "");
+        const std::string noClear = replaced(entry, "GCNLane L; gcn_clear(L);\n    for (uint k = 0u; k < 17u",
+            "GCNLane L; L.exec = true; L.killed = false; L.colorWritten = 0u; L.color[0] = float4(0.0f);\n    for (uint k = 0u; k < 17u");
+        // attr/param/color arrays of one element: this program uses only index 0.
+        auto smallLane = [&](std::string s) {
+            s = replaced(s, "float4 attr[32];", "float4 attr[1];");
+            s = replaced(s, "float4 param[32]; float4 color[8];", "float4 param[1]; float4 color[1];");
+            s = replaced(s, "k < 32u; ++k) { L.attr[k]", "k < 1u; ++k) { L.attr[k]");
+            return replaced(s, "k < 8u; ++k) L.color[k]", "k < 1u; ++k) L.color[k]");
+        };
+        struct Variant { const char* name; std::string source; const char* fragment; bool draws; bool smallLane = false; };
         std::vector<Variant> variants = {
             {"empty pass (clear only)", "", "", false},
             {"trivial Metal fragment", vs.source + ps.source + entry + trivial, "trivial_fragment", true},
@@ -74,6 +84,10 @@ fragment float4 metal_sample_fragment(GCNVaryings in [[stage_in]], texture2d<flo
             {"translated, no quad ops", noShuffle + vs.source + noQuad(ps.source) + entry, "gcn_fragment", true},
             {"translated, no sample/quad", noShuffle + vs.source + noQuad(noSample) + entry, "gcn_fragment", true},
             {"translated, no sample_mask input", vs.source + ps.source + noMask, "gcn_fragment", true},
+            {"entry only (program not run)", vs.source + ps.source + entryOnly, "gcn_fragment", true},
+            {"translated, no gcn_clear in fragment", vs.source + ps.source + noClear, "gcn_fragment", true},
+            {"translated, small GCNLane", vs.source + ps.source + entry, "gcn_fragment", true, true},
+            {"entry only, small GCNLane", vs.source + ps.source + entryOnly, "gcn_fragment", true, true},
         };
         MTLCompileOptions* options = [MTLCompileOptions new];
         if (@available(macOS 15.0, iOS 18.0, *)) options.mathMode = MTLMathModeSafe;
@@ -81,7 +95,7 @@ fragment float4 metal_sample_fragment(GCNVaryings in [[stage_in]], texture2d<flo
         for (std::size_t k = 0; k < variants.size(); ++k) {
             if (!variants[k].draws) continue;
             NSError* error = nil;
-            const std::string source = gcnMetalPrelude() + variants[k].source;
+            const std::string source = (variants[k].smallLane ? smallLane(gcnMetalPrelude()) : gcnMetalPrelude()) + variants[k].source;
             id<MTLLibrary> library = [device newLibraryWithSource:[NSString stringWithUTF8String:source.c_str()] options:options error:&error];
             if (!library) std::printf("%s MSL: %s\n", variants[k].name, error.localizedDescription.UTF8String);
             assert(library);
