@@ -12,6 +12,8 @@
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
+#include <atomic>
+#include <dispatch/dispatch.h>
 using namespace maxps4::gpu;
 using namespace gcn_test;
 namespace {
@@ -158,6 +160,8 @@ int main() {
             [batch commit]; [batch waitUntilCompleted];
             assert(batch.status == MTLCommandBufferStatusCompleted && !batch.error);
             assert(batched.renderPasses == 2 * (iteration + 1));
+            assert(batched.buffersBuilt == 3);
+            assert(batched.buffersReused == 3 * iteration);
             for (const auto address : {targetA, targetB}) {
                 std::uint8_t pixels[width * height * 4]{};
                 readPixels(device, queue, batched.target(address), pixels);
@@ -165,6 +169,38 @@ int main() {
             }
         }
         std::puts("PASS batching: 3 draws in 2 passes, identical pixels across 3 submissions");
+        std::puts("PASS uploads: 3 buffers allocated, 6 reused after GPU completion across 3 submissions");
+        // Two draws in one command buffer must retain different texture bytes,
+        // even if the guest overwrites that texture between their snapshots.
+        PM4Draw textured;
+        PM4DrawStats captureStats;
+        PM4DrawCollector capture(arena.memory, captureStats);
+        capture.execute(s.words.data(), s.words.size(), [&](const PM4Draw& draw) {
+            if (draw.ps == texturedPS) textured = draw;
+        });
+        assert(textured.ps == texturedPS);
+        Arena isolationArena;
+        isolationArena.bytes = arena.bytes;
+        PM4MetalRenderer isolation(device, isolationArena.memory, nil, 0);
+        id<MTLCommandBuffer> isolated = [queue commandBuffer];
+        isolation.beginBatch();
+        textured.target = targetA;
+        assert(isolation.encode(textured, isolated));
+        std::memset(isolationArena.bytes.data() + (image - Arena::start), 0, width * height * 4);
+        PM4SoftwareRenderer blankReference(isolationArena.memory);
+        blankReference.execute(s.words.data(), s.words.size());
+        assert(blankReference.stats.failed == 0);
+        textured.target = targetB;
+        assert(isolation.encode(textured, isolated));
+        isolation.endBatch();
+        assert(isolation.buffersBuilt == 2 && isolation.buffersReused == 0);
+        [isolated commit]; [isolated waitUntilCompleted];
+        assert(isolated.status == MTLCommandBufferStatusCompleted && !isolated.error);
+        std::uint8_t isolatedPixels[width * height * 4]{};
+        readPixels(device, queue, isolation.target(targetA), isolatedPixels);
+        assert(compare("immutable upload before guest change", isolatedPixels, arena.bytes.data() + (targetB - Arena::start)));
+        readPixels(device, queue, isolation.target(targetB), isolatedPixels);
+        assert(compare("fresh upload after guest change", isolatedPixels, isolationArena.bytes.data() + (targetB - Arena::start)));
         // Isolate cross-command-buffer rendering from the bridge/display copy.
         PM4DrawStats separateStats;
         PM4DrawCollector separateCollector(arena.memory,separateStats);
@@ -225,6 +261,35 @@ int main() {
         assert([bridge submit:killed.words.data() count:killed.words.size()]==0);
         readback([bridge copyTargetAtAddress:targetB width:width height:height],after);
         assert(std::memcmp(green,after,sizeof green)==0);
+        // A diagnostic read cannot wait behind a submission holding the renderer
+        // lock. The simulated slow reader is released even on a timeout.
+        auto entered = dispatch_semaphore_create(0), release = dispatch_semaphore_create(0);
+        auto reported = dispatch_semaphore_create(0), submitted = dispatch_semaphore_create(0);
+        std::atomic<bool> blockOnce{true}; auto* block = &blockOnce;
+        MaxPS4GameMetalBridge* slow = [[MaxPS4GameMetalBridge alloc] initWithDevice:device
+            reader:^BOOL(uint64_t address, void* destination, size_t count) {
+                if (block->exchange(false)) {
+                    dispatch_semaphore_signal(entered);
+                    dispatch_semaphore_wait(release, DISPATCH_TIME_FOREVER);
+                }
+                return reader->memory.read(address,destination,count);
+            }];
+        const auto* streamWords = s.words.data(); const auto streamCount = s.words.size();
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0), ^{
+            assert([slow submit:streamWords count:streamCount] == 0);
+            dispatch_semaphore_signal(submitted);
+        });
+        assert(dispatch_semaphore_wait(entered,dispatch_time(DISPATCH_TIME_NOW,10*NSEC_PER_SEC))==0);
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0), ^{
+            assert(slow.report.length > 0);
+            dispatch_semaphore_signal(reported);
+        });
+        const bool nonblocking = dispatch_semaphore_wait(reported,dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC))==0;
+        dispatch_semaphore_signal(release);
+        assert(dispatch_semaphore_wait(submitted,dispatch_time(DISPATCH_TIME_NOW,30*NSEC_PER_SEC))==0);
+        if (!nonblocking) dispatch_semaphore_wait(reported,dispatch_time(DISPATCH_TIME_NOW,10*NSEC_PER_SEC));
+        assert(nonblocking);
+        std::puts("PASS diagnostic snapshot is readable while the Metal submission is blocked");
         const uint32_t bad[]={0};
         assert([bridge submit:bad count:1]!=0 && bridge.failure);
         assert([bridge submit:s.words.data() count:s.words.size()]!=0);

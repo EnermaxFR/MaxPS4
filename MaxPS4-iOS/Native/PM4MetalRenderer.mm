@@ -91,6 +91,32 @@ void PM4MetalRenderer::endBatch() {
     encoder_ = nil; commands_ = nil; attachment_ = nil; batching_ = false;
 }
 
+id<MTLBuffer> PM4MetalRenderer::uploadBuffer(std::size_t bytes, id<MTLCommandBuffer> commands) {
+    // Each draw keeps its own immutable snapshot until its command buffer has
+    // finished. In particular, two draws in the same batch cannot share a slot.
+    Upload* best = nullptr;
+    for (auto& upload : uploads_) {
+        const auto status = upload.owner.status;
+        if ((status == MTLCommandBufferStatusCompleted || status == MTLCommandBufferStatusError) &&
+            upload.buffer.length >= bytes && (!best || upload.buffer.length < best->buffer.length)) best = &upload;
+    }
+    if (best) {
+        best->owner = commands;
+        ++buffersReused;
+        return best->buffer;
+    }
+    id<MTLBuffer> buffer = [device_ newBufferWithLength:bytes options:MTLResourceStorageModeShared];
+    if (buffer) {
+        ++buffersBuilt;
+        constexpr std::uint64_t budget = 64ull << 20;
+        if (uploads_.size() < 256 && bytes <= budget - pooledBytes_) {
+            uploads_.push_back({buffer, commands});
+            pooledBytes_ += bytes;
+        }
+    }
+    return buffer;
+}
+
 bool PM4MetalRenderer::encode(const PM4Draw& d, id<MTLCommandBuffer> commands) {
     error.clear();
     if (d.swap > 1) return fail("colour target component swap " + std::to_string(d.swap));
@@ -109,7 +135,7 @@ bool PM4MetalRenderer::encode(const PM4Draw& d, id<MTLCommandBuffer> commands) {
         std::uint64_t total = 0;
         for (const auto& r : ranges) total += (r.size + 255) & ~std::uint64_t{255};
         if (total > (256ull << 20)) return fail("draw reads more than 256 MiB");
-        memory = [device_ newBufferWithLength:std::max<std::uint64_t>(total, 256) options:MTLResourceStorageModeShared];
+        memory = uploadBuffer(std::max<std::uint64_t>(total, 256), commands);
         if (!memory) return fail("memory buffer");
         std::uint64_t offset = 0;
         auto* bytes = static_cast<std::uint8_t*>(memory.contents);
@@ -168,8 +194,15 @@ bool PM4MetalRenderer::encode(const PM4Draw& d, id<MTLCommandBuffer> commands) {
     [encoder setFragmentBytes:&drawState length:sizeof drawState atIndex:1];
     const std::size_t bytes = d.indices.size() * sizeof(std::uint32_t);
     if (bytes <= 4096) [encoder setVertexBytes:d.indices.data() length:bytes atIndex:2];
-    else [encoder setVertexBuffer:[device_ newBufferWithBytes:d.indices.data() length:bytes options:MTLResourceStorageModeShared]
-                           offset:0 atIndex:2];
+    else {
+        id<MTLBuffer> indices = uploadBuffer(bytes, commands);
+        if (!indices) {
+            if (!batching_) [encoder endEncoding];
+            return fail("index buffer");
+        }
+        std::memcpy(indices.contents, d.indices.data(), bytes);
+        [encoder setVertexBuffer:indices offset:0 atIndex:2];
+    }
     const NSUInteger count = d.primitive == 0x11 ? NSUInteger(d.indices.size() / 3 * 6) : NSUInteger(d.indices.size());
     [encoder drawPrimitives:d.primitive == 6 ? MTLPrimitiveTypeTriangleStrip : MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:count];
     if (!batching_) [encoder endEncoding];

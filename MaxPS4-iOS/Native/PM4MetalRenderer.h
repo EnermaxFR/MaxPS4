@@ -34,6 +34,7 @@ public:
     unsigned pipelinesBuilt = 0;
     unsigned lastRanges = 0; // memory ranges copied for the last draw (copy mode)
     unsigned renderPasses = 0;
+    unsigned buffersBuilt = 0, buffersReused = 0;
 
 private:
     using PipelineKey = std::tuple<std::uint64_t, std::uint64_t, std::uint32_t, std::uint32_t, std::uint32_t, std::string, unsigned, std::uint32_t, unsigned>;
@@ -48,6 +49,10 @@ private:
     id<MTLRenderCommandEncoder> encoder_ = nil;
     id<MTLCommandBuffer> commands_ = nil;
     id<MTLTexture> attachment_ = nil;
+    struct Upload { id<MTLBuffer> buffer; id<MTLCommandBuffer> owner; };
+    std::vector<Upload> uploads_;
+    std::uint64_t pooledBytes_ = 0;
+    id<MTLBuffer> uploadBuffer(std::size_t bytes, id<MTLCommandBuffer> commands);
     id<MTLRenderPipelineState> pipeline(const PM4Draw& draw, MTLPixelFormat format);
     bool fail(const std::string& message) { error = message; return false; }
 };

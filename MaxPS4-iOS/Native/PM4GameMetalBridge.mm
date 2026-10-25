@@ -20,11 +20,15 @@ struct GameMetalState {
           collector(memory, stats), renderer(device, memory, nil, 0), device(device), queue([device newCommandQueue]) {}
 };
 }
+@interface MaxPS4GameMetalBridge ()
+@property(atomic, copy) NSString* lastReport;
+@end
 @implementation MaxPS4GameMetalBridge {
     std::unique_ptr<GameMetalState> state_;
 }
 - (instancetype)initWithDevice:(id<MTLDevice>)device reader:(MaxPS4GameMemoryReader)reader {
     if ((self = [super init])) {
+        self.lastReport = @"Metal : préparation du premier rendu";
         state_ = std::make_unique<GameMetalState>(device, [reader copy]);
         if (!state_->queue) return nil;
     }
@@ -53,6 +57,7 @@ struct GameMetalState {
             s.error = command.error ? command.error.localizedDescription.UTF8String : "Metal GPU completion failed";
             return -EIO;
         }
+        self.lastReport = [NSString stringWithFormat:@"Metal : %u dessins, %u rendus, %u échecs, %u passes, %u buffers créés, %u réutilisés", s.stats.draws, s.stats.rendered, s.stats.failed, s.renderer.renderPasses, s.renderer.buffersBuilt, s.renderer.buffersReused];
         // The native queue retires synchronization packets only after this return.
         return 0;
     }
@@ -83,10 +88,9 @@ struct GameMetalState {
     return texture;
 }
 - (NSString*)report {
-    auto& s = *state_;
-    std::lock_guard<std::mutex> lock(s.mutex);
-    if (!s.error.empty()) return [NSString stringWithUTF8String:s.error.c_str()];
-    return [NSString stringWithFormat:@"Metal : %u dessins, %u rendus, %u échecs, %u passes", s.stats.draws, s.stats.rendered, s.stats.failed, s.renderer.renderPasses];
+    // An immutable atomic snapshot: reading diagnostics must not wait for the
+    // next submission's encoding, shader compilation or GPU completion.
+    return self.lastReport;
 }
 - (NSString*)failure {
     auto& s = *state_;
