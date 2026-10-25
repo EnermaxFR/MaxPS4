@@ -23,6 +23,29 @@ struct Arena {
 bool near(float a, float b) { return std::fabs(a - b) < 1e-5f; }
 }
 int main() {
+    for (const bool bulk : {true, false}) {
+        Arena arena;
+        for (unsigned k = 0; k < 128; ++k) arena.put(Arena::start + k * 4, 0xbf800000); // s_nop
+        arena.put(Arena::start + 128 * 4, 0xbf810000); // s_endpgm
+        unsigned calls = 0;
+        GCNMemory observed{[&](std::uint64_t address, void* destination, std::size_t bytes) {
+            ++calls;
+            return (bulk || bytes == 4) && arena.memory.read(address, destination, bytes);
+        }, {}};
+        GCNWave wave(observed, 1);
+        assert(wave.run(Arena::start));
+        assert(calls == 129 * (bulk ? 1u : 4u));
+    }
+    {
+        const std::uint32_t end = 0xbf810000;
+        GCNMemory edge{[&](std::uint64_t address, void* destination, std::size_t bytes) {
+            if (address != 0x10000 || bytes != 4) return false;
+            std::memcpy(destination, &end, 4); return true;
+        }, {}};
+        GCNWave wave(edge, 1);
+        assert(wave.run(0x10000));
+    }
+    std::puts("PASS GCN fetch: 129 instruction windows use 129 reads, bulk refusal and mapping-edge fallback preserved");
     // 1. shadPS4's embedded full-screen VS, one lane per vertex id.
     {
         Arena arena;

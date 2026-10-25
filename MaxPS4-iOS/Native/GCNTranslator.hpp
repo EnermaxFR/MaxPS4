@@ -90,8 +90,7 @@ private:
     // ---- control flow discovery ----
     bool decodeAt(std::uint64_t pc, Inst& in) {
         std::uint32_t words[3] = {};
-        std::size_t available = 0;
-        while (available < 3 && memory_.read(pc + 4 * available, &words[available], 4)) ++available;
+        const auto available = readGCNWords(memory_, pc, words);
         if (!available) return fail("unreadable code");
         if (decodeGCNInstruction(words, available, std::size_t(pc / 4), in.i) != GCNError::none) return fail("undecodable code");
         in.name = gcnMnemonic(in.i);

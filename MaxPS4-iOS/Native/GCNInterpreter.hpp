@@ -23,6 +23,16 @@ struct GCNMemory {
     std::function<bool(std::uint64_t, void*, std::size_t)> read;
     std::function<bool(std::uint64_t, const void*, std::size_t)> write;
 };
+// Fetch the same three-word decode window with one permission-checked read.
+// Preserve word-sized fallback at mapping edges or for readers that refuse a
+// bulk read; no instruction cache or immutable-code assumption is introduced.
+inline std::size_t readGCNWords(const GCNMemory& memory, std::uint64_t pc, std::uint32_t words[3]) {
+    if (memory.read(pc, words, 3 * sizeof(std::uint32_t))) return 3;
+    std::fill(words, words + 3, 0);
+    std::size_t available = 0;
+    while (available < 3 && memory.read(pc + 4 * available, &words[available], 4)) ++available;
+    return available;
+}
 // One attribute channel of the current primitive, as the parameter cache
 // holds it: value at vertex 0 and differences to vertices 1 and 2.
 struct GCNAttributePlane { float p0 = 0, p10 = 0, p20 = 0; };
@@ -167,8 +177,7 @@ private:
     bool fetch(std::uint64_t pc, GCNInstruction& i) {
         if (cache_) { auto found = cache_->find(pc); if (found != cache_->end()) { i = found->second; return true; } }
         std::uint32_t words[3] = {};
-        std::size_t available = 0;
-        while (available < 3 && memory_.read(pc + 4 * available, &words[available], 4)) ++available;
+        const auto available = readGCNWords(memory_, pc, words);
         if (!available) return fail("unreadable code");
         if (decodeGCNInstruction(words, available, std::size_t(pc / 4), i) != GCNError::none) {
             char text[48]; std::snprintf(text, sizeof text, "undecodable 0x%08x at 0x%llx", words[0], (unsigned long long)pc);
