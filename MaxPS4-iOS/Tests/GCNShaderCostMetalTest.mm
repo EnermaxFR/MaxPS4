@@ -65,8 +65,8 @@ fragment float4 metal_sample_fragment(GCNVaryings in [[stage_in]], texture2d<flo
         const std::string noShuffle = "GCN_FN uint gcn_no_shuffle(uint value, uint lane) { return value + lane; }\n";
         const std::string noMask = replaced(replaced(entry, "uint sampleCoverage [[sample_mask]],", ""), "sampleCoverage != 0u", "true");
         const std::string entryOnly = replaced(entry, "    ps_program(L, M, Q);\n", "");
-        const std::string noClear = replaced(entry, "GCNLane L; gcn_clear(L);\n    for (uint k = 0u; k < 17u",
-            "GCNLane L; L.exec = true; L.killed = false; L.colorWritten = 0u; L.color[0] = float4(0.0f);\n    for (uint k = 0u; k < 17u");
+        // Before the fix: entry points zeroed every attr/param/color per invocation.
+        const std::string fullClear = replaced(entry, "GCNLane L; gcn_lane_init(L);", "GCNLane L; gcn_clear(L);");
         // attr/param/color arrays of one element: this program uses only index 0.
         auto smallLane = [&](std::string s) {
             s = replaced(s, "float4 attr[32];", "float4 attr[1];");
@@ -85,7 +85,7 @@ fragment float4 metal_sample_fragment(GCNVaryings in [[stage_in]], texture2d<flo
             {"translated, no sample/quad", noShuffle + vs.source + noQuad(noSample) + entry, "gcn_fragment", true},
             {"translated, no sample_mask input", vs.source + ps.source + noMask, "gcn_fragment", true},
             {"entry only (program not run)", vs.source + ps.source + entryOnly, "gcn_fragment", true},
-            {"translated, no gcn_clear in fragment", vs.source + ps.source + noClear, "gcn_fragment", true},
+            {"translated, full gcn_clear (before)", vs.source + ps.source + fullClear, "gcn_fragment", true},
             {"translated, small GCNLane", vs.source + ps.source + entry, "gcn_fragment", true, true},
             {"entry only, small GCNLane", vs.source + ps.source + entryOnly, "gcn_fragment", true, true},
         };

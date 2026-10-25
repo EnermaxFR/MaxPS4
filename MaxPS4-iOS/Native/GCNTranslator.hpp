@@ -728,6 +728,14 @@ GCN_FN void gcn_clear(thread GCNLane& L) {
     for (uint k = 0u; k < 8u; ++k) L.color[k] = float4(0.0f);
     L.pos = float4(0.0f); L.exec = true; L.quadLane = 0u; L.colorWritten = 0u; L.killed = false;
 }
+// gcn_clear without attr/param/color: zeroing those arrays for every pixel
+// was most of a full-screen draw's GPU time (GCNShaderCostMetalTest). Entry
+// points set the attributes a program reads and clear what it exports.
+GCN_FN void gcn_lane_init(thread GCNLane& L) {
+    for (uint k = 0u; k < 17u; ++k) L.user[k] = 0u;
+    for (uint k = 0u; k < 24u; ++k) L.vinit[k] = 0u;
+    L.pos = float4(0.0f); L.exec = true; L.quadLane = 0u; L.colorWritten = 0u; L.killed = false;
+}
 // Per-draw state at buffer(1): guest memory at buffer(0) is either one window
 // starting at guest address `base` (rangeCount 0) or rangeCount copied ranges
 // as (guest start, length, offset in the buffer) triples; user SGPRs of each
@@ -830,8 +838,10 @@ inline std::string gcnMetalEntryPoints(const GCNTranslation& vs, const GCNTransl
             s += "    float4 p" + std::to_string(p) + " [[user(locn" + std::to_string(p) + ")" + ((flatParams >> p) & 1 ? ", flat" : "") + "]];\n";
     s += "};\n"
          "GCN_FN GCNVaryings gcn_run_vertex(uint index, uint iid, device const uchar* mem, constant GCNDrawState& D) {\n"
-         "    GCNLane L; gcn_clear(L);\n"
-         "    for (uint k = 0u; k < 16u; ++k) L.user[k] = D.vsUser[k];\n"
+         "    GCNLane L; gcn_lane_init(L);\n";
+    for (unsigned p = 0; p < 32; ++p)
+        if ((vs.params >> p) & 1) s += "    L.param[" + std::to_string(p) + "] = float4(0.0f);\n";
+    s += "    for (uint k = 0u; k < 16u; ++k) L.user[k] = D.vsUser[k];\n"
          "    L.vinit[0] = index; L.vinit[3] = iid;\n"
          "    GCNMemory M = { mem, D.base, D.size, D.ranges, D.rangeCount }; GCNQuad Q = { 0u };\n"
          "    " + vsName + "(L, M, Q);\n"
@@ -864,8 +874,10 @@ inline std::string gcnMetalEntryPoints(const GCNTranslation& vs, const GCNTransl
          "    device const uchar* mem [[buffer(0)]], constant GCNDrawState& D [[buffer(1)]]) {\n"
          // Incoming raster coverage is independent of later fragment kills.
          "    const bool covered = sampleCoverage != 0u;\n"
-         "    GCNLane L; gcn_clear(L);\n"
-         "    for (uint k = 0u; k < 17u; ++k) L.user[k] = D.psUser[k];\n"
+         "    GCNLane L; gcn_lane_init(L);\n";
+    for (unsigned c = 0; c < 8; ++c)
+        if (c == 0 || ((ps.colors >> c) & 1)) s += "    L.color[" + std::to_string(c) + "] = float4(0.0f);\n";
+    s += "    for (uint k = 0u; k < 17u; ++k) L.user[k] = D.psUser[k];\n"
          "    L.exec = covered;\n"
          "    L.quadLane = (uint(in.position.x) & 1u) | ((uint(in.position.y) & 1u) << 1);\n";
     for (unsigned a = 0; a < 32; ++a) {
