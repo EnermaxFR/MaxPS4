@@ -46,3 +46,10 @@ not a measurement of whole-game CPU time or a claim of reaching 60 frames/s.
 Local ASan/UBSan interpreter, translator generation and lane-by-lane translated
 program comparisons passed. Only the PM4 CPU/GPU workflow is dispatched for
 validation; no application packaging workflow is invoked.
+
+Final validation of the retained change passed in
+[40160869887](https://github.com/EnermaxFR/MaxPS4/actions/runs/40160869887):
+CPU sanitizer regressions, 819,200 texture comparisons, actual Metal pixel
+comparisons (worst channel difference 0), iPhone bridge compilation and Swift
+frontend checks. No IPA was generated or replaced. The on-device CPU time and
+frame rate of this retained CPU change have not been measured.
