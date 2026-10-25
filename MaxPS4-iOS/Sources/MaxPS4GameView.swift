@@ -90,7 +90,8 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
         }
         let texture = frame?.texture ?? lastTexture
         if let texture {
-            MaxPS4VideoOutMetal.encode(encoder: encoder, pipeline: pipeline, texture: texture, output: view.drawableSize, fill: true)
+            MaxPS4VideoOutMetal.encode(encoder: encoder, pipeline: pipeline, texture: texture,
+                output: view.drawableSize, fill: view.drawableSize.width > view.drawableSize.height)
         }
         encoder.endEncoding()
         if let frame {
