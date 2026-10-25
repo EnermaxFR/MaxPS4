@@ -43,6 +43,10 @@ public:
     unsigned renderPasses = 0;
     unsigned buffersBuilt = 0, buffersReused = 0;
     unsigned nativeDraws = 0; // draws given a native texture (nativeTextures)
+    // T#s refused: none captured (per draw), format/tiling, outside the copied
+    // ranges, alignment, Metal view refused; and the last refused T#.
+    unsigned nativeMisses[5] = {};
+    std::string nativeLastMiss;
 
 private:
     using PipelineKey = std::tuple<std::uint64_t, std::uint64_t, std::uint32_t, std::uint32_t, std::uint32_t, std::string, unsigned, std::uint32_t, unsigned>;

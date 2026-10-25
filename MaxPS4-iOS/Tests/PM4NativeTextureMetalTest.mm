@@ -132,8 +132,13 @@ kernel void compare_samples(device const uchar* mem [[buffer(0)]], constant GCND
         Arena arena;
         arena.bytes.resize(image + imageW * imageH * 4 - Arena::start);
         loadFetchVS(arena);
+        // Vertices just below the texture, at an address that is not 256-byte
+        // aligned: the scanner merges both into one range starting there, as
+        // in Sonic Mania, and the T# must still get an aligned texture view.
+        constexpr uint64_t vertices = image - 0xfc;
         const float triangle[3][4] = {{-1, -1, 0, 1}, {3, -1, 0, 1}, {-1, 3, 0, 1}};
-        for (unsigned n = 0; n < 3; ++n) for (unsigned c = 0; c < 4; ++c) arena.put(0x10e00 + 16 * n + 4 * c, bits(triangle[n][c]));
+        for (unsigned n = 0; n < 3; ++n) for (unsigned c = 0; c < 4; ++c) arena.put(vertices + 16 * n + 4 * c, bits(triangle[n][c]));
+        arena.put(vertexTable, std::uint32_t(vertices));
         // PM4MetalRendererTest's textured program with u = x / 1920, v = y / 1080:
         // the whole texture is stretched over the screen.
         arena.code(texturedPS, {
@@ -186,6 +191,11 @@ kernel void compare_samples(device const uchar* mem [[buffer(0)]], constant GCND
                     gpu[mode] += (command.GPUEndTime - command.GPUStartTime) * 1000; cpu[mode] += encodeMs; ++timed[mode];
                 }
             }
+            // The V# table, then the vertices merged with the texture.
+            assert(native.lastRanges == 2);
+            if (native.nativeDraws != (formatNative[f] ? runs : 0u))
+                std::printf("native refusals %u/%u/%u/%u/%u, last: %s\n", native.nativeMisses[0], native.nativeMisses[1],
+                            native.nativeMisses[2], native.nativeMisses[3], native.nativeMisses[4], native.nativeLastMiss.c_str());
             assert(native.nativeDraws == (formatNative[f] ? runs : 0u));
             const bool same = pixels(buffered.target(target)) == pixels(native.target(target));
             for (unsigned k = 0; k < 2; ++k) if (timed[k]) { gpu[k] /= timed[k]; cpu[k] /= timed[k]; }

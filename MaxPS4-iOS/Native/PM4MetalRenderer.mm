@@ -2,6 +2,7 @@
 #include "GCNTranslator.hpp"
 #include "PM4ResourceScan.hpp"
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <cmath>
 #include <vector>
@@ -121,11 +122,19 @@ id<MTLTexture> PM4MetalRenderer::nativeTexture(const std::array<std::uint32_t, 8
                                                const std::uint64_t* ranges, unsigned rangeCount) {
     // dfmt 8_8_8_8 or 5_6_5 (gcn_texel_at reads both as unorm whatever the nfmt), linear tiling.
     const unsigned dfmt = (t[1] >> 20) & 63;
-    if ((dfmt != 10 && dfmt != 16) || ((t[3] >> 20) & 31) != 8) return nil;
-    const MTLPixelFormat format = dfmt == 10 ? MTLPixelFormatRGBA8Unorm : MTLPixelFormatB5G6R5Unorm;
     const std::uint64_t base = (std::uint64_t(t[0]) | std::uint64_t(t[1] & 0xff) << 32) << 8;
     const std::uint64_t width = (t[2] & 0x3fff) + 1, height = ((t[2] >> 14) & 0x3fff) + 1, pitch = ((t[4] >> 13) & 0x3fff) + 1;
-    if (pitch < width) return nil;
+    auto miss = [&](unsigned reason, std::uint64_t detail) -> id<MTLTexture> {
+        ++nativeMisses[reason];
+        char text[160];
+        std::snprintf(text, sizeof text, "dfmt %u tiling %u %llux%llu pitch %llu base 0x%llx (%llu)", dfmt, (t[3] >> 20) & 31,
+                      (unsigned long long)width, (unsigned long long)height, (unsigned long long)pitch,
+                      (unsigned long long)base, (unsigned long long)detail);
+        nativeLastMiss = text;
+        return nil;
+    };
+    if ((dfmt != 10 && dfmt != 16) || ((t[3] >> 20) & 31) != 8 || pitch < width) return miss(1, 0);
+    const MTLPixelFormat format = dfmt == 10 ? MTLPixelFormatRGBA8Unorm : MTLPixelFormatB5G6R5Unorm;
     const std::uint64_t rowBytes = pitch * (dfmt == 10 ? 4 : 2), bytes = rowBytes * height;
     std::uint64_t offset = 0;
     bool inside = false;
@@ -138,14 +147,16 @@ id<MTLTexture> PM4MetalRenderer::nativeTexture(const std::array<std::uint32_t, 8
         inside = base >= start && base - start <= size && bytes <= size - (base - start);
         offset = ranges[3 * k + 2] + (base - start);
     }
+    if (!inside) return miss(2, bytes);
     const NSUInteger alignment = [device_ minimumLinearTextureAlignmentForPixelFormat:format];
-    if (!inside || !alignment || offset % alignment || rowBytes % alignment) return nil;
+    if (!alignment || offset % alignment || rowBytes % alignment) return miss(3, alignment ? offset % alignment : 0);
     MTLTextureDescriptor* descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format
                                                                                           width:width height:height mipmapped:NO];
     descriptor.storageMode = memory.storageMode;
     descriptor.cpuCacheMode = memory.cpuCacheMode;
     descriptor.usage = MTLTextureUsageShaderRead;
-    return [memory newTextureWithDescriptor:descriptor offset:offset bytesPerRow:rowBytes];
+    id<MTLTexture> view = [memory newTextureWithDescriptor:descriptor offset:offset bytesPerRow:rowBytes];
+    return view ? view : miss(4, alignment);
 }
 
 bool PM4MetalRenderer::encode(const PM4Draw& d, id<MTLCommandBuffer> commands) {
@@ -162,23 +173,27 @@ bool PM4MetalRenderer::encode(const PM4Draw& d, id<MTLCommandBuffer> commands) {
         drawState.base = guestBase_; drawState.size = memory.length;
         if (native_) scanner_.scan(d); // only for its T#s
     } else {
-        // Copies of the ranges this draw's programs read, packed 256-byte aligned.
+        // Copies of the ranges this draw's programs read. Each starts at a buffer
+        // offset congruent to its guest address modulo 256, so guest alignment
+        // (up to 256 bytes) holds in the buffer: a T# base inside a merged range
+        // stays aligned for a native texture view.
         const auto& ranges = scanner_.scan(d);
         if (ranges.size() > 16) return fail("more than 16 memory ranges");
         std::uint64_t total = 0;
-        for (const auto& r : ranges) total += (r.size + 255) & ~std::uint64_t{255};
+        for (const auto& r : ranges) total += r.size + 255;
         if (total > (256ull << 20)) return fail("draw reads more than 256 MiB");
         memory = uploadBuffer(std::max<std::uint64_t>(total, 256), commands);
         if (!memory) return fail("memory buffer");
         std::uint64_t offset = 0;
         auto* bytes = static_cast<std::uint8_t*>(memory.contents);
         for (std::size_t k = 0; k < ranges.size(); ++k) {
+            offset += (ranges[k].base - offset) & 255;
             // An unreadable range stays zero rather than exposing anything else.
             if (!code_.read(ranges[k].base, bytes + offset, ranges[k].size)) std::memset(bytes + offset, 0, ranges[k].size);
             drawState.ranges[3 * k] = ranges[k].base;
             drawState.ranges[3 * k + 1] = ranges[k].size;
             drawState.ranges[3 * k + 2] = offset;
-            offset += (ranges[k].size + 255) & ~std::uint64_t{255};
+            offset += ranges[k].size;
         }
         drawState.rangeCount = std::uint32_t(ranges.size());
         lastRanges = drawState.rangeCount;
@@ -241,6 +256,7 @@ bool PM4MetalRenderer::encode(const PM4Draw& d, id<MTLCommandBuffer> commands) {
         }
         id<MTLTexture> image = nil;
         std::array<std::uint32_t, 8> descriptor{};
+        if (scanner_.images().empty()) ++nativeMisses[0];
         for (const auto& t : scanner_.images())
             if ((image = nativeTexture(t, memory, drawState.ranges, drawState.rangeCount))) { descriptor = t; break; }
         id<MTLBuffer> arguments = nativeArguments_ ? uploadBuffer(nativeArguments_.encodedLength, commands) : nil;
