@@ -44,8 +44,8 @@ id<MTLRenderPipelineState> PM4MetalRenderer::pipeline(const PM4Draw& d, MTLPixel
     if (!vs) { fail("VS translation: " + vs.error); return nil; }
     const auto ps = translateGCN(code_, d.ps, psOptions);
     if (!ps) { fail("PS translation: " + ps.error); return nil; }
-    const std::string source = gcnMetalPrelude() + vs.source + ps.source +
-                               gcnMetalEntryPoints(vs, ps, "vs_program", "ps_program", d.psInputAddr, d.inputCntl);
+    const std::string source = gcnMetalPrelude(native_) + vs.source + ps.source +
+                               gcnMetalEntryPoints(vs, ps, "vs_program", "ps_program", d.psInputAddr, d.inputCntl, native_);
     MTLCompileOptions* options = [MTLCompileOptions new];
     if (@available(macOS 15.0, iOS 18.0, *)) options.mathMode = MTLMathModeSafe;
     else {
@@ -117,6 +117,35 @@ id<MTLBuffer> PM4MetalRenderer::uploadBuffer(std::size_t bytes, id<MTLCommandBuf
     return buffer;
 }
 
+id<MTLTexture> PM4MetalRenderer::nativeTexture(const std::array<std::uint32_t, 8>& t, id<MTLBuffer> memory,
+                                               const std::uint64_t* ranges, unsigned rangeCount) {
+    // dfmt 8_8_8_8 (gcn_texel_at reads it as unorm whatever the nfmt), linear tiling.
+    if (((t[1] >> 20) & 63) != 10 || ((t[3] >> 20) & 31) != 8) return nil;
+    const std::uint64_t base = (std::uint64_t(t[0]) | std::uint64_t(t[1] & 0xff) << 32) << 8;
+    const std::uint64_t width = (t[2] & 0x3fff) + 1, height = ((t[2] >> 14) & 0x3fff) + 1, pitch = ((t[4] >> 13) & 0x3fff) + 1;
+    if (pitch < width) return nil;
+    const std::uint64_t rowBytes = pitch * 4, bytes = rowBytes * height;
+    std::uint64_t offset = 0;
+    bool inside = false;
+    if (!rangeCount) {
+        inside = base >= guestBase_ && base - guestBase_ <= memory.length && bytes <= memory.length - (base - guestBase_);
+        offset = base - guestBase_;
+    }
+    for (unsigned k = 0; k < rangeCount && !inside; ++k) {
+        const std::uint64_t start = ranges[3 * k], size = ranges[3 * k + 1];
+        inside = base >= start && base - start <= size && bytes <= size - (base - start);
+        offset = ranges[3 * k + 2] + (base - start);
+    }
+    const NSUInteger alignment = [device_ minimumLinearTextureAlignmentForPixelFormat:MTLPixelFormatRGBA8Unorm];
+    if (!inside || !alignment || offset % alignment || rowBytes % alignment) return nil;
+    MTLTextureDescriptor* descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                                                                          width:width height:height mipmapped:NO];
+    descriptor.storageMode = memory.storageMode;
+    descriptor.cpuCacheMode = memory.cpuCacheMode;
+    descriptor.usage = MTLTextureUsageShaderRead;
+    return [memory newTextureWithDescriptor:descriptor offset:offset bytesPerRow:rowBytes];
+}
+
 bool PM4MetalRenderer::encode(const PM4Draw& d, id<MTLCommandBuffer> commands) {
     error.clear();
     if (d.swap > 1) return fail("colour target component swap " + std::to_string(d.swap));
@@ -127,8 +156,10 @@ bool PM4MetalRenderer::encode(const PM4Draw& d, id<MTLCommandBuffer> commands) {
     if (!state) return false;
     DrawState drawState{};
     id<MTLBuffer> memory = guest_;
-    if (memory) { drawState.base = guestBase_; drawState.size = memory.length; }
-    else {
+    if (memory) {
+        drawState.base = guestBase_; drawState.size = memory.length;
+        if (native_) scanner_.scan(d); // only for its T#s
+    } else {
         // Copies of the ranges this draw's programs read, packed 256-byte aligned.
         const auto& ranges = scanner_.scan(d);
         if (ranges.size() > 16) return fail("more than 16 memory ranges");
@@ -194,6 +225,39 @@ bool PM4MetalRenderer::encode(const PM4Draw& d, id<MTLCommandBuffer> commands) {
     [encoder setFragmentBuffer:memory offset:0 atIndex:0];
     [encoder setVertexBytes:&drawState length:sizeof drawState atIndex:1];
     [encoder setFragmentBytes:&drawState length:sizeof drawState atIndex:1];
+    if (native_) {
+        // GCNNativeTexture at buffer(3), always bound: `enabled` 0 means none.
+        if (!nativeArguments_) {
+            auto argument = [](MTLDataType type, NSUInteger index) {
+                MTLArgumentDescriptor* a = [MTLArgumentDescriptor argumentDescriptor];
+                a.dataType = type; a.index = index;
+                if (type == MTLDataTypeTexture) a.textureType = MTLTextureType2D;
+                return a;
+            };
+            nativeArguments_ = [device_ newArgumentEncoderWithArguments:@[argument(MTLDataTypeTexture, 0), argument(MTLDataTypeUInt, 1),
+                                                                          argument(MTLDataTypeUInt4, 2), argument(MTLDataTypeUInt4, 3)]];
+        }
+        id<MTLTexture> image = nil;
+        std::array<std::uint32_t, 8> descriptor{};
+        for (const auto& t : scanner_.images())
+            if ((image = nativeTexture(t, memory, drawState.ranges, drawState.rangeCount))) { descriptor = t; break; }
+        id<MTLBuffer> arguments = nativeArguments_ ? uploadBuffer(nativeArguments_.encodedLength, commands) : nil;
+        if (!arguments) {
+            if (!batching_) [encoder endEncoding];
+            return fail("native texture arguments");
+        }
+        [nativeArguments_ setArgumentBuffer:arguments offset:0];
+        [nativeArguments_ setTexture:image atIndex:0];
+        *static_cast<std::uint32_t*>([nativeArguments_ constantDataAtIndex:1]) = image ? 1 : 0;
+        std::memcpy([nativeArguments_ constantDataAtIndex:2], descriptor.data(), 16);
+        std::memcpy([nativeArguments_ constantDataAtIndex:3], descriptor.data() + 4, 16);
+        [encoder setVertexBuffer:arguments offset:0 atIndex:3];
+        [encoder setFragmentBuffer:arguments offset:0 atIndex:3];
+        if (image) {
+            [encoder useResource:image usage:MTLResourceUsageRead stages:MTLRenderStageVertex | MTLRenderStageFragment];
+            ++nativeDraws;
+        }
+    }
     const std::size_t bytes = d.indices.size() * sizeof(std::uint32_t);
     if (bytes <= 4096) [encoder setVertexBytes:d.indices.data() length:bytes atIndex:2];
     else {

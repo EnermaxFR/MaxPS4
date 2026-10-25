@@ -114,8 +114,15 @@ GCN_FN uint gcn_buffer_dword(GCNMemory M, GCNRes4 r, uint index, uint voffset, u
     if (!inside) return 0u;
     return gcn_ld32(M, base + soffset + inst + ulong(idx) * stride + off + 4u * n);
 }
+GCN_FN float4 gcn_texture_swizzle(GCNRes8 t, float4 value) {
+    uint4 c; for (uint k = 0u; k < 4u; ++k) c[k] = gu(value[k]);
+    return float4(gf(gcn_sel(t.d[3] & 7u, c, 0x3f800000u)), gf(gcn_sel((t.d[3] >> 3) & 7u, c, 0x3f800000u)),
+                  gf(gcn_sel((t.d[3] >> 6) & 7u, c, 0x3f800000u)), gf(gcn_sel((t.d[3] >> 9) & 7u, c, 0x3f800000u)));
+}
 // Linear 2D images (T# tiling index 8). Other tilings read as 0.
 GCN_FN float4 gcn_texel_at(GCNMemory M, GCNRes8 t, int x, int y, bool resolved, ulong offset) {
+    float4 native;
+    if (gcn_native_texel(M, t, x, y, native)) return gcn_texture_swizzle(t, native);
     ulong base = (ulong(t.d[0]) | (ulong(t.d[1] & 0xffu) << 32)) << 8;
     uint dfmt = (t.d[1] >> 20) & 0x3fu; uint pitch = ((t.d[4] >> 13) & 0x3fffu) + 1u;
     uint bytes = 4u;
@@ -140,9 +147,7 @@ GCN_FN float4 gcn_texel_at(GCNMemory M, GCNRes8 t, int x, int y, bool resolved, 
     else if (dfmt == 19u) { c0 = float(raw & 15u) / 15.0f; c1 = float((raw >> 4) & 15u) / 15.0f; c2 = float((raw >> 8) & 15u) / 15.0f; c3 = float((raw >> 12) & 15u) / 15.0f; }
     else if (dfmt == 14u) { c0 = gf(raw); c1 = gf(resolved ? gcn_packed32(M, packed + 4u) : gcn_ld32(M, at + 4u));
         c2 = gf(resolved ? gcn_packed32(M, packed + 8u) : gcn_ld32(M, at + 8u)); c3 = gf(resolved ? gcn_packed32(M, packed + 12u) : gcn_ld32(M, at + 12u)); }
-    uint4 c; c[0] = gu(c0); c[1] = gu(c1); c[2] = gu(c2); c[3] = gu(c3);
-    return float4(gf(gcn_sel(t.d[3] & 7u, c, 0x3f800000u)), gf(gcn_sel((t.d[3] >> 3) & 7u, c, 0x3f800000u)),
-                  gf(gcn_sel((t.d[3] >> 6) & 7u, c, 0x3f800000u)), gf(gcn_sel((t.d[3] >> 9) & 7u, c, 0x3f800000u)));
+    return gcn_texture_swizzle(t, float4(c0, c1, c2, c3));
 }
 GCN_FN float4 gcn_texel(GCNMemory M, GCNRes8 t, int x, int y) { return gcn_texel_at(M, t, x, y, false, 0ul); }
 GCN_FN int gcn_wrap(int x, int size, uint mode, GCN_THREAD bool& border) {

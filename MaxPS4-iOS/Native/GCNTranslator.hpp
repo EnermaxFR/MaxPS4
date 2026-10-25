@@ -694,14 +694,27 @@ inline GCNTranslation translateGCN(const GCNMemory& memory, std::uint64_t entry,
 }
 
 // The Metal build of GCNShaderRuntime.hpp: put it before translated programs.
-inline std::string gcnMetalPrelude() {
+inline std::string gcnMetalPrelude(bool nativeTextures = false) {
     std::string text = R"MSL(#include <metal_stdlib>
 using namespace metal;
+#define GCN_NATIVE_TEXTURES 0
 #define GCN_THREAD thread
 #define GCN_FN inline
 struct GCNRes8 { uint d[8]; };
 struct GCNRes4 { uint d[4]; };
-struct GCNMemory { device const uchar* p; ulong base; ulong size; constant ulong* ranges; uint count; };
+#if GCN_NATIVE_TEXTURES
+struct GCNNativeTexture {
+    texture2d<float> image [[id(0)]];
+    uint enabled [[id(1)]];
+    uint4 low [[id(2)]];
+    uint4 high [[id(3)]];
+};
+#endif
+struct GCNMemory { device const uchar* p; ulong base; ulong size; constant ulong* ranges; uint count;
+#if GCN_NATIVE_TEXTURES
+    constant GCNNativeTexture* native;
+#endif
+};
 struct GCNQuad { uint unused; };
 struct GCNLane {
     uint user[17]; uint vinit[24]; bool exec; uint quadLane;
@@ -763,6 +776,17 @@ GCN_FN uint gcn_ld8(GCNMemory M, ulong a) { ulong o = 0ul; if (!gcn_locate(M, a,
 GCN_FN uint gcn_packed32(GCNMemory M, ulong o) { return *(device const uint*)(M.p + o); }
 GCN_FN uint gcn_packed16(GCNMemory M, ulong o) { return uint(*(device const ushort*)(M.p + o)); }
 GCN_FN uint gcn_packed8(GCNMemory M, ulong o) { return uint(M.p[o]); }
+GCN_FN bool gcn_native_texel(GCNMemory M, GCNRes8 t, int x, int y, thread float4& value) {
+#if GCN_NATIVE_TEXTURES
+    if (!M.native || M.native->enabled == 0u || ((t.d[1] >> 20) & 63u) != 10u) return false;
+    if (any(M.native->low != uint4(t.d[0],t.d[1],t.d[2],t.d[3])) ||
+        any(M.native->high != uint4(t.d[4],t.d[5],t.d[6],t.d[7]))) return false;
+    if (x < 0 || y < 0 || uint(x) >= M.native->image.get_width() || uint(y) >= M.native->image.get_height()) return false;
+    value = M.native->image.read(uint2(x,y)); return true;
+#else
+    return false;
+#endif
+}
 // Attributes arrive interpolated by Metal: p1 is a no-op, p2 the value.
 GCN_FN float gcn_interp1(thread GCNLane& L, uint attr, uint chan, float i) { return 0.0f; }
 GCN_FN float gcn_interp2(thread GCNLane& L, uint attr, uint chan, float j, float previous) { return L.attr[attr & 31u][chan & 3u]; }
@@ -775,6 +799,10 @@ GCN_FN uint gcn_quad_shuffle(thread GCNQuad& Q, thread GCNLane& L, uint value, u
 #include "GCNShaderRuntimeShared.inc"
 #undef GCN_SHARED_SOURCE
         ;
+    if (nativeTextures) {
+        const std::string flag = "#define GCN_NATIVE_TEXTURES 0";
+        text.replace(text.find(flag), flag.size(), "#define GCN_NATIVE_TEXTURES 1");
+    }
     return text + shared + "\n";
 }
 
@@ -788,7 +816,7 @@ GCN_FN uint gcn_quad_shuffle(thread GCNQuad& Q, thread GCNLane& L, uint value, u
 // SPI_PS_INPUT_CNTL_0..31, read when the pipeline is built. The fragment
 // returns colour target 0.
 inline std::string gcnMetalEntryPoints(const GCNTranslation& vs, const GCNTranslation& ps, const std::string& vsName,
-                                       const std::string& psName, std::uint32_t psInputAddr, const std::uint32_t inputCntl[32]) {
+                                       const std::string& psName, std::uint32_t psInputAddr, const std::uint32_t inputCntl[32], bool nativeTextures = false) {
     std::uint32_t flatParams = 0;
     for (unsigned a = 0; a < 32; ++a)
         if (((ps.attributes >> a) & 1) && ((ps.flat >> a) & 1) && !(inputCntl[a] & 0x20)) flatParams |= 1u << (inputCntl[a] & 0x1f);
@@ -866,6 +894,16 @@ inline std::string gcnMetalEntryPoints(const GCNTranslation& vs, const GCNTransl
     // covered pixel. Do not ask Metal to suppress helpers again at export.
     s += ps.mayKill ? "    return { L.color[0], L.killed ? 0u : 0xffffffffu };\n}\n"
                     : "    return L.color[0];\n}\n";
+    if (nativeTextures) {
+        auto replace = [&](const std::string& from, const std::string& to) {
+            for (std::size_t at = 0; (at = s.find(from, at)) != std::string::npos; at += to.size()) s.replace(at, from.size(), to);
+        };
+        replace("constant GCNDrawState& D) {", "constant GCNDrawState& D, constant GCNNativeTexture& N) {");
+        replace("device const uint* indices [[buffer(2)]]) {", "device const uint* indices [[buffer(2)]], constant GCNNativeTexture& N [[buffer(3)]]) {");
+        replace("constant GCNDrawState& D [[buffer(1)]]) {", "constant GCNDrawState& D [[buffer(1)]], constant GCNNativeTexture& N [[buffer(3)]]) {");
+        replace("iid, mem, D)", "iid, mem, D, N)");
+        replace("D.rangeCount }", "D.rangeCount, &N }");
+    }
     return s;
 }
 } // namespace maxps4::gpu

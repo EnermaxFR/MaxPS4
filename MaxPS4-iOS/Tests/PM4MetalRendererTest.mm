@@ -144,6 +144,38 @@ int main() {
             ok = compare(name, pixels, arena.bytes.data() + (address - Arena::start)) && ok;
         }
         assert(ok);
+        // Prototype native texel reads: same pixels, with scene B's T# read
+        // through a texture viewing the draw's buffer whenever Metal accepts
+        // its alignment. Per-draw copies, then the whole guest window.
+        const NSUInteger alignment = [device minimumLinearTextureAlignmentForPixelFormat:MTLPixelFormatRGBA8Unorm];
+        const bool viewable = alignment && (width * 4) % alignment == 0 && (image - Arena::start) % alignment == 0 && 256 % alignment == 0;
+        id<MTLBuffer> window = [device newBufferWithBytes:arena.bytes.data() length:arena.bytes.size() options:MTLResourceStorageModeShared];
+        assert(window);
+        id<MTLBuffer> guests[] = {nil, window};
+        for (id<MTLBuffer> guest : guests) {
+            PM4DrawStats nativeStats;
+            PM4DrawCollector nativeCollector(arena.memory, nativeStats);
+            PM4MetalRenderer native(device, arena.memory, guest, guest ? Arena::start : 0, true);
+            id<MTLCommandBuffer> nativeCommands = [queue commandBuffer];
+            nativeCollector.execute(s.words.data(), s.words.size(), [&](const PM4Draw& d) {
+                if (!native.encode(d, nativeCommands)) std::printf("native: %s\n", native.error.c_str());
+                else ++nativeStats.rendered;
+            });
+            [nativeCommands commit]; [nativeCommands waitUntilCompleted];
+            assert(nativeCommands.status == MTLCommandBufferStatusCompleted && !nativeCommands.error);
+            assert(nativeStats.rendered == 3 && native.nativeDraws == (viewable ? 1u : 0u));
+            for (const auto address : {targetA, targetB}) {
+                std::uint8_t pixels[width * height * 4] = {};
+                readPixels(device, queue, native.target(address), pixels);
+                assert(compare(guest ? "native textures, guest window" : "native textures, copies", pixels,
+                               arena.bytes.data() + (address - Arena::start)));
+                std::uint8_t buffered[sizeof pixels] = {};
+                readPixels(device, queue, metal.target(address), buffered);
+                assert(std::memcmp(pixels, buffered, sizeof pixels) == 0); // bit-identical to the buffer path
+            }
+        }
+        std::printf("PASS native RGBA8 texture prototype matches the software renderer (%s, alignment %lu)\n",
+                    viewable ? "native reads used" : "buffer fallback", (unsigned long)alignment);
         // Identical stream with target-compatible draws sharing tile memory.
         // State changes (pipeline/scissor), target switches, repeated batches
         // and the first clear must match the original single-draw passes.

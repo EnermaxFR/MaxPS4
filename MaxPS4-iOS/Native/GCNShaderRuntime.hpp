@@ -112,6 +112,7 @@ GCN_FN uint gcn_ld8(GCNMemory M, ulong a) { ulong o; if (!gcn_locate(M, a, 1, o)
 GCN_FN uint gcn_packed32(GCNMemory M, ulong o) { uint v; std::memcpy(&v, M.p + o, 4); return v; }
 GCN_FN uint gcn_packed16(GCNMemory M, ulong o) { std::uint16_t v; std::memcpy(&v, M.p + o, 2); return v; }
 GCN_FN uint gcn_packed8(GCNMemory M, ulong o) { return M.p[o]; }
+GCN_FN bool gcn_native_texel(GCNMemory, GCNRes8, int, int, float4&) { return false; }
 #define GCN_SHARED_SOURCE(...) __VA_ARGS__
 #include "GCNShaderRuntimeShared.inc"
 #undef GCN_SHARED_SOURCE

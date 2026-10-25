@@ -138,6 +138,7 @@ public:
     // addresses (scalar loads, V#, T#), whatever EXEC: a draw's GPU copy of
     // guest memory is built from these (PM4ResourceScan.hpp).
     std::function<void(std::uint64_t base, std::uint64_t bytes)> resource;
+    std::function<void(const std::array<std::uint32_t, 8>&)> imageResource;
 
     std::uint32_t& v(unsigned reg, unsigned lane) { return v_[std::size_t(reg & 0xff) * lanes_ + lane]; }
     std::uint64_t exec() const { return std::uint64_t(s[126]) | std::uint64_t(s[127]) << 32; }
@@ -150,7 +151,7 @@ public:
     void reset() {
         s.fill(0); scc = false; exports.clear(); error.clear();
         std::fill(v_.begin(), v_.end(), 0);
-        attribute = {}; resource = {}; images = nullptr;
+        attribute = {}; resource = {}; imageResource = {}; images = nullptr;
         setExec(lanes_ == 64 ? ~0ull : ((1ull << lanes_) - 1));
     }
 
@@ -823,6 +824,7 @@ private:
         const std::uint32_t w = i.word0, w1 = i.word1;
         const unsigned vaddr = w1 & 0xff, vdata = (w1 >> 8) & 0xff;
         const unsigned rsrc = ((w1 >> 16) & 0x1f) * 4, samp = ((w1 >> 21) & 0x1f) * 4, dmask = (w >> 8) & 15;
+        if (rsrc > s.size() - 8) return fail("image resource register range");
         const std::uint32_t* d = &s[rsrc];
         Image t{(std::uint64_t(d[0]) | std::uint64_t(d[1] & 0xff) << 32) << 8,
                 (d[2] & 0x3fff) + 1, ((d[2] >> 14) & 0x3fff) + 1, ((d[4] >> 13) & 0x3fff) + 1,
@@ -833,6 +835,10 @@ private:
         unsigned bytes;
         if (!imageBytes(t.dfmt, bytes)) return fail("image data format " + std::to_string(t.dfmt));
         if (resource) resource(t.base, std::uint64_t(t.pitch) * t.height * bytes);
+        if (imageResource) {
+            std::array<std::uint32_t, 8> descriptor{};
+            std::copy_n(d, 8, descriptor.begin()); imageResource(descriptor);
+        }
         const unsigned op = i.opcode;
         // Address layout: [offset][bias][compare] coordinates [lod/clamp].
         unsigned first = 0;

@@ -26,6 +26,12 @@ int main(int argc, char** argv) {
     // A program that faults keeps what it found before; nothing is invented.
     PM4Draw lost = d; lost.vs = 0x40000; lost.ps = 0x40000;
     assert(scanDrawResources(arena.memory, lost).empty());
+    // With image capture, the pixel program's T# (s[0:7]) is kept as read, once.
+    PM4ResourceScanner capturing(arena.memory, true);
+    capturing.scan(d);
+    assert(capturing.images().size() == 1);
+    for (unsigned k = 0; k < 8; ++k) assert(capturing.images()[0][k] == quadSgprs[k]);
+    assert(capturing.scan(lost).empty() && capturing.images().empty());
     PM4ResourceScanner reused(arena.memory);
     auto check = [&] {
         const auto& current = reused.scan(d);
