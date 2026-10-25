@@ -182,6 +182,31 @@ GCN_FN float4 gcn_sample_at(GCNMemory M, GCNRes8 t, GCNRes4 s, bool unorm, float
         r[n] = (c00[n] * (1.0f - ax) + c10[n] * ax) * (1.0f - ay) + (c01[n] * (1.0f - ax) + c11[n] * ax) * ay;
     return r;
 }
+GCN_FN float4 gcn_unpack_bilinear(uint raw, uint format) {
+    if (format == 10u) return float4(float(raw & 255u) / 255.0f, float((raw >> 8) & 255u) / 255.0f,
+        float((raw >> 16) & 255u) / 255.0f, float((raw >> 24) & 255u) / 255.0f);
+    return float4(float(raw & 31u) / 31.0f, float((raw >> 5) & 63u) / 63.0f, float((raw >> 11) & 31u) / 31.0f, 1.0f);
+}
+// All four texels are inside a previously validated complete image footprint.
+// Decode format once and swizzle the interpolated result once, not four times.
+GCN_FN float4 gcn_bilinear_interior(GCNMemory M, GCNRes8 t, ulong offset, uint pitch, uint format, float fx, float fy) {
+    uint x = uint(gcn_floor(fx)), y = uint(gcn_floor(fy));
+    uint bytes = format == 10u ? 4u : 2u;
+    ulong at = offset + (ulong(y) * pitch + x) * bytes;
+    ulong row = ulong(pitch) * bytes;
+    uint a = format == 10u ? gcn_packed32(M, at) : gcn_packed16(M, at);
+    uint b = format == 10u ? gcn_packed32(M, at + bytes) : gcn_packed16(M, at + bytes);
+    uint c = format == 10u ? gcn_packed32(M, at + row) : gcn_packed16(M, at + row);
+    uint d = format == 10u ? gcn_packed32(M, at + row + bytes) : gcn_packed16(M, at + row + bytes);
+    float4 c00 = gcn_unpack_bilinear(a, format), c10 = gcn_unpack_bilinear(b, format);
+    float4 c01 = gcn_unpack_bilinear(c, format), c11 = gcn_unpack_bilinear(d, format);
+    float ax = fx - float(x), ay = fy - float(y);
+    uint4 comp;
+    for (uint n = 0u; n < 4u; ++n)
+        comp[n] = gu((c00[n] * (1.0f - ax) + c10[n] * ax) * (1.0f - ay) + (c01[n] * (1.0f - ax) + c11[n] * ax) * ay);
+    return float4(gf(gcn_sel(t.d[3] & 7u, comp, 0x3f800000u)), gf(gcn_sel((t.d[3] >> 3) & 7u, comp, 0x3f800000u)),
+        gf(gcn_sel((t.d[3] >> 6) & 7u, comp, 0x3f800000u)), gf(gcn_sel((t.d[3] >> 9) & 7u, comp, 0x3f800000u)));
+}
 GCN_FN float4 gcn_sample(GCNMemory M, GCNRes8 t, GCNRes4 s, bool unorm, float u, float v) {
     if (((t.d[3] >> 20) & 0x1fu) != 8u) return float4(0.0f, 0.0f, 0.0f, 0.0f);
     ulong base = (ulong(t.d[0]) | (ulong(t.d[1] & 0xffu) << 32)) << 8;
@@ -192,8 +217,16 @@ GCN_FN float4 gcn_sample(GCNMemory M, GCNRes8 t, GCNRes4 s, bool unorm, float u,
     // Address modes in gcn_fetch_at constrain every texel to [0,width)x[0,height).
     // Resolve that complete footprint once, not once per tap/channel. Sparse or
     // truncated resources retain the original checked-load path and zero reads.
-    if (gcn_locate(M, base, ((ulong(height) - 1ul) * pitch + width) * bytes, offset))
+    if (gcn_locate(M, base, ((ulong(height) - 1ul) * pitch + width) * bytes, offset)) {
+        bool linear = ((s.d[2] >> 20) & 3u) == 1u || ((s.d[2] >> 22) & 3u) == 1u;
+        if (linear && (dfmt == 10u || dfmt == 16u)) {
+            bool un = unorm || ((s.d[0] >> 15) & 1u) != 0u;
+            float fx = (un ? u : u * float(width)) - 0.5f, fy = (un ? v : v * float(height)) - 0.5f;
+            if (fx >= 0.0f && fy >= 0.0f && fx < float(width - 1u) && fy < float(height - 1u))
+                return gcn_bilinear_interior(M, t, offset, pitch, dfmt, fx, fy);
+        }
         return gcn_sample_at(M, t, s, unorm, u, v, true, offset);
+    }
     return gcn_sample_at(M, t, s, unorm, u, v, false, 0ul);
 }
 GCN_FN float4 gcn_image_load(GCNMemory M, GCNRes8 t, uint x, uint y) {
