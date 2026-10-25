@@ -15,6 +15,15 @@ import Foundation
             precondition(!clock.due(at: 2), "Missed intervals must not create an event burst")
             precondition(!clock.due(at: .nan))
         }
+        var jittered = MaxPS4VideoOutClock()
+        var jitterTicks = 0
+        for index in 0..<120 {
+            let offset = index == 0 ? 0.002 : Double((index * 7) % 5) * 0.0005
+            let time = Double(index) / 60 + offset
+            if jittered.due(at: time) { jitterTicks += 1 }
+            precondition(!jittered.due(at: time))
+        }
+        precondition(jitterTicks == 120, "Normal timer jitter cannot halve the guest refresh rate")
         for reversed in [false, true] {
             var results: [Bool] = []
             let gate = MaxPS4VideoOutPresentation { results.append($0) }
