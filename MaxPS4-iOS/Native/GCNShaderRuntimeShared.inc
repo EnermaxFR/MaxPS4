@@ -115,14 +115,17 @@ GCN_FN uint gcn_buffer_dword(GCNMemory M, GCNRes4 r, uint index, uint voffset, u
     return gcn_ld32(M, base + soffset + inst + ulong(idx) * stride + off + 4u * n);
 }
 // Linear 2D images (T# tiling index 8). Other tilings read as 0.
-GCN_FN float4 gcn_texel(GCNMemory M, GCNRes8 t, int x, int y) {
+GCN_FN float4 gcn_texel_at(GCNMemory M, GCNRes8 t, int x, int y, bool resolved, ulong offset) {
     ulong base = (ulong(t.d[0]) | (ulong(t.d[1] & 0xffu) << 32)) << 8;
     uint dfmt = (t.d[1] >> 20) & 0x3fu; uint pitch = ((t.d[4] >> 13) & 0x3fffu) + 1u;
     uint bytes = 4u;
     if (dfmt == 1u) bytes = 1u; else if (dfmt == 2u || dfmt == 3u || (dfmt >= 16u && dfmt <= 19u)) bytes = 2u;
     else if (dfmt == 14u) bytes = 16u;
-    ulong at = base + (ulong(uint(y)) * pitch + uint(x)) * bytes;
-    uint raw = bytes == 1u ? gcn_ld8(M, at) : bytes == 2u ? gcn_ld16(M, at) : gcn_ld32(M, at);
+    ulong relative = (ulong(uint(y)) * pitch + uint(x)) * bytes;
+    ulong at = base + relative;
+    ulong packed = offset + relative;
+    uint raw = resolved ? (bytes == 1u ? gcn_packed8(M, packed) : bytes == 2u ? gcn_packed16(M, packed) : gcn_packed32(M, packed))
+        : (bytes == 1u ? gcn_ld8(M, at) : bytes == 2u ? gcn_ld16(M, at) : gcn_ld32(M, at));
     float c0 = 0.0f; float c1 = 0.0f; float c2 = 0.0f; float c3 = 1.0f;
     uint nfmt = (t.d[1] >> 26) & 15u;
     if (dfmt == 1u) c0 = float(raw & 0xffu) / 255.0f;
@@ -135,11 +138,13 @@ GCN_FN float4 gcn_texel(GCNMemory M, GCNRes8 t, int x, int y) {
     else if (dfmt == 17u) { c0 = float(raw & 1u); c1 = float((raw >> 1) & 31u) / 31.0f; c2 = float((raw >> 6) & 31u) / 31.0f; c3 = float((raw >> 11) & 31u) / 31.0f; }
     else if (dfmt == 18u) { c0 = float(raw & 31u) / 31.0f; c1 = float((raw >> 5) & 31u) / 31.0f; c2 = float((raw >> 10) & 31u) / 31.0f; c3 = float((raw >> 15) & 1u); }
     else if (dfmt == 19u) { c0 = float(raw & 15u) / 15.0f; c1 = float((raw >> 4) & 15u) / 15.0f; c2 = float((raw >> 8) & 15u) / 15.0f; c3 = float((raw >> 12) & 15u) / 15.0f; }
-    else if (dfmt == 14u) { c0 = gf(raw); c1 = gf(gcn_ld32(M, at + 4u)); c2 = gf(gcn_ld32(M, at + 8u)); c3 = gf(gcn_ld32(M, at + 12u)); }
+    else if (dfmt == 14u) { c0 = gf(raw); c1 = gf(resolved ? gcn_packed32(M, packed + 4u) : gcn_ld32(M, at + 4u));
+        c2 = gf(resolved ? gcn_packed32(M, packed + 8u) : gcn_ld32(M, at + 8u)); c3 = gf(resolved ? gcn_packed32(M, packed + 12u) : gcn_ld32(M, at + 12u)); }
     uint4 c; c[0] = gu(c0); c[1] = gu(c1); c[2] = gu(c2); c[3] = gu(c3);
     return float4(gf(gcn_sel(t.d[3] & 7u, c, 0x3f800000u)), gf(gcn_sel((t.d[3] >> 3) & 7u, c, 0x3f800000u)),
                   gf(gcn_sel((t.d[3] >> 6) & 7u, c, 0x3f800000u)), gf(gcn_sel((t.d[3] >> 9) & 7u, c, 0x3f800000u)));
 }
+GCN_FN float4 gcn_texel(GCNMemory M, GCNRes8 t, int x, int y) { return gcn_texel_at(M, t, x, y, false, 0ul); }
 GCN_FN int gcn_wrap(int x, int size, uint mode, GCN_THREAD bool& border) {
     if (mode == 0u) { int m = x % size; return m < 0 ? m + size : m; }
     if (mode == 1u) { int period = 2 * size; int m = x % period; if (m < 0) m += period; return m < size ? m : period - 1 - m; }
@@ -148,7 +153,7 @@ GCN_FN int gcn_wrap(int x, int size, uint mode, GCN_THREAD bool& border) {
     if (x < 0 || x >= size) border = true;
     return x < 0 ? 0 : (x >= size ? size - 1 : x);
 }
-GCN_FN float4 gcn_fetch(GCNMemory M, GCNRes8 t, GCNRes4 s, int x, int y) {
+GCN_FN float4 gcn_fetch_at(GCNMemory M, GCNRes8 t, GCNRes4 s, int x, int y, bool resolved, ulong offset) {
     int w = int(t.d[2] & 0x3fffu) + 1; int h = int((t.d[2] >> 14) & 0x3fffu) + 1;
     bool border = false;
     int ax = gcn_wrap(x, w, s.d[0] & 7u, border); int ay = gcn_wrap(y, h, (s.d[0] >> 3) & 7u, border);
@@ -158,24 +163,38 @@ GCN_FN float4 gcn_fetch(GCNMemory M, GCNRes8 t, GCNRes4 s, int x, int y) {
         if (type == 2u) return float4(1.0f, 1.0f, 1.0f, 1.0f);
         return float4(0.0f, 0.0f, 0.0f, 0.0f);
     }
-    return gcn_texel(M, t, ax, ay);
+    return gcn_texel_at(M, t, ax, ay, resolved, offset);
 }
-GCN_FN float4 gcn_sample(GCNMemory M, GCNRes8 t, GCNRes4 s, bool unorm, float u, float v) {
-    if (((t.d[3] >> 20) & 0x1fu) != 8u) return float4(0.0f, 0.0f, 0.0f, 0.0f);
+GCN_FN float4 gcn_fetch(GCNMemory M, GCNRes8 t, GCNRes4 s, int x, int y) { return gcn_fetch_at(M, t, s, x, y, false, 0ul); }
+GCN_FN float4 gcn_sample_at(GCNMemory M, GCNRes8 t, GCNRes4 s, bool unorm, float u, float v, bool resolved, ulong offset) {
     float w = float((t.d[2] & 0x3fffu) + 1u); float h = float(((t.d[2] >> 14) & 0x3fffu) + 1u);
     bool un = unorm || ((s.d[0] >> 15) & 1u) != 0u;
     bool linear = ((s.d[2] >> 20) & 3u) == 1u || ((s.d[2] >> 22) & 3u) == 1u;
     float x = un ? u : u * w; float y = un ? v : v * h;
-    if (!linear) return gcn_fetch(M, t, s, int(gcn_floor(x)), int(gcn_floor(y)));
+    if (!linear) return gcn_fetch_at(M, t, s, int(gcn_floor(x)), int(gcn_floor(y)), resolved, offset);
     float fx = x - 0.5f; float fy = y - 0.5f;
     int x0 = int(gcn_floor(fx)); int y0 = int(gcn_floor(fy));
     float ax = fx - float(x0); float ay = fy - float(y0);
-    float4 c00 = gcn_fetch(M, t, s, x0, y0); float4 c10 = gcn_fetch(M, t, s, x0 + 1, y0);
-    float4 c01 = gcn_fetch(M, t, s, x0, y0 + 1); float4 c11 = gcn_fetch(M, t, s, x0 + 1, y0 + 1);
+    float4 c00 = gcn_fetch_at(M, t, s, x0, y0, resolved, offset); float4 c10 = gcn_fetch_at(M, t, s, x0 + 1, y0, resolved, offset);
+    float4 c01 = gcn_fetch_at(M, t, s, x0, y0 + 1, resolved, offset); float4 c11 = gcn_fetch_at(M, t, s, x0 + 1, y0 + 1, resolved, offset);
     float4 r;
     for (uint n = 0u; n < 4u; ++n)
         r[n] = (c00[n] * (1.0f - ax) + c10[n] * ax) * (1.0f - ay) + (c01[n] * (1.0f - ax) + c11[n] * ax) * ay;
     return r;
+}
+GCN_FN float4 gcn_sample(GCNMemory M, GCNRes8 t, GCNRes4 s, bool unorm, float u, float v) {
+    if (((t.d[3] >> 20) & 0x1fu) != 8u) return float4(0.0f, 0.0f, 0.0f, 0.0f);
+    ulong base = (ulong(t.d[0]) | (ulong(t.d[1] & 0xffu) << 32)) << 8;
+    uint width = (t.d[2] & 0x3fffu) + 1u, height = ((t.d[2] >> 14) & 0x3fffu) + 1u;
+    uint pitch = ((t.d[4] >> 13) & 0x3fffu) + 1u, dfmt = (t.d[1] >> 20) & 0x3fu;
+    uint bytes = dfmt == 1u ? 1u : (dfmt == 2u || dfmt == 3u || (dfmt >= 16u && dfmt <= 19u)) ? 2u : dfmt == 14u ? 16u : 4u;
+    ulong offset = 0ul;
+    // Address modes in gcn_fetch_at constrain every texel to [0,width)x[0,height).
+    // Resolve that complete footprint once, not once per tap/channel. Sparse or
+    // truncated resources retain the original checked-load path and zero reads.
+    if (gcn_locate(M, base, ((ulong(height) - 1ul) * pitch + width) * bytes, offset))
+        return gcn_sample_at(M, t, s, unorm, u, v, true, offset);
+    return gcn_sample_at(M, t, s, unorm, u, v, false, 0ul);
 }
 GCN_FN float4 gcn_image_load(GCNMemory M, GCNRes8 t, uint x, uint y) {
     uint w = (t.d[2] & 0x3fffu) + 1u; uint h = ((t.d[2] >> 14) & 0x3fffu) + 1u;

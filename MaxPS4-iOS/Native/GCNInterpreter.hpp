@@ -114,7 +114,7 @@ public:
     static constexpr unsigned maxLanes = 64;
     static constexpr unsigned vcc = 106, m0 = 124, execLo = 126;
     GCNWave(const GCNMemory& memory, unsigned lanes, GCNCodeCache* cache = nullptr)
-        : memory_(memory), lanes_(lanes > maxLanes ? maxLanes : lanes), cache_(cache), v_(256 * maxLanes, 0) {
+        : memory_(memory), lanes_(lanes > maxLanes ? maxLanes : lanes), cache_(cache), v_(256 * lanes_, 0) {
         setExec(lanes_ == 64 ? ~0ull : ((1ull << lanes_) - 1));
     }
     std::array<std::uint32_t, 128> s{}; // SGPRs, VCC at 106, M0 at 124, EXEC at 126
@@ -129,7 +129,7 @@ public:
     // guest memory is built from these (PM4ResourceScan.hpp).
     std::function<void(std::uint64_t base, std::uint64_t bytes)> resource;
 
-    std::uint32_t& v(unsigned reg, unsigned lane) { return v_[std::size_t(reg & 0xff) * maxLanes + lane]; }
+    std::uint32_t& v(unsigned reg, unsigned lane) { return v_[std::size_t(reg & 0xff) * lanes_ + lane]; }
     std::uint64_t exec() const { return std::uint64_t(s[126]) | std::uint64_t(s[127]) << 32; }
     void setExec(std::uint64_t mask) { s[126] = std::uint32_t(mask); s[127] = std::uint32_t(mask >> 32); }
     std::uint64_t vccMask() const { return std::uint64_t(s[106]) | std::uint64_t(s[107]) << 32; }

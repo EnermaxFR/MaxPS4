@@ -49,6 +49,8 @@ jobs:
           c++ -std=c++17 -Wall -Wextra -Werror -pedantic -pthread -fsanitize=address,undefined -fno-omit-frame-pointer \
             '-DGCN_GENERATED="/tmp/gcn-generated.inc"' MaxPS4-iOS/Tests/GCNTranslatorHarness.cpp -o /tmp/gcn-translator-harness
           /tmp/gcn-translator-harness
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -pthread -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/GCNTextureFootprintTest.cpp -o /tmp/gcn-texture-footprint-test
+          /tmp/gcn-texture-footprint-test
   metal-bridge:
     runs-on: macos-latest
     steps:
@@ -74,6 +76,9 @@ jobs:
           xcrun clang++ -std=c++17 -fobjc-arc -Wall -Wextra -Werror MaxPS4-iOS/Tests/GCNMetalTest.mm \
             -framework Foundation -framework Metal -o build/pm4/gcn-metal-test
           build/pm4/gcn-metal-test
+          xcrun clang++ -std=c++17 -fobjc-arc -Wall -Wextra -Werror MaxPS4-iOS/Tests/GCNTextureFootprintMetalTest.mm \
+            -framework Foundation -framework Metal -o build/pm4/gcn-texture-footprint-metal-test
+          build/pm4/gcn-texture-footprint-metal-test
           xcrun clang++ -std=c++17 -fobjc-arc -Wall -Wextra -Werror MaxPS4-iOS/Native/PM4MetalRenderer.mm \
             MaxPS4-iOS/Native/PM4GameMetalBridge.mm \
             MaxPS4-iOS/Tests/PM4MetalRendererTest.mm -framework Foundation -framework Metal -o build/pm4/pm4-metal-renderer-test

@@ -760,6 +760,10 @@ GCN_FN bool gcn_locate(GCNMemory M, ulong a, ulong n, thread ulong& offset) {
 GCN_FN uint gcn_ld32(GCNMemory M, ulong a) { ulong o = 0ul; if (!gcn_locate(M, a, 4ul, o)) return 0u; return *(device const uint*)(M.p + o); }
 GCN_FN uint gcn_ld16(GCNMemory M, ulong a) { ulong o = 0ul; if (!gcn_locate(M, a, 2ul, o)) return 0u; return uint(*(device const ushort*)(M.p + o)); }
 GCN_FN uint gcn_ld8(GCNMemory M, ulong a) { ulong o = 0ul; if (!gcn_locate(M, a, 1ul, o)) return 0u; return uint(M.p[o]); }
+// Only used with an image span already validated by gcn_locate.
+GCN_FN uint gcn_packed32(GCNMemory M, ulong o) { return *(device const uint*)(M.p + o); }
+GCN_FN uint gcn_packed16(GCNMemory M, ulong o) { return uint(*(device const ushort*)(M.p + o)); }
+GCN_FN uint gcn_packed8(GCNMemory M, ulong o) { return uint(M.p[o]); }
 // Attributes arrive interpolated by Metal: p1 is a no-op, p2 the value.
 GCN_FN float gcn_interp1(thread GCNLane& L, uint attr, uint chan, float i) { return 0.0f; }
 GCN_FN float gcn_interp2(thread GCNLane& L, uint attr, uint chan, float j, float previous) { return L.attr[attr & 31u][chan & 3u]; }
