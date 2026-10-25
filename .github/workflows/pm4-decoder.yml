@@ -85,6 +85,9 @@ jobs:
             MaxPS4-iOS/Native/PM4GameMetalBridge.mm \
             MaxPS4-iOS/Tests/PM4MetalRendererTest.mm -framework Foundation -framework Metal -o build/pm4/pm4-metal-renderer-test
           build/pm4/pm4-metal-renderer-test
+          xcrun clang++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic MaxPS4-iOS/Tests/PM4ResourceScanTest.cpp \
+            -o build/pm4/resource-scan-benchmark
+          build/pm4/resource-scan-benchmark --benchmark
       - name: Compile actual bridge and Swift renderer for iPhone arm64
         run: |
           set -euo pipefail
