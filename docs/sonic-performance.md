@@ -71,3 +71,11 @@ The portrait display keeps the original aspect ratio without cropping. Only
 landscape uses centered aspect-fill cropping; native resolution is unchanged.
 The orientation change passed the targeted VideoOut Metal workflow
 [40161216429](https://github.com/EnermaxFR/MaxPS4/actions/runs/40161216429).
+
+Final CPU/GPU and iPhone frontend validation passed in
+[40161670043](https://github.com/EnermaxFR/MaxPS4/actions/runs/40161670043).
+The optimized fixture measured 3.082 to 2.155 us/draw on the Linux runner and
+6.449 to 4.063 us/draw with native Apple Clang on the Mac runner. GPU pixel
+comparisons remained identical. These are scanner timings, not full-frame
+timings or an on-device FPS measurement. Only explicit test workflows ran;
+application version and existing IPA files were left unchanged.
