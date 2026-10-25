@@ -80,13 +80,12 @@ fragment float4 metal_sample_fragment(GCNVaryings in [[stage_in]], texture2d<flo
         std::string previousWrap = replaced(prelude, "if (x >= 0 && x < size) return x; ", "");
         previousWrap = replaced(previousWrap, "int m = x; if (m < 0 || m >= period) { m = x % period; if (m < 0) m += period; }",
                                 "int m = x % period; if (m < 0) m += period;");
-        for (const char* tap : {"c00 = bx0 || by0 ? gcn_border_color(s) : gcn_texel_at(M, t, wx0, wy0, resolved, offset)|c00 = gcn_fetch_at(M, t, s, x0, y0, resolved, offset)",
-                                "c10 = bx1 || by0 ? gcn_border_color(s) : gcn_texel_at(M, t, wx1, wy0, resolved, offset)|c10 = gcn_fetch_at(M, t, s, x0 + 1, y0, resolved, offset)",
-                                "c01 = bx0 || by1 ? gcn_border_color(s) : gcn_texel_at(M, t, wx0, wy1, resolved, offset)|c01 = gcn_fetch_at(M, t, s, x0, y0 + 1, resolved, offset)",
-                                "c11 = bx1 || by1 ? gcn_border_color(s) : gcn_texel_at(M, t, wx1, wy1, resolved, offset)|c11 = gcn_fetch_at(M, t, s, x0 + 1, y0 + 1, resolved, offset)"}) {
-            const std::string pair = tap; const auto bar = pair.find('|');
-            previousWrap = replaced(previousWrap, pair.substr(0, bar), pair.substr(bar + 1));
-        }
+        const std::pair<const char*, const char*> taps[] = {
+            {"c00 = bx0 || by0 ? gcn_border_color(s) : gcn_texel_at(M, t, wx0, wy0, resolved, offset)", "c00 = gcn_fetch_at(M, t, s, x0, y0, resolved, offset)"},
+            {"c10 = bx1 || by0 ? gcn_border_color(s) : gcn_texel_at(M, t, wx1, wy0, resolved, offset)", "c10 = gcn_fetch_at(M, t, s, x0 + 1, y0, resolved, offset)"},
+            {"c01 = bx0 || by1 ? gcn_border_color(s) : gcn_texel_at(M, t, wx0, wy1, resolved, offset)", "c01 = gcn_fetch_at(M, t, s, x0, y0 + 1, resolved, offset)"},
+            {"c11 = bx1 || by1 ? gcn_border_color(s) : gcn_texel_at(M, t, wx1, wy1, resolved, offset)", "c11 = gcn_fetch_at(M, t, s, x0 + 1, y0 + 1, resolved, offset)"}};
+        for (const auto& [from, to] : taps) previousWrap = replaced(previousWrap, from, to);
         struct Variant { const char* name; std::string source; const char* fragment; bool draws; std::string prelude = {}; };
         std::vector<Variant> variants = {
             {"empty pass (clear only)", "", "", false},
