@@ -156,7 +156,9 @@ bool PM4MetalRenderer::encode(const PM4Draw& d, id<MTLCommandBuffer> commands) {
         MTLTextureDescriptor* descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format
                                                                                               width:d.pitch height:d.height mipmapped:NO];
         descriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
-        descriptor.storageMode = MTLStorageModeShared;
+        // These colour targets are rendered, sampled and copied only by the
+        // GPU. CPU-visible shared storage is unnecessary for this path.
+        descriptor.storageMode = MTLStorageModePrivate;
         target = {[device_ newTextureWithDescriptor:descriptor], true};
         if (!target.texture) return fail("colour target texture");
     }

@@ -138,8 +138,9 @@ int main() {
         for (const auto& [name, address] : {std::pair<const char*, std::uint64_t>{"scene A", targetA}, {"scene B", targetB}}) {
             id<MTLTexture> texture = metal.target(address);
             assert(texture && texture.pixelFormat == MTLPixelFormatBGRA8Unorm);
+            assert(texture.storageMode == MTLStorageModePrivate);
             std::uint8_t pixels[width * height * 4] = {};
-            [texture getBytes:pixels bytesPerRow:width * 4 fromRegion:MTLRegionMake2D(0, 0, width, height) mipmapLevel:0];
+            readPixels(device, queue, texture, pixels);
             ok = compare(name, pixels, arena.bytes.data() + (address - Arena::start)) && ok;
         }
         assert(ok);
@@ -231,6 +232,8 @@ int main() {
         };
         id<MTLTexture> saved = [bridge copyTargetAtAddress:targetB width:width height:height];
         assert(saved && ![bridge copyTargetAtAddress:0 width:width height:height]);
+        assert(saved.storageMode == MTLStorageModePrivate);
+        assert([bridge.report containsString:@"Dernier lot : CPU"] && [bridge.report containsString:@"Copie image : CPU"]);
         assert(![bridge copyTargetAtAddress:targetA width:width+1 height:height]);
         std::uint8_t before[width*height*4]{}, after[sizeof before]{};
         readback([bridge copyTargetAtAddress:targetA width:width height:height],after);

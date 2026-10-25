@@ -3,9 +3,19 @@
 #include <cerrno>
 #include <memory>
 #include <mutex>
+#include <chrono>
 
 using namespace maxps4::gpu;
 namespace {
+using Clock = std::chrono::steady_clock;
+double elapsedMs(Clock::time_point started) {
+    return std::chrono::duration<double, std::milli>(Clock::now() - started).count();
+}
+double gpuMs(id<MTLCommandBuffer> command) {
+    return command.GPUStartTime > 0 && command.GPUEndTime >= command.GPUStartTime
+        ? (command.GPUEndTime - command.GPUStartTime) * 1000 : -1;
+}
+NSString* gpuText(double ms) { return ms < 0 ? @"n/d" : [NSString stringWithFormat:@"%.2f", ms]; }
 struct GameMetalState {
     std::mutex mutex;
     GCNMemory memory;
@@ -15,6 +25,12 @@ struct GameMetalState {
     id<MTLDevice> device;
     id<MTLCommandQueue> queue;
     std::string error;
+    double encodeMs = 0, waitMs = 0, renderGpuMs = -1, copyMs = 0, copyGpuMs = -1;
+    NSString* report() const {
+        return [NSString stringWithFormat:@"Metal : %u dessins, %u rendus, %u échecs, %u passes, %u buffers créés, %u réutilisés\nDernier lot : CPU %.2f ms · GPU %@ ms · attente %.2f ms\nCopie image : CPU %.2f ms · GPU %@ ms",
+            stats.draws, stats.rendered, stats.failed, renderer.renderPasses, renderer.buffersBuilt, renderer.buffersReused,
+            encodeMs, gpuText(renderGpuMs), waitMs, copyMs, gpuText(copyGpuMs)];
+    }
     GameMetalState(id<MTLDevice> device, MaxPS4GameMemoryReader reader)
         : memory{[reader](uint64_t a, void* d, size_t n) { return bool(reader(a,d,n)); }, {}},
           collector(memory, stats), renderer(device, memory, nil, 0), device(device), queue([device newCommandQueue]) {}
@@ -40,9 +56,11 @@ struct GameMetalState {
         std::lock_guard<std::mutex> lock(s.mutex);
         if (!s.error.empty()) return -EIO;
         if (!words || !count || count > 65536) return -EINVAL;
+        const auto started = Clock::now();
         id<MTLCommandBuffer> command = [s.queue commandBuffer];
         if (!command) { s.error = "Metal command buffer allocation"; return -ENOMEM; }
         const unsigned failed = s.stats.failed;
+        const unsigned rendered = s.stats.rendered;
         s.renderer.beginBatch();
         s.collector.execute(words, count, [&](const PM4Draw& draw) {
             if (s.stats.failed != failed) return;
@@ -51,13 +69,18 @@ struct GameMetalState {
         });
         s.renderer.endBatch();
         if (s.stats.failed != failed) { s.error = s.stats.error; return -ENOTSUP; }
+        const double encoding = elapsedMs(started);
+        const auto waiting = Clock::now();
         [command commit];
         [command waitUntilCompleted];
         if (command.status != MTLCommandBufferStatusCompleted || command.error) {
             s.error = command.error ? command.error.localizedDescription.UTF8String : "Metal GPU completion failed";
             return -EIO;
         }
-        self.lastReport = [NSString stringWithFormat:@"Metal : %u dessins, %u rendus, %u échecs, %u passes, %u buffers créés, %u réutilisés", s.stats.draws, s.stats.rendered, s.stats.failed, s.renderer.renderPasses, s.renderer.buffersBuilt, s.renderer.buffersReused];
+        if (s.stats.rendered != rendered) {
+            s.encodeMs = encoding; s.waitMs = elapsedMs(waiting); s.renderGpuMs = gpuMs(command);
+        }
+        self.lastReport = s.report();
         // The native queue retires synchronization packets only after this return.
         return 0;
     }
@@ -68,10 +91,11 @@ struct GameMetalState {
     if (!lock || !s.error.empty() || !width || !height || width > 1920 || height > 1080) return nil;
     id<MTLTexture> source = s.renderer.target(address);
     if (!source || source.width < width || source.height < height) return nil;
+    const auto started = Clock::now();
     auto* descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:source.pixelFormat
         width:width height:height mipmapped:NO];
     descriptor.usage = MTLTextureUsageShaderRead;
-    descriptor.storageMode = MTLStorageModeShared;
+    descriptor.storageMode = MTLStorageModePrivate;
     id<MTLTexture> texture = [s.device newTextureWithDescriptor:descriptor];
     id<MTLCommandBuffer> command = [s.queue commandBuffer];
     id<MTLBlitCommandEncoder> blit = texture && command ? [command blitCommandEncoder] : nil;
@@ -85,6 +109,8 @@ struct GameMetalState {
     if (command.status != MTLCommandBufferStatusCompleted || command.error) {
         s.error = "Metal display copy failed"; return nil;
     }
+    s.copyMs = elapsedMs(started); s.copyGpuMs = gpuMs(command);
+    self.lastReport = s.report();
     return texture;
 }
 - (NSString*)report {
