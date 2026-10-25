@@ -86,7 +86,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
             maxps4_fex_engine_close(engine)
         }
     }
-    func run(url: URL, device: MTLDevice, progress: @escaping @Sendable (String) -> Void) -> String {
+    func run(url: URL, device: MTLDevice, nativeTextures: Bool = false, progress: @escaping @Sendable (String) -> Void) -> String {
         dispatchPrecondition(condition: .onQueue(MaxPS4FEXMetalExecution.queue))
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -114,7 +114,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
             progress("Jeu chargé. Préparation du rendu Metal…")
             guard let metal = MaxPS4GameMetalBridge(device: device, reader: { address, destination, count in
                 maxps4_fex_engine_read_memory(opened, address, destination, count) == 0
-            }) else { throw failure("Création du renderer Metal", -ENOMEM) }
+            }, nativeTextures: nativeTextures) else { throw failure("Création du renderer Metal", -ENOMEM) }
             let attached = maxps4_fex_engine_gnm_host_consumer(opened,
                 Unmanaged.passUnretained(metal).toOpaque(), { context, words, count in
                     guard let context, let words else { return -EINVAL }
@@ -162,14 +162,14 @@ final class MaxPS4GameSource: @unchecked Sendable {
     @Published private(set) var report = "Activer le JIT avec StikDebug avant de lancer le jeu."
     private var worker: MaxPS4GameSource?
     private var generation = UUID()
-    func start(url: URL, device: MTLDevice) {
+    func start(url: URL, device: MTLDevice, nativeTextures: Bool = false) {
         stop()
         let source = MaxPS4GameSource(), id = UUID()
         generation = id; self.source = source; worker = source; running = true
         hasPresented = false
         report = "Chargement du jeu et préparation Metal…"
         MaxPS4FEXMetalExecution.queue.async { [weak self] in
-            let result = source.run(url: url, device: device) { [weak self] text in
+            let result = source.run(url: url, device: device, nativeTextures: nativeTextures) { [weak self] text in
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.generation == id, self.running else { return }
                     self.report = text

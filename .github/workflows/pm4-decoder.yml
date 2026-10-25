@@ -88,6 +88,9 @@ jobs:
             MaxPS4-iOS/Native/PM4GameMetalBridge.mm \
             MaxPS4-iOS/Tests/PM4MetalRendererTest.mm -framework Foundation -framework Metal -o build/pm4/pm4-metal-renderer-test
           build/pm4/pm4-metal-renderer-test
+          xcrun clang++ -std=c++17 -O2 -fobjc-arc -Wall -Wextra -Werror MaxPS4-iOS/Native/PM4MetalRenderer.mm \
+            MaxPS4-iOS/Tests/PM4NativeTextureMetalTest.mm -framework Foundation -framework Metal -o build/pm4/pm4-native-texture-test
+          build/pm4/pm4-native-texture-test
           xcrun clang++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic MaxPS4-iOS/Tests/PM4ResourceScanTest.cpp \
             -o build/pm4/resource-scan-benchmark
           build/pm4/resource-scan-benchmark --benchmark

@@ -8,7 +8,7 @@
 // across draws. Pipelines are cached by program addresses, the fetch-shader
 // SGPR pair (s[0:1]), PS inputs, format and blend. Limits as the software
 // renderer: colour target 0 only, no depth, instance 0.
-// Prototype, off by default: `nativeTextures` reads one linear RGBA8 T# per
+// Prototype, off by default: `nativeTextures` reads one linear 8_8_8_8 or 5_6_5 T# per
 // draw through a Metal texture viewing the draw's memory buffer (no copy).
 // Filtering stays the GCN arithmetic; any other T#, or a view Metal cannot
 // make (alignment, partial range), keeps the buffer path.

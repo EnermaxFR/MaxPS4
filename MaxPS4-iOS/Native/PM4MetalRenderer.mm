@@ -119,12 +119,14 @@ id<MTLBuffer> PM4MetalRenderer::uploadBuffer(std::size_t bytes, id<MTLCommandBuf
 
 id<MTLTexture> PM4MetalRenderer::nativeTexture(const std::array<std::uint32_t, 8>& t, id<MTLBuffer> memory,
                                                const std::uint64_t* ranges, unsigned rangeCount) {
-    // dfmt 8_8_8_8 (gcn_texel_at reads it as unorm whatever the nfmt), linear tiling.
-    if (((t[1] >> 20) & 63) != 10 || ((t[3] >> 20) & 31) != 8) return nil;
+    // dfmt 8_8_8_8 or 5_6_5 (gcn_texel_at reads both as unorm whatever the nfmt), linear tiling.
+    const unsigned dfmt = (t[1] >> 20) & 63;
+    if ((dfmt != 10 && dfmt != 16) || ((t[3] >> 20) & 31) != 8) return nil;
+    const MTLPixelFormat format = dfmt == 10 ? MTLPixelFormatRGBA8Unorm : MTLPixelFormatB5G6R5Unorm;
     const std::uint64_t base = (std::uint64_t(t[0]) | std::uint64_t(t[1] & 0xff) << 32) << 8;
     const std::uint64_t width = (t[2] & 0x3fff) + 1, height = ((t[2] >> 14) & 0x3fff) + 1, pitch = ((t[4] >> 13) & 0x3fff) + 1;
     if (pitch < width) return nil;
-    const std::uint64_t rowBytes = pitch * 4, bytes = rowBytes * height;
+    const std::uint64_t rowBytes = pitch * (dfmt == 10 ? 4 : 2), bytes = rowBytes * height;
     std::uint64_t offset = 0;
     bool inside = false;
     if (!rangeCount) {
@@ -136,9 +138,9 @@ id<MTLTexture> PM4MetalRenderer::nativeTexture(const std::array<std::uint32_t, 8
         inside = base >= start && base - start <= size && bytes <= size - (base - start);
         offset = ranges[3 * k + 2] + (base - start);
     }
-    const NSUInteger alignment = [device_ minimumLinearTextureAlignmentForPixelFormat:MTLPixelFormatRGBA8Unorm];
+    const NSUInteger alignment = [device_ minimumLinearTextureAlignmentForPixelFormat:format];
     if (!inside || !alignment || offset % alignment || rowBytes % alignment) return nil;
-    MTLTextureDescriptor* descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+    MTLTextureDescriptor* descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format
                                                                                           width:width height:height mipmapped:NO];
     descriptor.storageMode = memory.storageMode;
     descriptor.cpuCacheMode = memory.cpuCacheMode;

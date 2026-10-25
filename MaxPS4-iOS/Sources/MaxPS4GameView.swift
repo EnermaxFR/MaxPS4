@@ -201,6 +201,7 @@ struct MaxPS4GameView: View {
     @State private var device = MTLCreateSystemDefaultDevice()
     @State private var touch: UInt32 = 0
     @State private var hasLaunched = false
+    @AppStorage("maxps4.metal.nativeTextures") private var nativeTextures = false
     private let poll = Timer.publish(every: 1.0 / 60, on: .main, in: .common).autoconnect()
 #endif
     var body: some View {
@@ -232,8 +233,10 @@ struct MaxPS4GameView: View {
                         }
                         Button(hasLaunched ? "Rejouer" : "Jouer") {
                             touch = 0; hasLaunched = true
-                            session.start(url: directory, device: device)
+                            session.start(url: directory, device: device, nativeTextures: nativeTextures)
                         }.buttonStyle(.borderedProminent).tint(.cyan)
+                        Toggle("Textures Metal natives (expérimental)", isOn: $nativeTextures)
+                            .font(.footnote).frame(maxWidth: 320)
                         Text("Tourne l’iPhone pour jouer en paysage.")
                             .font(.caption).foregroundStyle(.secondary)
                     }

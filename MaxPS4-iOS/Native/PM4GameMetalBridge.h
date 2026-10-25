@@ -11,6 +11,10 @@ typedef BOOL (^MaxPS4GameMemoryReader)(uint64_t, void*, size_t);
 @interface MaxPS4GameMetalBridge : NSObject
 - (nullable instancetype)initWithDevice:(id<MTLDevice>)device
                                 reader:(MaxPS4GameMemoryReader)reader;
+// Experimental: native Metal texel reads (PM4MetalRenderer nativeTextures).
+- (nullable instancetype)initWithDevice:(id<MTLDevice>)device
+                                reader:(MaxPS4GameMemoryReader)reader
+                        nativeTextures:(BOOL)nativeTextures;
 - (int32_t)submit:(const uint32_t*)words count:(size_t)count;
 // Returns an owned, immutable display copy, cropped to VideoOut dimensions.
 // nil while a submission holds the renderer, or if the address was not drawn.

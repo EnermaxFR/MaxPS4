@@ -778,11 +778,15 @@ GCN_FN uint gcn_packed16(GCNMemory M, ulong o) { return uint(*(device const usho
 GCN_FN uint gcn_packed8(GCNMemory M, ulong o) { return uint(M.p[o]); }
 GCN_FN bool gcn_native_texel(GCNMemory M, GCNRes8 t, int x, int y, thread float4& value) {
 #if GCN_NATIVE_TEXTURES
-    if (!M.native || M.native->enabled == 0u || ((t.d[1] >> 20) & 63u) != 10u) return false;
+    const uint dfmt = (t.d[1] >> 20) & 63u;
+    if (!M.native || M.native->enabled == 0u || (dfmt != 10u && dfmt != 16u)) return false;
     if (any(M.native->low != uint4(t.d[0],t.d[1],t.d[2],t.d[3])) ||
         any(M.native->high != uint4(t.d[4],t.d[5],t.d[6],t.d[7]))) return false;
     if (x < 0 || y < 0 || uint(x) >= M.native->image.get_width() || uint(y) >= M.native->image.get_height()) return false;
-    value = M.native->image.read(uint2(x,y)); return true;
+    value = M.native->image.read(uint2(x,y));
+    // 5_6_5 viewed as B5G6R5Unorm: GCN's first component is the low 5 bits, Metal's blue.
+    if (dfmt == 16u) value = float4(value.b, value.g, value.r, 1.0f);
+    return true;
 #else
     return false;
 #endif

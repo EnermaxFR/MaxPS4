@@ -26,14 +26,17 @@ struct GameMetalState {
     id<MTLCommandQueue> queue;
     std::string error;
     double encodeMs = 0, waitMs = 0, renderGpuMs = -1, copyMs = 0, copyGpuMs = -1;
+    bool nativeTextures;
     NSString* report() const {
-        return [NSString stringWithFormat:@"Metal : %u dessins, %u rendus, %u échecs, %u passes, %u buffers créés, %u réutilisés\nDernier lot : CPU %.2f ms · GPU %@ ms · attente %.2f ms\nCopie image : CPU %.2f ms · GPU %@ ms",
+        NSString* native = nativeTextures ? [NSString stringWithFormat:@"\nTextures natives : %u dessins", renderer.nativeDraws] : @"";
+        return [NSString stringWithFormat:@"Metal : %u dessins, %u rendus, %u échecs, %u passes, %u buffers créés, %u réutilisés\nDernier lot : CPU %.2f ms · GPU %@ ms · attente %.2f ms\nCopie image : CPU %.2f ms · GPU %@ ms%@",
             stats.draws, stats.rendered, stats.failed, renderer.renderPasses, renderer.buffersBuilt, renderer.buffersReused,
-            encodeMs, gpuText(renderGpuMs), waitMs, copyMs, gpuText(copyGpuMs)];
+            encodeMs, gpuText(renderGpuMs), waitMs, copyMs, gpuText(copyGpuMs), native];
     }
-    GameMetalState(id<MTLDevice> device, MaxPS4GameMemoryReader reader)
+    GameMetalState(id<MTLDevice> device, MaxPS4GameMemoryReader reader, bool nativeTextures)
         : memory{[reader](uint64_t a, void* d, size_t n) { return bool(reader(a,d,n)); }, {}},
-          collector(memory, stats), renderer(device, memory, nil, 0), device(device), queue([device newCommandQueue]) {}
+          collector(memory, stats), renderer(device, memory, nil, 0, nativeTextures), device(device),
+          queue([device newCommandQueue]), nativeTextures(nativeTextures) {}
 };
 }
 @interface MaxPS4GameMetalBridge ()
@@ -43,9 +46,12 @@ struct GameMetalState {
     std::unique_ptr<GameMetalState> state_;
 }
 - (instancetype)initWithDevice:(id<MTLDevice>)device reader:(MaxPS4GameMemoryReader)reader {
+    return [self initWithDevice:device reader:reader nativeTextures:NO];
+}
+- (instancetype)initWithDevice:(id<MTLDevice>)device reader:(MaxPS4GameMemoryReader)reader nativeTextures:(BOOL)nativeTextures {
     if ((self = [super init])) {
         self.lastReport = @"Metal : préparation du premier rendu";
-        state_ = std::make_unique<GameMetalState>(device, [reader copy]);
+        state_ = std::make_unique<GameMetalState>(device, [reader copy], nativeTextures);
         if (!state_->queue) return nil;
     }
     return self;
