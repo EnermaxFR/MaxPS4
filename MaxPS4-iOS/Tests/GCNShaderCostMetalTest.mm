@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include <algorithm>
 using namespace maxps4::gpu;
 using namespace gcn_test;
 namespace {
@@ -75,6 +76,17 @@ fragment float4 metal_sample_fragment(GCNVaryings in [[stage_in]], texture2d<flo
         const std::string oneTap = replaced(prelude, "if (!linear) return gcn_fetch_at", "if (true) return gcn_fetch_at");
         const std::string noLookup = replaced(prelude, "if (gcn_locate(M, base, ((ulong(height) - 1ul) * pitch + width) * bytes, offset))",
             "offset = M.ranges[5]; if (true)");
+        // The runtime before per-axis wrapping (same results, measured in the same run).
+        std::string previousWrap = replaced(prelude, "if (x >= 0 && x < size) return x; ", "");
+        previousWrap = replaced(previousWrap, "int m = x; if (m < 0 || m >= period) { m = x % period; if (m < 0) m += period; }",
+                                "int m = x % period; if (m < 0) m += period;");
+        for (const char* tap : {"c00 = bx0 || by0 ? gcn_border_color(s) : gcn_texel_at(M, t, wx0, wy0, resolved, offset)|c00 = gcn_fetch_at(M, t, s, x0, y0, resolved, offset)",
+                                "c10 = bx1 || by0 ? gcn_border_color(s) : gcn_texel_at(M, t, wx1, wy0, resolved, offset)|c10 = gcn_fetch_at(M, t, s, x0 + 1, y0, resolved, offset)",
+                                "c01 = bx0 || by1 ? gcn_border_color(s) : gcn_texel_at(M, t, wx0, wy1, resolved, offset)|c01 = gcn_fetch_at(M, t, s, x0, y0 + 1, resolved, offset)",
+                                "c11 = bx1 || by1 ? gcn_border_color(s) : gcn_texel_at(M, t, wx1, wy1, resolved, offset)|c11 = gcn_fetch_at(M, t, s, x0 + 1, y0 + 1, resolved, offset)"}) {
+            const std::string pair = tap; const auto bar = pair.find('|');
+            previousWrap = replaced(previousWrap, pair.substr(0, bar), pair.substr(bar + 1));
+        }
         struct Variant { const char* name; std::string source; const char* fragment; bool draws; std::string prelude = {}; };
         std::vector<Variant> variants = {
             {"empty pass (clear only)", "", "", false},
@@ -87,6 +99,7 @@ fragment float4 metal_sample_fragment(GCNVaryings in [[stage_in]], texture2d<flo
             {"translated, no sample_mask input", vs.source + ps.source + noMask, "gcn_fragment", true},
             {"entry only (program not run)", vs.source + ps.source + entryOnly, "gcn_fragment", true},
             {"translated, full gcn_clear (before)", vs.source + ps.source + fullClear, "gcn_fragment", true},
+            {"sample: previous wrap code", vs.source + ps.source + entry, "gcn_fragment", true, previousWrap},
             {"sample: identity swizzle", vs.source + ps.source + entry, "gcn_fragment", true, identitySwizzle},
             {"sample: clamp instead of wrap", vs.source + ps.source + entry, "gcn_fragment", true, clampOnly},
             {"sample: one tap (nearest)", vs.source + ps.source + entry, "gcn_fragment", true, oneTap},
@@ -129,8 +142,8 @@ fragment float4 metal_sample_fragment(GCNVaryings in [[stage_in]], texture2d<flo
         [metalImage replaceRegion:MTLRegionMake2D(0, 0, imageW, imageH) mipmapLevel:0
                         withBytes:arena.bytes.data() + (image - Arena::start) bytesPerRow:imageW * 4];
         id<MTLCommandQueue> queue = [device newCommandQueue];
-        std::vector<double> total(variants.size()); std::vector<unsigned> timed(variants.size());
-        constexpr unsigned runs = 14, warmup = 4;
+        std::vector<std::vector<double>> samples(variants.size());
+        constexpr unsigned runs = 34, warmup = 4;
         for (unsigned run = 0; run < runs; ++run) for (std::size_t turn = 0; turn < variants.size(); ++turn) {
             const std::size_t k = (turn + run) % variants.size(); // rotate the order between runs
             id<MTLCommandBuffer> command = [queue commandBuffer];
@@ -150,12 +163,16 @@ fragment float4 metal_sample_fragment(GCNVaryings in [[stage_in]], texture2d<flo
             }
             [encoder endEncoding]; [command commit]; [command waitUntilCompleted];
             assert(command.status == MTLCommandBufferStatusCompleted && !command.error);
-            if (run >= warmup && command.GPUStartTime > 0) { total[k] += (command.GPUEndTime - command.GPUStartTime) * 1000; ++timed[k]; }
+            if (run >= warmup && command.GPUStartTime > 0) samples[k].push_back((command.GPUEndTime - command.GPUStartTime) * 1000);
         }
-        std::printf("SHADER COST on %s, %ux%u full-screen draw (GPU ms, mean of %u):\n", device.name.UTF8String, screenW, screenH, runs - warmup);
+        // The shared CI GPU is noisy: the median and the minimum resist outliers better than a mean.
+        std::printf("SHADER COST on %s, %ux%u full-screen draw (GPU ms over %u runs):\n", device.name.UTF8String, screenW, screenH, runs - warmup);
         for (std::size_t k = 0; k < variants.size(); ++k) {
-            const double ms = timed[k] ? total[k] / timed[k] : -1;
-            std::printf("SHADER COST %-36s %9.3f ms  %7.2f ns/pixel\n", variants[k].name, ms, ms * 1e6 / (screenW * screenH));
+            auto& times = samples[k];
+            std::sort(times.begin(), times.end());
+            const double median = times.empty() ? -1 : times[times.size() / 2], fastest = times.empty() ? -1 : times.front();
+            std::printf("SHADER COST %-36s median %8.3f ms  min %8.3f ms  %6.2f ns/pixel\n", variants[k].name, median, fastest,
+                        median * 1e6 / (screenW * screenH));
         }
         std::puts("PASS shader cost research (timings only, CI GPU, not iPhone game FPS)");
     }
