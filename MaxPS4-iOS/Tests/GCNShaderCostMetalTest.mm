@@ -67,14 +67,15 @@ fragment float4 metal_sample_fragment(GCNVaryings in [[stage_in]], texture2d<flo
         const std::string entryOnly = replaced(entry, "    ps_program(L, M, Q);\n", "");
         // Before the fix: entry points zeroed every attr/param/color per invocation.
         const std::string fullClear = replaced(entry, "GCNLane L; gcn_lane_init(L);", "GCNLane L; gcn_clear(L);");
-        // attr/param/color arrays of one element: this program uses only index 0.
-        auto smallLane = [&](std::string s) {
-            s = replaced(s, "float4 attr[32];", "float4 attr[1];");
-            s = replaced(s, "float4 param[32]; float4 color[8];", "float4 param[1]; float4 color[1];");
-            s = replaced(s, "k < 32u; ++k) { L.attr[k]", "k < 1u; ++k) { L.attr[k]");
-            return replaced(s, "k < 8u; ++k) L.color[k]", "k < 1u; ++k) L.color[k]");
-        };
-        struct Variant { const char* name; std::string source; const char* fragment; bool draws; bool smallLane = false; };
+        // gcn_sample parts removed one at a time (pixels change, timings only).
+        const std::string prelude = gcnMetalPrelude();
+        const std::string identitySwizzle = replaced(prelude, "return gcn_texture_swizzle(t, float4(c0, c1, c2, c3));", "return float4(c0, c1, c2, c3);");
+        const std::string clampOnly = replaced(prelude, "GCN_FN int gcn_wrap(int x, int size, uint mode, GCN_THREAD bool& border) {",
+            "GCN_FN int gcn_wrap(int x, int size, uint mode, GCN_THREAD bool& border) { return x < 0 ? 0 : (x >= size ? size - 1 : x);");
+        const std::string oneTap = replaced(prelude, "if (!linear) return gcn_fetch_at", "if (true) return gcn_fetch_at");
+        const std::string noLookup = replaced(prelude, "if (gcn_locate(M, base, ((ulong(height) - 1ul) * pitch + width) * bytes, offset))",
+            "offset = M.ranges[5]; if (true)");
+        struct Variant { const char* name; std::string source; const char* fragment; bool draws; std::string prelude = {}; };
         std::vector<Variant> variants = {
             {"empty pass (clear only)", "", "", false},
             {"trivial Metal fragment", vs.source + ps.source + entry + trivial, "trivial_fragment", true},
@@ -86,8 +87,10 @@ fragment float4 metal_sample_fragment(GCNVaryings in [[stage_in]], texture2d<flo
             {"translated, no sample_mask input", vs.source + ps.source + noMask, "gcn_fragment", true},
             {"entry only (program not run)", vs.source + ps.source + entryOnly, "gcn_fragment", true},
             {"translated, full gcn_clear (before)", vs.source + ps.source + fullClear, "gcn_fragment", true},
-            {"translated, small GCNLane", vs.source + ps.source + entry, "gcn_fragment", true, true},
-            {"entry only, small GCNLane", vs.source + ps.source + entryOnly, "gcn_fragment", true, true},
+            {"sample: identity swizzle", vs.source + ps.source + entry, "gcn_fragment", true, identitySwizzle},
+            {"sample: clamp instead of wrap", vs.source + ps.source + entry, "gcn_fragment", true, clampOnly},
+            {"sample: one tap (nearest)", vs.source + ps.source + entry, "gcn_fragment", true, oneTap},
+            {"sample: no range lookup", vs.source + ps.source + entry, "gcn_fragment", true, noLookup},
         };
         MTLCompileOptions* options = [MTLCompileOptions new];
         if (@available(macOS 15.0, iOS 18.0, *)) options.mathMode = MTLMathModeSafe;
@@ -95,7 +98,7 @@ fragment float4 metal_sample_fragment(GCNVaryings in [[stage_in]], texture2d<flo
         for (std::size_t k = 0; k < variants.size(); ++k) {
             if (!variants[k].draws) continue;
             NSError* error = nil;
-            const std::string source = (variants[k].smallLane ? smallLane(gcnMetalPrelude()) : gcnMetalPrelude()) + variants[k].source;
+            const std::string source = (variants[k].prelude.empty() ? prelude : variants[k].prelude) + variants[k].source;
             id<MTLLibrary> library = [device newLibraryWithSource:[NSString stringWithUTF8String:source.c_str()] options:options error:&error];
             if (!library) std::printf("%s MSL: %s\n", variants[k].name, error.localizedDescription.UTF8String);
             assert(library);
@@ -108,7 +111,10 @@ fragment float4 metal_sample_fragment(GCNVaryings in [[stage_in]], texture2d<flo
             assert(pipelines[k]);
         }
         id<MTLBuffer> memory = [device newBufferWithBytes:arena.bytes.data() length:arena.bytes.size() options:MTLResourceStorageModeShared];
-        State state{}; state.base = Arena::start; state.size = arena.bytes.size();
+        // Two copied ranges over the same buffer, as PM4MetalRenderer uploads them.
+        State state{}; state.count = 2;
+        state.ranges[0] = Arena::start; state.ranges[1] = image - Arena::start; state.ranges[2] = 0;
+        state.ranges[3] = image; state.ranges[4] = imageW * imageH * 4; state.ranges[5] = image - Arena::start;
         state.vs[0] = std::uint32_t(fetchShader); state.vs[2] = std::uint32_t(vertexTable);
         const uint32_t t[12] = {std::uint32_t(image >> 8), 10u << 20, (imageW - 1) | ((imageH - 1) << 14), 0x90800facu,
                                 (imageW - 1) << 13, 0, 0, 0, 0, 0, 0x500000, 0};
