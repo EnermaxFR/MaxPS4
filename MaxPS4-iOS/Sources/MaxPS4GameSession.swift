@@ -115,13 +115,14 @@ final class MaxPS4GameSource: @unchecked Sendable {
             maxps4_fex_engine_close(engine)
         }
     }
-    func run(url: URL, device: MTLDevice, nativeTextures: Bool = false, progress: @escaping @Sendable (String) -> Void) -> String {
+    func run(url: URL, device: MTLDevice, nativeTextures: Bool = false, tso: Bool = true, progress: @escaping @Sendable (String) -> Void) -> String {
         dispatchPrecondition(condition: .onQueue(MaxPS4FEXMetalExecution.queue))
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         defer { close() }
         do {
             progress("Ouverture du moteur…")
+            _ = maxps4_fex_set_tso_emulation(tso ? 1 : 0)
             var opened: OpaquePointer?
             let status = maxps4_fex_engine_open(&opened)
             guard status == 0, let opened else { throw failure("Ouverture FEX", status) }
@@ -198,7 +199,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private var generation = UUID()
     private var stopping: UUID?
     private var heartbeatTimer: Timer?
-    func start(url: URL, device: MTLDevice, nativeTextures: Bool = false) {
+    func start(url: URL, device: MTLDevice, nativeTextures: Bool = false, tso: Bool = true) {
         stop()
         let source = MaxPS4GameSource(), id = UUID()
         generation = id; self.source = source; worker = source; running = true
@@ -211,7 +212,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
             }
         }
         MaxPS4FEXMetalExecution.queue.async { [weak self] in
-            let result = source.run(url: url, device: device, nativeTextures: nativeTextures) { [weak self] text in
+            let result = source.run(url: url, device: device, nativeTextures: nativeTextures, tso: tso) { [weak self] text in
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.generation == id, self.running else { return }
                     self.report = text

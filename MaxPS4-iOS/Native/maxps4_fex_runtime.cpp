@@ -58,6 +58,12 @@
 extern "C" int maxps4_native_guest_x86_run(const uint8_t*, size_t, uint32_t,
                                            uint64_t*) noexcept;
 namespace {
+// Unaligned TSO/atomic accesses repaired in the SIGBUS handler (signal-safe
+// lock-free counters), reported with the thread activity.
+std::atomic<uint64_t> alignment_repairs {0};
+std::atomic<uint64_t> last_repair_pc {0};
+// maxps4_fex_set_tso_emulation: applies to engines opened afterwards.
+std::atomic<bool> tso_emulation {true};
 class GuestThreads;
 // scePthreadCreate/Join/Exit and the entry's exit function for a general run
 // (see GuestThreads), defined once GuestThreads is complete.
@@ -444,6 +450,8 @@ private:
 #endif
                     }
                     pc+=*repaired;
+                    alignment_repairs.fetch_add(1, std::memory_order_relaxed);
+                    last_repair_pc.store(pc, std::memory_order_relaxed);
                     return;
                 }
             }
@@ -850,6 +858,10 @@ extern "C" int32_t maxps4_fex_engine_open(maxps4_fex_engine **out) {
             std::to_string(static_cast<uint64_t>(FEXCore::Config::HostFeatures::DISABLESVE)));
 #endif
     }
+#if !defined(VIXL_SIMULATOR)
+    // Read by the context created below; the simulator always runs without it.
+    FEXCore::Config::Set(FEXCore::Config::CONFIG_TSOENABLED, tso_emulation.load() ? "1" : "0");
+#endif
     // Real Darwin sysctl-based feature discovery; never fabricated features.
     const auto features = FEX::FetchHostFeatures();
     engine->context = FEXCore::Context::Context::CreateNewContext(features);
@@ -1716,9 +1728,17 @@ extern "C" int64_t maxps4_fex_engine_videoout_vblank(maxps4_fex_engine* engine, 
     if (!engine) return maxps4::PS4VideoOut::error(11);
     return engine->libkernel.videoout().vblank(port);
 }
+extern "C" int32_t maxps4_fex_set_tso_emulation(uint32_t enabled) {
+    if (enabled > 1) return -EINVAL;
+    tso_emulation = enabled != 0; return 0;
+}
 extern "C" int32_t maxps4_fex_engine_thread_activity(maxps4_fex_engine* engine, char* text, size_t capacity) {
     if (!engine || !text || !capacity) return -EINVAL;
-    std::string out;
+    char header[160];
+    std::snprintf(header, sizeof header, "TSO %s · réparations d'alignement %llu (dernier PC hôte 0x%llx)\n",
+        tso_emulation.load() ? "émulé" : "désactivé", (unsigned long long)alignment_repairs.load(),
+        (unsigned long long)last_repair_pc.load());
+    std::string out = header;
     const uint64_t now = ProbeAddressSpace::now_ns();
     for (const auto& a : engine->probe.activity) {
         const uint64_t thread = a.thread.load();

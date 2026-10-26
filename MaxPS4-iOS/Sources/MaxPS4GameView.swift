@@ -202,6 +202,7 @@ struct MaxPS4GameView: View {
     @State private var touch: UInt32 = 0
     @State private var hasLaunched = false
     @AppStorage("maxps4.metal.nativeTextures") private var nativeTextures = false
+    @AppStorage("maxps4.fex.tso") private var tso = true
     private let poll = Timer.publish(every: 1.0 / 60, on: .main, in: .common).autoconnect()
 #endif
     var body: some View {
@@ -233,9 +234,11 @@ struct MaxPS4GameView: View {
                         }
                         Button(hasLaunched ? "Rejouer" : "Jouer") {
                             touch = 0; hasLaunched = true
-                            session.start(url: directory, device: device, nativeTextures: nativeTextures)
+                            session.start(url: directory, device: device, nativeTextures: nativeTextures, tso: tso)
                         }.buttonStyle(.borderedProminent).tint(.cyan)
                         Toggle("Textures Metal natives (expérimental)", isOn: $nativeTextures)
+                            .font(.footnote).frame(maxWidth: 320)
+                        Toggle("Ordre mémoire x86 (TSO)", isOn: $tso)
                             .font(.footnote).frame(maxWidth: 320)
                         Text("Tourne l’iPhone pour jouer en paysage.")
                             .font(.caption).foregroundStyle(.secondary)
