@@ -109,6 +109,17 @@ int64_t maxps4_fex_engine_videoout_vblank(maxps4_fex_engine *engine, uint64_t po
 // how long, or how long it has run guest code since its last call. Diagnostic
 // only, lock-free, NUL-terminated and truncated to `capacity`.
 int32_t maxps4_fex_engine_thread_activity(maxps4_fex_engine *engine, char *text, size_t capacity);
+// Where the main guest thread of the running image is right now, sampled by
+// a signal that lets it continue. Refused (-EBUSY) while it is inside an HLE
+// call, -ESRCH when nothing runs. Diagnostic only.
+typedef struct maxps4_fex_thread_sample {
+    uint64_t host_pc, host_lr;
+    uint64_t guest_rip; // JIT: reconstructed; otherwise FEX's last stored RIP.
+    uint32_t location;  // 1: JIT code, 2: FEX dispatcher, 3: other host code.
+    char symbol[128];   // Host symbol of host_pc, "" when unknown.
+    char caller[128];   // Host symbol of host_lr.
+} maxps4_fex_thread_sample;
+int32_t maxps4_fex_engine_sample_main_thread(maxps4_fex_engine *engine, maxps4_fex_thread_sample *sample);
 // Experimental: x86 memory-order (TSO) emulation for engines opened after
 // this call (default 1). The VIXL simulator always runs with it off.
 int32_t maxps4_fex_set_tso_emulation(uint32_t enabled);

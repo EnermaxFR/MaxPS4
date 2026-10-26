@@ -21,6 +21,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private var started: TimeInterval?
     private var vblanksSent = 0
     private var lastTicket: UInt64 = 0
+    private var relocation: UInt64 = 0
     private var vblankClock = MaxPS4VideoOutClock()
     private var vblankTimer: DispatchSourceTimer?
     private let vblanks = DispatchQueue(label: "com.enermaxfr.maxps4.vblank", qos: .userInteractive)
@@ -44,7 +45,24 @@ final class MaxPS4GameSource: @unchecked Sendable {
         let seconds = Int(ProcessInfo.processInfo.systemUptime - started)
         var activity = [CChar](repeating: 0, count: 4096)
         _ = maxps4_fex_engine_thread_activity(engine, &activity, activity.count)
-        return "Depuis le démarrage du JIT : \(seconds) s · dernier ticket VideoOut \(lastTicket) · images affichées \(displayed) · VBlank envoyés \(vblanksSent)\n" + String(cString: activity)
+        return "Depuis le démarrage du JIT : \(seconds) s · dernier ticket VideoOut \(lastTicket) · images affichées \(displayed) · VBlank envoyés \(vblanksSent)\n" + String(cString: activity) + mainThreadSample(engine)
+    }
+    // One sample of where the main guest thread is (only while outside HLE).
+    private func mainThreadSample(_ engine: OpaquePointer) -> String {
+        var sample = maxps4_fex_thread_sample()
+        let status = maxps4_fex_engine_sample_main_thread(engine, &sample)
+        guard status == 0 else { return status == -EBUSY ? "" : "Échantillon thread 1 : indisponible (\(status))" }
+        func text<T>(_ field: T) -> String {
+            withUnsafeBytes(of: field) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+        }
+        let rip = sample.guest_rip, relative = rip >= relocation ? rip - relocation : rip
+        let position = "RIP 0x\(String(rip, radix: 16)) (relatif 0x\(String(relative, radix: 16)))"
+        switch sample.location {
+        case 1: return "Échantillon thread 1 : code JIT, \(position)"
+        case 2: return "Échantillon thread 1 : répartiteur FEX, dernier \(position)"
+        default:
+            return "Échantillon thread 1 : code hôte \(text(sample.symbol)) appelé depuis \(text(sample.caller)), dernier \(position)"
+        }
     }
 
     func input(_ buttons: UInt32) {
@@ -159,6 +177,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
             lock.lock()
             bridge = metal; ready = !stopped
             started = ProcessInfo.processInfo.systemUptime
+            self.relocation = relocation
             let cancelled = stopped
             if ready { sendInputLocked(opened) }
             if ready {

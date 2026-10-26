@@ -46,6 +46,7 @@
 #include <optional>
 #include <system_error>
 #include <thread>
+#include <dlfcn.h>
 #include <pthread.h>
 #include <signal.h>
 #if defined(__APPLE__)
@@ -364,6 +365,14 @@ public:
     std::atomic<int> signal {0};
     int32_t code = 0;
     uint64_t address = 0;
+    // maxps4_fex_engine_sample_main_thread: the next SIGURG seen while
+    // `sample_request` is set records where the guarded thread is, then
+    // lets it run on. `where`: 1 JIT code, 2 FEX dispatcher, 3 other host code.
+    struct Sample { uint64_t pc = 0, lr = 0, rip = 0; uint32_t where = 0; };
+    std::atomic<bool> sample_request {false};
+    std::atomic<uint32_t> sample_sequence {0};
+    Sample sample {};
+    const pthread_t host = ::pthread_self();
 private:
     struct AlignmentAccess { uint64_t address; size_t bytes; uint32_t permissions; };
     // Operand forms recognized by the pinned FEX unaligned handler. Include
@@ -400,6 +409,22 @@ private:
         auto& sp = machine->uc_mcontext.sp;
 #endif
         auto* guard = active;
+        if (number == SIGURG && guard && guard->sample_request.exchange(false)) {
+            const bool jit = guard->context->IsAddressInCodeBuffer(guard->thread, pc);
+            const bool dispatcher = pc >= guard->config.DispatcherBegin && pc < guard->config.DispatcherEnd;
+#if defined(__APPLE__)
+            guard->sample.lr = machine->uc_mcontext->__ss.__lr;
+#else
+            guard->sample.lr = machine->uc_mcontext.regs[30];
+#endif
+            guard->sample.pc = pc;
+            guard->sample.where = jit ? 1 : dispatcher ? 2 : 3;
+            // Outside JIT code, the guest position FEX last stored (block granularity).
+            guard->sample.rip = jit ? guard->context->RestoreRIPFromHostPC(guard->thread, pc) :
+                guard->thread->CurrentFrame->State.rip;
+            guard->sample_sequence.fetch_add(1, std::memory_order_release);
+            return;
+        }
         if (guard && !guard->signal.load()) {
             const bool in_jit = guard->context->IsAddressInCodeBuffer(guard->thread, pc);
             // x86 permits unaligned accesses. ARM64 TSO loads/stores and locked
@@ -805,6 +830,9 @@ struct maxps4_fex_engine {
     maxps4_fex_guest_fault last_fault{};
     uint32_t time_limit_ms = 0; // 0: no limit.
     std::atomic<bool> stop_requested{false};
+    // The running main thread's guard, for sampling; guarded by sample_lock.
+    std::mutex sample_lock;
+    GuestFaultGuard* main_guard = nullptr;
     maxps4::GuestFrame frame;
     uint64_t frame_sequence = 0;
     bool frame_code_cached = false;
@@ -1123,7 +1151,9 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
                                   const auto low=reinterpret_cast<uintptr_t>(stack_base);
                                   return a>=low && a-low<=page && n<=page-(a-low) && !(p&~6u);
                               });
+        { std::lock_guard sampling(engine->sample_lock); engine->main_guard = &guard; }
         engine->context->ExecuteThread(thread);
+        { std::lock_guard sampling(engine->sample_lock); engine->main_guard = nullptr; }
         int signal = guard.signal.load();
         // scePthreadExit on the main thread: the other threads carry on.
         const bool main_exit = threads && !signal && threads->main_thread_exited();
@@ -1727,6 +1757,39 @@ extern "C" int64_t maxps4_fex_engine_videoout_complete(maxps4_fex_engine* engine
 extern "C" int64_t maxps4_fex_engine_videoout_vblank(maxps4_fex_engine* engine, uint64_t port) {
     if (!engine) return maxps4::PS4VideoOut::error(11);
     return engine->libkernel.videoout().vblank(port);
+}
+extern "C" int32_t maxps4_fex_engine_sample_main_thread(maxps4_fex_engine* engine, maxps4_fex_thread_sample* out) {
+    if (!engine || !out) return -EINVAL;
+    *out = {};
+    if (!GuestFaultGuard::available) return -ENOTSUP;
+    // SIGURG would interrupt the host syscalls of an HLE call: sample only
+    // while the main guest thread runs outside HLE.
+    for (const auto& a : engine->probe.activity)
+        if (a.thread.load() == 1 && a.inside.load()) return -EBUSY;
+    std::lock_guard lock(engine->sample_lock);
+    auto* guard = engine->main_guard;
+    if (!guard) return -ESRCH;
+    const uint32_t before = guard->sample_sequence.load(std::memory_order_acquire);
+    guard->sample_request = true;
+    for (int i = 0; i < 50 && guard->sample_sequence.load(std::memory_order_acquire) == before; ++i) {
+        ::pthread_kill(guard->host, SIGURG);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (guard->sample_sequence.load(std::memory_order_acquire) == before) {
+        guard->sample_request = false;
+        return -ETIMEDOUT;
+    }
+    const auto sample = guard->sample;
+    out->host_pc = sample.pc; out->host_lr = sample.lr; out->guest_rip = sample.rip; out->location = sample.where;
+    auto name = [](uint64_t address, char* text, size_t capacity) {
+        Dl_info info {};
+        if (!::dladdr(reinterpret_cast<void*>(address), &info) || !info.dli_sname) return;
+        std::snprintf(text, capacity, "%s+0x%llx", info.dli_sname,
+            (unsigned long long)(address - reinterpret_cast<uintptr_t>(info.dli_saddr)));
+    };
+    name(sample.pc, out->symbol, sizeof out->symbol);
+    name(sample.lr, out->caller, sizeof out->caller);
+    return 0;
 }
 extern "C" int32_t maxps4_fex_set_tso_emulation(uint32_t enabled) {
     if (enabled > 1) return -EINVAL;
