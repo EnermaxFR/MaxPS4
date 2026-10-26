@@ -287,8 +287,8 @@ struct MaxPS4GameView: View {
                                 }
                             }
                             DisclosureGroup("Détails de la session") {
-                                Text(session.report).font(.footnote.monospaced()).textSelection(.enabled)
-                                ShareLink(item: session.report) { Label("Partager le rapport", systemImage: "square.and.arrow.up") }
+                                Text(session.sharedReport).font(.footnote.monospaced()).textSelection(.enabled)
+                                ShareLink(item: session.sharedReport) { Label("Partager le rapport", systemImage: "square.and.arrow.up") }
                             }.tint(.cyan)
 #endif
                             Button("Quitter le jeu", role: .destructive) { dismiss() }

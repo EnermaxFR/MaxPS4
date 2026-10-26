@@ -18,6 +18,9 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private var missingSince: Date?
     private var buttons: UInt32 = 0
     private var displayed = 0
+    private var started: TimeInterval?
+    private var vblanksSent = 0
+    private var lastTicket: UInt64 = 0
     private var vblankClock = MaxPS4VideoOutClock()
     private var vblankTimer: DispatchSourceTimer?
     private let vblanks = DispatchQueue(label: "com.enermaxfr.maxps4.vblank", qos: .userInteractive)
@@ -29,6 +32,17 @@ final class MaxPS4GameSource: @unchecked Sendable {
         sendInputLocked(engine)
         guard vblankClock.due(at: time) else { return }
         _ = maxps4_fex_engine_videoout_vblank(engine, port)
+        vblanksSent += 1
+    }
+
+    // Progress counters refreshed even when no new image arrives, so a stalled
+    // game can be told apart from a slow one. Nil while another call holds the lock.
+    func heartbeat() -> String? {
+        guard lock.try() else { return nil }
+        defer { lock.unlock() }
+        guard let started else { return nil }
+        let seconds = Int(ProcessInfo.processInfo.systemUptime - started)
+        return "Depuis le démarrage du JIT : \(seconds) s · dernier ticket VideoOut \(lastTicket) · images affichées \(displayed) · VBlank envoyés \(vblanksSent)"
     }
 
     func input(_ buttons: UInt32) {
@@ -53,7 +67,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
         let status = maxps4_fex_engine_videoout_target(engine, &info, &address)
         if status == -EAGAIN { return nil }
         guard status == 0, info.ticket != 0 else { throw failure("VideoOut", status) }
-        port = info.port
+        port = info.port; lastTicket = info.ticket
         return (info, address, bridge)
     }
     func snapshot() throws -> Frame? {
@@ -141,6 +155,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
             guard initialized == 0 else { throw failure("Activer le JIT avec StikDebug puis réessayer", initialized) }
             lock.lock()
             bridge = metal; ready = !stopped
+            started = ProcessInfo.processInfo.systemUptime
             let cancelled = stopped
             if ready { sendInputLocked(opened) }
             if ready {
@@ -173,14 +188,22 @@ final class MaxPS4GameSource: @unchecked Sendable {
     @Published private(set) var running = false
     @Published private(set) var hasPresented = false
     @Published private(set) var report = "Activer le JIT avec StikDebug avant de lancer le jeu."
+    @Published private(set) var heartbeat = ""
     private var worker: MaxPS4GameSource?
     private var generation = UUID()
+    private var heartbeatTimer: Timer?
     func start(url: URL, device: MTLDevice, nativeTextures: Bool = false) {
         stop()
         let source = MaxPS4GameSource(), id = UUID()
         generation = id; self.source = source; worker = source; running = true
-        hasPresented = false
+        hasPresented = false; heartbeat = ""
         report = "Chargement du jeu et préparation Metal…"
+        heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.generation == id, let beat = source.heartbeat() else { return }
+                self.heartbeat = beat
+            }
+        }
         MaxPS4FEXMetalExecution.queue.async { [weak self] in
             let result = source.run(url: url, device: device, nativeTextures: nativeTextures) { [weak self] text in
                 DispatchQueue.main.async { [weak self] in
@@ -199,8 +222,11 @@ final class MaxPS4GameSource: @unchecked Sendable {
     func failed(_ text: String) { stop(); report = text }
     func stop() {
         generation = UUID(); worker?.stop(); worker = nil; source = nil; running = false
+        heartbeatTimer?.invalidate(); heartbeatTimer = nil
         report = "Arrêt demandé."
     }
+    // What "Partager le rapport" sends: the last image report plus live progress.
+    var sharedReport: String { heartbeat.isEmpty ? report : report + "\n" + heartbeat }
     deinit { worker?.stop() }
 }
 #endif
