@@ -173,10 +173,13 @@ final class MaxPS4GameSource: @unchecked Sendable {
             var backend: UInt32 = 0
             let ran = maxps4_fex_engine_run_orbis(opened, &value, &backend, &entry)
             lock.lock(); let wasStopped = stopped; let frames = displayed; lock.unlock()
-            if wasStopped { return "Arrêté après \(frames) images présentées. \(metal.report)" }
             var fault = maxps4_fex_guest_fault()
             _ = maxps4_fex_engine_last_guest_fault(opened, &fault)
             let relativeRIP = fault.rip >= relocation ? fault.rip - relocation : fault.rip
+            // A stop interrupts the main thread: where it was shows what a stalled game waits on.
+            if wasStopped {
+                return "Arrêté après \(frames) images présentées. \(metal.report)\nThread principal interrompu à RIP 0x\(String(fault.rip, radix: 16)) (relatif 0x\(String(relativeRIP, radix: 16)), relocation 0x\(String(relocation, radix: 16)))."
+            }
             return "Exécution terminée (\(ran)), backend \(backend), \(frames) images. \(metal.report)\nSignal \(fault.signal), code \(fault.code), adresse mémoire 0x\(String(fault.address, radix: 16)), RIP 0x\(String(fault.rip, radix: 16)).\nRelocation 0x\(String(relocation, radix: 16)), RIP relatif 0x\(String(relativeRIP, radix: 16))."
         } catch { return "Échec : \(error.localizedDescription)" }
     }
@@ -193,6 +196,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
     @Published private(set) var heartbeat = ""
     private var worker: MaxPS4GameSource?
     private var generation = UUID()
+    private var stopping: UUID?
     private var heartbeatTimer: Timer?
     func start(url: URL, device: MTLDevice, nativeTextures: Bool = false) {
         stop()
@@ -214,15 +218,20 @@ final class MaxPS4GameSource: @unchecked Sendable {
                 }
             }
             DispatchQueue.main.async {
-                guard let self, self.generation == id else { return }
-                self.report = result; self.running = false
+                guard let self else { return }
+                // A stopped session's result (where its main thread was) still
+                // replaces "Arrêt demandé." unless another session has started.
+                if self.generation == id || (self.stopping == id && !self.running) {
+                    self.report = result; self.running = false
+                }
             }
         }
     }
     func input(_ buttons: UInt32) { worker?.input(buttons) }
     func presented(_ text: String) { if running { hasPresented = true; report = text } }
-    func failed(_ text: String) { stop(); report = text }
+    func failed(_ text: String) { stop(); stopping = nil; report = text }
     func stop() {
+        stopping = worker == nil ? nil : generation
         generation = UUID(); worker?.stop(); worker = nil; source = nil; running = false
         heartbeatTimer?.invalidate(); heartbeatTimer = nil
         report = "Arrêt demandé."
