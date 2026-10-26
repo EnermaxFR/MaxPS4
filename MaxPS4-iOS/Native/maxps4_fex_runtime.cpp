@@ -91,6 +91,27 @@ public:
     std::atomic<int> callback_error {0};
     std::atomic<bool> exited {false};
     std::atomic<int32_t> exit_status {0};
+    // Per guest thread: the HLE call in progress, or the last one and when it
+    // returned, so a stalled game shows where each of its threads waits.
+    struct Activity {
+        std::atomic<uint64_t> thread {0}, since {0}, returned {0};
+        std::atomic<uint32_t> service {0};
+        std::atomic<bool> inside {false};
+    };
+    std::array<Activity, 32> activity;
+    static uint64_t now_ns() {
+        return uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+    }
+    // This guest thread's slot; null once all slots are taken.
+    Activity* activity_slot() {
+        for (auto& a : activity) if (a.thread.load(std::memory_order_relaxed) == guest_thread) return &a;
+        for (auto& a : activity) {
+            uint64_t free = 0;
+            if (a.thread.compare_exchange_strong(free, guest_thread)) return &a;
+        }
+        return nullptr;
+    }
     // PS4 identity (PS4Threads) of the guest thread on this host thread.
     static inline thread_local uint64_t guest_thread = 1;
     // Static TLS thread pointer of a child guest thread (0: the image's own).
@@ -124,6 +145,8 @@ public:
                 // seventh, at RSP+8 past the trampoline's return address) are
                 // readable. Bounded images keep 0, which makes them fault.
                 image->general() ? r[x86::REG_RSP] : 0};
+            Activity* slot = activity_slot();
+            if (slot) { slot->service = static_cast<uint32_t>(orbis); slot->since = now_ns(); slot->inside = true; }
             const uint32_t stub = static_cast<uint32_t>(orbis) - maxps4::missing_import_token;
             if (static_cast<uint32_t>(orbis) >= maxps4::missing_import_token) {
                 if (missing_imports && stub < missing_imports->size()) {
@@ -169,6 +192,7 @@ public:
             } else {
                 result = kernel->invoke(orbis,call,guest_thread,posix);
             }
+            if (slot) { slot->since = now_ns(); slot->inside = false; ++slot->returned; }
             ++calls;
             char path[256] = {};
             if (missing_imports && (orbis == maxps4::PS4KernelService::open || orbis == maxps4::PS4KernelService::stat) &&
@@ -1005,6 +1029,7 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     engine->probe.private_stack_size = page;
     engine->probe.calls = 0;
     engine->probe.callback_error = 0;
+    for (auto& a : engine->probe.activity) { a.thread = 0; a.inside = false; a.returned = 0; }
     struct ClearRange {
         ProbeAddressSpace& space;
         ~ClearRange() {
@@ -1690,6 +1715,32 @@ extern "C" int64_t maxps4_fex_engine_videoout_complete(maxps4_fex_engine* engine
 extern "C" int64_t maxps4_fex_engine_videoout_vblank(maxps4_fex_engine* engine, uint64_t port) {
     if (!engine) return maxps4::PS4VideoOut::error(11);
     return engine->libkernel.videoout().vblank(port);
+}
+extern "C" int32_t maxps4_fex_engine_thread_activity(maxps4_fex_engine* engine, char* text, size_t capacity) {
+    if (!engine || !text || !capacity) return -EINVAL;
+    std::string out;
+    const uint64_t now = ProbeAddressSpace::now_ns();
+    for (const auto& a : engine->probe.activity) {
+        const uint64_t thread = a.thread.load();
+        if (!thread) continue;
+        const uint32_t raw = a.service.load();
+        const char* name = raw >= maxps4::missing_import_token ? "import manquant" :
+            service_name(static_cast<maxps4::PS4KernelService>(raw));
+        const double seconds = double(now - std::min(now, a.since.load())) / 1e9;
+        const auto returned = (unsigned long long)a.returned.load();
+        char line[192];
+        if (a.inside.load())
+            std::snprintf(line, sizeof line, "thread %llu : dans %s depuis %.1f s (%llu appels)\n",
+                (unsigned long long)thread, name, seconds, returned);
+        else
+            std::snprintf(line, sizeof line, "thread %llu : code du jeu depuis %.1f s, dernier %s (%llu appels)\n",
+                (unsigned long long)thread, seconds, name, returned);
+        out += line;
+    }
+    const size_t n = std::min(capacity - 1, out.size());
+    std::memcpy(text, out.data(), n);
+    text[n] = 0;
+    return 0;
 }
 extern "C" int32_t maxps4_fex_engine_read_ps4(maxps4_fex_engine* engine,
     uint64_t address, uint8_t* output, size_t length) {

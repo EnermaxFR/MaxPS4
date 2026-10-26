@@ -40,9 +40,11 @@ final class MaxPS4GameSource: @unchecked Sendable {
     func heartbeat() -> String? {
         guard lock.try() else { return nil }
         defer { lock.unlock() }
-        guard let started else { return nil }
+        guard let started, let engine else { return nil }
         let seconds = Int(ProcessInfo.processInfo.systemUptime - started)
-        return "Depuis le démarrage du JIT : \(seconds) s · dernier ticket VideoOut \(lastTicket) · images affichées \(displayed) · VBlank envoyés \(vblanksSent)"
+        var activity = [CChar](repeating: 0, count: 4096)
+        _ = maxps4_fex_engine_thread_activity(engine, &activity, activity.count)
+        return "Depuis le démarrage du JIT : \(seconds) s · dernier ticket VideoOut \(lastTicket) · images affichées \(displayed) · VBlank envoyés \(vblanksSent)\n" + String(cString: activity)
     }
 
     func input(_ buttons: UInt32) {

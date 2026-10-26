@@ -105,6 +105,10 @@ int32_t maxps4_fex_engine_videoout_snapshot(maxps4_fex_engine *engine,
 int64_t maxps4_fex_engine_videoout_complete(maxps4_fex_engine *engine,
     uint64_t ticket, uint32_t presented);
 int64_t maxps4_fex_engine_videoout_vblank(maxps4_fex_engine *engine, uint64_t port);
+// One line per guest thread of the current run: the HLE call it is in and for
+// how long, or how long it has run guest code since its last call. Diagnostic
+// only, lock-free, NUL-terminated and truncated to `capacity`.
+int32_t maxps4_fex_engine_thread_activity(maxps4_fex_engine *engine, char *text, size_t capacity);
 enum { MAXPS4_CPU_RESTRICTED_INTERPRETER = 1, MAXPS4_CPU_FEX_ARM64_JIT = 2,
        MAXPS4_CPU_FEX_ARM64_SIMULATOR = 3 };
 enum { MAXPS4_FEX_CONTEXT_CREATED = 1, MAXPS4_FEX_DISPATCHER_INITIALIZED = 2 };
