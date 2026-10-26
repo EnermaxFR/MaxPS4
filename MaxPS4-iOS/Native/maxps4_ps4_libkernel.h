@@ -5,6 +5,7 @@
 #include "maxps4_ps4_videoout.h"
 #include "maxps4_ps4_user_service.h"
 #include "maxps4_ps4_pad.h"
+#include "maxps4_ps4_audio_out.h"
 #include "maxps4_ps4_gnm.h"
 #include "maxps4_ps4_gnm_queue.h"
 #include <array>
@@ -82,7 +83,9 @@ enum class PS4KernelService : uint32_t {
     heap_trace_info,
     // libSceSystemService (shadPS4 system_service.cpp): settings of an
     // English console, a foreground application status, no system events.
-    system_param_int, system_status, system_event
+    system_param_int, system_status, system_event,
+    // libSceAudioOut (PS4AudioOut). Output blocks for one buffer's duration.
+    audio_init, audio_open, audio_close, audio_output
 };
 // Token bit of a trampoline whose function follows the POSIX convention: -1
 // with the error in the calling thread's errno (__Error) instead of an Orbis
@@ -145,6 +148,7 @@ public:
     PS4Threads& threads() { return threads_; }
     PS4VideoOut& videoout() { return videoout_; }
     PS4Pad& pad() { return pad_; }
+    PS4AudioOut& audio() { return audio_; }
     PS4GnmQueue& graphics() { return graphics_; }
     static constexpr int32_t abort_status = 134; // As a process killed by SIGABRT.
 private:
@@ -154,6 +158,7 @@ private:
     PS4VideoOut videoout_;
     PS4UserService user_service_;
     PS4Pad pad_;
+    PS4AudioOut audio_;
     PS4Gnm gnm_;
     PS4GnmQueue graphics_;
     uint64_t errno_table_ = 0, errno_table_size_ = 0, process_param_ = 0;

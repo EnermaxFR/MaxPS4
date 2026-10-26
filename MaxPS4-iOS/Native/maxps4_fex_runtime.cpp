@@ -1749,6 +1749,21 @@ extern "C" int32_t maxps4_fex_engine_pad_update(maxps4_fex_engine* engine, uint3
     if (!engine || connected > 1) return -EINVAL;
     return engine->libkernel.pad().update(buttons, {{lx, ly, rx, ry}}, l2, r2, connected != 0);
 }
+extern "C" int32_t maxps4_fex_engine_audio_read(maxps4_fex_engine* engine, float* samples, uint32_t frames) {
+    if (!engine || !samples || frames > 16384) return -EINVAL;
+    return int32_t(engine->libkernel.audio().read(samples, frames));
+}
+extern "C" int32_t maxps4_fex_engine_audio_status(maxps4_fex_engine* engine, uint64_t* outputs,
+    uint64_t* written, uint64_t* dropped, uint64_t* silent, uint32_t* ports) {
+    if (!engine) return -EINVAL;
+    const auto stats = engine->libkernel.audio().stats();
+    if (outputs) *outputs = stats.outputs;
+    if (written) *written = stats.written;
+    if (dropped) *dropped = stats.dropped;
+    if (silent) *silent = stats.silent;
+    if (ports) *ports = stats.ports;
+    return 0;
+}
 extern "C" int64_t maxps4_fex_engine_videoout_complete(maxps4_fex_engine* engine,
     uint64_t ticket, uint32_t presented) {
     if (!engine || presented > 1) return maxps4::PS4VideoOut::error(1);

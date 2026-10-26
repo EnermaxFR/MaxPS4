@@ -92,6 +92,15 @@ int32_t maxps4_fex_engine_gnm_software_status(maxps4_fex_engine* engine, uint32_
 // Caller retains the engine and serializes against close; connected is 0 or 1.
 int32_t maxps4_fex_engine_pad_update(maxps4_fex_engine* engine, uint32_t buttons,
     uint8_t lx, uint8_t ly, uint8_t rx, uint8_t ry, uint8_t l2, uint8_t r2, uint32_t connected);
+// Concurrent host audio: mixes up to `frames` 48 kHz interleaved stereo float
+// frames of the game's AudioOut ports into `samples` (zeros where none).
+// Returns the frames that had data, or -EINVAL. Same ownership rule as
+// pad_update; no FEX runtime lock.
+int32_t maxps4_fex_engine_audio_read(maxps4_fex_engine* engine, float* samples, uint32_t frames);
+// AudioOut counters (any pointer may be null): Output calls, frames written,
+// frames dropped (ring full, no reader), silent frames read, open ports.
+int32_t maxps4_fex_engine_audio_status(maxps4_fex_engine* engine, uint64_t* outputs,
+    uint64_t* written, uint64_t* dropped, uint64_t* silent, uint32_t* ports);
 // Owned linear VideoOut frame (raw RGBA/BGRA bytes, including row padding).
 // With pixels=NULL/capacity=0, query metadata only. Otherwise capacity must
 // cover byte_count. Returns 0, -EAGAIN if no frame, or -EINVAL for bad outputs;

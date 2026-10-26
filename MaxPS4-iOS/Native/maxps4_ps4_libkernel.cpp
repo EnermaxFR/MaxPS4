@@ -257,6 +257,11 @@ constexpr Binding bindings[] = {
     {"sceSystemServiceHideSplashScreen", "Vo5V8KAwCmk", PS4KernelService::succeed, "libSceSystemService"},
     // System modules are part of the HLE: loading one has nothing to do.
     {"sceSysmoduleLoadModule", "g8cM39EUZ6o", PS4KernelService::succeed, "libSceSysmodule"},
+    // Audio (shadPS4 libraries/audio/audioout.cpp).
+    {"sceAudioOutInit", "JfEPXVxhFqA", PS4KernelService::audio_init, "libSceAudioOut"},
+    {"sceAudioOutOpen", "ekNvsT22rsY", PS4KernelService::audio_open, "libSceAudioOut"},
+    {"sceAudioOutClose", "s1--uE9mBFw", PS4KernelService::audio_close, "libSceAudioOut"},
+    {"sceAudioOutOutput", "QOQtbeDqsT4", PS4KernelService::audio_output, "libSceAudioOut"},
     {"msync", "tZY4+SZNFhA", PS4KernelService::succeed, "libkernel", true},
     {"sceKernelMlock", "3k6kx-zOOSQ", PS4KernelService::succeed},
     // Files (shadPS4 kernel/file_system.cpp).
@@ -307,7 +312,7 @@ PS4KernelService resolve_libkernel(std::string_view symbol, std::string_view lib
     return PS4KernelService::unresolved;
 }
 PS4Libkernel::PS4Libkernel(PS4GuestMemory& memory, PS4VirtualMemory* dynamic)
-    : memory_(memory), dynamic_(dynamic), threads_(memory), videoout_(memory, threads_), user_service_(memory), pad_(memory), gnm_(memory), graphics_(memory), started_us_(monotonic_us()) {}
+    : memory_(memory), dynamic_(dynamic), threads_(memory), videoout_(memory, threads_), user_service_(memory), pad_(memory), audio_(memory, threads_), gnm_(memory), graphics_(memory), started_us_(monotonic_us()) {}
 PS4Libkernel::~PS4Libkernel() {
     reset();
 }
@@ -321,6 +326,7 @@ void PS4Libkernel::reset() {
     videoout_.reset();
     user_service_.reset();
     pad_.reset();
+    audio_.reset();
     graphics_.reset();
     if (dynamic_) dynamic_->reset();
     threads_.reset();
@@ -787,6 +793,11 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     case S::pad_read: return pad_.read(signed32(c.rdi), c.rsi, signed32(c.rdx), false);
     case S::pad_read_state: return pad_.read(signed32(c.rdi), c.rsi, 1, true);
     case S::pad_information: return pad_.information(signed32(c.rdi), c.rsi);
+    case S::audio_init: return audio_.initialize();
+    case S::audio_open:
+        return audio_.open(signed32(c.rdi), signed32(c.rsi), signed32(c.rdx), uint32_t(c.rcx), uint32_t(c.r8), uint32_t(c.r9));
+    case S::audio_close: return audio_.close(signed32(c.rdi));
+    case S::audio_output: return audio_.output(signed32(c.rdi), c.rsi);
     case S::user_terminate: return user_service_.terminate();
     case S::user_initial: return user_service_.initial_user(c.rdi);
     case S::user_login_list: return user_service_.login_users(c.rdi);

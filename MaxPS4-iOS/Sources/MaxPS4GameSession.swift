@@ -3,6 +3,61 @@ import Combine
 import Metal
 #if MAXPS4_FEX_APP
 import Darwin
+import AVFoundation
+
+// Game audio: an AVAudioSourceNode pulls the engine's mixed AudioOut ports
+// (48 kHz stereo). The render thread never waits: while the engine is being
+// detached it plays silence. After stop() returns the engine is never read.
+final class MaxPS4GameAudio: @unchecked Sendable {
+    private final class Tap: @unchecked Sendable {
+        static let capacity = 4096
+        let lock = NSLock()
+        var engine: OpaquePointer?
+        let mix = UnsafeMutablePointer<Float>.allocate(capacity: Tap.capacity * 2)
+        deinit { mix.deallocate() }
+    }
+    private let tap = Tap()
+    private let output = AVAudioEngine()
+    // Nil on success, otherwise why playback could not start.
+    func start(_ engine: OpaquePointer) -> String? {
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2) else { return "format 48 kHz refusé" }
+        let tap = self.tap
+        let node = AVAudioSourceNode(format: format) { silence, _, frameCount, list in
+            let frames = min(Int(frameCount), Tap.capacity)
+            var filled: Int32 = 0
+            if tap.lock.try() {
+                if let engine = tap.engine { filled = maxps4_fex_engine_audio_read(engine, tap.mix, UInt32(frames)) }
+                tap.lock.unlock()
+            }
+            if filled <= 0 { silence.pointee = true }
+            for (channel, buffer) in UnsafeMutableAudioBufferListPointer(list).enumerated() {
+                guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
+                let count = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
+                for i in 0..<count { data[i] = filled > 0 && i < frames ? tap.mix[2 * i + min(channel, 1)] : 0 }
+            }
+            return noErr
+        }
+        output.attach(node)
+        output.connect(node, to: output.mainMixerNode, format: format)
+        do {
+            #if os(iOS)
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true)
+            #endif
+            tap.lock.lock(); tap.engine = engine; tap.lock.unlock()
+            try output.start()
+            return nil
+        } catch {
+            stop()
+            return error.localizedDescription
+        }
+    }
+    func stop() {
+        output.stop()
+        tap.lock.lock(); tap.engine = nil; tap.lock.unlock()
+    }
+}
 
 // The FEX worker owns execution and close. Concurrent display/input/stop calls
 // retain the engine under lock, using only the native concurrent APIs.
@@ -24,6 +79,8 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private var relocation: UInt64 = 0
     private var vblankClock = MaxPS4VideoOutClock()
     private var vblankTimer: DispatchSourceTimer?
+    private let audio = MaxPS4GameAudio()
+    private var audioFailure: String?
     private let vblanks = DispatchQueue(label: "com.enermaxfr.maxps4.vblank", qos: .userInteractive)
 
     private func tick(at time: TimeInterval) {
@@ -45,7 +102,14 @@ final class MaxPS4GameSource: @unchecked Sendable {
         let seconds = Int(ProcessInfo.processInfo.systemUptime - started)
         var activity = [CChar](repeating: 0, count: 4096)
         _ = maxps4_fex_engine_thread_activity(engine, &activity, activity.count)
-        return "Depuis le démarrage du JIT : \(seconds) s · dernier ticket VideoOut \(lastTicket) · images affichées \(displayed) · VBlank envoyés \(vblanksSent)\n" + String(cString: activity) + mainThreadSample(engine)
+        return "Depuis le démarrage du JIT : \(seconds) s · dernier ticket VideoOut \(lastTicket) · images affichées \(displayed) · VBlank envoyés \(vblanksSent)\n" + audioStatus(engine) + "\n" + String(cString: activity) + mainThreadSample(engine)
+    }
+    private func audioStatus(_ engine: OpaquePointer) -> String {
+        if let audioFailure { return "Audio : sortie iOS indisponible (\(audioFailure))" }
+        var outputs: UInt64 = 0, written: UInt64 = 0, dropped: UInt64 = 0, silent: UInt64 = 0
+        var ports: UInt32 = 0
+        _ = maxps4_fex_engine_audio_status(engine, &outputs, &written, &dropped, &silent, &ports)
+        return "Audio : \(ports) ports · \(outputs) appels Output · \(written) trames écrites · \(dropped) perdues · \(silent) silencieuses"
     }
     // One sample of where the main guest thread is (only while outside HLE).
     private func mainThreadSample(_ engine: OpaquePointer) -> String {
@@ -127,6 +191,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
         ready = false
         vblankTimer?.cancel(); vblankTimer = nil
         if let engine {
+            audio.stop()
             _ = maxps4_fex_engine_gnm_backend(engine, 0)
             _ = maxps4_fex_engine_gnm_host_consumer(engine, nil, nil)
             bridge = nil; self.engine = nil
@@ -188,6 +253,8 @@ final class MaxPS4GameSource: @unchecked Sendable {
             }
             lock.unlock()
             if cancelled { return "Arrêté." }
+            let audioError = audio.start(opened)
+            lock.lock(); audioFailure = audioError; lock.unlock()
             progress("Jeu en cours d’exécution. En attente de la première image…")
             var value: UInt64 = 0, entry: UInt64 = 0
             var backend: UInt32 = 0
