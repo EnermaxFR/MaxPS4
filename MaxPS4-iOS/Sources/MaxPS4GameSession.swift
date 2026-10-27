@@ -105,7 +105,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
         let seconds = Int(now - started)
         var activity = [CChar](repeating: 0, count: 4096)
         _ = maxps4_fex_engine_thread_activity(engine, &activity, activity.count)
-        return "Depuis le démarrage du JIT : \(seconds) s · dernier ticket VideoOut \(lastTicket) · images affichées \(displayed) · sautées \(maxps4_fex_engine_videoout_dropped(engine)) · VBlank envoyés \(vblanksSent)\n" + rates(engine, now: now) + audioStatus(engine) + "\n" + String(cString: activity) + mainThreadSample(engine)
+        return "Depuis le démarrage du JIT : \(seconds) s · dernier ticket VideoOut \(lastTicket) · images affichées \(displayed) · sautées \(maxps4_fex_engine_videoout_dropped(engine)) · VBlank envoyés \(vblanksSent)\n" + rates(engine, now: now) + audioStatus(engine) + "\n" + String(cString: activity) + profile(engine) + mainThreadSample(engine)
     }
     // Since the previous heartbeat: images the game asked to flip, images the
     // host displayed, and the share of the time its thread spent in Metal
@@ -128,6 +128,12 @@ final class MaxPS4GameSource: @unchecked Sendable {
         var ports: UInt32 = 0
         _ = maxps4_fex_engine_audio_status(engine, &outputs, &written, &dropped, &silent, &ports, &audible)
         return "Audio : \(ports) ports · \(outputs) appels Output · \(written) trames écrites (\(audible) non muettes) · \(dropped) perdues · \(silent) silencieuses"
+    }
+    // The CPU profile since the run started; empty unless profiling was asked.
+    private func profile(_ engine: OpaquePointer) -> String {
+        var text = [CChar](repeating: 0, count: 2048)
+        _ = maxps4_fex_engine_profile_report(engine, &text, text.count)
+        return String(cString: text)
     }
     // One sample of where the main guest thread is (only while outside HLE).
     private func mainThreadSample(_ engine: OpaquePointer) -> String {
@@ -246,7 +252,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
             maxps4_fex_engine_close(engine)
         }
     }
-    func run(url: URL, device: MTLDevice, nativeTextures: Bool = false, tso: Bool = true, outputHeight: Int = 1080, progress: @escaping @Sendable (String) -> Void) -> String {
+    func run(url: URL, device: MTLDevice, nativeTextures: Bool = false, tso: Bool = true, outputHeight: Int = 1080, profiling: Bool = false, progress: @escaping @Sendable (String) -> Void) -> String {
         dispatchPrecondition(condition: .onQueue(MaxPS4FEXMetalExecution.queue))
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -273,7 +279,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
             }
             guard loaded == 0 else { throw failure(String(cString: diagnostic), loaded) }
             // The output resolution the game is told (sceVideoOutGetResolutionStatus).
-            _ = maxps4_fex_engine_videoout_output(opened, outputHeight == 720 ? 1280 : 1920, outputHeight == 720 ? 720 : 1080)
+            _ = maxps4_fex_engine_set_profiling(opened, profiling ? 1 : 0), outputHeight == 720 ? 1280 : 1920, outputHeight == 720 ? 720 : 1080)
             progress("Jeu chargé. Préparation du rendu Metal…")
             guard let metal = MaxPS4GameMetalBridge(device: device, reader: { address, destination, count in
                 maxps4_fex_engine_read_memory(opened, address, destination, count) == 0
@@ -338,7 +344,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private var generation = UUID()
     private var stopping: UUID?
     private var heartbeatTimer: Timer?
-    func start(url: URL, device: MTLDevice, nativeTextures: Bool = false, tso: Bool = true, outputHeight: Int = 1080) {
+    func start(url: URL, device: MTLDevice, nativeTextures: Bool = false, tso: Bool = true, outputHeight: Int = 1080, profiling: Bool = false) {
         stop()
         let source = MaxPS4GameSource(), id = UUID()
         generation = id; self.source = source; worker = source; running = true
@@ -351,7 +357,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
             }
         }
         MaxPS4FEXMetalExecution.queue.async { [weak self] in
-            let result = source.run(url: url, device: device, nativeTextures: nativeTextures, tso: tso, outputHeight: outputHeight) { [weak self] text in
+            let result = source.run(url: url, device: device, nativeTextures: nativeTextures, tso: tso, outputHeight: outputHeight, profiling: profiling) { [weak self] text in
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.generation == id, self.running else { return }
                     self.report = text

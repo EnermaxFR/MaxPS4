@@ -147,6 +147,13 @@ typedef struct maxps4_fex_thread_sample {
     uint32_t rip_count;
 } maxps4_fex_thread_sample;
 int32_t maxps4_fex_engine_sample_main_thread(maxps4_fex_engine *engine, maxps4_fex_thread_sample *sample);
+// CPU profile of the main guest thread for the next run (diagnostic, off by
+// default; Apple devices only): sampled every 5 ms through Mach suspension.
+int32_t maxps4_fex_engine_set_profiling(maxps4_fex_engine *engine, uint32_t enabled);
+// Since the run started: JIT code / FEX dispatcher / host shares, the hottest
+// guest RIPs (64-byte buckets, relative to the game's relocation) and host
+// functions. NUL-terminated, truncated to `capacity`; empty without samples.
+int32_t maxps4_fex_engine_profile_report(maxps4_fex_engine *engine, char *text, size_t capacity);
 // Experimental: x86 memory-order (TSO) emulation for engines opened after
 // this call (default 1). The VIXL simulator always runs with it off.
 int32_t maxps4_fex_set_tso_emulation(uint32_t enabled);

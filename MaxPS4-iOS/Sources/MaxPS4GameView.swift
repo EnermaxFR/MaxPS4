@@ -158,6 +158,7 @@ struct MaxPS4GameView: View {
     @AppStorage("maxps4.fex.tso") private var tso = true
     @AppStorage("maxps4.display.scaling") private var scaling = "fit"
     @AppStorage("maxps4.video.height") private var outputHeight = 1080
+    @AppStorage("maxps4.fex.profile") private var profiling = false
     private let poll = Timer.publish(every: 1.0 / 60, on: .main, in: .common).autoconnect()
 #endif
     var body: some View {
@@ -190,7 +191,7 @@ struct MaxPS4GameView: View {
                         Button(hasLaunched ? "Rejouer" : "Jouer") {
                             touch = 0; hasLaunched = true
                             session.start(url: directory, device: device, nativeTextures: nativeTextures, tso: tso,
-                                          outputHeight: outputHeight)
+                                          outputHeight: outputHeight, profiling: profiling)
                         }.buttonStyle(.borderedProminent).tint(.cyan)
                         Picker("Affichage", selection: $scaling) {
                             Text("Ajuster").tag("fit")
@@ -206,6 +207,8 @@ struct MaxPS4GameView: View {
                         Toggle("Textures Metal natives (expérimental)", isOn: $nativeTextures)
                             .font(.footnote).frame(maxWidth: 320)
                         Toggle("Ordre mémoire x86 (TSO)", isOn: $tso)
+                            .font(.footnote).frame(maxWidth: 320)
+                        Toggle("Profileur processeur (diagnostic)", isOn: $profiling)
                             .font(.footnote).frame(maxWidth: 320)
                         Text("Tourne l’iPhone pour jouer en paysage.")
                             .font(.caption).foregroundStyle(.secondary)

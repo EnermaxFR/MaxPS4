@@ -46,6 +46,7 @@
 #include <optional>
 #include <system_error>
 #include <thread>
+#include <unordered_map>
 #include <dlfcn.h>
 #include <pthread.h>
 #include <signal.h>
@@ -826,6 +827,53 @@ int64_t guest_thread_service(GuestThreads& threads, maxps4::PS4KernelService ser
     }
 }
 }
+// CPU profile of the main guest thread (maxps4_fex_engine_set_profiling):
+// a host thread suspends it through Mach every 5 ms and records where it
+// is: a guest RIP (JIT code, 64-byte buckets), the FEX dispatcher, or a host
+// function (HLE services, FEX helpers). The FEX lookups run while the thread
+// is suspended, as in the signal handler; nothing allocates until it resumes.
+struct CPUProfile {
+    std::mutex lock;
+    uint64_t jit = 0, dispatcher = 0, host = 0;
+    std::unordered_map<uint64_t, uint64_t> guest;   // RIP bucket -> samples
+    std::unordered_map<uint64_t, uint64_t> symbols; // host symbol start -> samples
+    void clear() { std::lock_guard g(lock); jit = dispatcher = host = 0; guest.clear(); symbols.clear(); }
+#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__)) && !defined(VIXL_SIMULATOR)
+    void run(const GuestFaultGuard& guard, const std::atomic<bool>& done) {
+        const thread_act_t port = ::pthread_mach_thread_np(guard.host);
+        while (!done.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            if (done.load()) break;
+            arm_thread_state64_t state {};
+            mach_msg_type_number_t count = ARM_THREAD_STATE64_COUNT;
+            if (::thread_suspend(port) != KERN_SUCCESS) break;
+            const bool read = ::thread_get_state(port, ARM_THREAD_STATE64,
+                reinterpret_cast<thread_state_t>(&state), &count) == KERN_SUCCESS;
+            uint64_t pc = 0, rip = 0; uint32_t where = 0;
+            if (read) {
+                pc = arm_thread_state64_get_pc(state);
+#if __has_feature(ptrauth_calls)
+                pc = uint64_t(reinterpret_cast<uintptr_t>(ptrauth_strip(reinterpret_cast<void*>(pc), ptrauth_key_return_address)));
+#endif
+                if (guard.in_jit(pc)) { where = 1; rip = guard.guest_rip(pc); }
+                else where = guard.in_dispatcher(pc) ? 2 : 3;
+            }
+            ::thread_resume(port);
+            if (!read) continue;
+            uint64_t symbol = 0;
+            if (where == 3) {
+                Dl_info info {};
+                if (::dladdr(reinterpret_cast<void*>(pc), &info) && info.dli_saddr)
+                    symbol = reinterpret_cast<uintptr_t>(info.dli_saddr);
+            }
+            std::lock_guard g(lock);
+            if (where == 1) { ++jit; ++guest[rip & ~uint64_t{0x3f}]; }
+            else if (where == 2) ++dispatcher;
+            else { ++host; ++symbols[symbol]; }
+        }
+    }
+#endif
+};
 struct maxps4_fex_engine {
     // This real FEX configuration holder installs no process signal handlers.
     // It outlives the context. Only admitted no-fault straight-line code executes.
@@ -843,6 +891,9 @@ struct maxps4_fex_engine {
     // The running main thread's guard, for sampling; guarded by sample_lock.
     std::mutex sample_lock;
     GuestFaultGuard* main_guard = nullptr;
+    CPUProfile profile;
+    std::atomic<bool> profiling{false};
+    uint64_t relocation = 0; // Of the loaded game, for relative profile RIPs.
     maxps4::GuestFrame frame;
     uint64_t frame_sequence = 0;
     bool frame_code_cached = false;
@@ -1162,7 +1213,18 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
                                   return a>=low && a-low<=page && n<=page-(a-low) && !(p&~6u);
                               });
         { std::lock_guard sampling(engine->sample_lock); engine->main_guard = &guard; }
+        std::atomic<bool> profiled {false};
+        std::thread profiler;
+#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__)) && !defined(VIXL_SIMULATOR)
+        if (engine->profiling.load()) {
+            engine->profile.clear();
+            profiler = std::thread([engine, &guard, &profiled] { engine->profile.run(guard, profiled); });
+        }
+#endif
         engine->context->ExecuteThread(thread);
+        // Stopped while this thread (the sampled one) still exists.
+        profiled = true;
+        if (profiler.joinable()) profiler.join();
         { std::lock_guard sampling(engine->sample_lock); engine->main_guard = nullptr; }
         int signal = guard.signal.load();
         // scePthreadExit on the main thread: the other threads carry on.
@@ -1417,7 +1479,7 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine* en
         }
         message(status ? reason : "SCE image linked and identity-mapped; execution not attempted");
         engine->orbis_admitted = status == 0;
-        if (!status) *relocation = moved;
+        if (!status) *relocation = engine->relocation = moved;
         return status;
     } catch (const std::bad_alloc&) { message("Orbis allocation failed"); return -ENOMEM; }
 }
@@ -1902,6 +1964,52 @@ extern "C" int32_t maxps4_fex_engine_sample_main_thread(maxps4_fex_engine* engin
     out->host_pc = sample.pc; out->host_lr = sample.lr; out->guest_rip = sample.rip; out->location = sample.where;
     name(sample.pc, out->symbol, sizeof out->symbol);
     name(sample.lr, out->caller, sizeof out->caller);
+    return 0;
+}
+extern "C" int32_t maxps4_fex_engine_set_profiling(maxps4_fex_engine* engine, uint32_t enabled) {
+    if (!engine || enabled > 1) return -EINVAL;
+    engine->profiling = enabled != 0; return 0;
+}
+extern "C" int32_t maxps4_fex_engine_profile_report(maxps4_fex_engine* engine, char* text, size_t capacity) {
+    if (!engine || !text || !capacity) return -EINVAL;
+    text[0] = 0;
+    auto& p = engine->profile;
+    std::vector<std::pair<uint64_t, uint64_t>> guest, symbols;
+    uint64_t jit, dispatcher, host;
+    {
+        std::lock_guard g(p.lock);
+        jit = p.jit; dispatcher = p.dispatcher; host = p.host;
+        guest.assign(p.guest.begin(), p.guest.end());
+        symbols.assign(p.symbols.begin(), p.symbols.end());
+    }
+    const uint64_t total = jit + dispatcher + host;
+    if (!total) return 0;
+    auto by_count = [](const auto& a, const auto& b) { return a.second > b.second; };
+    std::sort(guest.begin(), guest.end(), by_count);
+    std::sort(symbols.begin(), symbols.end(), by_count);
+    auto percent = [total](uint64_t n) { return 100.0 * double(n) / double(total); };
+    char line[256];
+    std::snprintf(line, sizeof line, "Profil thread 1 (%llu échantillons) : code du jeu %.0f %% · répartiteur FEX %.0f %% · émulateur %.0f %%\n",
+        (unsigned long long)total, percent(jit), percent(dispatcher), percent(host));
+    std::string out = line;
+    out += "Code du jeu (RIP relatif) :";
+    for (size_t i = 0; i < std::min<size_t>(10, guest.size()); ++i) {
+        const uint64_t rip = guest[i].first >= engine->relocation ? guest[i].first - engine->relocation : guest[i].first;
+        std::snprintf(line, sizeof line, " 0x%llx %.1f %%", (unsigned long long)rip, percent(guest[i].second));
+        out += line;
+    }
+    out += "\nÉmulateur :";
+    for (size_t i = 0; i < std::min<size_t>(8, symbols.size()); ++i) {
+        Dl_info info {};
+        const char* name = symbols[i].first && ::dladdr(reinterpret_cast<void*>(symbols[i].first), &info) && info.dli_sname
+            ? info.dli_sname : "?";
+        std::snprintf(line, sizeof line, " %.60s %.1f %%", name, percent(symbols[i].second));
+        out += line;
+    }
+    out += "\n";
+    const size_t n = std::min(capacity - 1, out.size());
+    std::memcpy(text, out.data(), n);
+    text[n] = 0;
     return 0;
 }
 extern "C" int32_t maxps4_fex_set_tso_emulation(uint32_t enabled) {
