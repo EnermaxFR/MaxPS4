@@ -123,9 +123,9 @@ int32_t maxps4_fex_engine_thread_activity(maxps4_fex_engine *engine, char *text,
 // a signal that lets it continue. Refused (-EBUSY) while it is inside an HLE
 // call, -ESRCH when nothing runs. Diagnostic only. On Apple devices a thread
 // that never takes the signal (signals masked, e.g. inside a FEX lock) is
-// suspended briefly through Mach instead (`method` 1): its registers and
-// frame-pointer chain are read, and an address in no loaded image is assumed
-// to be JIT code.
+// suspended briefly through Mach instead (`method` 1), 16 times 1 ms apart:
+// the first read gives its registers and frame-pointer chain, every read in
+// JIT code a guest RIP translated back from the host PC.
 typedef struct maxps4_fex_thread_sample {
     uint64_t host_pc, host_lr;
     uint64_t guest_rip; // JIT: reconstructed; otherwise FEX's last stored RIP.
@@ -134,6 +134,9 @@ typedef struct maxps4_fex_thread_sample {
     char symbol[128];   // Host symbol of host_pc, "" when unknown.
     char caller[128];   // Host symbol of host_lr.
     char backtrace[768]; // Method 1: return addresses up the frame chain, " < " separated.
+    uint64_t registers[29]; // Method 1: host x0..x28 at the first read.
+    uint64_t rips[8];       // Method 1: distinct guest RIPs of the reads in JIT code.
+    uint32_t rip_count;
 } maxps4_fex_thread_sample;
 int32_t maxps4_fex_engine_sample_main_thread(maxps4_fex_engine *engine, maxps4_fex_thread_sample *sample);
 // Experimental: x86 memory-order (TSO) emulation for engines opened after

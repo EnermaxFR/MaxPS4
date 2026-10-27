@@ -377,9 +377,12 @@ public:
     std::atomic<uint32_t> sample_sequence {0};
     Sample sample {};
     const pthread_t host = ::pthread_self();
-    // For a sample taken from outside the thread (no locks taken).
+    // For a sample taken from outside the thread. The signal handler uses the
+    // same FEX lookups, so they take no lock the sampled thread could hold.
     uint64_t stored_rip() const { return thread->CurrentFrame->State.rip; }
     bool in_dispatcher(uint64_t pc) const { return pc >= config.DispatcherBegin && pc < config.DispatcherEnd; }
+    bool in_jit(uint64_t pc) const { return context->IsAddressInCodeBuffer(thread, pc); }
+    uint64_t guest_rip(uint64_t pc) const { return context->RestoreRIPFromHostPC(thread, pc); }
 private:
     struct AlignmentAccess { uint64_t address; size_t bytes; uint32_t permissions; };
     // Operand forms recognized by the pinned FEX unaligned handler. Include
@@ -1823,32 +1826,48 @@ extern "C" int32_t maxps4_fex_engine_sample_main_thread(maxps4_fex_engine* engin
         };
         std::array<uint64_t, 16> frames {};
         size_t depth = 0;
-        arm_thread_state64_t state {};
-        mach_msg_type_number_t count = ARM_THREAD_STATE64_COUNT;
-        if (::thread_suspend(port) != KERN_SUCCESS) return -ETIMEDOUT;
-        const kern_return_t read = ::thread_get_state(port, ARM_THREAD_STATE64,
-            reinterpret_cast<thread_state_t>(&state), &count);
-        if (read == KERN_SUCCESS) {
-            out->host_pc = strip(arm_thread_state64_get_pc(state));
-            out->host_lr = strip(arm_thread_state64_get_lr(state));
-            // JIT code may use x29 as a scratch register: only follow frames
-            // that stay inside this thread's stack and move up it.
-            uintptr_t fp = arm_thread_state64_get_fp(state);
-            while (depth < frames.size() && fp >= low && fp % 16 == 0 && fp <= top - 16) {
-                const auto* frame = reinterpret_cast<const uint64_t*>(fp);
-                if (frame[1]) frames[depth++] = strip(frame[1]);
-                if (frame[0] <= fp) break;
-                fp = frame[0];
+        // Several reads 1 ms apart: a waiting loop shows up as a few guest
+        // addresses. FEX's stored RIP only moves when a block leaves JIT code,
+        // so JIT positions are translated back from the host PC (after resume).
+        constexpr int reads = 16;
+        for (int k = 0; k < reads; ++k) {
+            if (k) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            arm_thread_state64_t state {};
+            mach_msg_type_number_t count = ARM_THREAD_STATE64_COUNT;
+            if (::thread_suspend(port) != KERN_SUCCESS) break;
+            const kern_return_t read = ::thread_get_state(port, ARM_THREAD_STATE64,
+                reinterpret_cast<thread_state_t>(&state), &count);
+            if (read == KERN_SUCCESS && !k) {
+                out->host_pc = strip(arm_thread_state64_get_pc(state));
+                out->host_lr = strip(arm_thread_state64_get_lr(state));
+                for (size_t r = 0; r < 29; ++r) out->registers[r] = state.__x[r];
+                // JIT code may use x29 as a scratch register: only follow frames
+                // that stay inside this thread's stack and move up it.
+                uintptr_t fp = arm_thread_state64_get_fp(state);
+                while (depth < frames.size() && fp >= low && fp % 16 == 0 && fp <= top - 16) {
+                    const auto* frame = reinterpret_cast<const uint64_t*>(fp);
+                    if (frame[1]) frames[depth++] = strip(frame[1]);
+                    if (frame[0] <= fp) break;
+                    fp = frame[0];
+                }
+                out->guest_rip = guard->stored_rip();
             }
-            out->guest_rip = guard->stored_rip();
+            ::thread_resume(port);
+            if (read != KERN_SUCCESS) break;
+            if (!k) out->method = 1;
+            const uint64_t pc = strip(arm_thread_state64_get_pc(state));
+            if (!guard->in_jit(pc)) continue;
+            const uint64_t rip = guard->guest_rip(pc);
+            if (!k) out->guest_rip = rip;
+            bool seen = false;
+            for (uint32_t i = 0; i < out->rip_count; ++i) seen = seen || out->rips[i] == rip;
+            if (!seen && out->rip_count < 8) out->rips[out->rip_count++] = rip;
         }
-        ::thread_resume(port);
-        if (read != KERN_SUCCESS) return -ETIMEDOUT;
-        out->method = 1;
+        if (out->method != 1) return -ETIMEDOUT;
         const uint64_t pc = out->host_pc;
         const bool dispatcher = guard->in_dispatcher(pc);
         const bool named = name(pc, out->symbol, sizeof out->symbol);
-        out->location = dispatcher ? 2 : named ? 3 : 1;
+        out->location = guard->in_jit(pc) ? 1 : dispatcher ? 2 : named ? 3 : 1;
         name(out->host_lr, out->caller, sizeof out->caller);
         size_t used = 0;
         for (size_t i = 0; i < depth && used + 1 < sizeof out->backtrace; ++i) {

@@ -127,12 +127,24 @@ final class MaxPS4GameSource: @unchecked Sendable {
         let pc = "PC 0x\(String(sample.host_pc, radix: 16))"
         let place: String
         switch sample.location {
-        case 1: place = mach ? "\(label) : hors bibliothèque, sans doute code JIT (\(pc)), dernier \(position)" : "\(label) : code JIT, \(position)"
+        case 1: place = mach ? "\(label) : code JIT (\(pc)), \(position)" : "\(label) : code JIT, \(position)"
         case 2: place = "\(label) : répartiteur FEX, dernier \(position)"
         default: place = "\(label) : code hôte \(text(sample.symbol)) appelé depuis \(text(sample.caller)), dernier \(position)"
         }
+        guard mach else { return place }
+        func words<T>(_ field: T) -> [UInt64] {
+            withUnsafeBytes(of: field) { Array($0.bindMemory(to: UInt64.self)) }
+        }
+        func hex(_ value: UInt64) -> String { "0x" + String(value, radix: 16) }
+        let rips = words(sample.rips).prefix(Int(sample.rip_count))
+            .map { hex($0 >= relocation ? $0 - relocation : $0) }
+        let registers = words(sample.registers).enumerated().map { "x\($0.offset)=\(hex($0.element))" }
+        var lines = [place]
+        lines.append("RIP JIT relatifs (16 lectures) : " + (rips.isEmpty ? "aucun" : rips.joined(separator: " ")))
+        lines.append("Registres hôte : " + registers.joined(separator: " "))
         let frames = text(sample.backtrace)
-        return frames.isEmpty ? place : place + "\nPile thread 1 : " + frames
+        if !frames.isEmpty { lines.append("Pile thread 1 : " + frames) }
+        return lines.joined(separator: "\n")
     }
 
     func input(_ buttons: UInt32) {
