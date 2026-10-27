@@ -329,8 +329,10 @@ struct MaxPS4GameView: View {
             }
             session.input(buttons)
         }
-        .onDisappear { touch = 0; session.stop() }
+        .onDisappear { touch = 0; session.stop(); UIApplication.shared.isIdleTimerDisabled = false }
         .onChange(of: scenePhase) { _, phase in if phase != .active { touch = 0; session.stop() } }
+        // A running game keeps the screen awake: auto-lock would stop it.
+        .onChange(of: session.running, initial: true) { _, running in UIApplication.shared.isIdleTimerDisabled = running }
 #endif
     }
 #if MAXPS4_FEX_APP
