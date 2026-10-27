@@ -7,18 +7,14 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
     private let queue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
     private var source: MaxPS4GameSource?
-    private var presentation: MaxPS4VideoOutPresentation?
-    private var activeID: UUID?
     private var lastTexture: MTLTexture?
     private let snapshots = DispatchQueue(label: "com.enermaxfr.maxps4.display-copy", qos: .userInteractive)
     private var snapshotID: UUID?
-    private var pendingFrame: MaxPS4GameSource.Frame?
+    private var pendingTexture: MTLTexture?
     private var reportTime = ProcessInfo.processInfo.systemUptime
     private var reportFrames = 0
     private var preparationSeconds = 0.0
     private var needsRedraw = true
-    private var retryTicket: UInt64 = 0
-    private var presentationRetries = 0
     // "fit" (whole image, black bars), "fill" (cropped) or "stretch".
     var scaling = "fit" { didSet { if scaling != oldValue { needsRedraw = true } } }
     var report: (String) -> Void
@@ -33,125 +29,75 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
         if self.source !== source {
             cancel(); self.source = source; lastTexture = nil
             needsRedraw = true
-            retryTicket = 0; presentationRetries = 0
             reportTime = ProcessInfo.processInfo.systemUptime; reportFrames = 0; preparationSeconds = 0
         }
     }
     func cancel() {
-        snapshotID = nil
-        if let pendingFrame { source?.complete(ticket: pendingFrame.info.ticket, presented: false) }
-        pendingFrame = nil
-        presentation?.cancel(); presentation = nil; activeID = nil
+        snapshotID = nil; pendingTexture = nil
     }
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) { needsRedraw = true }
+    // Each flip is copied into an owned texture and handed back to the game at
+    // once (completed as presented), so the game never waits for the screen:
+    // the next copy starts while this one is shown. Every refresh shows the
+    // newest copy; flips the copy loop misses are skipped by VideoOut.
     func draw(in view: MTKView) {
-        guard activeID == nil, !view.isPaused,
-              view.drawableSize.width > 0, view.drawableSize.height > 0, let source else { return }
+        guard !view.isPaused, view.drawableSize.width > 0, view.drawableSize.height > 0, let source else { return }
         // Acquire the drawable and encode only inside MTKView's draw cycle.
-        // The worker hands off an immutable texture; it never renders directly.
-        if let frame = pendingFrame {
-            pendingFrame = nil
-            present(frame, source: source, in: view)
-            return
+        if let texture = pendingTexture {
+            pendingTexture = nil
+            present(texture, in: view)
+        } else if needsRedraw, let lastTexture {
+            present(lastTexture, in: view)
         }
-        if needsRedraw, lastTexture != nil { present(nil, source: source, in: view) }
         guard snapshotID == nil else { return }
         let id = UUID(); snapshotID = id
         snapshots.async { [weak self, weak view, source] in
             let started = ProcessInfo.processInfo.systemUptime
             let result = Result { try source.snapshot() }
+            if case .success(let frame?) = result { source.complete(ticket: frame.info.ticket, presented: true) }
             let elapsed = ProcessInfo.processInfo.systemUptime - started
             DispatchQueue.main.async { [weak self, weak view] in
-                guard let self, let view, self.snapshotID == id,
-                      self.source === source, !view.isPaused else {
-                    if case .success(let frame?) = result { source.complete(ticket: frame.info.ticket, presented: false) }
-                    return
-                }
+                guard let self, let view, self.snapshotID == id, self.source === source, !view.isPaused else { return }
                 self.snapshotID = nil
                 switch result {
                 case .success(let frame):
-                    if let frame {
-                        self.preparationSeconds += elapsed
-                        self.pendingFrame = frame
-                        view.draw()
+                    guard let frame else { return }
+                    self.preparationSeconds += elapsed
+                    self.reportFrames += 1
+                    let now = ProcessInfo.processInfo.systemUptime
+                    let span = now - self.reportTime
+                    // Report once per second instead of invalidating the
+                    // entire SwiftUI game view for every displayed frame.
+                    if span >= 1 {
+                        let fps = Double(self.reportFrames) / span
+                        let ms = self.preparationSeconds * 1000 / Double(self.reportFrames)
+                        self.report(String(format: "%.1f images/s · préparation image %.2f ms · ", fps, ms) + frame.report)
+                        self.reportTime = now; self.reportFrames = 0; self.preparationSeconds = 0
                     }
+                    self.pendingTexture = frame.texture
+                    // Show it now and start the next copy, rather than losing
+                    // a refresh interval before the MTKView timer runs.
+                    view.draw()
                 case .failure(let error): self.failed(error.localizedDescription)
                 }
             }
         }
     }
-    private func present(_ frame: MaxPS4GameSource.Frame?, source: MaxPS4GameSource, in view: MTKView) {
-        guard frame != nil || needsRedraw else { return }
+    private func present(_ texture: MTLTexture, in view: MTKView) {
         guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable else {
-            pendingFrame = frame // Retry the same ticket on the next draw cycle.
+            pendingTexture = texture // Retry on the next draw cycle.
             return
         }
         guard let command = queue.makeCommandBuffer(), let encoder = command.makeRenderCommandEncoder(descriptor: pass) else {
-            if let frame { source.complete(ticket: frame.info.ticket, presented: false) }
             failed("Création de la présentation Metal impossible."); return
         }
-        let texture = frame?.texture ?? lastTexture
-        if let texture {
-            MaxPS4VideoOutMetal.encode(encoder: encoder, pipeline: pipeline, texture: texture,
-                output: view.drawableSize, fill: scaling == "fill", stretch: scaling == "stretch")
-        }
+        MaxPS4VideoOutMetal.encode(encoder: encoder, pipeline: pipeline, texture: texture,
+            output: view.drawableSize, fill: scaling == "fill", stretch: scaling == "stretch")
         encoder.endEncoding()
-        if let frame {
-            if retryTicket != frame.info.ticket {
-                retryTicket = frame.info.ticket; presentationRetries = 0
-            }
-            let id = UUID(); activeID = id
-            let gate = MaxPS4VideoOutPresentation(outcome: { [weak self, weak view, source] outcome in
-                DispatchQueue.main.async { [weak self, weak view] in
-                    guard let self, self.activeID == id else {
-                        source.complete(ticket: frame.info.ticket, presented: false)
-                        return
-                    }
-                    self.activeID = nil; self.presentation = nil
-                    if outcome == .notDisplayed || outcome == .timedOut {
-                        if self.presentationRetries < 2 {
-                            self.presentationRetries += 1
-                            self.pendingFrame = frame
-                            self.report("Image non confirmée. Nouvelle tentative \(self.presentationRetries)/2…")
-                            return // Keep the native flip pending; never confirm a dropped image.
-                        }
-                    }
-                    guard outcome == .presented else {
-                        source.complete(ticket: frame.info.ticket, presented: false)
-                        let reason: String
-                        switch outcome {
-                        case .gpuFailed: reason = "échec de la commande GPU"
-                        case .notDisplayed: reason = "image non affichée (horodatage nul ou invalide)"
-                        case .timedOut: reason = "aucune confirmation de présentation dans le délai prévu"
-                        case .cancelled: reason = "présentation annulée"
-                        case .presented: reason = ""
-                        }
-                        self.failed("Présentation Metal : \(reason), ticket \(frame.info.ticket), \(self.presentationRetries) nouvelle(s) tentative(s).")
-                        return
-                    }
-                    if source.complete(ticket: frame.info.ticket, presented: true) {
-                        self.reportFrames += 1
-                        let now = ProcessInfo.processInfo.systemUptime
-                        let elapsed = now - self.reportTime
-                        // Report once per second instead of invalidating the
-                        // entire SwiftUI game view for every displayed frame.
-                        if elapsed >= 1 {
-                            let fps = Double(self.reportFrames) / elapsed
-                            let ms = self.preparationSeconds * 1000 / Double(self.reportFrames)
-                            self.report(String(format: "%.1f images/s · préparation image %.2f ms · ", fps, ms) + frame.report)
-                            self.reportTime = now; self.reportFrames = 0; self.preparationSeconds = 0
-                        }
-                        // Start preparing the next image now, rather than losing
-                        // another refresh interval before the MTK timer runs.
-                        if let view, !view.isPaused { self.draw(in: view) }
-                    }
-                    else { self.failed("Image affichée, mais confirmation VideoOut refusée pour le ticket \(frame.info.ticket).") }
-                }
-            })
-            presentation = gate
-            drawable.addPresentedHandler { gate.drawablePresented(at: $0.presentedTime) }
-            command.addCompletedHandler { gate.gpuFinished($0.status == .completed && $0.error == nil) }
-            DispatchQueue.global().asyncAfter(deadline: .now() + 3) { gate.expire() }
+        command.addCompletedHandler { [weak self] buffer in
+            guard buffer.status != .completed || buffer.error != nil else { return }
+            let reason = buffer.error?.localizedDescription ?? "statut \(buffer.status.rawValue)"
+            DispatchQueue.main.async { self?.failed("Présentation Metal : échec de la commande GPU (\(reason)).") }
         }
         lastTexture = texture
         needsRedraw = false

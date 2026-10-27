@@ -88,7 +88,11 @@ public:
         const auto result = remove ? events_.video_event_delete(queue, port, id) : events_.video_event_add(queue, port, id, user_data);
         return result == ps4::ok ? 0 : result == ps4::badf ? error(12) : error(0x100c);
     }
-    int64_t submit(uint64_t port, int32_t index, int32_t mode, uint64_t argument) {
+    // `copy`: keep a CPU copy of the buffer for snapshot(). A host that
+    // presents the GPU-rendered target through target() passes false: the
+    // copy (8 MB at 1080p) would only cost the game thread, under the lock
+    // that the host's target(), complete() and vblank() wait on.
+    int64_t submit(uint64_t port, int32_t index, int32_t mode, uint64_t argument, bool copy = true) {
         std::lock_guard<std::mutex> lock(guard_);
         if (!valid(port)) return error(11);
         if (index < 0 || size_t(index) >= buffers_.size() || !buffers_[size_t(index)].used) return error(10);
@@ -97,9 +101,9 @@ public:
         if (next_frame_ == UINT64_MAX) return error(0x17);
         const auto& buffer = buffers_[size_t(index)]; const auto& attr = groups_[buffer.group].attribute;
         try {
-            std::vector<uint8_t> pixels(attr.bytes());
-            if (!memory_.read(buffer.address, pixels.data(), pixels.size())) return error(0x13);
-            frame_ = {next_frame_++, port_, argument, attr.width, attr.height, attr.pitch, attr.format, uint32_t(index), attr.tiled ? 1U : 0U, pixels.size()};
+            std::vector<uint8_t> pixels(copy ? attr.bytes() : 0);
+            if (copy && !memory_.read(buffer.address, pixels.data(), pixels.size())) return error(0x13);
+            frame_ = {next_frame_++, port_, argument, attr.width, attr.height, attr.pitch, attr.format, uint32_t(index), attr.tiled ? 1U : 0U, attr.bytes()};
             pixels_.swap(pixels);
         } catch (const std::bad_alloc&) { return error(0x100c); }
         return 0;
@@ -127,6 +131,7 @@ public:
         info = {};
         std::lock_guard<std::mutex> lock(guard_);
         if (!frame_.ticket) return -EAGAIN;
+        if (pixels_.size() != frame_.byte_count) return -ENODATA; // Submitted without a CPU copy.
         if ((!pixels && capacity) || (pixels && capacity < pixels_.size())) return -EINVAL;
         if (pixels) std::memcpy(pixels, pixels_.data(), pixels_.size());
         info = frame_; return 0;

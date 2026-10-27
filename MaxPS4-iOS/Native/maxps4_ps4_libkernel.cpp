@@ -765,8 +765,9 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
         if (result) return result;
         if (interrupts) threads_.graphics_interrupt();
         if (!flip) return 0;
+        // The host backend presents the GPU-rendered target: no CPU copy.
         const int64_t shown = videoout_.submit(c.r9, signed32(get_le(stack, 4)), signed32(get_le(stack + 8, 4)),
-                                               get_le(stack + 16, 8));
+                                               get_le(stack + 16, 8), !graphics_.host_backend());
         // The host presents asynchronously, so the previous flip may still be
         // pending. Skip this image rather than fail: the game ignores the error
         // and spins forever on the prepareFlip label (Sonic Mania after its

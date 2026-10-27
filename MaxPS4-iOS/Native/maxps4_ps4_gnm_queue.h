@@ -53,6 +53,7 @@ public:
     }
     // True for both backends that retire work at submission (null, software).
     bool null_backend() { std::lock_guard<std::mutex> lock(lock_); return kind_>=null; }
+    bool host_backend() { std::lock_guard<std::mutex> lock(lock_); return kind_==host; }
     // Software backend counters and its first error (empty when none).
     gpu::PM4SoftwareRenderer::Stats software_stats() {
         std::lock_guard<std::mutex> lock(lock_);

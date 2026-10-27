@@ -71,6 +71,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private var ready = false
     private var port: UInt64 = 1
     private var missingSince: Date?
+    private var lockWait: TimeInterval = 0 // Last snapshot's wait for `lock`.
     private var buttons: UInt32 = 0
     private var displayed = 0
     private var started: TimeInterval?
@@ -178,7 +179,9 @@ final class MaxPS4GameSource: @unchecked Sendable {
         _ = maxps4_fex_engine_pad_update(engine, latest, 128, 128, 128, 128, 0, 0, 1)
     }
     private func snapshotTarget() throws -> (maxps4_videoout_frame, UInt64, MaxPS4GameMetalBridge)? {
+        let asked = ProcessInfo.processInfo.systemUptime
         lock.lock(); defer { lock.unlock() }
+        lockWait = ProcessInfo.processInfo.systemUptime - asked
         guard ready, !stopped, let engine, let bridge else { return nil }
         if let failure = bridge.failure { throw self.failure(failure, -EIO) }
         var info = maxps4_videoout_frame(), address: UInt64 = 0
@@ -189,10 +192,16 @@ final class MaxPS4GameSource: @unchecked Sendable {
         return (info, address, bridge)
     }
     func snapshot() throws -> Frame? {
+        let started = ProcessInfo.processInfo.systemUptime
         guard let (info, address, bridge) = try snapshotTarget() else { return nil }
+        let located = ProcessInfo.processInfo.systemUptime
         // The retained bridge owns the texture copy. No engine pointer is used
         // here, so GPU completion need not block pad updates, vblank or stop.
-        guard let texture = bridge.copyTarget(address: address, width: info.width, height: info.height) else {
+        let copied = bridge.copyTarget(address: address, width: info.width, height: info.height)
+        let timing = String(format: "Préparation : verrou session %.1f ms · cible %.1f ms · copie %.1f ms",
+                            lockWait * 1000, (located - started - lockWait) * 1000,
+                            (ProcessInfo.processInfo.systemUptime - located) * 1000)
+        guard let texture = copied else {
             if missingSince == nil { missingSince = Date() }
             if Date().timeIntervalSince(missingSince!) > 5 {
                 throw failure("Aucune texture Metal pour le buffer retourné", -EIO)
@@ -200,7 +209,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
             return nil
         }
         missingSince = nil
-        return Frame(info: info, texture: texture, report: bridge.report)
+        return Frame(info: info, texture: texture, report: bridge.report + "\n" + timing)
     }
     @discardableResult func complete(ticket: UInt64, presented: Bool) -> Bool {
         lock.lock(); defer { lock.unlock() }

@@ -95,6 +95,11 @@ int main() {
     assert(poll() == timedout); // Neither registration, submission nor snapshot means presented.
     assert(video.complete(cancelled, false) == 0 && video.pending(port) == 0 && poll() == timedout);
     assert(video.complete(cancelled, true) == PS4VideoOut::error(1));
+    // Without a CPU copy: the target is known, a snapshot has no pixels.
+    assert(video.submit(port, 0, 1, 0, false) == 0);
+    assert(video.target(target, target_address) == 0 && target.byte_count == 32 && target_address == pixels);
+    assert(video.snapshot(frame, nullptr, 0) == -ENODATA);
+    assert(video.complete(target.ticket, false) == 0 && poll() == timedout);
     assert(video.submit(port, 0, 1, uint64_t(int64_t(-123))) == 0);
     assert(video.snapshot(frame, snapshot, sizeof(snapshot)) == 0 && snapshot[0] == 0xff);
     const uint64_t presented = frame.ticket;
