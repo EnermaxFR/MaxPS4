@@ -99,10 +99,26 @@ final class MaxPS4GameSource: @unchecked Sendable {
         guard lock.try() else { return nil }
         defer { lock.unlock() }
         guard let started, let engine else { return nil }
-        let seconds = Int(ProcessInfo.processInfo.systemUptime - started)
+        let now = ProcessInfo.processInfo.systemUptime
+        let seconds = Int(now - started)
         var activity = [CChar](repeating: 0, count: 4096)
         _ = maxps4_fex_engine_thread_activity(engine, &activity, activity.count)
-        return "Depuis le démarrage du JIT : \(seconds) s · dernier ticket VideoOut \(lastTicket) · images affichées \(displayed) · sautées \(maxps4_fex_engine_videoout_dropped(engine)) · VBlank envoyés \(vblanksSent)\n" + audioStatus(engine) + "\n" + String(cString: activity) + mainThreadSample(engine)
+        return "Depuis le démarrage du JIT : \(seconds) s · dernier ticket VideoOut \(lastTicket) · images affichées \(displayed) · sautées \(maxps4_fex_engine_videoout_dropped(engine)) · VBlank envoyés \(vblanksSent)\n" + rates(engine, now: now) + audioStatus(engine) + "\n" + String(cString: activity) + mainThreadSample(engine)
+    }
+    // Since the previous heartbeat: images the game asked to flip, images the
+    // host displayed, and the share of the time its thread spent in Metal
+    // submissions (the rest is emulated CPU and HLE calls).
+    private var lastRates: (time: TimeInterval, requested: UInt64, displayed: Int, submitMs: Double)?
+    private func rates(_ engine: OpaquePointer, now: TimeInterval) -> String {
+        let requested = maxps4_fex_engine_videoout_requested(engine)
+        let submitMs = bridge?.submitMilliseconds ?? 0
+        defer { lastRates = (now, requested, displayed, submitMs) }
+        guard let last = lastRates, now > last.time else { return "" }
+        let span = now - last.time
+        let game = Double(requested - last.requested) / span
+        let shown = Double(displayed - last.displayed) / span
+        let metal = (submitMs - last.submitMs) / (span * 10)
+        return String(format: "Cadence : jeu %.1f images/s · affichées %.1f/s · rendu Metal %.0f %% du temps du jeu\n", game, shown, metal)
     }
     private func audioStatus(_ engine: OpaquePointer) -> String {
         if let audioFailure { return "Audio : sortie iOS indisponible (\(audioFailure))" }

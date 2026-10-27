@@ -1783,6 +1783,9 @@ extern "C" int64_t maxps4_fex_engine_videoout_complete(maxps4_fex_engine* engine
 extern "C" uint64_t maxps4_fex_engine_videoout_dropped(maxps4_fex_engine* engine) {
     return engine ? engine->libkernel.videoout().dropped() : 0;
 }
+extern "C" uint64_t maxps4_fex_engine_videoout_requested(maxps4_fex_engine* engine) {
+    return engine ? engine->libkernel.videoout().requested() : 0;
+}
 extern "C" int64_t maxps4_fex_engine_videoout_vblank(maxps4_fex_engine* engine, uint64_t port) {
     if (!engine) return maxps4::PS4VideoOut::error(11);
     return engine->libkernel.videoout().vblank(port);
@@ -1792,9 +1795,14 @@ extern "C" int32_t maxps4_fex_engine_sample_main_thread(maxps4_fex_engine* engin
     *out = {};
     if (!GuestFaultGuard::available) return -ENOTSUP;
     // SIGURG would interrupt the host syscalls of an HLE call: sample only
-    // while the main guest thread runs outside HLE.
+    // while the main guest thread runs outside HLE. A sample costs the game
+    // up to ~70 ms (signal retries, then 16 suspensions) and the caller holds
+    // its session lock meanwhile: only when no HLE call returned for 2 s,
+    // never while the game runs normally.
+    const uint64_t now = ProbeAddressSpace::now_ns();
     for (const auto& a : engine->probe.activity)
-        if (a.thread.load() == 1 && a.inside.load()) return -EBUSY;
+        if (a.thread.load() == 1 && (a.inside.load() || now - std::min(now, a.since.load()) < 2000000000ULL))
+            return -EBUSY;
     std::lock_guard lock(engine->sample_lock);
     auto* guard = engine->main_guard;
     if (!guard) return -ESRCH;

@@ -118,13 +118,15 @@ int64_t maxps4_fex_engine_videoout_vblank(maxps4_fex_engine *engine, uint64_t po
 // Flips of sceGnmSubmitAndFlipCommandBuffers skipped because the previous one
 // was still pending (their prepareFlip label is still written).
 uint64_t maxps4_fex_engine_videoout_dropped(maxps4_fex_engine *engine);
+// Flips the game asked for so far: accepted plus skipped.
+uint64_t maxps4_fex_engine_videoout_requested(maxps4_fex_engine *engine);
 // One line per guest thread of the current run: the HLE call it is in and for
 // how long, or how long it has run guest code since its last call. Diagnostic
 // only, lock-free, NUL-terminated and truncated to `capacity`.
 int32_t maxps4_fex_engine_thread_activity(maxps4_fex_engine *engine, char *text, size_t capacity);
 // Where the main guest thread of the running image is right now, sampled by
 // a signal that lets it continue. Refused (-EBUSY) while it is inside an HLE
-// call, -ESRCH when nothing runs. Diagnostic only. On Apple devices a thread
+// call or returned from one less than 2 s ago, -ESRCH when nothing runs. Diagnostic only. On Apple devices a thread
 // that never takes the signal (signals masked, e.g. inside a FEX lock) is
 // suspended briefly through Mach instead (`method` 1), 16 times 1 ms apart:
 // the first read gives its registers and frame-pointer chain, every read in

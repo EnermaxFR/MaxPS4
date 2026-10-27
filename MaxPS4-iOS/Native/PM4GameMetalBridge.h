@@ -22,6 +22,9 @@ typedef BOOL (^MaxPS4GameMemoryReader)(uint64_t, void*, size_t);
                                        width:(uint32_t)width height:(uint32_t)height
     NS_SWIFT_NAME(copyTarget(address:width:height:));
 @property(nonatomic, readonly, copy) NSString* report;
+// Milliseconds the game's submitting thread has spent in submit so far
+// (encoding, GPU and waiting), every submission included.
+@property(atomic, readonly) double submitMilliseconds;
 @property(nonatomic, readonly, copy, nullable) NSString* failure;
 @end
 NS_ASSUME_NONNULL_END

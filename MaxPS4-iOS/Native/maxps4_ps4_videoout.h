@@ -108,6 +108,8 @@ public:
     // by sceGnmSubmitAndFlipCommandBuffers instead of failing the submission.
     void count_dropped() { std::lock_guard<std::mutex> lock(guard_); ++dropped_; }
     uint64_t dropped() { std::lock_guard<std::mutex> lock(guard_); return dropped_; }
+    // Flips the game asked for: accepted (tickets issued) plus skipped.
+    uint64_t requested() { std::lock_guard<std::mutex> lock(guard_); return next_frame_ - 1 + dropped_; }
     // Metadata of the pending flip, without copying CPU surface pixels.
     int32_t target(maxps4_videoout_frame& info, uint64_t& address) {
         info={}; address=0;

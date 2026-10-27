@@ -45,6 +45,7 @@ struct GameMetalState {
 }
 @interface MaxPS4GameMetalBridge ()
 @property(atomic, copy) NSString* lastReport;
+@property(atomic, readwrite) double submitMilliseconds;
 @end
 @implementation MaxPS4GameMetalBridge {
     std::unique_ptr<GameMetalState> state_;
@@ -90,6 +91,7 @@ struct GameMetalState {
         if (s.stats.rendered != rendered) {
             s.encodeMs = encoding; s.waitMs = elapsedMs(waiting); s.renderGpuMs = gpuMs(command);
         }
+        self.submitMilliseconds += elapsedMs(started);
         self.lastReport = s.report();
         // The native queue retires synchronization packets only after this return.
         return 0;
