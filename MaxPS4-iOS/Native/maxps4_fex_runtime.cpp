@@ -1783,6 +1783,10 @@ extern "C" int64_t maxps4_fex_engine_videoout_complete(maxps4_fex_engine* engine
 extern "C" uint64_t maxps4_fex_engine_videoout_dropped(maxps4_fex_engine* engine) {
     return engine ? engine->libkernel.videoout().dropped() : 0;
 }
+extern "C" int32_t maxps4_fex_engine_videoout_output(maxps4_fex_engine* engine, uint32_t width, uint32_t height) {
+    if (!engine) return -EINVAL;
+    return engine->libkernel.videoout().set_output(width, height) ? 0 : -EINVAL;
+}
 extern "C" uint64_t maxps4_fex_engine_videoout_requested(maxps4_fex_engine* engine) {
     return engine ? engine->libkernel.videoout().requested() : 0;
 }

@@ -37,6 +37,11 @@ int main() {
     assert(opened > 0);
     const uint64_t port = uint64_t(opened);
     assert(video.open(0, 0, 0) == PS4VideoOut::error(9));
+    // Reported output resolution: 1080p by default, 720p on request, nothing else.
+    assert(video.resolution(port, status) == 0 && read(status, 4) == 1920 && read(status + 4, 4) == 1080);
+    assert(!video.set_output(1280, 1080) && video.set_output(1280, 720));
+    assert(video.resolution(port, status) == 0 && read(status, 4) == 1280 && read(status + 4, 4) == 720);
+    assert(video.set_output(1920, 1080));
     assert(video.close(port + 1) == PS4VideoOut::error(11));
     assert(video.add_event(queue + 1, port, 6, 55) == PS4VideoOut::error(12));
     assert(video.add_event(queue, port, 6, 55) == 0 && video.add_event(queue, port, 7, 66) == 0);

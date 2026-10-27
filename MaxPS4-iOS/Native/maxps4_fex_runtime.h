@@ -118,6 +118,9 @@ int64_t maxps4_fex_engine_videoout_vblank(maxps4_fex_engine *engine, uint64_t po
 // Flips of sceGnmSubmitAndFlipCommandBuffers skipped because the previous one
 // was still pending (their prepareFlip label is still written).
 uint64_t maxps4_fex_engine_videoout_dropped(maxps4_fex_engine *engine);
+// Output resolution reported to the game: 1920x1080 (default) or 1280x720.
+// Set after loading, before running; kept across reloads. -EINVAL otherwise.
+int32_t maxps4_fex_engine_videoout_output(maxps4_fex_engine *engine, uint32_t width, uint32_t height);
 // Flips the game asked for so far: accepted plus skipped.
 uint64_t maxps4_fex_engine_videoout_requested(maxps4_fex_engine *engine);
 // One line per guest thread of the current run: the HLE call it is in and for

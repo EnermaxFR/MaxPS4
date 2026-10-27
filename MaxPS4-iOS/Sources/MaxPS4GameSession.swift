@@ -232,7 +232,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
             maxps4_fex_engine_close(engine)
         }
     }
-    func run(url: URL, device: MTLDevice, nativeTextures: Bool = false, tso: Bool = true, progress: @escaping @Sendable (String) -> Void) -> String {
+    func run(url: URL, device: MTLDevice, nativeTextures: Bool = false, tso: Bool = true, outputHeight: Int = 1080, progress: @escaping @Sendable (String) -> Void) -> String {
         dispatchPrecondition(condition: .onQueue(MaxPS4FEXMetalExecution.queue))
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -258,6 +258,8 @@ final class MaxPS4GameSource: @unchecked Sendable {
                 }
             }
             guard loaded == 0 else { throw failure(String(cString: diagnostic), loaded) }
+            // The output resolution the game is told (sceVideoOutGetResolutionStatus).
+            _ = maxps4_fex_engine_videoout_output(opened, outputHeight == 720 ? 1280 : 1920, outputHeight == 720 ? 720 : 1080)
             progress("Jeu chargé. Préparation du rendu Metal…")
             guard let metal = MaxPS4GameMetalBridge(device: device, reader: { address, destination, count in
                 maxps4_fex_engine_read_memory(opened, address, destination, count) == 0
@@ -319,7 +321,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private var generation = UUID()
     private var stopping: UUID?
     private var heartbeatTimer: Timer?
-    func start(url: URL, device: MTLDevice, nativeTextures: Bool = false, tso: Bool = true) {
+    func start(url: URL, device: MTLDevice, nativeTextures: Bool = false, tso: Bool = true, outputHeight: Int = 1080) {
         stop()
         let source = MaxPS4GameSource(), id = UUID()
         generation = id; self.source = source; worker = source; running = true
@@ -332,7 +334,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
             }
         }
         MaxPS4FEXMetalExecution.queue.async { [weak self] in
-            let result = source.run(url: url, device: device, nativeTextures: nativeTextures, tso: tso) { [weak self] text in
+            let result = source.run(url: url, device: device, nativeTextures: nativeTextures, tso: tso, outputHeight: outputHeight) { [weak self] text in
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.generation == id, self.running else { return }
                     self.report = text

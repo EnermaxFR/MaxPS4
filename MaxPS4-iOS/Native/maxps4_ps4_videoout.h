@@ -104,6 +104,12 @@ public:
         } catch (const std::bad_alloc&) { return error(0x100c); }
         return 0;
     }
+    // What sceVideoOutGetResolutionStatus reports (1920x1080 by default);
+    // kept across reset, set by the host before the game runs.
+    bool set_output(uint32_t width, uint32_t height) {
+        if (!((width == 1920 && height == 1080) || (width == 1280 && height == 720))) return false;
+        std::lock_guard<std::mutex> lock(guard_); output_width_ = width; output_height_ = height; return true;
+    }
     // A flip refused because another is still pending (error 0x12) and skipped
     // by sceGnmSubmitAndFlipCommandBuffers instead of failing the submission.
     void count_dropped() { std::lock_guard<std::mutex> lock(guard_); ++dropped_; }
@@ -145,7 +151,7 @@ public:
         std::lock_guard<std::mutex> lock(guard_);
         if (!valid(port)) return error(11);
         uint8_t wire[44]{};
-        const uint32_t sizes[] = {1920, 1080, 1920, 1080};
+        const uint32_t sizes[] = {output_width_, output_height_, output_width_, output_height_};
         for (size_t i = 0; i < 4; ++i) ps4::put_le(wire, i * 4, sizes[i], 4);
         ps4::put_le(wire, 16, 3, 8);
         const float inches = 50.0f;
@@ -192,6 +198,7 @@ private:
     uint64_t port_ = 0, next_port_ = 1, next_frame_ = 1, flip_count_ = 0, vblank_count_ = 0, dropped_ = 0;
     uint64_t last_argument_ = UINT64_MAX, flip_time_ = 0, vblank_time_ = 0;
     int32_t current_buffer_ = -1;
+    uint32_t output_width_ = 1920, output_height_ = 1080;
     maxps4_videoout_frame frame_{}; std::vector<uint8_t> pixels_;
     bool valid(uint64_t port) const { return port && port == port_; }
     static uint64_t now() {

@@ -19,6 +19,8 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
     private var needsRedraw = true
     private var retryTicket: UInt64 = 0
     private var presentationRetries = 0
+    // "fit" (whole image, black bars), "fill" (cropped) or "stretch".
+    var scaling = "fit" { didSet { if scaling != oldValue { needsRedraw = true } } }
     var report: (String) -> Void
     var failed: (String) -> Void
     init(device: MTLDevice, report: @escaping (String) -> Void, failed: @escaping (String) -> Void) throws {
@@ -91,7 +93,7 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
         let texture = frame?.texture ?? lastTexture
         if let texture {
             MaxPS4VideoOutMetal.encode(encoder: encoder, pipeline: pipeline, texture: texture,
-                output: view.drawableSize, fill: view.drawableSize.width > view.drawableSize.height)
+                output: view.drawableSize, fill: scaling == "fill", stretch: scaling == "stretch")
         }
         encoder.endEncoding()
         if let frame {
@@ -161,6 +163,7 @@ private struct GameMetalSurface: UIViewRepresentable {
     let device: MTLDevice
     let source: MaxPS4GameSource?
     let active: Bool
+    let scaling: String
     let report: (String) -> Void
     let failed: (String) -> Void
     final class Coordinator { var renderer: GameMetalDisplay? }
@@ -179,6 +182,7 @@ private struct GameMetalSurface: UIViewRepresentable {
     func updateUIView(_ view: MTKView, context: Context) {
         context.coordinator.renderer?.report = report
         context.coordinator.renderer?.failed = failed
+        context.coordinator.renderer?.scaling = scaling
         context.coordinator.renderer?.use(source)
         view.isPaused = !active || context.coordinator.renderer == nil
         if !active { context.coordinator.renderer?.cancel() }
@@ -203,6 +207,8 @@ struct MaxPS4GameView: View {
     @State private var hasLaunched = false
     @AppStorage("maxps4.metal.nativeTextures") private var nativeTextures = false
     @AppStorage("maxps4.fex.tso") private var tso = true
+    @AppStorage("maxps4.display.scaling") private var scaling = "fit"
+    @AppStorage("maxps4.video.height") private var outputHeight = 1080
     private let poll = Timer.publish(every: 1.0 / 60, on: .main, in: .common).autoconnect()
 #endif
     var body: some View {
@@ -211,7 +217,7 @@ struct MaxPS4GameView: View {
 #if MAXPS4_FEX_APP
             if let device {
                 GameMetalSurface(device: device, source: session.source,
-                    active: session.running && scenePhase == .active,
+                    active: session.running && scenePhase == .active, scaling: scaling,
                     report: session.presented, failed: session.failed)
                     .ignoresSafeArea()
                     .accessibilityIdentifier("maxps4.game.surface")
@@ -234,8 +240,20 @@ struct MaxPS4GameView: View {
                         }
                         Button(hasLaunched ? "Rejouer" : "Jouer") {
                             touch = 0; hasLaunched = true
-                            session.start(url: directory, device: device, nativeTextures: nativeTextures, tso: tso)
+                            session.start(url: directory, device: device, nativeTextures: nativeTextures, tso: tso,
+                                          outputHeight: outputHeight)
                         }.buttonStyle(.borderedProminent).tint(.cyan)
+                        Picker("Affichage", selection: $scaling) {
+                            Text("Ajuster").tag("fit")
+                            Text("Remplir").tag("fill")
+                            Text("Étirer").tag("stretch")
+                        }.pickerStyle(.segmented).frame(maxWidth: 320)
+                        Picker("Résolution du jeu", selection: $outputHeight) {
+                            Text("1080p").tag(1080)
+                            Text("720p").tag(720)
+                        }.pickerStyle(.segmented).frame(maxWidth: 320)
+                        Text("Résolution annoncée au jeu : 720p peut alléger le rendu si le jeu s’y adapte.")
+                            .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 320)
                         Toggle("Textures Metal natives (expérimental)", isOn: $nativeTextures)
                             .font(.footnote).frame(maxWidth: 320)
                         Toggle("Ordre mémoire x86 (TSO)", isOn: $tso)
@@ -284,6 +302,11 @@ struct MaxPS4GameView: View {
                             Button("Revenir au jeu") { showingMenu = false }
                                 .buttonStyle(.borderedProminent).tint(.cyan)
 #if MAXPS4_FEX_APP
+                            Picker("Affichage", selection: $scaling) {
+                                Text("Ajuster").tag("fit")
+                                Text("Remplir").tag("fill")
+                                Text("Étirer").tag("stretch")
+                            }.pickerStyle(.segmented)
                             if session.running {
                                 Button("Arrêter la session", role: .destructive) {
                                     touch = 0; session.stop(); showingMenu = false
