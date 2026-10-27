@@ -765,8 +765,14 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
         if (result) return result;
         if (interrupts) threads_.graphics_interrupt();
         if (!flip) return 0;
-        if (const int64_t e = videoout_.submit(c.r9, signed32(get_le(stack, 4)), signed32(get_le(stack + 8, 4)),
-                                               get_le(stack + 16, 8))) return e;
+        const int64_t shown = videoout_.submit(c.r9, signed32(get_le(stack, 4)), signed32(get_le(stack + 8, 4)),
+                                               get_le(stack + 16, 8));
+        // The host presents asynchronously, so the previous flip may still be
+        // pending. Skip this image rather than fail: the game ignores the error
+        // and spins forever on the prepareFlip label (Sonic Mania after its
+        // first flip on the iPhone).
+        if (shown == PS4VideoOut::error(0x12)) videoout_.count_dropped();
+        else if (shown) return shown;
         // The work is already retired: what prepareFlip asks for happens now.
         uint8_t value[4];
         put_le(value, 0, prepared.value, 4);

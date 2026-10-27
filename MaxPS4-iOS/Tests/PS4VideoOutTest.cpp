@@ -75,6 +75,7 @@ int main() {
     assert(video.pending(port) == 1 && video.flip_status(port, status) == 0);
     assert(read(status) == 0 && read(status + 52, 4) == 1 && read(status + 56, 4) == UINT32_MAX);
     assert(video.submit(port, 1, 1, 0) == PS4VideoOut::error(0x12));
+    assert(video.dropped() == 0); video.count_dropped(); assert(video.dropped() == 1);
     assert(video.unregister_buffers(port, 0) == PS4VideoOut::error(9));
     maxps4_videoout_frame frame{};
     assert(video.snapshot(frame, nullptr, 0) == 0 && frame.ticket && frame.port == port);

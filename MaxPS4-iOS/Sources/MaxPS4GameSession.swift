@@ -102,7 +102,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
         let seconds = Int(ProcessInfo.processInfo.systemUptime - started)
         var activity = [CChar](repeating: 0, count: 4096)
         _ = maxps4_fex_engine_thread_activity(engine, &activity, activity.count)
-        return "Depuis le démarrage du JIT : \(seconds) s · dernier ticket VideoOut \(lastTicket) · images affichées \(displayed) · VBlank envoyés \(vblanksSent)\n" + audioStatus(engine) + "\n" + String(cString: activity) + mainThreadSample(engine)
+        return "Depuis le démarrage du JIT : \(seconds) s · dernier ticket VideoOut \(lastTicket) · images affichées \(displayed) · sautées \(maxps4_fex_engine_videoout_dropped(engine)) · VBlank envoyés \(vblanksSent)\n" + audioStatus(engine) + "\n" + String(cString: activity) + mainThreadSample(engine)
     }
     private func audioStatus(_ engine: OpaquePointer) -> String {
         if let audioFailure { return "Audio : sortie iOS indisponible (\(audioFailure))" }

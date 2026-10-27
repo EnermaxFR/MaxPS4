@@ -104,6 +104,10 @@ public:
         } catch (const std::bad_alloc&) { return error(0x100c); }
         return 0;
     }
+    // A flip refused because another is still pending (error 0x12) and skipped
+    // by sceGnmSubmitAndFlipCommandBuffers instead of failing the submission.
+    void count_dropped() { std::lock_guard<std::mutex> lock(guard_); ++dropped_; }
+    uint64_t dropped() { std::lock_guard<std::mutex> lock(guard_); return dropped_; }
     // Metadata of the pending flip, without copying CPU surface pixels.
     int32_t target(maxps4_videoout_frame& info, uint64_t& address) {
         info={}; address=0;
@@ -183,7 +187,7 @@ private:
     struct Buffer { bool used = false; size_t group = 0; uint64_t address = 0; };
     PS4GuestMemory& memory_; PS4Threads& events_; std::mutex guard_;
     std::array<Group, group_limit> groups_{}; std::array<Buffer, buffer_limit> buffers_{};
-    uint64_t port_ = 0, next_port_ = 1, next_frame_ = 1, flip_count_ = 0, vblank_count_ = 0;
+    uint64_t port_ = 0, next_port_ = 1, next_frame_ = 1, flip_count_ = 0, vblank_count_ = 0, dropped_ = 0;
     uint64_t last_argument_ = UINT64_MAX, flip_time_ = 0, vblank_time_ = 0;
     int32_t current_buffer_ = -1;
     maxps4_videoout_frame frame_{}; std::vector<uint8_t> pixels_;
@@ -194,7 +198,7 @@ private:
     void clear() {
         if (port_) events_.video_event_remove_source(port_);
         port_ = 0; frame_ = {}; pixels_.clear(); groups_.fill({}); buffers_.fill({});
-        flip_count_ = vblank_count_ = flip_time_ = vblank_time_ = 0; last_argument_ = UINT64_MAX; current_buffer_ = -1;
+        flip_count_ = vblank_count_ = flip_time_ = vblank_time_ = dropped_ = 0; last_argument_ = UINT64_MAX; current_buffer_ = -1;
     }
 };
 }

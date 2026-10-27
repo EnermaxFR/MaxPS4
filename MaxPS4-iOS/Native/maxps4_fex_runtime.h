@@ -115,6 +115,9 @@ int32_t maxps4_fex_engine_videoout_snapshot(maxps4_fex_engine *engine,
 int64_t maxps4_fex_engine_videoout_complete(maxps4_fex_engine *engine,
     uint64_t ticket, uint32_t presented);
 int64_t maxps4_fex_engine_videoout_vblank(maxps4_fex_engine *engine, uint64_t port);
+// Flips of sceGnmSubmitAndFlipCommandBuffers skipped because the previous one
+// was still pending (their prepareFlip label is still written).
+uint64_t maxps4_fex_engine_videoout_dropped(maxps4_fex_engine *engine);
 // One line per guest thread of the current run: the HLE call it is in and for
 // how long, or how long it has run guest code since its last call. Diagnostic
 // only, lock-free, NUL-terminated and truncated to `capacity`.
