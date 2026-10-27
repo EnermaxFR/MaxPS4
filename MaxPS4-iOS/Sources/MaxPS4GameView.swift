@@ -118,7 +118,10 @@ private struct GameMetalSurface: UIViewRepresentable {
         let view = MTKView(frame: .zero, device: device)
         view.colorPixelFormat = .bgra8Unorm_srgb
         view.clearColor = MTLClearColorMake(0, 0, 0, 1)
-        view.preferredFramesPerSecond = 60; view.isPaused = true
+        // 120 Hz where the screen allows it (more chances to show a new copy
+        // early) and two drawables instead of three: one less queued image.
+        view.preferredFramesPerSecond = 120; view.isPaused = true
+        (view.layer as? CAMetalLayer)?.maximumDrawableCount = 2
         do {
             context.coordinator.renderer = try GameMetalDisplay(device: device, report: report, failed: failed)
             view.delegate = context.coordinator.renderer

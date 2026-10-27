@@ -73,6 +73,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private var missingSince: Date?
     private var lockWait: TimeInterval = 0 // Last snapshot's wait for `lock`.
     private var buttons: UInt32 = 0
+    private var inputEngine: OpaquePointer?
     private var displayed = 0
     private var started: TimeInterval?
     private var vblanksSent = 0
@@ -164,15 +165,13 @@ final class MaxPS4GameSource: @unchecked Sendable {
         return lines.joined(separator: "\n")
     }
 
+    // Input goes straight to the engine under inputLock alone, never waiting
+    // for `lock` (display copies, completions, reports). `inputEngine` is set
+    // while the game runs and cleared under inputLock before the engine closes.
     func input(_ buttons: UInt32) {
-        // Retain the latest state even when another engine API owns the lock.
-        // The independent timer retries it without waiting for a displayed frame.
-        inputLock.lock(); self.buttons = buttons; inputLock.unlock()
-        guard lock.try() else { return }
-        defer { lock.unlock() }
-        if ready, !stopped, let engine {
-            sendInputLocked(engine)
-        }
+        inputLock.lock(); defer { inputLock.unlock() }
+        self.buttons = buttons
+        if let inputEngine { _ = maxps4_fex_engine_pad_update(inputEngine, buttons, 128, 128, 128, 128, 0, 0, 1) }
     }
     private func sendInputLocked(_ engine: OpaquePointer) {
         inputLock.lock(); let latest = buttons; inputLock.unlock()
@@ -224,6 +223,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
         // run ends the game's audio thread would queue its last buffers in a
         // tight loop and the speaker would stutter them. close() repeats this.
         audio.stop()
+        inputLock.lock(); inputEngine = nil; inputLock.unlock()
         lock.lock()
         stopped = true; ready = false
         vblankTimer?.cancel(); vblankTimer = nil
@@ -234,6 +234,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
     }
     private func close() {
         dispatchPrecondition(condition: .onQueue(MaxPS4FEXMetalExecution.queue))
+        inputLock.lock(); inputEngine = nil; inputLock.unlock()
         lock.lock(); defer { lock.unlock() }
         ready = false
         vblankTimer?.cancel(); vblankTimer = nil
@@ -293,7 +294,10 @@ final class MaxPS4GameSource: @unchecked Sendable {
             started = ProcessInfo.processInfo.systemUptime
             self.relocation = relocation
             let cancelled = stopped
-            if ready { sendInputLocked(opened) }
+            if ready {
+                sendInputLocked(opened)
+                inputLock.lock(); inputEngine = opened; inputLock.unlock()
+            }
             if ready {
                 let timer = DispatchSource.makeTimerSource(queue: vblanks)
                 timer.schedule(deadline: .now(), repeating: 1.0 / 60, leeway: .milliseconds(1))
