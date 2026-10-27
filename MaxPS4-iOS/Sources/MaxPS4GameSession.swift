@@ -106,10 +106,10 @@ final class MaxPS4GameSource: @unchecked Sendable {
     }
     private func audioStatus(_ engine: OpaquePointer) -> String {
         if let audioFailure { return "Audio : sortie iOS indisponible (\(audioFailure))" }
-        var outputs: UInt64 = 0, written: UInt64 = 0, dropped: UInt64 = 0, silent: UInt64 = 0
+        var outputs: UInt64 = 0, written: UInt64 = 0, dropped: UInt64 = 0, silent: UInt64 = 0, audible: UInt64 = 0
         var ports: UInt32 = 0
-        _ = maxps4_fex_engine_audio_status(engine, &outputs, &written, &dropped, &silent, &ports)
-        return "Audio : \(ports) ports · \(outputs) appels Output · \(written) trames écrites · \(dropped) perdues · \(silent) silencieuses"
+        _ = maxps4_fex_engine_audio_status(engine, &outputs, &written, &dropped, &silent, &ports, &audible)
+        return "Audio : \(ports) ports · \(outputs) appels Output · \(written) trames écrites (\(audible) non muettes) · \(dropped) perdues · \(silent) silencieuses"
     }
     // One sample of where the main guest thread is (only while outside HLE).
     private func mainThreadSample(_ engine: OpaquePointer) -> String {
@@ -121,12 +121,18 @@ final class MaxPS4GameSource: @unchecked Sendable {
         }
         let rip = sample.guest_rip, relative = rip >= relocation ? rip - relocation : rip
         let position = "RIP 0x\(String(rip, radix: 16)) (relatif 0x\(String(relative, radix: 16)))"
+        // Method 1: the signal was never taken; the thread was read through Mach.
+        let mach = sample.method == 1
+        let label = mach ? "Échantillon thread 1 (Mach, signal non reçu)" : "Échantillon thread 1"
+        let pc = "PC 0x\(String(sample.host_pc, radix: 16))"
+        let place: String
         switch sample.location {
-        case 1: return "Échantillon thread 1 : code JIT, \(position)"
-        case 2: return "Échantillon thread 1 : répartiteur FEX, dernier \(position)"
-        default:
-            return "Échantillon thread 1 : code hôte \(text(sample.symbol)) appelé depuis \(text(sample.caller)), dernier \(position)"
+        case 1: place = mach ? "\(label) : hors bibliothèque, sans doute code JIT (\(pc)), dernier \(position)" : "\(label) : code JIT, \(position)"
+        case 2: place = "\(label) : répartiteur FEX, dernier \(position)"
+        default: place = "\(label) : code hôte \(text(sample.symbol)) appelé depuis \(text(sample.caller)), dernier \(position)"
         }
+        let frames = text(sample.backtrace)
+        return frames.isEmpty ? place : place + "\nPile thread 1 : " + frames
     }
 
     func input(_ buttons: UInt32) {

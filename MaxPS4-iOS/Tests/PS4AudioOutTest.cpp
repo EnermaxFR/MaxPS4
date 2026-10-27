@@ -101,6 +101,7 @@ int main() {
     assert(stats.ports == PS4AudioOut::port_limit);
     assert(stats.dropped == 7 * 2048 - PS4AudioOut::ring_frames);
     assert(stats.outputs > 40 && stats.written == 256 * 3 + 7 * 2048 && stats.silent > 0);
+    assert(stats.audible > 0 && stats.audible < stats.written); // The NaN mono frame is muted.
     assert(audio.read(out.data(), 4096) == 4096);
 
     // Concurrent host reads while a game thread outputs.

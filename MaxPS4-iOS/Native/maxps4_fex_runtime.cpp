@@ -52,6 +52,10 @@
 #if defined(__APPLE__)
 #include <sys/ucontext.h>
 #include <libkern/OSCacheControl.h>
+#include <mach/mach.h>
+#if __has_feature(ptrauth_calls)
+#include <ptrauth.h>
+#endif
 #else
 #include <ucontext.h>
 #endif
@@ -1754,9 +1758,10 @@ extern "C" int32_t maxps4_fex_engine_audio_read(maxps4_fex_engine* engine, float
     return int32_t(engine->libkernel.audio().read(samples, frames));
 }
 extern "C" int32_t maxps4_fex_engine_audio_status(maxps4_fex_engine* engine, uint64_t* outputs,
-    uint64_t* written, uint64_t* dropped, uint64_t* silent, uint32_t* ports) {
+    uint64_t* written, uint64_t* dropped, uint64_t* silent, uint32_t* ports, uint64_t* audible) {
     if (!engine) return -EINVAL;
     const auto stats = engine->libkernel.audio().stats();
+    if (audible) *audible = stats.audible;
     if (outputs) *outputs = stats.outputs;
     if (written) *written = stats.written;
     if (dropped) *dropped = stats.dropped;
@@ -1790,18 +1795,74 @@ extern "C" int32_t maxps4_fex_engine_sample_main_thread(maxps4_fex_engine* engin
         ::pthread_kill(guard->host, SIGURG);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+    auto name = [](uint64_t address, char* text, size_t capacity) {
+        Dl_info info {};
+        if (!::dladdr(reinterpret_cast<void*>(address), &info) || !info.dli_sname) return false;
+        std::snprintf(text, capacity, "%s+0x%llx", info.dli_sname,
+            (unsigned long long)(address - reinterpret_cast<uintptr_t>(info.dli_saddr)));
+        return true;
+    };
     if (guard->sample_sequence.load(std::memory_order_acquire) == before) {
         guard->sample_request = false;
+#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__)) && !defined(VIXL_SIMULATOR)
+        // The signal was not taken: read the suspended thread instead. Nothing
+        // that may lock (allocation, FEX lookups, dladdr) runs while it is
+        // suspended, since it may hold that lock.
+        const thread_act_t port = ::pthread_mach_thread_np(guard->host);
+        const auto top = reinterpret_cast<uintptr_t>(::pthread_get_stackaddr_np(guard->host));
+        const uintptr_t low = top - ::pthread_get_stacksize_np(guard->host);
+        auto strip = [](uint64_t address) {
+#if __has_feature(ptrauth_calls)
+            return uint64_t(reinterpret_cast<uintptr_t>(ptrauth_strip(reinterpret_cast<void*>(address), ptrauth_key_return_address)));
+#else
+            return address;
+#endif
+        };
+        std::array<uint64_t, 16> frames {};
+        size_t depth = 0;
+        arm_thread_state64_t state {};
+        mach_msg_type_number_t count = ARM_THREAD_STATE64_COUNT;
+        if (::thread_suspend(port) != KERN_SUCCESS) return -ETIMEDOUT;
+        const kern_return_t read = ::thread_get_state(port, ARM_THREAD_STATE64,
+            reinterpret_cast<thread_state_t>(&state), &count);
+        if (read == KERN_SUCCESS) {
+            out->host_pc = strip(arm_thread_state64_get_pc(state));
+            out->host_lr = strip(arm_thread_state64_get_lr(state));
+            // JIT code may use x29 as a scratch register: only follow frames
+            // that stay inside this thread's stack and move up it.
+            uintptr_t fp = arm_thread_state64_get_fp(state);
+            while (depth < frames.size() && fp >= low && fp % 16 == 0 && fp <= top - 16) {
+                const auto* frame = reinterpret_cast<const uint64_t*>(fp);
+                if (frame[1]) frames[depth++] = strip(frame[1]);
+                if (frame[0] <= fp) break;
+                fp = frame[0];
+            }
+            out->guest_rip = guard->thread->CurrentFrame->State.rip;
+        }
+        ::thread_resume(port);
+        if (read != KERN_SUCCESS) return -ETIMEDOUT;
+        out->method = 1;
+        const uint64_t pc = out->host_pc;
+        const bool dispatcher = pc >= guard->config.DispatcherBegin && pc < guard->config.DispatcherEnd;
+        const bool named = name(pc, out->symbol, sizeof out->symbol);
+        out->location = dispatcher ? 2 : named ? 3 : 1;
+        name(out->host_lr, out->caller, sizeof out->caller);
+        size_t used = 0;
+        for (size_t i = 0; i < depth && used + 1 < sizeof out->backtrace; ++i) {
+            char symbol[128] {};
+            if (!name(frames[i], symbol, sizeof symbol))
+                std::snprintf(symbol, sizeof symbol, "0x%llx", (unsigned long long)frames[i]);
+            const int n = std::snprintf(out->backtrace + used, sizeof out->backtrace - used, "%s%s", i ? " < " : "", symbol);
+            if (n < 0) break;
+            used = std::min(sizeof out->backtrace - 1, used + size_t(n));
+        }
+        return 0;
+#else
         return -ETIMEDOUT;
+#endif
     }
     const auto sample = guard->sample;
     out->host_pc = sample.pc; out->host_lr = sample.lr; out->guest_rip = sample.rip; out->location = sample.where;
-    auto name = [](uint64_t address, char* text, size_t capacity) {
-        Dl_info info {};
-        if (!::dladdr(reinterpret_cast<void*>(address), &info) || !info.dli_sname) return;
-        std::snprintf(text, capacity, "%s+0x%llx", info.dli_sname,
-            (unsigned long long)(address - reinterpret_cast<uintptr_t>(info.dli_saddr)));
-    };
     name(sample.pc, out->symbol, sizeof out->symbol);
     name(sample.lr, out->caller, sizeof out->caller);
     return 0;

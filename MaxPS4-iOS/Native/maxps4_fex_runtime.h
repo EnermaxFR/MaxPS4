@@ -98,9 +98,10 @@ int32_t maxps4_fex_engine_pad_update(maxps4_fex_engine* engine, uint32_t buttons
 // pad_update; no FEX runtime lock.
 int32_t maxps4_fex_engine_audio_read(maxps4_fex_engine* engine, float* samples, uint32_t frames);
 // AudioOut counters (any pointer may be null): Output calls, frames written,
-// frames dropped (ring full, no reader), silent frames read, open ports.
+// frames dropped (ring full, no reader), silent frames read, open ports,
+// written frames with a non-zero sample.
 int32_t maxps4_fex_engine_audio_status(maxps4_fex_engine* engine, uint64_t* outputs,
-    uint64_t* written, uint64_t* dropped, uint64_t* silent, uint32_t* ports);
+    uint64_t* written, uint64_t* dropped, uint64_t* silent, uint32_t* ports, uint64_t* audible);
 // Owned linear VideoOut frame (raw RGBA/BGRA bytes, including row padding).
 // With pixels=NULL/capacity=0, query metadata only. Otherwise capacity must
 // cover byte_count. Returns 0, -EAGAIN if no frame, or -EINVAL for bad outputs;
@@ -120,13 +121,19 @@ int64_t maxps4_fex_engine_videoout_vblank(maxps4_fex_engine *engine, uint64_t po
 int32_t maxps4_fex_engine_thread_activity(maxps4_fex_engine *engine, char *text, size_t capacity);
 // Where the main guest thread of the running image is right now, sampled by
 // a signal that lets it continue. Refused (-EBUSY) while it is inside an HLE
-// call, -ESRCH when nothing runs. Diagnostic only.
+// call, -ESRCH when nothing runs. Diagnostic only. On Apple devices a thread
+// that never takes the signal (signals masked, e.g. inside a FEX lock) is
+// suspended briefly through Mach instead (`method` 1): its registers and
+// frame-pointer chain are read, and an address in no loaded image is assumed
+// to be JIT code.
 typedef struct maxps4_fex_thread_sample {
     uint64_t host_pc, host_lr;
     uint64_t guest_rip; // JIT: reconstructed; otherwise FEX's last stored RIP.
     uint32_t location;  // 1: JIT code, 2: FEX dispatcher, 3: other host code.
+    uint32_t method;    // 0: signal, 1: Mach suspension (the signal was not taken).
     char symbol[128];   // Host symbol of host_pc, "" when unknown.
     char caller[128];   // Host symbol of host_lr.
+    char backtrace[768]; // Method 1: return addresses up the frame chain, " < " separated.
 } maxps4_fex_thread_sample;
 int32_t maxps4_fex_engine_sample_main_thread(maxps4_fex_engine *engine, maxps4_fex_thread_sample *sample);
 // Experimental: x86 memory-order (TSO) emulation for engines opened after

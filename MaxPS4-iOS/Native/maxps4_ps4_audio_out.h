@@ -24,7 +24,9 @@ public:
     // A quarter of a second per port: enough to absorb a host render period.
     static constexpr size_t ring_frames = rate / 4;
     static int64_t error(uint32_t code) { return ps4::signed32(0x80260000U | code); }
-    struct Stats { uint64_t outputs = 0, written = 0, dropped = 0, silent = 0; uint32_t ports = 0; };
+    // `audible`: written frames with a non-zero sample (a game that only
+    // queues silence is told apart from audio that never reaches the host).
+    struct Stats { uint64_t outputs = 0, written = 0, dropped = 0, silent = 0, audible = 0; uint32_t ports = 0; };
     PS4AudioOut(PS4GuestMemory& memory, PS4Threads& threads) : memory_(memory), threads_(threads) {}
     int64_t initialize() {
         std::lock_guard<std::mutex> lock(lock_);
@@ -162,6 +164,7 @@ private:
             const size_t at = (port.head + port.count) % ring_frames;
             port.ring[2*at] = stereo[2*i]; port.ring[2*at+1] = stereo[2*i+1];
             ++port.count;
+            if (stereo[2*i] != 0.0f || stereo[2*i+1] != 0.0f) ++stats_.audible;
         }
         stats_.written += frames;
     }
