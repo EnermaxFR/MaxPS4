@@ -211,6 +211,10 @@ final class MaxPS4GameSource: @unchecked Sendable {
         return result == 0 && confirmed
     }
     func stop() {
+        // Silence at once: a stop interrupts AudioOut's pacing, so until the
+        // run ends the game's audio thread would queue its last buffers in a
+        // tight loop and the speaker would stutter them. close() repeats this.
+        audio.stop()
         lock.lock()
         stopped = true; ready = false
         vblankTimer?.cancel(); vblankTimer = nil
