@@ -96,6 +96,9 @@ public:
     // whether each was already reported.
     const std::vector<std::string>* missing_imports = nullptr;
     std::vector<std::atomic<bool>>* missing_reported = nullptr;
+    // One stderr line per HLE call (boot probe only): thousands per second,
+    // which a game on the iPhone paid on its own thread, through the debugger.
+    bool trace = false;
     uint64_t private_stack = 0;
     size_t private_stack_size = 0;
     // Guest threads of a general run call in concurrently.
@@ -207,10 +210,10 @@ public:
             if (slot) { slot->since = now_ns(); slot->inside = false; ++slot->returned; }
             ++calls;
             char path[256] = {};
-            if (missing_imports && (orbis == maxps4::PS4KernelService::open || orbis == maxps4::PS4KernelService::stat) &&
+            if (trace && (orbis == maxps4::PS4KernelService::open || orbis == maxps4::PS4KernelService::stat) &&
                 memory->read_cstring(call.rdi, path, sizeof(path)))
                 std::fprintf(stderr, "hle path \"%s\"\n", path);
-            if (missing_imports && static_cast<uint32_t>(orbis) < maxps4::missing_import_token)
+            if (trace && static_cast<uint32_t>(orbis) < maxps4::missing_import_token)
                 std::fprintf(stderr, "hle %s(0x%llx, 0x%llx, 0x%llx, 0x%llx) = 0x%llx rsp 0x%llx -> 0x%llx\n",
                     service_name(orbis), (unsigned long long)call.rdi, (unsigned long long)call.rsi,
                     (unsigned long long)call.rdx, (unsigned long long)call.rcx, (unsigned long long)result,
@@ -901,7 +904,7 @@ struct maxps4_fex_engine {
     maxps4::PS4GuestMemory system_memory{staged_ps4, &dynamic_ps4};
     maxps4::PS4Libkernel libkernel{system_memory, &dynamic_ps4};
     maxps4::PS4DynamicLinker linker;
-    bool import_probe = false;
+    bool import_probe = false, import_trace = false;
     std::vector<std::string> missing_imports;
     std::vector<std::atomic<bool>> missing_reported;
     fextl::unique_ptr<FEXCore::Context::Context> context;
@@ -1123,9 +1126,10 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     // Orbis images with synthesized HLE trampolines also reach libkernel.
     engine->probe.kernel = linked || image.has_hle() ? &engine->libkernel : nullptr;
     engine->probe.memory = linked || image.has_hle() ? &engine->system_memory : nullptr;
-    // Probe mode only: stubs report themselves and every HLE call is traced.
+    // Probe mode only: stubs report themselves; mode 1 also traces every HLE call.
     engine->probe.missing_imports = engine->import_probe ? &engine->missing_imports : nullptr;
     engine->probe.missing_reported = engine->import_probe ? &engine->missing_reported : nullptr;
+    engine->probe.trace = engine->import_trace;
     engine->probe.private_stack = reinterpret_cast<uintptr_t>(stack_base);
     engine->probe.private_stack_size = page;
     engine->probe.calls = 0;
@@ -1484,9 +1488,10 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine* en
     } catch (const std::bad_alloc&) { message("Orbis allocation failed"); return -ENOMEM; }
 }
 extern "C" int32_t maxps4_fex_engine_set_import_probe(maxps4_fex_engine* engine, uint32_t enabled) {
-    if (!engine || enabled > 1) return -EINVAL;
+    if (!engine || enabled > 2) return -EINVAL;
     std::lock_guard lock(runtime_lock);
     engine->import_probe = enabled != 0;
+    engine->import_trace = enabled == 1;
     return 0;
 }
 extern "C" int32_t maxps4_fex_engine_prepare_orbis(maxps4_fex_engine* engine,

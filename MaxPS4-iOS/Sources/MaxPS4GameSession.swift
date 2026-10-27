@@ -268,7 +268,9 @@ final class MaxPS4GameSource: @unchecked Sendable {
             engine = opened; lock.unlock()
             // Same permissive import probe as the validated Sonic boot probe.
             // This remains experimental: unresolved imports are reported by FEX.
-            _ = maxps4_fex_engine_set_import_probe(opened, 1)
+            // Mode 2: stubs without the per-call stderr trace, which cost the
+            // game's thread thousands of formatted lines per second.
+            _ = maxps4_fex_engine_set_import_probe(opened, 2)
             var diagnostic = [CChar](repeating: 0, count: 2048)
             var relocation: UInt64 = 0
             progress("Lecture du dossier et chargement de eboot.bin et des PRX…")

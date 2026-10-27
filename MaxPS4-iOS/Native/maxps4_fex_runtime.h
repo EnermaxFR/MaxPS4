@@ -287,7 +287,8 @@ int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine *engine,
 // default). When on, every import that neither a given module nor the HLE
 // provides gets a stub: a function writes "missing import <library> <NID>"
 // to stderr on its first call and returns 0, a data object is 64 zero bytes.
-// Every HLE call of a run is also traced to stderr with its result.
+// With 1, every HLE call of a run is also traced to stderr with its result;
+// 2 keeps the stubs without that trace (thousands of lines per second).
 // It shows how far a game gets; it never makes it correct.
 int32_t maxps4_fex_engine_set_import_probe(maxps4_fex_engine *engine, uint32_t enabled);
 // A game directory as the boot probe loads it: <directory>/sce_module/*.prx
