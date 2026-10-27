@@ -377,6 +377,9 @@ public:
     std::atomic<uint32_t> sample_sequence {0};
     Sample sample {};
     const pthread_t host = ::pthread_self();
+    // For a sample taken from outside the thread (no locks taken).
+    uint64_t stored_rip() const { return thread->CurrentFrame->State.rip; }
+    bool in_dispatcher(uint64_t pc) const { return pc >= config.DispatcherBegin && pc < config.DispatcherEnd; }
 private:
     struct AlignmentAccess { uint64_t address; size_t bytes; uint32_t permissions; };
     // Operand forms recognized by the pinned FEX unaligned handler. Include
@@ -1837,13 +1840,13 @@ extern "C" int32_t maxps4_fex_engine_sample_main_thread(maxps4_fex_engine* engin
                 if (frame[0] <= fp) break;
                 fp = frame[0];
             }
-            out->guest_rip = guard->thread->CurrentFrame->State.rip;
+            out->guest_rip = guard->stored_rip();
         }
         ::thread_resume(port);
         if (read != KERN_SUCCESS) return -ETIMEDOUT;
         out->method = 1;
         const uint64_t pc = out->host_pc;
-        const bool dispatcher = pc >= guard->config.DispatcherBegin && pc < guard->config.DispatcherEnd;
+        const bool dispatcher = guard->in_dispatcher(pc);
         const bool named = name(pc, out->symbol, sizeof out->symbol);
         out->location = dispatcher ? 2 : named ? 3 : 1;
         name(out->host_lr, out->caller, sizeof out->caller);
