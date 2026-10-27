@@ -25,6 +25,8 @@ struct GameMetalState {
     id<MTLDevice> device;
     id<MTLCommandQueue> queue;
     std::string error;
+    // The previous submission, still running on the GPU while the game goes on.
+    id<MTLCommandBuffer> inflight;
     double encodeMs = 0, waitMs = 0, renderGpuMs = -1, copyMs = 0, copyGpuMs = -1;
     bool nativeTextures;
     NSString* report() const {
@@ -68,6 +70,24 @@ struct GameMetalState {
         if (!s.error.empty()) return -EIO;
         if (!words || !count || count > 65536) return -EINVAL;
         const auto started = Clock::now();
+        // The game does not wait for its work's GPU completion: every byte a
+        // draw reads is copied while encoding (upload buffers are reused only
+        // once their command buffer has completed, constants go by value),
+        // targets are GPU-only, and display copies follow on the same queue.
+        // One submission at a time stays in flight: the next one waits for it
+        // here, after the game's CPU work in between.
+        if (s.inflight) {
+            [s.inflight waitUntilCompleted];
+            id<MTLCommandBuffer> previous = s.inflight;
+            s.inflight = nil;
+            s.waitMs = elapsedMs(started);
+            if (previous.status != MTLCommandBufferStatusCompleted || previous.error) {
+                s.error = previous.error ? previous.error.localizedDescription.UTF8String : "Metal GPU completion failed";
+                return -EIO;
+            }
+            if (gpuMs(previous) >= 0) s.renderGpuMs = gpuMs(previous);
+        }
+        const auto encodingStarted = Clock::now();
         id<MTLCommandBuffer> command = [s.queue commandBuffer];
         if (!command) { s.error = "Metal command buffer allocation"; return -ENOMEM; }
         const unsigned failed = s.stats.failed;
@@ -80,16 +100,11 @@ struct GameMetalState {
         });
         s.renderer.endBatch();
         if (s.stats.failed != failed) { s.error = s.stats.error; return -ENOTSUP; }
-        const double encoding = elapsedMs(started);
-        const auto waiting = Clock::now();
+        const double encoding = elapsedMs(encodingStarted);
         [command commit];
-        [command waitUntilCompleted];
-        if (command.status != MTLCommandBufferStatusCompleted || command.error) {
-            s.error = command.error ? command.error.localizedDescription.UTF8String : "Metal GPU completion failed";
-            return -EIO;
-        }
         if (s.stats.rendered != rendered) {
-            s.encodeMs = encoding; s.waitMs = elapsedMs(waiting); s.renderGpuMs = gpuMs(command);
+            s.encodeMs = encoding;
+            s.inflight = command;
         }
         self.submitMilliseconds += elapsedMs(started);
         self.lastReport = s.report();
