@@ -3,6 +3,7 @@
 #include "maxps4_guest_stack.h"
 #include "maxps4_orbis_v4_execution_gate.h"
 #include <algorithm>
+#include <map>
 #include <iterator>
 #include <filesystem>
 #include <fstream>
@@ -897,6 +898,7 @@ struct maxps4_fex_engine {
     CPUProfile profile;
     std::atomic<bool> profiling{false};
     uint64_t relocation = 0; // Of the loaded game, for relative profile RIPs.
+    std::string update_directory; // For load_game (set_update); empty: none.
     maxps4::GuestFrame frame;
     uint64_t frame_sequence = 0;
     bool frame_code_cached = false;
@@ -1691,6 +1693,12 @@ extern "C" int64_t maxps4_fex_engine_mount_app0(maxps4_fex_engine* engine, const
     if (engine->staged_ps4.segments().empty()) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
     return engine->libkernel.mount_app0(directory);
 }
+extern "C" int32_t maxps4_fex_engine_set_update(maxps4_fex_engine* engine, const char* directory) {
+    if (!engine) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    engine->update_directory = directory ? directory : "";
+    return 0;
+}
 extern "C" int32_t maxps4_fex_engine_load_game(maxps4_fex_engine* engine, const char* directory,
     uint64_t* relocation, char* diagnostic, size_t capacity) {
     if (relocation) *relocation = 0;
@@ -1702,13 +1710,19 @@ extern "C" int32_t maxps4_fex_engine_load_game(maxps4_fex_engine* engine, const 
     struct Module { std::string name; std::vector<uint8_t> bytes; maxps4::OrbisMetadata metadata;
                     std::vector<std::string> dependencies; std::vector<const char*> pointers; };
     try {
-        const std::filesystem::path root(directory);
+        const std::filesystem::path root(directory), update(engine->update_directory);
         std::vector<std::filesystem::path> files;
         std::error_code error;
-        for (const auto& entry : std::filesystem::directory_iterator(root / "sce_module", error))
-            if (entry.path().extension() == ".prx") files.push_back(entry.path());
-        std::sort(files.begin(), files.end());
-        files.push_back(root / "eboot.bin");
+        // The update's modules replace the game's of the same name and add its own.
+        std::map<std::string, std::filesystem::path> prx;
+        for (const auto& folder : {root, update}) {
+            if (folder.empty()) continue;
+            std::error_code missing;
+            for (const auto& entry : std::filesystem::directory_iterator(folder / "sce_module", missing))
+                if (entry.path().extension() == ".prx") prx[entry.path().filename().string()] = entry.path();
+        }
+        for (const auto& [name, path] : prx) files.push_back(path);
+        files.push_back(!update.empty() && std::filesystem::exists(update / "eboot.bin", error) ? update / "eboot.bin" : root / "eboot.bin");
         // Providers first (the linker wants a module's dependencies before it).
         std::vector<Module> modules(files.size());
         for (size_t i = 0; i < files.size(); ++i) {
@@ -1739,7 +1753,12 @@ extern "C" int32_t maxps4_fex_engine_load_game(maxps4_fex_engine* engine, const 
                                                                          "eboot.bin", relocation, diagnostic, capacity);
         if (prepared) return prepared;
         const int64_t mounted = maxps4_fex_engine_mount_app0(engine, root.string().c_str());
-        return mounted ? int32_t(mounted) : 0;
+        if (mounted) return int32_t(mounted);
+        if (!update.empty()) {
+            const int64_t overlaid = engine->libkernel.mount_app0_update(update.string().c_str());
+            if (overlaid) { report("update: not readable"); return int32_t(overlaid); }
+        }
+        return 0;
     } catch (const std::bad_alloc&) { return -ENOMEM; }
     catch (const std::filesystem::filesystem_error&) { report("directory not readable"); return -ENOENT; }
 }

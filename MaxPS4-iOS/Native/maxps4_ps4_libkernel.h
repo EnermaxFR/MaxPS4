@@ -143,6 +143,9 @@ public:
     // the previous one. A successful remount closes guest descriptors.
     int64_t mount(const char* guest, const char* host_directory);
     int64_t mount_app0(const char* host_directory) { return mount("/app0", host_directory); }
+    // A game update over /app0: a path the update holds is read from it, any
+    // other from the game. Read-only, like /app0; cleared by reset() or a remount.
+    int64_t mount_app0_update(const char* host_directory);
     // Host directory holding this game's save directories: sceSaveDataMount2
     // mounts <root>/<dirName> at /savedata0. Cleared by reset().
     int64_t set_savedata_root(const char* host_directory);
@@ -183,7 +186,7 @@ private:
     int64_t invoke_service(PS4KernelService service, const PS4KernelCall& call, uint64_t thread);
     int64_t extended(PS4KernelService service, const PS4KernelCall& call, uint64_t thread, bool& handled);
     std::mutex lock_;
-    struct Mount { const char* prefix; bool writable; int root; };
+    struct Mount { const char* prefix; bool writable; int root; int overlay = -1; };
     std::array<Mount, 4> mounts_{{{"/app0", false, -1}, {"/savedata0", true, -1},
                                   {"/download0", true, -1}, {"/temp0", true, -1}}};
     // A guest descriptor: its host descriptor, access, and for a directory
@@ -203,6 +206,7 @@ private:
     // descriptor) and that component ("." for the mount root). Every
     // component is opened without following symbolic links.
     int parent(size_t mount, const char* relative, char* leaf, ps4::Error& error) const;
+    int parent_from(int root, const char* relative, char* leaf, ps4::Error& error) const;
     int64_t file_service(PS4KernelService service, const PS4KernelCall& call);
     int64_t open(const PS4KernelCall& call);
     int64_t read(const PS4KernelCall& call);

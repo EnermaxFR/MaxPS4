@@ -308,7 +308,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
             maxps4_fex_engine_close(engine)
         }
     }
-    func run(url: URL, device: MTLDevice, nativeTextures: Bool = false, tso: Bool = true, outputHeight: Int = 1080, profiling: Bool = false, progress: @escaping @Sendable (String) -> Void) -> String {
+    func run(url: URL, update: URL? = nil, device: MTLDevice, nativeTextures: Bool = false, tso: Bool = true, outputHeight: Int = 1080, profiling: Bool = false, progress: @escaping @Sendable (String) -> Void) -> String {
         dispatchPrecondition(condition: .onQueue(MaxPS4FEXMetalExecution.queue))
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -330,6 +330,8 @@ final class MaxPS4GameSource: @unchecked Sendable {
             var diagnostic = [CChar](repeating: 0, count: 2048)
             var relocation: UInt64 = 0
             progress(String(localized: "Lecture du dossier et chargement de eboot.bin et des PRX…", bundle: .maxps4))
+            // An extracted update: its eboot.bin and modules first, and over /app0.
+            _ = (update?.path ?? "").withCString { maxps4_fex_engine_set_update(opened, $0) }
             let loaded = url.path.withCString { path in
                 diagnostic.withUnsafeMutableBufferPointer {
                     maxps4_fex_engine_load_game(opened, path, &relocation, $0.baseAddress, $0.count)
@@ -426,7 +428,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private var stopping: UUID?
     private var heartbeatTimer: Timer?
     private var beating = false // A heartbeat is being read in the background.
-    func start(url: URL, device: MTLDevice, nativeTextures: Bool = false, tso: Bool = true, outputHeight: Int = 1080, profiling: Bool = false) {
+    func start(url: URL, update: URL? = nil, device: MTLDevice, nativeTextures: Bool = false, tso: Bool = true, outputHeight: Int = 1080, profiling: Bool = false) {
         stop()
         let source = MaxPS4GameSource(), id = UUID()
         generation = id; self.source = source; worker = source; running = true
@@ -449,7 +451,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
             }
         }
         MaxPS4FEXMetalExecution.queue.async { [weak self] in
-            let result = source.run(url: url, device: device, nativeTextures: nativeTextures, tso: tso, outputHeight: outputHeight, profiling: profiling) { [weak self] text in
+            let result = source.run(url: url, update: update, device: device, nativeTextures: nativeTextures, tso: tso, outputHeight: outputHeight, profiling: profiling) { [weak self] text in
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.generation == id, self.running else { return }
                     self.report = text

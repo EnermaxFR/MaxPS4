@@ -68,6 +68,9 @@ struct MaxPS4GameDirectoryView: View {
         let url: URL
         let name: String
         let icon: URL?
+        // An extracted update found for it (shadPS4 layout: "<game>-UPDATE").
+        var update: URL? = nil
+        var updateVersion: String? = nil
     }
     static let shared = MaxPS4GameFolders()
     @Published private(set) var folders: [Folder] = []
@@ -99,6 +102,8 @@ struct MaxPS4GameDirectoryView: View {
         try? manager.createDirectory(at: documents.appendingPathComponent("Jeux", isDirectory: true),
                                      withIntermediateDirectories: true)
         var games: [LocalGame] = [], walked: [URL] = []
+        // Updates by TITLE_ID and by the game folder name they are named after.
+        var updates: [(url: URL, titleID: String?, base: String, version: String?)] = []
         func named(_ name: String, in entries: [URL]) -> URL? {
             entries.first { $0.lastPathComponent.lowercased() == name }
         }
@@ -110,8 +115,19 @@ struct MaxPS4GameDirectoryView: View {
             if depth > 0, named("eboot.bin", in: entries) != nil {
                 let system = named("sce_sys", in: entries)
                 let files = system.flatMap { try? manager.contentsOfDirectory(at: $0, includingPropertiesForKeys: nil) } ?? []
+                let sfo = named("param.sfo", in: files)
+                func field(_ key: String) -> String? { sfo.flatMap { Self.sfoString($0, key: key) } }
+                // A patch (category gp) or a folder named "<game>-UPDATE" / "-PATCH" is
+                // an update of a game, not a game of its own.
+                let upper = folder.lastPathComponent.uppercased()
+                let suffix = ["-UPDATE", "-PATCH"].first { upper.hasSuffix($0) }
+                if field("CATEGORY")?.lowercased().hasPrefix("gp") == true || suffix != nil {
+                    let base = suffix.map { String(folder.lastPathComponent.dropLast($0.count)) } ?? folder.lastPathComponent
+                    updates.append((folder, field("TITLE_ID"), base.uppercased(), field("APP_VER")))
+                    return
+                }
                 games.append(LocalGame(url: folder,
-                    name: named("param.sfo", in: files).flatMap(Self.title) ?? folder.lastPathComponent,
+                    name: sfo.flatMap(Self.title) ?? folder.lastPathComponent,
                     icon: named("icon0.png", in: files)))
                 return
             }
@@ -123,6 +139,13 @@ struct MaxPS4GameDirectoryView: View {
             }
         }
         visit(documents, depth: 0)
+        for index in games.indices {
+            let game = games[index]
+            let id = Self.sfoString(game.url.appendingPathComponent("sce_sys/param.sfo"), key: "TITLE_ID")
+            let match = updates.first { ($0.titleID != nil && $0.titleID == id) || $0.base == game.url.lastPathComponent.uppercased() }
+            games[index].update = match?.url
+            games[index].updateVersion = match?.version
+        }
         if games != local { local = games }
         if walked.count != searched { searched = walked.count }
         watch(walked.prefix(64))
@@ -197,6 +220,16 @@ struct MaxPS4GameDirectoryView: View {
     private static func location(_ folder: Folder) -> URL? {
         var stale = false
         return try? URL(resolvingBookmarkData: folder.bookmark, bookmarkDataIsStale: &stale)
+    }
+    // The update found for a game folder, if any (from the last scan).
+    func update(for game: URL) -> (url: URL, version: String?)? {
+        guard let found = local.first(where: { $0.url.standardizedFileURL == game.standardizedFileURL }),
+              let update = found.update else { return nil }
+        return (update, found.updateVersion)
+    }
+    // Whether a game launches with its update ("Utiliser la mise à jour", on by default).
+    static func useUpdate(for game: URL) -> Bool {
+        UserDefaults.standard.object(forKey: "maxps4.update." + MaxPS4Saves.gameID(for: game)) as? Bool ?? true
     }
     func remember(_ url: URL) {
         let scoped = url.startAccessingSecurityScopedResource()

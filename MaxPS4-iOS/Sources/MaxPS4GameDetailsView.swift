@@ -12,6 +12,8 @@ struct MaxPS4GameDetailsView: View {
     @State private var title = ""
     @State private var saves: URL?
     @State private var savesSize: Int64 = 0
+    @State private var update: (url: URL, version: String?)?
+    @State private var useUpdate = true
 
     var body: some View {
         NavigationStack {
@@ -41,6 +43,19 @@ struct MaxPS4GameDetailsView: View {
                         }
                         .padding(14).frame(maxWidth: .infinity, alignment: .leading)
                         .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+                        if let update {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Label("Mise à jour", systemImage: "arrow.down.circle").font(.headline)
+                                Text(verbatim: [update.version.map { "v" + $0 }, update.url.lastPathComponent].compactMap { $0 }.joined(separator: " · "))
+                                    .font(.subheadline).foregroundStyle(.secondary)
+                                Toggle("Utiliser la mise à jour", isOn: $useUpdate).tint(.cyan)
+                                    .onChange(of: useUpdate) { _, on in
+                                        UserDefaults.standard.set(on, forKey: "maxps4.update." + MaxPS4Saves.gameID(for: url))
+                                    }
+                            }
+                            .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+                        }
                         VStack(alignment: .leading, spacing: 8) {
                             Label("Sauvegardes", systemImage: "externaldrive").font(.headline)
                             if savesSize > 0 {
@@ -84,6 +99,8 @@ struct MaxPS4GameDetailsView: View {
         if let content = field("CONTENT_ID") { rows.append(("Content ID", content)) }
         rows.append(("Dossier", url.lastPathComponent))
         info = rows
+        update = MaxPS4GameFolders.shared.update(for: url)
+        useUpdate = MaxPS4GameFolders.useUpdate(for: url)
         saves = MaxPS4Saves.root(for: url)
         savesSize = saves.map { Self.size(of: $0) } ?? 0
     }

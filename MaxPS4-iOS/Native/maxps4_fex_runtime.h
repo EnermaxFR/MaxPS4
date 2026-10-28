@@ -306,6 +306,9 @@ int32_t maxps4_fex_engine_missing_imports(maxps4_fex_engine *engine, char *text,
 // them, placed 1 MiB aligned and apart from 0x400000, linked with
 // prepare_orbis_general, then <directory> mounted as /app0. Files are only
 // read. Returns 0, a negative errno, or the failing call's status.
+// A game update for the next load_game (NULL or "" for none): its eboot.bin
+// and sce_module/*.prx replace the game's, and it overlays /app0.
+int32_t maxps4_fex_engine_set_update(maxps4_fex_engine *engine, const char *directory);
 int32_t maxps4_fex_engine_load_game(maxps4_fex_engine *engine, const char *directory,
     uint64_t *relocation, char *diagnostic, size_t capacity);
 // Optional bounded RGBA8 output/input contract for an admitted SCE process.

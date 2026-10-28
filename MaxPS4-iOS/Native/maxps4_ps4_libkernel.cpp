@@ -357,7 +357,10 @@ void PS4Libkernel::close_files() {
 void PS4Libkernel::reset() {
     std::lock_guard<std::mutex> guard(lock_);
     close_files();
-    for (auto& mount : mounts_) if (mount.root >= 0) { ::close(mount.root); mount.root = -1; }
+    for (auto& mount : mounts_) {
+        if (mount.root >= 0) { ::close(mount.root); mount.root = -1; }
+        if (mount.overlay >= 0) { ::close(mount.overlay); mount.overlay = -1; }
+    }
     videoout_.reset();
     user_service_.reset();
     pad_.reset();
@@ -380,7 +383,17 @@ int64_t PS4Libkernel::mount(const char* guest, const char* directory) {
     if (fd < 0) return kernel_error(host_error(errno));
     close_files();
     if (target->root >= 0) ::close(target->root);
+    if (target->overlay >= 0) { ::close(target->overlay); target->overlay = -1; }
     target->root = fd;
+    return 0;
+}
+int64_t PS4Libkernel::mount_app0_update(const char* directory) {
+    std::lock_guard<std::mutex> guard(lock_);
+    if (!directory || !*directory || mounts_[0].root < 0) return kernel_error(inval);
+    const int fd = ::open(directory, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) return kernel_error(host_error(errno));
+    if (mounts_[0].overlay >= 0) ::close(mounts_[0].overlay);
+    mounts_[0].overlay = fd;
     return 0;
 }
 int64_t PS4Libkernel::set_savedata_root(const char* directory) {
@@ -466,9 +479,23 @@ Error PS4Libkernel::resolve(uint64_t address, size_t& mount, char* relative) con
     return length > 1 && path[length - 1] == '/' ? inval : noent;
 }
 int PS4Libkernel::parent(size_t mount, const char* relative, char* leaf, Error& error) const {
+    // An update overlay answers for the paths it holds (not the mount root).
+    if (mounts_[mount].overlay >= 0 && *relative) {
+        Error missing = ok;
+        HostFD over(parent_from(mounts_[mount].overlay, relative, leaf, missing));
+        struct stat info{};
+        if (over.fd >= 0 && ::fstatat(over.fd, leaf, &info, AT_SYMLINK_NOFOLLOW) == 0) {
+            error = ok;
+            const int result = over.fd; over.fd = -1;
+            return result;
+        }
+    }
+    return parent_from(mounts_[mount].root, relative, leaf, error);
+}
+int PS4Libkernel::parent_from(int root, const char* relative, char* leaf, Error& error) const {
     // Walk from a held directory descriptor; reject symlinks at EVERY component.
     // Do not canonicalize then reopen a host path (a race can escape the mount).
-    HostFD directory(::fcntl(mounts_[mount].root, F_DUPFD_CLOEXEC, 0));
+    HostFD directory(::fcntl(root, F_DUPFD_CLOEXEC, 0));
     if (directory.fd < 0) { error = host_error(errno); return -1; }
     char path[PS4KernelPath::max_path];
     std::strcpy(path, *relative ? relative : ".");
