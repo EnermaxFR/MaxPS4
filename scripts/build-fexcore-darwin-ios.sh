@@ -16,8 +16,11 @@ TARGETS=(FEXCore_shared)
 RUNTIME=OFF
 # The device runtime (the IPA's FEXCore, HLE services, GNM and PM4 code) is
 # optimized and tuned for the oldest iOS 18 device CPU (A12: ARMv8.3 with LSE
-# atomics); a Debug build ran all of it at -O0 with FEX assertions. Host
-# runtimes for the macOS tests stay Debug, with assertions.
+# atomics); a Debug build ran all of it at -O0 with FEX assertions. Not
+# Release: FEX's LinkerGC then passes GNU-only --gc-sections/--strip-all/
+# --as-needed to Apple's linker, and stripping would hide the host symbols
+# the CPU profiler names. RelWithDebInfo is -O2 with frame pointers kept.
+# Host runtimes for the macOS tests stay Debug, with assertions.
 BUILD_TYPE=Debug
 TUNE_CPU=none
 if [[ "${3:-}" == --runtime || "${3:-}" == --host-runtime ]]; then
@@ -25,7 +28,7 @@ if [[ "${3:-}" == --runtime || "${3:-}" == --host-runtime ]]; then
   TARGETS+=(MaxPS4FEXRuntime maxps4-fex-runtime-test maxps4-ps4-linked-test)
 fi
 if [[ "${3:-}" == --runtime ]]; then
-  BUILD_TYPE=Release
+  BUILD_TYPE=RelWithDebInfo
   TUNE_CPU=apple-a12
 fi
 if [[ "${3:-}" == --host-runtime ]]; then
