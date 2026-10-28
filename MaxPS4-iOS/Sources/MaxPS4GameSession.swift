@@ -76,6 +76,19 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private var lockWait: TimeInterval = 0 // Last snapshot's wait for `lock`.
     private var pad = MaxPS4PadState()
     private var lastBeat = "" // The last heartbeat() text, under lock.
+    // Where the run or its stop is, for the next session's loading screen.
+    private let stageLock = NSLock()
+    private var stage = "lancement"
+    private func setStage(_ text: String) { stageLock.lock(); stage = text; stageLock.unlock() }
+    func stopStatus() -> String {
+        stageLock.lock(); let current = stage; stageLock.unlock()
+        guard lock.try() else { return current + " (verrou de session pris)" }
+        defer { lock.unlock() }
+        guard let engine else { return current }
+        var activity = [CChar](repeating: 0, count: 4096)
+        _ = maxps4_fex_engine_thread_activity(engine, &activity, activity.count)
+        return current + "\n" + String(cString: activity)
+    }
     // What the last run left for the player, set before run() returns.
     struct Outcome { var missing: [String] = []; var crashed = false; var report: URL? }
     private(set) var outcome = Outcome()
@@ -291,6 +304,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
         vblankTimer?.cancel(); vblankTimer = nil
         if let engine { _ = maxps4_fex_engine_request_stop(engine) }
         lock.unlock()
+        setStage("arrêt demandé, threads du jeu en cours d’arrêt")
         // close runs after run_orbis returns, never while FEX/GPU uses memory.
         MaxPS4FEXMetalExecution.queue.async { self.close() }
     }
@@ -301,12 +315,16 @@ final class MaxPS4GameSource: @unchecked Sendable {
         ready = false
         vblankTimer?.cancel(); vblankTimer = nil
         if let engine {
+            setStage("fermeture : audio")
             audio.stop()
+            setStage("fermeture : GPU")
             _ = maxps4_fex_engine_gnm_backend(engine, 0)
             _ = maxps4_fex_engine_gnm_host_consumer(engine, nil, nil)
             bridge = nil; self.engine = nil
+            setStage("fermeture : moteur")
             maxps4_fex_engine_close(engine)
         }
+        setStage("fermée")
     }
     func run(url: URL, update: URL? = nil, device: MTLDevice, nativeTextures: Bool = false, tso: Bool = true, outputHeight: Int = 1080, profiling: Bool = false, progress: @escaping @Sendable (String) -> Void) -> String {
         dispatchPrecondition(condition: .onQueue(MaxPS4FEXMetalExecution.queue))
@@ -381,7 +399,9 @@ final class MaxPS4GameSource: @unchecked Sendable {
             progress(String(localized: "Jeu en cours d’exécution. En attente de la première image…", bundle: .maxps4))
             var value: UInt64 = 0, entry: UInt64 = 0
             var backend: UInt32 = 0
+            setStage("jeu en cours")
             let ran = maxps4_fex_engine_run_orbis(opened, &value, &backend, &entry)
+            setStage("jeu arrêté, rapport de fin")
             lock.lock(); let wasStopped = stopped; let frames = displayed; lock.unlock()
             var fault = maxps4_fex_guest_fault()
             _ = maxps4_fex_engine_last_guest_fault(opened, &fault)
@@ -428,15 +448,28 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private var stopping: UUID?
     private var heartbeatTimer: Timer?
     private var beating = false // A heartbeat is being read in the background.
+    // The stopped source a new run waits for (one serial FEX queue), and
+    // whether the new run has started, for the loading screen.
+    private static var draining: MaxPS4GameSource? // App-wide: a new game screen waits for it too.
+    private var launched = false
     func start(url: URL, update: URL? = nil, device: MTLDevice, nativeTextures: Bool = false, tso: Bool = true, outputHeight: Int = 1080, profiling: Bool = false) {
         stop()
         let source = MaxPS4GameSource(), id = UUID()
         generation = id; self.source = source; worker = source; running = true
         hasPresented = false; heartbeat = ""; outcome = .init()
         report = String(localized: "Chargement du jeu et préparation Metal…", bundle: .maxps4)
+        launched = false
         heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.generation == id, !self.beating else { return }
+                guard let self, self.generation == id else { return }
+                // Still waiting for the previous run to end: say where its stop is.
+                if !self.launched, let previous = Self.draining {
+                    let status = previous.stopStatus()
+                    self.report = String(localized: "Chargement du jeu et préparation Metal…", bundle: .maxps4)
+                        + "\n\nLa session précédente n’est pas encore arrêtée : " + status
+                    return
+                }
+                guard !self.beating else { return }
                 self.beating = true
                 // Off the main thread: reading the engine (thread activity,
                 // profiler, main thread sample) stalled the interface each second.
@@ -454,6 +487,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
             let result = source.run(url: url, update: update, device: device, nativeTextures: nativeTextures, tso: tso, outputHeight: outputHeight, profiling: profiling) { [weak self] text in
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.generation == id, self.running else { return }
+                    self.launched = true; Self.draining = nil
                     self.report = text
                 }
             }
@@ -461,6 +495,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
                 guard let self else { return }
                 // A stopped session's result (where its main thread was) still
                 // replaces "Arrêt demandé." unless another session has started.
+                if Self.draining === source { Self.draining = nil } // Its run is over.
                 if self.generation == id || (self.stopping == id && !self.running) {
                     self.report = result; self.running = false; self.outcome = source.outcome
                 }
@@ -475,6 +510,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
     func setPaused(_ paused: Bool) { worker?.setPaused(paused) }
     func stop() {
         stopping = worker == nil ? nil : generation
+        if let worker { Self.draining = worker }
         generation = UUID(); worker?.stop(); worker = nil; source = nil; running = false
         heartbeatTimer?.invalidate(); heartbeatTimer = nil
         report = String(localized: "Arrêt demandé.", bundle: .maxps4)
