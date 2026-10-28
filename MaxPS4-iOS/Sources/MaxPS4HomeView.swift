@@ -24,6 +24,7 @@ struct MaxPS4HomeView: View {
     @State private var confirmingClear = false
     @State private var pendingDirectory = false
     @State private var message: String?
+    @AppStorage(MaxPS4Language.key) private var language = ""
 
     private var filteredGames: [MaxPS4Game] {
         let query = gameSearch.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -96,7 +97,7 @@ struct MaxPS4HomeView: View {
                 emulator.importGame(from: url)
                 if emulator.games.count == count { message = emulator.status }
                 else { selectedTab = .games }
-            case .failure(let error): message = "Import impossible : \(error.localizedDescription)"
+            case .failure(let error): message = String(localized: "Import impossible : \(error.localizedDescription)", bundle: .maxps4)
             }
         }
     }
@@ -132,6 +133,17 @@ struct MaxPS4HomeView: View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 20) {
                 Text("RÉGLAGES").font(.system(size: 36, weight: .black, design: .rounded))
+                VStack(alignment: .leading, spacing: 14) {
+                    Label("Langue", systemImage: "globe").font(.headline)
+                    Picker("Langue", selection: $language) {
+                        Text("Langue de l’iPhone").tag("")
+                        ForEach(MaxPS4Language.choices, id: \.code) { Text(verbatim: $0.name).tag($0.code) }
+                    }
+                    .pickerStyle(.menu).tint(.cyan)
+                    .onChange(of: language) { _, code in MaxPS4Language.apply(code) }
+                }
+                .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 22))
                 secondaryAction(icon: "bolt.fill", title: "JIT et StikDebug", subtitle: "Activation et état de préparation") {
                     showingJIT = true
                 }
@@ -258,7 +270,7 @@ struct MaxPS4HomeView: View {
 
     private func play(_ folder: MaxPS4GameFolders.Folder) {
         if let url = folders.resolve(folder) { playingFolder = MaxPS4PlayingFolder(url: url) }
-        else { message = "Dossier introuvable : il a été déplacé ou supprimé. Choisis-le à nouveau avec Jouer." }
+        else { message = String(localized: "Dossier introuvable : il a été déplacé ou supprimé. Choisis-le à nouveau avec Jouer.", bundle: .maxps4) }
     }
 
     private func gameDetails(_ game: MaxPS4Game) -> some View {
@@ -279,7 +291,7 @@ struct MaxPS4HomeView: View {
                         if let info = selectedTitleInfo { MaxPS4TitleInfoView(info: info) }
                         if let attributes = try? FileManager.default.attributesOfItem(atPath: game.localPath),
                            let size = attributes[.size] as? NSNumber {
-                            Text("Taille : " + ByteCountFormatter.string(fromByteCount: size.int64Value, countStyle: .file))
+                            Text("Taille : \(ByteCountFormatter.string(fromByteCount: size.int64Value, countStyle: .file))")
                                 .font(.footnote).foregroundStyle(.secondary)
                         }
                         if game.fileName.lowercased().hasSuffix(".pkg") {
@@ -315,7 +327,7 @@ struct MaxPS4HomeView: View {
         .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.10)))
         .padding(.horizontal, 20).padding(.bottom, 8)
     }
-    private func tabButton(_ tab: MaxPS4Tab, icon: String, title: String) -> some View {
+    private func tabButton(_ tab: MaxPS4Tab, icon: String, title: LocalizedStringKey) -> some View {
         Button {
             withAnimation(.easeInOut(duration: 0.22)) { selectedTab = tab }
         } label: {
@@ -395,8 +407,8 @@ struct MaxPS4HomeView: View {
 
     private func primaryAction(
         icon: String,
-        title: String,
-        subtitle: String,
+        title: LocalizedStringKey,
+        subtitle: LocalizedStringKey,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -442,8 +454,8 @@ struct MaxPS4HomeView: View {
 
     private func secondaryAction(
         icon: String,
-        title: String,
-        subtitle: String,
+        title: LocalizedStringKey,
+        subtitle: LocalizedStringKey,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -486,7 +498,8 @@ struct MaxPS4HomeView: View {
                 }
 
                 let count = emulator.games.count + folders.folders.count + folders.local.count
-                Text(count == 0 ? "Aucun jeu" : "\(count) élément\(count > 1 ? "s" : "")")
+                let summary: LocalizedStringKey = count == 0 ? "Aucun jeu" : count == 1 ? "1 élément" : "\(count) éléments"
+                Text(summary)
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.58))
             }
@@ -633,7 +646,7 @@ private struct MaxPS4PKGSubtitleView: View {
     @State private var subtitle: String?
 
     var body: some View {
-        Text(subtitle ?? "PKG PS4")
+        Text(subtitle ?? String(localized: "PKG PS4", bundle: .maxps4))
             .task(id: path) {
                 let url = URL(fileURLWithPath: path)
                 let text = await Task.detached(priority: .utility) { () -> String in
@@ -644,7 +657,7 @@ private struct MaxPS4PKGSubtitleView: View {
                     if let cached = Self.cache.object(forKey: key) { return cached as String }
                     let info = MaxPS4PKGInspector.titleInfo(url: url)
                     let parts = [info?.titleID, info?.appVersion.map { "v" + $0 }, info?.categoryName].compactMap { $0 }
-                    let text = parts.isEmpty ? "PKG PS4" : parts.joined(separator: " • ")
+                    let text = parts.isEmpty ? String(localized: "PKG PS4", bundle: .maxps4) : parts.joined(separator: " • ")
                     Self.cache.setObject(text as NSString, forKey: key)
                     return text
                 }.value
@@ -676,7 +689,7 @@ private struct MaxPS4TitleInfoView: View {
     }
 
     @ViewBuilder
-    private func row(_ label: String, _ value: String?) -> some View {
+    private func row(_ label: LocalizedStringKey, _ value: String?) -> some View {
         if let value {
             HStack(alignment: .firstTextBaseline) {
                 Text(label).foregroundStyle(.secondary)

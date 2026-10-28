@@ -42,7 +42,7 @@ struct MaxPS4GameDirectoryView: View {
         .fileImporter(isPresented: $importing, allowedContentTypes: [.folder]) { result in
             switch result {
             case .success(let url): directory = url; importError = nil; MaxPS4GameFolders.shared.add(url)
-            case .failure(let error): importError = "Sélection impossible : \(error.localizedDescription)"
+            case .failure(let error): importError = String(localized: "Sélection impossible : \(error.localizedDescription)", bundle: .maxps4)
             }
         }
         .sheet(isPresented: $showingJIT) { MaxPS4JITSetupView() }

@@ -21,7 +21,7 @@ private struct MaxPS4JITReadiness: Sendable {
         let ready = checked == 0 && value == 42 && backend == UInt32(MAXPS4_CPU_FEX_ARM64_JIT)
         return Self(ready: ready, detail: "Vérification du JIT : \(checked)\nBackend : \(backend)\nRésultat : \(value)")
 #else
-        return Self(ready: false, detail: "Le moteur FEX n’est pas inclus dans cette version.")
+        return Self(ready: false, detail: String(localized: "Le moteur FEX n’est pas inclus dans cette version.", bundle: .maxps4))
 #endif
     }
 }
@@ -32,7 +32,7 @@ struct MaxPS4JITSetupView: View {
     @State private var checking = false
     @State private var requested = false
     @State private var ready = false
-    @State private var message = "Active le JIT avec StikDebug avant de lancer un jeu."
+    @State private var message = String(localized: "Active le JIT avec StikDebug avant de lancer un jeu.", bundle: .maxps4)
     @State private var detail = ""
 
     var body: some View {
@@ -100,7 +100,7 @@ struct MaxPS4JITSetupView: View {
                 MaxPS4FEXMetalExecution.queue.async { continuation.resume(returning: MaxPS4JITReadiness.check()) }
             }
             ready = result.ready; detail = result.detail; checking = false
-            message = ready ? "L’activation est vérifiée. Tu peux lancer ton jeu." : "Le JIT n’est pas encore prêt. Termine l’activation dans StikDebug, puis réessaie."
+            message = ready ? String(localized: "L’activation est vérifiée. Tu peux lancer ton jeu.", bundle: .maxps4) : String(localized: "Le JIT n’est pas encore prêt. Termine l’activation dans StikDebug, puis réessaie.", bundle: .maxps4)
         }
     }
 }

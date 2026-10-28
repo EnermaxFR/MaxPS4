@@ -1,5 +1,6 @@
 name: MaxPS4
 options:
+  developmentLanguage: fr
   deploymentTarget:
     iOS: '18.0'
 settings:

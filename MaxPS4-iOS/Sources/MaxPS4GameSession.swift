@@ -262,13 +262,13 @@ final class MaxPS4GameSource: @unchecked Sendable {
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         defer { close() }
         do {
-            progress("Ouverture du moteur…")
+            progress(String(localized: "Ouverture du moteur…", bundle: .maxps4))
             _ = maxps4_fex_set_tso_emulation(tso ? 1 : 0)
             var opened: OpaquePointer?
             let status = maxps4_fex_engine_open(&opened)
             guard status == 0, let opened else { throw failure("Ouverture FEX", status) }
             lock.lock()
-            if stopped { lock.unlock(); maxps4_fex_engine_close(opened); return "Arrêté." }
+            if stopped { lock.unlock(); maxps4_fex_engine_close(opened); return String(localized: "Arrêté.", bundle: .maxps4) }
             engine = opened; lock.unlock()
             // Same permissive import probe as the validated Sonic boot probe.
             // This remains experimental: unresolved imports are reported by FEX.
@@ -277,7 +277,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
             _ = maxps4_fex_engine_set_import_probe(opened, 2)
             var diagnostic = [CChar](repeating: 0, count: 2048)
             var relocation: UInt64 = 0
-            progress("Lecture du dossier et chargement de eboot.bin et des PRX…")
+            progress(String(localized: "Lecture du dossier et chargement de eboot.bin et des PRX…", bundle: .maxps4))
             let loaded = url.path.withCString { path in
                 diagnostic.withUnsafeMutableBufferPointer {
                     maxps4_fex_engine_load_game(opened, path, &relocation, $0.baseAddress, $0.count)
@@ -287,7 +287,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
             // The output resolution the game is told (sceVideoOutGetResolutionStatus).
             _ = maxps4_fex_engine_videoout_output(opened, outputHeight == 720 ? 1280 : 1920, outputHeight == 720 ? 720 : 1080)
             _ = maxps4_fex_engine_set_profiling(opened, profiling ? 1 : 0)
-            progress("Jeu chargé. Préparation du rendu Metal…")
+            progress(String(localized: "Jeu chargé. Préparation du rendu Metal…", bundle: .maxps4))
             guard let metal = MaxPS4GameMetalBridge(device: device, reader: { address, destination, count in
                 maxps4_fex_engine_read_memory(opened, address, destination, count) == 0
             }, nativeTextures: nativeTextures) else { throw failure("Création du renderer Metal", -ENOMEM) }
@@ -299,9 +299,9 @@ final class MaxPS4GameSource: @unchecked Sendable {
             guard attached == 0 else { throw failure("Connexion GNM", attached) }
             let graphics = maxps4_fex_engine_gnm_backend(opened, 4)
             guard graphics == 0 else { throw failure("Backend Metal", graphics) }
-            progress("Initialisation du JIT…")
+            progress(String(localized: "Initialisation du JIT…", bundle: .maxps4))
             let initialized = maxps4_fex_engine_initialize(opened)
-            guard initialized == 0 else { throw failure("Activer le JIT avec StikDebug puis réessayer", initialized) }
+            guard initialized == 0 else { throw failure(String(localized: "Activer le JIT avec StikDebug puis réessayer", bundle: .maxps4), initialized) }
             lock.lock()
             bridge = metal; ready = !stopped
             started = ProcessInfo.processInfo.systemUptime
@@ -318,10 +318,10 @@ final class MaxPS4GameSource: @unchecked Sendable {
                 vblankTimer = timer; timer.resume()
             }
             lock.unlock()
-            if cancelled { return "Arrêté." }
+            if cancelled { return String(localized: "Arrêté.", bundle: .maxps4) }
             let audioError = audio.start(opened)
             lock.lock(); audioFailure = audioError; lock.unlock()
-            progress("Jeu en cours d’exécution. En attente de la première image…")
+            progress(String(localized: "Jeu en cours d’exécution. En attente de la première image…", bundle: .maxps4))
             var value: UInt64 = 0, entry: UInt64 = 0
             var backend: UInt32 = 0
             let ran = maxps4_fex_engine_run_orbis(opened, &value, &backend, &entry)
@@ -334,7 +334,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
                 return "Arrêté après \(frames) images présentées. \(metal.report)\nThread principal interrompu à RIP 0x\(String(fault.rip, radix: 16)) (relatif 0x\(String(relativeRIP, radix: 16)), relocation 0x\(String(relocation, radix: 16)))."
             }
             return "Exécution terminée (\(ran)), backend \(backend), \(frames) images. \(metal.report)\nSignal \(fault.signal), code \(fault.code), adresse mémoire 0x\(String(fault.address, radix: 16)), RIP 0x\(String(fault.rip, radix: 16)).\nRelocation 0x\(String(relocation, radix: 16)), RIP relatif 0x\(String(relativeRIP, radix: 16))."
-        } catch { return "Échec : \(error.localizedDescription)" }
+        } catch { return String(localized: "Échec : \(error.localizedDescription)", bundle: .maxps4) }
     }
     private func failure(_ text: String, _ code: Int32) -> NSError {
         NSError(domain: "MaxPS4.Game", code: Int(code), userInfo: [NSLocalizedDescriptionKey: "\(text) (\(code))"])
@@ -345,7 +345,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
     @Published private(set) var source: MaxPS4GameSource?
     @Published private(set) var running = false
     @Published private(set) var hasPresented = false
-    @Published private(set) var report = "Activer le JIT avec StikDebug avant de lancer le jeu."
+    @Published private(set) var report = String(localized: "Activer le JIT avec StikDebug avant de lancer le jeu.", bundle: .maxps4)
     @Published private(set) var heartbeat = ""
     private var worker: MaxPS4GameSource?
     private var generation = UUID()
@@ -356,7 +356,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
         let source = MaxPS4GameSource(), id = UUID()
         generation = id; self.source = source; worker = source; running = true
         hasPresented = false; heartbeat = ""
-        report = "Chargement du jeu et préparation Metal…"
+        report = String(localized: "Chargement du jeu et préparation Metal…", bundle: .maxps4)
         heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.generation == id, let beat = source.heartbeat() else { return }
@@ -387,7 +387,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
         stopping = worker == nil ? nil : generation
         generation = UUID(); worker?.stop(); worker = nil; source = nil; running = false
         heartbeatTimer?.invalidate(); heartbeatTimer = nil
-        report = "Arrêt demandé."
+        report = String(localized: "Arrêt demandé.", bundle: .maxps4)
     }
     // What "Partager le rapport" sends: the last image report plus live progress.
     var sharedReport: String { heartbeat.isEmpty ? report : report + "\n" + heartbeat }

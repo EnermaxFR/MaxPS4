@@ -355,7 +355,7 @@ struct MaxPS4GameView: View {
         .accessibilityIdentifier("maxps4.game.controls")
     }
 
-    private func control(_ name: String, label: String, bit: UInt32, size: CGFloat) -> some View {
+    private func control(_ name: String, label: LocalizedStringKey, bit: UInt32, size: CGFloat) -> some View {
         let pressed = touch & bit != 0
         return Text(name)
             .font(.system(size: name == "Options" ? 10 : 22, weight: .bold, design: .rounded))
