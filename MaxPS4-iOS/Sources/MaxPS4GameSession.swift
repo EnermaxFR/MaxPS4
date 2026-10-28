@@ -101,13 +101,15 @@ final class MaxPS4GameSource: @unchecked Sendable {
     }
     // A screen refresh, after the display took the pending flip: the guest
     // vblank follows the screen, so each refresh finds one new image instead
-    // of two 60 Hz clocks drifting apart. The shared clock keeps 60 vblanks a
-    // second on a 120 Hz screen; a screen slower than 60 Hz leaves it to the timer.
+    // of two 60 Hz clocks drifting apart. Every refresh of a screen up to 90 Hz
+    // (a 59 Hz one too), and the shared 60 Hz clock above that, so a 120 Hz
+    // screen gives one in two. A screen slower than 50 Hz leaves it to the timer.
     func displayRefresh(at time: TimeInterval) {
         inputLock.lock(); defer { inputLock.unlock() }
         if let last = lastRefresh, time > last { refreshInterval = min(time - last, 1) }
         lastRefresh = time
-        guard let inputEngine, screenPaced(at: time), vblankClock.due(at: time) else { return }
+        guard let inputEngine, screenPaced(at: time),
+              refreshInterval > 1.0 / 90 || vblankClock.due(at: time) else { return }
         _ = maxps4_fex_engine_videoout_vblank(inputEngine, vblankPort)
         vblanksSent += 1
     }

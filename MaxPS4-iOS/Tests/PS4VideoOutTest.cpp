@@ -144,8 +144,15 @@ int main() {
     assert(video.set_flip_rate(port, 0) == 0 && video.flip_at_vblank(true, status, 7, false));
     assert(read(status, 4) == 22);
     assert(video.vblank(port) == 0 && read(status, 4) == 7);
-    assert(video.flip_at_vblank(true, status, 8, false) && read(status, 4) == 7);
-    assert(video.vblank(port) == 0 && read(status, 4) == 8);
+    // The second comes right after the first returned: it sleeps until its
+    // vblank and returns with its label written (no spin for the game).
+    std::atomic<bool> flipped{false};
+    std::thread flipper([&] { assert(video.flip_at_vblank(true, status, 8, false)); flipped = true; });
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    assert(!flipped && read(status, 4) == 7);
+    assert(video.vblank(port) == 0);
+    flipper.join();
+    assert(flipped && read(status, 4) == 8);
     while (poll() == ok) {}
     // Closing removes only VideoOut subscriptions, not user or GNM events.
     assert(queues.user_event_add(queue, 6, true) == ok && queues.user_event_trigger(queue, 6, 77) == ok);
