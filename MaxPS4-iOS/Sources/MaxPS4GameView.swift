@@ -396,7 +396,8 @@ struct MaxPS4GameView: View {
     }
     private var screenControls: some View {
         GeometryReader { geometry in
-            let size = max(36, min(80, max(44, min(56, (geometry.size.width - 32) / 6)) * touchScale))
+            let base: CGFloat = max(44, min(56, (geometry.size.width - 32) / 6))
+            let size: CGFloat = max(36, min(80, base * CGFloat(touchScale)))
             VStack(spacing: 0) {
                 control("Options", label: "Options", bit: 0x8, size: 44)
                 Spacer(minLength: 0)
