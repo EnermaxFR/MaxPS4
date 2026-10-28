@@ -5,6 +5,14 @@
 [![Licence](https://img.shields.io/badge/Licence-GPL--2.0-blue)](LICENSE)
 [![Compatibilit%C3%A9](https://img.shields.io/badge/Jeux%20PS4-non%20jouables%20actuellement-red)](docs/LEGAL-COMPLIANCE.md)
 
+<p align="center">
+  <a href="https://discord.gg/G7BaXN4fd">
+    <img src="https://img.shields.io/badge/Discord-Rejoindre%20la%20communaut%C3%A9%20MaxPS4-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Rejoindre le Discord MaxPS4">
+  </a>
+</p>
+
+<p align="center"><b>💬 Suis l'avancement, pose tes questions et partage tes tests sur le <a href="https://discord.gg/G7BaXN4fd">Discord MaxPS4</a>.</b></p>
+
 **MaxPS4** est un projet indépendant de recherche et de portage d'émulation PS4 sur iPhone, avec interface SwiftUI, expérimentations ARM64 et intégration progressive de composants issus d'**AetherPS4**, de **FEXCore** et de **shadPS4**.
 
 > **Transparence :** l'application ne sait pas encore lancer un jeu PS4. Un workflow vert, une IPA produite ou un test synthétique réussi ne démontrent ni une émulation PS4 opérationnelle, ni un JIT fonctionnel sur iPhone.
