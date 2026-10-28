@@ -765,7 +765,6 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
         if (result) return result;
         if (interrupts) threads_.graphics_interrupt();
         if (!flip) return 0;
-        videoout_.pace();
         // The host backend presents the GPU-rendered target: no CPU copy.
         const int64_t shown = videoout_.submit(c.r9, signed32(get_le(stack, 4)), signed32(get_le(stack + 8, 4)),
                                                get_le(stack + 16, 8), !graphics_.host_backend());
@@ -775,11 +774,10 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
         // first flip on the iPhone).
         if (shown == PS4VideoOut::error(0x12)) videoout_.count_dropped();
         else if (shown) return shown;
-        // The work is already retired: what prepareFlip asks for happens now.
-        uint8_t value[4];
-        put_le(value, 0, prepared.value, 4);
-        if (prepared.label && !memory_.write(prepared.address, value, sizeof(value))) return PS4GnmQueue::error(0x1000);
-        if (prepared.interrupt) threads_.graphics_interrupt();
+        // The work is already retired: what prepareFlip asks for happens at
+        // the flip's vblank.
+        if (!videoout_.flip_at_vblank(prepared.label, prepared.address, prepared.value, prepared.interrupt))
+            return PS4GnmQueue::error(0x1000);
         return 0;
     }
     case S::gnm_allowed: return graphics_.allowed();

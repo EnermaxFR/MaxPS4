@@ -131,6 +131,12 @@ int main() {
     assert(video.vblank(port) == 0 && video.vblank(port) == 0);
     pacer.join();
     assert(paced && video.vblank_status(port, status) == 0 && read(status) == 22);
+    // A GNM flip's label is written at its vblank, without holding the caller.
+    assert(video.set_flip_rate(port, 0) == 0 && video.flip_at_vblank(true, status, 7, false));
+    assert(read(status, 4) == 22);
+    assert(video.vblank(port) == 0 && read(status, 4) == 7);
+    assert(video.flip_at_vblank(true, status, 8, false) && read(status, 4) == 7);
+    assert(video.vblank(port) == 0 && read(status, 4) == 8);
     while (poll() == ok) {}
     // Closing removes only VideoOut subscriptions, not user or GNM events.
     assert(queues.user_event_add(queue, 6, true) == ok && queues.user_event_trigger(queue, 6, 77) == ok);

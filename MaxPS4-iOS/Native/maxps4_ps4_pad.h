@@ -45,7 +45,10 @@ public:
         if (!valid(handle)) return error(3);
         if (!output || count < 1 || count > 64) return error(1);
         std::array<uint8_t, data_size> wire{};
-        ps4::put_le(wire.data(), 0, connected_ ? buttons_ : 0, 4);
+        // A press released before any read saw it is still reported once: a
+        // tap shorter than a frame would otherwise never reach the game.
+        ps4::put_le(wire.data(), 0, connected_ ? buttons_ | tapped_ : 0, 4);
+        tapped_ = unread_ = 0;
         for (size_t i = 0; i < 4; ++i) wire[4+i] = connected_ ? axes_[i] : 128;
         wire[8] = connected_ ? l2_ : 0; wire[9] = connected_ ? r2_ : 0;
         ps4::put_le(wire.data(), 24, 0x3f800000, 4); // identity quaternion W
@@ -54,7 +57,6 @@ public:
             std::chrono::steady_clock::now().time_since_epoch()).count();
         ps4::put_le(wire.data(), 80, uint64_t(now), 8);
         wire[104] = connections_;
-        // Read exposes only the current host snapshot, never invented history.
         if (!memory_.write(output, wire.data(), wire.size())) return error(1);
         return state ? 0 : 1;
     }
@@ -72,12 +74,15 @@ public:
         if (buttons & ~button_mask) return -22;
         std::lock_guard<std::mutex> lock(lock_);
         if (connected && !connected_ && connections_ != UINT8_MAX) ++connections_;
-        connected_ = connected; buttons_ = connected ? buttons : 0;
+        if (!connected) buttons = 0;
+        unread_ |= buttons & ~buttons_;
+        tapped_ |= buttons_ & ~buttons & unread_; unread_ &= buttons;
+        connected_ = connected; buttons_ = buttons;
         axes_ = axes; l2_ = l2; r2_ = r2; return 0;
     }
     void reset() {
         std::lock_guard<std::mutex> lock(lock_);
-        initialized_ = connected_ = false; handle_ = 0; buttons_ = 0;
+        initialized_ = connected_ = false; handle_ = 0; buttons_ = tapped_ = unread_ = 0;
         axes_.fill(128); l2_ = r2_ = connections_ = 0;
         // next_ survives reset so an old handle cannot name a reopened pad.
     }
@@ -87,7 +92,8 @@ private:
     std::mutex lock_;
     bool initialized_ = false, connected_ = false;
     int32_t handle_ = 0, next_ = 1;
-    uint32_t buttons_ = 0;
+    // unread_: pressed since the last read; tapped_: those released before it.
+    uint32_t buttons_ = 0, unread_ = 0, tapped_ = 0;
     std::array<uint8_t, 4> axes_{{128,128,128,128}};
     uint8_t l2_ = 0, r2_ = 0, connections_ = 0;
 };

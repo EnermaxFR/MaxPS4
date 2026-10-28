@@ -129,6 +129,22 @@ public:
                         [&] { return !port_ || vblank_count_ >= due; });
         paced_vblank_ = vblank_count_;
     }
+    // sceGnmSubmitAndFlipCommandBuffers: the prepareFlip label write and
+    // interrupt happen at the vblank the flip is due on, as on the hardware,
+    // while the game goes on preparing its next frame (holding the game until
+    // that vblank would halve its rate whenever a frame takes over 16 ms).
+    // Only a flip whose predecessor still waits holds the caller, bounded,
+    // then retires that one at once. False if an immediate label write fails.
+    bool flip_at_vblank(bool label, uint64_t address, uint32_t value, bool interrupt) {
+        std::unique_lock<std::mutex> lock(guard_);
+        if (port_ && vblank_count_) {
+            paced_.wait_for(lock, std::chrono::milliseconds(pace_timeout_ms), [&] { return !port_ || !deferred_.pending; });
+            if (deferred_.pending) retire();
+            deferred_ = {true, label, interrupt, address, value};
+            if (port_ && vblank_count_ < paced_vblank_ + flip_rate_ + 1) return true;
+        } else deferred_ = {true, label, interrupt, address, value};
+        return retire();
+    }
     // What sceVideoOutGetResolutionStatus reports (1920x1080 by default);
     // kept across reset, set by the host before the game runs.
     bool set_output(uint32_t width, uint32_t height) {
@@ -170,6 +186,7 @@ public:
         std::lock_guard<std::mutex> lock(guard_);
         if (!valid(port)) return error(11);
         ++vblank_count_; vblank_time_ = now(); events_.video_event_notify(port_, 7, 0, vblank_time_);
+        if (deferred_.pending && vblank_count_ >= paced_vblank_ + flip_rate_ + 1) retire();
         paced_.notify_all(); return 0;
     }
     // sceVideoOutGetResolutionStatus: a 1080p 59.94 Hz television (shadPS4
@@ -220,6 +237,7 @@ private:
     struct Attribute { uint32_t format = 0, width = 0, height = 0, pitch = 0; bool tiled = false; size_t bytes() const { return size_t(pitch) * height * 4; } };
     struct Group { bool used = false; Attribute attribute; };
     struct Buffer { bool used = false; size_t group = 0; uint64_t address = 0; };
+    struct Deferred { bool pending = false, label = false, interrupt = false; uint64_t address = 0; uint32_t value = 0; };
     static constexpr int pace_timeout_ms = 50;
     PS4GuestMemory& memory_; PS4Threads& events_; std::mutex guard_; std::condition_variable paced_;
     std::array<Group, group_limit> groups_{}; std::array<Buffer, buffer_limit> buffers_{};
@@ -228,14 +246,21 @@ private:
     uint32_t flip_rate_ = 0;
     int32_t current_buffer_ = -1;
     uint32_t output_width_ = 1920, output_height_ = 1080;
-    maxps4_videoout_frame frame_{}; std::vector<uint8_t> pixels_;
+    maxps4_videoout_frame frame_{}; std::vector<uint8_t> pixels_; Deferred deferred_{};
     bool valid(uint64_t port) const { return port && port == port_; }
+    bool retire() {
+        const Deferred flip = deferred_; deferred_ = {}; paced_vblank_ = vblank_count_; paced_.notify_all();
+        uint8_t value[4]; ps4::put_le(value, 0, flip.value, 4);
+        const bool written = !flip.label || memory_.write(flip.address, value, sizeof(value));
+        if (flip.interrupt) events_.graphics_interrupt();
+        return written;
+    }
     static uint64_t now() {
         return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
     }
     void clear() {
         if (port_) events_.video_event_remove_source(port_);
-        port_ = 0; frame_ = {}; pixels_.clear(); groups_.fill({}); buffers_.fill({});
+        port_ = 0; frame_ = {}; pixels_.clear(); groups_.fill({}); buffers_.fill({}); deferred_ = {};
         flip_count_ = vblank_count_ = flip_time_ = vblank_time_ = dropped_ = paced_vblank_ = 0; flip_rate_ = 0;
         last_argument_ = UINT64_MAX; current_buffer_ = -1; paced_.notify_all();
     }
