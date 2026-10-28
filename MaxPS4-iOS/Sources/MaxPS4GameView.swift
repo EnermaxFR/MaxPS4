@@ -53,12 +53,17 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
         } else if needsRedraw, let lastTexture {
             present(lastTexture, in: view)
         }
-        guard snapshotID == nil else { return }
+        let refreshed = ProcessInfo.processInfo.systemUptime
+        // A copy still running: the game gets this refresh's vblank anyway.
+        guard snapshotID == nil else { source.displayRefresh(at: refreshed); return }
         let id = UUID(); snapshotID = id
         snapshots.async { [weak self, weak view, source] in
             let started = ProcessInfo.processInfo.systemUptime
             let result = Result { try source.snapshot() }
             if case .success(let frame?) = result { source.complete(ticket: frame.info.ticket, presented: true) }
+            // Only once the pending flip is taken, so the game's next image
+            // cannot replace it before it is seen.
+            source.displayRefresh(at: refreshed)
             let elapsed = ProcessInfo.processInfo.systemUptime - started
             DispatchQueue.main.async { [weak self, weak view] in
                 guard let self, let view, self.snapshotID == id, self.source === source, !view.isPaused else { return }

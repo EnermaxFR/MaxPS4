@@ -81,6 +81,8 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private var lastTicket: UInt64 = 0
     private var relocation: UInt64 = 0
     private var vblankClock = MaxPS4VideoOutClock()
+    // Screen refreshes seen by displayRefresh (under inputLock).
+    private var lastRefresh: TimeInterval?, refreshInterval: TimeInterval = 1
     private var vblankTimer: DispatchSourceTimer?
     private let audio = MaxPS4GameAudio()
     private var audioFailure: String?
@@ -88,13 +90,31 @@ final class MaxPS4GameSource: @unchecked Sendable {
 
     // Under inputLock alone, like input(): the game's flips wait for vblanks,
     // so one skipped while a display copy holds `lock` would slow the game.
+    // The timer sends them only while the screen does not (see displayRefresh).
     private func tick(at time: TimeInterval) {
         inputLock.lock(); defer { inputLock.unlock() }
         guard let inputEngine else { return }
         _ = maxps4_fex_engine_pad_update(inputEngine, buttons, 128, 128, 128, 128, 0, 0, 1)
-        guard vblankClock.due(at: time) else { return }
+        guard !screenPaced(at: time), vblankClock.due(at: time) else { return }
         _ = maxps4_fex_engine_videoout_vblank(inputEngine, vblankPort)
         vblanksSent += 1
+    }
+    // A screen refresh, after the display took the pending flip: the guest
+    // vblank follows the screen, so each refresh finds one new image instead
+    // of two 60 Hz clocks drifting apart. The shared clock keeps 60 vblanks a
+    // second on a 120 Hz screen; a screen slower than 60 Hz leaves it to the timer.
+    func displayRefresh(at time: TimeInterval) {
+        inputLock.lock(); defer { inputLock.unlock() }
+        if let last = lastRefresh, time > last { refreshInterval = min(time - last, 1) }
+        lastRefresh = time
+        guard let inputEngine, screenPaced(at: time), vblankClock.due(at: time) else { return }
+        _ = maxps4_fex_engine_videoout_vblank(inputEngine, vblankPort)
+        vblanksSent += 1
+    }
+    // Refreshing at least 60 times a second (with jitter) and lately.
+    private func screenPaced(at time: TimeInterval) -> Bool {
+        guard let lastRefresh else { return false }
+        return refreshInterval < 1.0 / 50 && time - lastRefresh < 1.0 / 20
     }
 
     // Progress counters refreshed even when no new image arrives, so a stalled
