@@ -538,6 +538,13 @@ struct MaxPS4HomeView: View {
                 secondaryAction(icon: "folder.fill", title: "Jouer depuis un dossier",
                     subtitle: "Ouvrir un jeu avec ses données") { showingGameDirectory = true }
 
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Jeux trouvés dans « Sur mon iPhone › MaxPS4 » : \(folders.local.count) (\(folders.searched) dossiers parcourus). Un jeu est un dossier qui contient eboot.bin.")
+                        .font(.caption).foregroundStyle(.white.opacity(0.55))
+                    Spacer()
+                    Button("Actualiser") { folders.scanDocuments() }.font(.caption.weight(.semibold)).tint(.cyan)
+                }
+
                 HStack {
                     Image(systemName: "magnifyingglass")
                     TextField("Rechercher un jeu", text: $gameSearch)

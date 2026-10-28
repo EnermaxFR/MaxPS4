@@ -72,6 +72,7 @@ struct MaxPS4GameDirectoryView: View {
     static let shared = MaxPS4GameFolders()
     @Published private(set) var folders: [Folder] = []
     @Published private(set) var local: [LocalGame] = []
+    @Published private(set) var searched = 0 // Folders walked by the last scan.
     private let key = "maxps4.library.folders"
     private var watchers: [DispatchSourceFileSystemObject] = []
     private var rescanPending = false
@@ -82,33 +83,42 @@ struct MaxPS4GameDirectoryView: View {
         scanDocuments()
     }
 
-    // Looks up to three levels below Documents (its "Jeux" folder is made for
-    // this) and watches the folders it walked, so a game copied in with the
-    // Files app shows up without restarting MaxPS4.
+    // Looks up to six levels below Documents (its "Jeux" folder is made for
+    // this) for a folder holding eboot.bin in any letter case, and watches the
+    // first folders it walked, so a game copied in with the Files app shows up
+    // without restarting MaxPS4.
     func scanDocuments() {
         let manager = FileManager.default
         let documents = manager.urls(for: .documentDirectory, in: .userDomainMask)[0]
         try? manager.createDirectory(at: documents.appendingPathComponent("Jeux", isDirectory: true),
                                      withIntermediateDirectories: true)
         var games: [LocalGame] = [], walked: [URL] = []
+        func named(_ name: String, in entries: [URL]) -> URL? {
+            entries.first { $0.lastPathComponent.lowercased() == name }
+        }
         func visit(_ folder: URL, depth: Int) {
             walked.append(folder)
-            let children = (try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey],
-                                                             options: [.skipsHiddenFiles])) ?? []
-            for child in children.sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
-            where (try? child.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
-                && child.lastPathComponent != "MaxPS4Games" {
-                if manager.fileExists(atPath: child.appendingPathComponent("eboot.bin").path) {
-                    let system = child.appendingPathComponent("sce_sys", isDirectory: true)
-                    let icon = system.appendingPathComponent("icon0.png")
-                    games.append(LocalGame(url: child,
-                        name: Self.title(system.appendingPathComponent("param.sfo")) ?? child.lastPathComponent,
-                        icon: manager.fileExists(atPath: icon.path) ? icon : nil))
-                } else if depth < 3 { visit(child, depth: depth + 1) }
+            let entries = ((try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey],
+                                                             options: [.skipsHiddenFiles])) ?? [])
+                .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            if depth > 0, named("eboot.bin", in: entries) != nil {
+                let system = named("sce_sys", in: entries)
+                let files = system.flatMap { try? manager.contentsOfDirectory(at: $0, includingPropertiesForKeys: nil) } ?? []
+                games.append(LocalGame(url: folder,
+                    name: named("param.sfo", in: files).flatMap(Self.title) ?? folder.lastPathComponent,
+                    icon: named("icon0.png", in: files)))
+                return
+            }
+            guard depth < 6 else { return }
+            for entry in entries where walked.count < 400
+                && (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+                && entry.lastPathComponent != "MaxPS4Games" {
+                visit(entry, depth: depth + 1)
             }
         }
-        visit(documents, depth: 1)
+        visit(documents, depth: 0)
         if games != local { local = games }
+        if walked.count != searched { searched = walked.count }
         watch(walked.prefix(64))
     }
     private func watch(_ folders: ArraySlice<URL>) {
