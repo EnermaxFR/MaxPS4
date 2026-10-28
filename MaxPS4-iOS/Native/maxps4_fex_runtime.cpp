@@ -1863,6 +1863,9 @@ extern "C" int32_t maxps4_fex_engine_videoout_output(maxps4_fex_engine* engine, 
 extern "C" uint64_t maxps4_fex_engine_videoout_requested(maxps4_fex_engine* engine) {
     return engine ? engine->libkernel.videoout().requested() : 0;
 }
+extern "C" void maxps4_fex_engine_videoout_pause(maxps4_fex_engine* engine, uint32_t paused) {
+    if (engine) engine->libkernel.videoout().set_paused(paused != 0);
+}
 extern "C" int64_t maxps4_fex_engine_videoout_vblank(maxps4_fex_engine* engine, uint64_t port) {
     if (!engine) return maxps4::PS4VideoOut::error(11);
     return engine->libkernel.videoout().vblank(port);

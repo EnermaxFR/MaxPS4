@@ -153,6 +153,17 @@ int main() {
     assert(video.vblank(port) == 0);
     flipper.join();
     assert(flipped && read(status, 4) == 8);
+    // Paused: vblanks do not count and a waiting flip outlasts the 50 ms bound.
+    video.set_paused(true);
+    assert(video.vblank(port) == 0 && video.vblank_status(port, status) == 0 && read(status) == 24);
+    std::atomic<bool> resumed{false};
+    std::thread held([&] { assert(video.flip_at_vblank(true, status, 9, false)); resumed = true; });
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    assert(!resumed && read(status, 4) == 24);
+    video.set_paused(false);
+    assert(video.vblank(port) == 0);
+    held.join();
+    assert(resumed && read(status, 4) == 9);
     while (poll() == ok) {}
     // Closing removes only VideoOut subscriptions, not user or GNM events.
     assert(queues.user_event_add(queue, 6, true) == ok && queues.user_event_trigger(queue, 6, 77) == ok);

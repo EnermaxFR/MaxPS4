@@ -131,8 +131,7 @@ public:
         std::unique_lock<std::mutex> lock(guard_);
         if (!port_ || !vblank_count_) return;
         const uint64_t due = paced_vblank_ + flip_rate_ + 1;
-        paced_.wait_for(lock, std::chrono::milliseconds(pace_timeout_ms),
-                        [&] { return !port_ || vblank_count_ >= due; });
+        wait_paced(lock, [&] { return vblank_count_ >= due; });
         paced_vblank_ = vblank_count_;
     }
     // sceGnmSubmitAndFlipCommandBuffers: the prepareFlip label write and
@@ -151,12 +150,12 @@ public:
         const uint64_t worked = now() - std::max(flip_returned_, retired_at_);
         bool written = true;
         if (port_ && vblank_count_) {
-            paced_.wait_for(lock, std::chrono::milliseconds(pace_timeout_ms), [&] { return !port_ || !deferred_.pending; });
+            wait_paced(lock, [&] { return !deferred_.pending; });
             if (deferred_.pending) retire();
             deferred_ = {true, label, interrupt, address, value};
             if (port_ && vblank_count_ < paced_vblank_ + flip_rate_ + 1) {
                 if (worked < sleep_below_us) {
-                    paced_.wait_for(lock, std::chrono::milliseconds(pace_timeout_ms), [&] { return !port_ || !deferred_.pending; });
+                    wait_paced(lock, [&] { return !deferred_.pending; });
                     if (deferred_.pending) written = retire(); // Bounded wait over.
                 }
                 flip_returned_ = now(); return written;
@@ -201,9 +200,16 @@ public:
         }
         frame_ = {}; pixels_.clear(); taken_ = false; return 0;
     }
+    // The host's pause: vblanks stop counting and flips waiting for one keep
+    // waiting past the usual bound, so a game paced on them stops where it is.
+    // The host must resume before stopping a run.
+    void set_paused(bool paused) {
+        std::lock_guard<std::mutex> lock(guard_); paused_ = paused; paced_.notify_all();
+    }
     int64_t vblank(uint64_t port) {
         std::lock_guard<std::mutex> lock(guard_);
         if (!valid(port)) return error(11);
+        if (paused_) return 0;
         ++vblank_count_; vblank_time_ = now(); events_.video_event_notify(port_, 7, 0, vblank_time_);
         if (deferred_.pending && vblank_count_ >= paced_vblank_ + flip_rate_ + 1) retire();
         paced_.notify_all(); return 0;
@@ -268,9 +274,15 @@ private:
     uint32_t output_width_ = 1920, output_height_ = 1080;
     maxps4_videoout_frame frame_{}; std::vector<uint8_t> pixels_; Deferred deferred_{};
     bool taken_ = false; // The host holds frame_'s ticket: it may complete it.
+    bool paused_ = false; // Kept across reset: the host's state, not the game's.
     uint64_t replaced_ = 0; // Dropped flips that had a ticket (requested() counts them once).
     uint64_t flip_returned_ = 0, retired_at_ = 0; // When the last flip returned / was retired (now()).
     bool valid(uint64_t port) const { return port && port == port_; }
+    // Bounded wait for `done`, extended while the host has paused the game.
+    template <class Done> void wait_paced(std::unique_lock<std::mutex>& lock, Done done) {
+        do paced_.wait_for(lock, std::chrono::milliseconds(pace_timeout_ms), [&] { return !port_ || done(); });
+        while (paused_ && port_ && !done());
+    }
     bool retire() {
         const Deferred flip = deferred_; deferred_ = {}; paced_vblank_ = vblank_count_; paced_.notify_all();
         retired_at_ = now();

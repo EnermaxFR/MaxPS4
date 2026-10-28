@@ -118,6 +118,9 @@ int32_t maxps4_fex_engine_videoout_snapshot(maxps4_fex_engine *engine,
 int64_t maxps4_fex_engine_videoout_complete(maxps4_fex_engine *engine,
     uint64_t ticket, uint32_t presented);
 int64_t maxps4_fex_engine_videoout_vblank(maxps4_fex_engine *engine, uint64_t port);
+// Host pause (game menu): vblanks are ignored and flips waiting for one keep
+// waiting, which holds a vblank-paced game. Resume before stopping the run.
+void maxps4_fex_engine_videoout_pause(maxps4_fex_engine *engine, uint32_t paused);
 // Flips of sceGnmSubmitAndFlipCommandBuffers skipped because the previous one
 // was still pending (their prepareFlip label is still written).
 uint64_t maxps4_fex_engine_videoout_dropped(maxps4_fex_engine *engine);

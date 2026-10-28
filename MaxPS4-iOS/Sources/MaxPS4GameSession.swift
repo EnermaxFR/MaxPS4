@@ -13,6 +13,7 @@ final class MaxPS4GameAudio: @unchecked Sendable {
         static let capacity = 4096
         let lock = NSLock()
         var engine: OpaquePointer?
+        var paused = false // Game menu open: silence, and the game's AudioOut waits.
         let mix = UnsafeMutablePointer<Float>.allocate(capacity: Tap.capacity * 2)
         deinit { mix.deallocate() }
     }
@@ -26,7 +27,7 @@ final class MaxPS4GameAudio: @unchecked Sendable {
             let frames = min(Int(frameCount), Tap.capacity)
             var filled: Int32 = 0
             if tap.lock.try() {
-                if let engine = tap.engine { filled = maxps4_fex_engine_audio_read(engine, tap.mix, UInt32(frames)) }
+                if let engine = tap.engine, !tap.paused { filled = maxps4_fex_engine_audio_read(engine, tap.mix, UInt32(frames)) }
                 tap.lock.unlock()
             }
             if filled <= 0 { silence.pointee = true }
@@ -57,6 +58,7 @@ final class MaxPS4GameAudio: @unchecked Sendable {
         output.stop()
         tap.lock.lock(); tap.engine = nil; tap.lock.unlock()
     }
+    func setPaused(_ paused: Bool) { tap.lock.lock(); tap.paused = paused; tap.lock.unlock() }
 }
 
 // The FEX worker owns execution and close. Concurrent display/input/stop calls
@@ -199,6 +201,11 @@ final class MaxPS4GameSource: @unchecked Sendable {
     // Input goes straight to the engine under inputLock alone, never waiting
     // for `lock` (display copies, completions, reports). `inputEngine` is set
     // while the game runs and cleared under inputLock before the engine closes.
+    func setPaused(_ paused: Bool) {
+        audio.setPaused(paused)
+        inputLock.lock(); defer { inputLock.unlock() }
+        if let inputEngine { maxps4_fex_engine_videoout_pause(inputEngine, paused ? 1 : 0) }
+    }
     func input(_ pad: MaxPS4PadState) {
         inputLock.lock(); defer { inputLock.unlock() }
         self.pad = pad
@@ -255,7 +262,10 @@ final class MaxPS4GameSource: @unchecked Sendable {
         // run ends the game's audio thread would queue its last buffers in a
         // tight loop and the speaker would stutter them. close() repeats this.
         audio.stop()
-        inputLock.lock(); inputEngine = nil; inputLock.unlock()
+        // A paused game must run again for the stop to reach its threads.
+        inputLock.lock()
+        if let inputEngine { maxps4_fex_engine_videoout_pause(inputEngine, 0) }
+        inputEngine = nil; inputLock.unlock()
         lock.lock()
         stopped = true; ready = false
         vblankTimer?.cancel(); vblankTimer = nil
@@ -419,6 +429,9 @@ final class MaxPS4GameSource: @unchecked Sendable {
     func input(_ pad: MaxPS4PadState) { worker?.input(pad) }
     func presented(_ text: String) { if running { hasPresented = true; report = text } }
     func failed(_ text: String) { stop(); stopping = nil; report = text }
+    // The game menu's pause: no vblank and no audio read, so a game paced on
+    // them (Sonic Mania) waits where it is.
+    func setPaused(_ paused: Bool) { worker?.setPaused(paused) }
     func stop() {
         stopping = worker == nil ? nil : generation
         generation = UUID(); worker?.stop(); worker = nil; source = nil; running = false
