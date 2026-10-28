@@ -20,7 +20,6 @@
 "JIT et StikDebug" = "JIT und StikDebug";
 "Activation et état de préparation" = "Aktivierung und Bereitschaft";
 "Stockage" = "Speicher";
-"%lld fichier(s) importé(s)" = "%lld importierte Datei(en)";
 "Ouvrir la bibliothèque" = "Bibliothek öffnen";
 "Vider la bibliothèque…" = "Bibliothek leeren…";
 "Aucun jeu ni firmware n’est inclus. Utilise uniquement tes fichiers autorisés." = "Es sind keine Spiele und keine Firmware enthalten. Verwende nur Dateien, die du nutzen darfst.";
@@ -163,3 +162,9 @@
 "Voir dans Fichiers" = "In „Dateien“ zeigen";
 "Dossier" = "Ordner";
 "Ces réglages sont mémorisés pour ce jeu." = "Diese Einstellungen werden für dieses Spiel gespeichert.";
+"%lld jeu(x) dans la bibliothèque" = "%lld Spiel(e) in der Bibliothek";
+"dont %lld fichier(s) importé(s)" = "davon %lld importierte Datei(en)";
+"Ce jeu a appelé %lld fonctions PS4 que MaxPS4 ne gère pas encore : c’est sans doute ce qui le bloque." = "Dieses Spiel hat %lld PS4-Funktionen aufgerufen, die MaxPS4 noch nicht unterstützt: Das blockiert es wahrscheinlich.";
+"Le jeu s’est arrêté sur une erreur." = "Das Spiel wurde wegen eines Fehlers beendet.";
+"Partager le rapport de compatibilité" = "Kompatibilitätsbericht teilen";
+"Rapport enregistré dans Fichiers › MaxPS4 › Rapports." = "Bericht gespeichert unter Dateien › MaxPS4 › Rapports.";

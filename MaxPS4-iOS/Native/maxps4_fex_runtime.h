@@ -297,6 +297,10 @@ int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine *engine,
 // 2 keeps the stubs without that trace (thousands of lines per second).
 // It shows how far a game gets; it never makes it correct.
 int32_t maxps4_fex_engine_set_import_probe(maxps4_fex_engine *engine, uint32_t enabled);
+// The loaded game's imports that neither its modules nor the HLE provide
+// (stubbed, returning 0): one "<library> <NID> <calls>" line each, most
+// called first, as many whole lines as fit. Returns how many there are.
+int32_t maxps4_fex_engine_missing_imports(maxps4_fex_engine *engine, char *text, size_t capacity);
 // A game directory as the boot probe loads it: <directory>/sce_module/*.prx
 // (sorted) then <directory>/eboot.bin, each module's DT_NEEDED resolved among
 // them, placed 1 MiB aligned and apart from 0x400000, linked with

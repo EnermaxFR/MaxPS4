@@ -223,6 +223,21 @@ struct MaxPS4GameView: View {
                         if hasLaunched {
                             Text("Session terminée. Consulte le menu pour les détails.")
                                 .font(.footnote).foregroundStyle(.secondary)
+                            // Why a game stopped, for the player, with the report to send.
+                            let outcome = session.outcome
+                            if !outcome.missing.isEmpty {
+                                Text("Ce jeu a appelé \(outcome.missing.count) fonctions PS4 que MaxPS4 ne gère pas encore : c’est sans doute ce qui le bloque.")
+                                    .font(.footnote).multilineTextAlignment(.center).frame(maxWidth: 320)
+                            }
+                            if outcome.crashed {
+                                Text("Le jeu s’est arrêté sur une erreur.").font(.footnote).foregroundStyle(.orange)
+                            }
+                            if let report = outcome.report {
+                                ShareLink(item: report) { Label("Partager le rapport de compatibilité", systemImage: "square.and.arrow.up") }
+                                    .font(.footnote).tint(.cyan)
+                                Text("Rapport enregistré dans Fichiers › MaxPS4 › Rapports.")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
                         }
                         Button(hasLaunched ? "Rejouer" : "Jouer") {
                             touch = 0; hasLaunched = true

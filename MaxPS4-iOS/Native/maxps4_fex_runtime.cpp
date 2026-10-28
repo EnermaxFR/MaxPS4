@@ -93,9 +93,9 @@ public:
     maxps4::PS4GuestMemory* memory = nullptr;
     GuestThreads* threads = nullptr; // General runs only.
     // Boot probe stubs: "<library> <NID>" per missing_import_token index, and
-    // whether each was already reported.
+    // how many times each was called (the first call is also reported).
     const std::vector<std::string>* missing_imports = nullptr;
-    std::vector<std::atomic<bool>>* missing_reported = nullptr;
+    std::vector<std::atomic<uint32_t>>* missing_reported = nullptr;
     // One stderr line per HLE call (boot probe only): thousands per second,
     // which a game on the iPhone paid on its own thread, through the debugger.
     bool trace = false;
@@ -165,7 +165,7 @@ public:
             const uint32_t stub = static_cast<uint32_t>(orbis) - maxps4::missing_import_token;
             if (static_cast<uint32_t>(orbis) >= maxps4::missing_import_token) {
                 if (missing_imports && stub < missing_imports->size()) {
-                    if (!(*missing_reported)[stub].exchange(true))
+                    if ((*missing_reported)[stub].fetch_add(1, std::memory_order_relaxed) == 0)
                         std::fprintf(stderr, "missing import %s\n", (*missing_imports)[stub].c_str());
                     result = 0;
                 } else {
@@ -906,7 +906,7 @@ struct maxps4_fex_engine {
     maxps4::PS4DynamicLinker linker;
     bool import_probe = false, import_trace = false;
     std::vector<std::string> missing_imports;
-    std::vector<std::atomic<bool>> missing_reported;
+    std::vector<std::atomic<uint32_t>> missing_reported;
     fextl::unique_ptr<FEXCore::Context::Context> context;
     int32_t stage = MAXPS4_FEX_CONTEXT_CREATED;
 };
@@ -1453,7 +1453,7 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine* en
             engine->import_probe ? &missing : nullptr);
         if (collected) { message(why); return collected; }
         engine->missing_imports = std::move(missing);
-        engine->missing_reported = std::vector<std::atomic<bool>>(engine->missing_imports.size());
+        engine->missing_reported = std::vector<std::atomic<uint32_t>>(engine->missing_imports.size());
         std::string reason;
         uint64_t moved = 0;
         int status = engine->staged_ps4.prepare_orbis_general(inputs,hle,root,reason,moved);
@@ -1746,6 +1746,22 @@ extern "C" int64_t maxps4_fex_engine_mount(maxps4_fex_engine* engine, const char
     std::lock_guard lock(runtime_lock);
     if (engine->staged_ps4.segments().empty()) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
     return engine->libkernel.mount(guest, directory);
+}
+extern "C" int32_t maxps4_fex_engine_missing_imports(maxps4_fex_engine* engine, char* text, size_t capacity) {
+    if (!engine || (!text && capacity)) return -EINVAL;
+    // Immutable once loaded; the counts are atomics the running game bumps.
+    std::vector<std::pair<uint32_t, size_t>> order;
+    for (size_t i = 0; i < engine->missing_imports.size(); ++i)
+        order.push_back({engine->missing_reported[i].load(std::memory_order_relaxed), i});
+    std::stable_sort(order.begin(), order.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+    std::string out;
+    for (const auto& [calls, i] : order) {
+        const std::string line = engine->missing_imports[i] + " " + std::to_string(calls) + "\n";
+        if (out.size() + line.size() >= capacity) break;
+        out += line;
+    }
+    if (capacity) { std::memcpy(text, out.data(), out.size()); text[out.size()] = 0; }
+    return int32_t(order.size());
 }
 extern "C" int64_t maxps4_fex_engine_set_savedata_root(maxps4_fex_engine* engine, const char* directory) {
     if (!engine) return maxps4::ps4::kernel_error(maxps4::ps4::inval);

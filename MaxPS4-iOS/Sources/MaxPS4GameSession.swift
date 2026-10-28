@@ -75,6 +75,9 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private var missingSince: Date?
     private var lockWait: TimeInterval = 0 // Last snapshot's wait for `lock`.
     private var pad = MaxPS4PadState()
+    // What the last run left for the player, set before run() returns.
+    struct Outcome { var missing: [String] = []; var crashed = false; var report: URL? }
+    private(set) var outcome = Outcome()
     private var inputEngine: OpaquePointer?
     private var displayed = 0
     private var started: TimeInterval?
@@ -132,7 +135,21 @@ final class MaxPS4GameSource: @unchecked Sendable {
         var activity = [CChar](repeating: 0, count: 4096)
         _ = maxps4_fex_engine_thread_activity(engine, &activity, activity.count)
         inputLock.lock(); let sent = vblanksSent; inputLock.unlock()
-        return "Depuis le démarrage du JIT : \(seconds) s · dernier ticket VideoOut \(lastTicket) · images affichées \(displayed) · sautées \(maxps4_fex_engine_videoout_dropped(engine)) · VBlank envoyés \(sent)\n" + rates(engine, now: now) + audioStatus(engine) + "\n" + String(cString: activity) + profile(engine) + mainThreadSample(engine)
+        let missing = missingImports(engine)
+        let compatibility = missing.called.isEmpty ? "" : "Fonctions PS4 manquantes appelées : \(missing.called.count) sur \(missing.total) absentes · "
+            + missing.called.prefix(5).joined(separator: " · ") + "\n"
+        return compatibility + "Depuis le démarrage du JIT : \(seconds) s · dernier ticket VideoOut \(lastTicket) · images affichées \(displayed) · sautées \(maxps4_fex_engine_videoout_dropped(engine)) · VBlank envoyés \(sent)\n" + rates(engine, now: now) + audioStatus(engine) + "\n" + String(cString: activity) + profile(engine) + mainThreadSample(engine)
+    }
+    // The game's imports MaxPS4 stubs: those it called ("<library> <NID> (n appels)"), and how many exist.
+    private func missingImports(_ engine: OpaquePointer) -> (called: [String], total: Int) {
+        var text = [CChar](repeating: 0, count: 16384)
+        let total = maxps4_fex_engine_missing_imports(engine, &text, text.count)
+        let called = String(cString: text).split(separator: "\n").compactMap { line -> String? in
+            let parts = line.split(separator: " ")
+            guard parts.count == 3, let calls = Int(parts[2]), calls > 0 else { return nil }
+            return "\(parts[0]) \(parts[1]) (\(calls) appels)"
+        }
+        return (called, max(0, Int(total)))
     }
     // Since the previous heartbeat: images the game asked to flip, images the
     // host displayed, and the share of the time its thread spent in Metal
@@ -364,12 +381,28 @@ final class MaxPS4GameSource: @unchecked Sendable {
             var fault = maxps4_fex_guest_fault()
             _ = maxps4_fex_engine_last_guest_fault(opened, &fault)
             let relativeRIP = fault.rip >= relocation ? fault.rip - relocation : fault.rip
+            let missing = missingImports(opened)
+            let crashed = !wasStopped && (ran != 0 || fault.signal != 0)
+            let live = heartbeat() ?? ""
+            defer {
+                let text = [result(of: ran, backend: backend, wasStopped: wasStopped, frames: frames, metal: metal.report, fault: fault, relative: relativeRIP),
+                            "Fonctions PS4 manquantes appelées (\(missing.called.count) sur \(missing.total) absentes) :",
+                            missing.called.isEmpty ? "aucune" : missing.called.joined(separator: "\n"), "", live].joined(separator: "\n")
+                outcome = Outcome(missing: missing.called, crashed: crashed, report: MaxPS4Reports.save(text, for: url))
+            }
+            return result(of: ran, backend: backend, wasStopped: wasStopped, frames: frames, metal: metal.report, fault: fault, relative: relativeRIP)
+        } catch {
+            let text = String(localized: "Échec : \(error.localizedDescription)", bundle: .maxps4)
+            outcome = Outcome(missing: [], crashed: true, report: MaxPS4Reports.save(text, for: url))
+            return text
+        }
+    }
+    private func result(of ran: Int32, backend: UInt32, wasStopped: Bool, frames: Int, metal: String, fault: maxps4_fex_guest_fault, relative relativeRIP: UInt64) -> String {
             // A stop interrupts the main thread: where it was shows what a stalled game waits on.
             if wasStopped {
-                return "Arrêté après \(frames) images présentées. \(metal.report)\nThread principal interrompu à RIP 0x\(String(fault.rip, radix: 16)) (relatif 0x\(String(relativeRIP, radix: 16)), relocation 0x\(String(relocation, radix: 16)))."
+                return "Arrêté après \(frames) images présentées. \(metal)\nThread principal interrompu à RIP 0x\(String(fault.rip, radix: 16)) (relatif 0x\(String(relativeRIP, radix: 16)), relocation 0x\(String(relocation, radix: 16)))."
             }
-            return "Exécution terminée (\(ran)), backend \(backend), \(frames) images. \(metal.report)\nSignal \(fault.signal), code \(fault.code), adresse mémoire 0x\(String(fault.address, radix: 16)), RIP 0x\(String(fault.rip, radix: 16)).\nRelocation 0x\(String(relocation, radix: 16)), RIP relatif 0x\(String(relativeRIP, radix: 16))."
-        } catch { return String(localized: "Échec : \(error.localizedDescription)", bundle: .maxps4) }
+            return "Exécution terminée (\(ran)), backend \(backend), \(frames) images. \(metal)\nSignal \(fault.signal), code \(fault.code), adresse mémoire 0x\(String(fault.address, radix: 16)), RIP 0x\(String(fault.rip, radix: 16)).\nRelocation 0x\(String(relocation, radix: 16)), RIP relatif 0x\(String(relativeRIP, radix: 16))."
     }
     private func failure(_ text: String, _ code: Int32) -> NSError {
         NSError(domain: "MaxPS4.Game", code: Int(code), userInfo: [NSLocalizedDescriptionKey: "\(text) (\(code))"])
@@ -382,6 +415,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
     @Published private(set) var hasPresented = false
     @Published private(set) var report = String(localized: "Activer le JIT avec StikDebug avant de lancer le jeu.", bundle: .maxps4)
     @Published private(set) var heartbeat = ""
+    @Published private(set) var outcome = MaxPS4GameSource.Outcome()
     private var worker: MaxPS4GameSource?
     private var generation = UUID()
     private var stopping: UUID?
@@ -391,7 +425,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
         stop()
         let source = MaxPS4GameSource(), id = UUID()
         generation = id; self.source = source; worker = source; running = true
-        hasPresented = false; heartbeat = ""
+        hasPresented = false; heartbeat = ""; outcome = .init()
         report = String(localized: "Chargement du jeu et préparation Metal…", bundle: .maxps4)
         heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -421,7 +455,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
                 // A stopped session's result (where its main thread was) still
                 // replaces "Arrêt demandé." unless another session has started.
                 if self.generation == id || (self.stopping == id && !self.running) {
-                    self.report = result; self.running = false
+                    self.report = result; self.running = false; self.outcome = source.outcome
                 }
             }
         }
