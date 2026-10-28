@@ -351,6 +351,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private var generation = UUID()
     private var stopping: UUID?
     private var heartbeatTimer: Timer?
+    private var beating = false // A heartbeat is being read in the background.
     func start(url: URL, device: MTLDevice, nativeTextures: Bool = false, tso: Bool = true, outputHeight: Int = 1080, profiling: Bool = false) {
         stop()
         let source = MaxPS4GameSource(), id = UUID()
@@ -359,8 +360,18 @@ final class MaxPS4GameSource: @unchecked Sendable {
         report = String(localized: "Chargement du jeu et préparation Metal…", bundle: .maxps4)
         heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.generation == id, let beat = source.heartbeat() else { return }
-                self.heartbeat = beat
+                guard let self, self.generation == id, !self.beating else { return }
+                self.beating = true
+                // Off the main thread: reading the engine (thread activity,
+                // profiler, main thread sample) stalled the interface each second.
+                DispatchQueue.global(qos: .utility).async {
+                    let beat = source.heartbeat()
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        self.beating = false
+                        if self.generation == id, let beat { self.heartbeat = beat }
+                    }
+                }
             }
         }
         MaxPS4FEXMetalExecution.queue.async { [weak self] in
