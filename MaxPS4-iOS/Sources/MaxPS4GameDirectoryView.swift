@@ -112,7 +112,7 @@ struct MaxPS4GameDirectoryView: View {
             guard depth < 6 else { return }
             for entry in entries where walked.count < 400
                 && (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
-                && entry.lastPathComponent != "MaxPS4Games" {
+                && !["Fichiers importés", "MaxPS4Games"].contains(entry.lastPathComponent) {
                 visit(entry, depth: depth + 1)
             }
         }

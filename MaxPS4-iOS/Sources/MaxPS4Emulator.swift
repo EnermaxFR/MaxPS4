@@ -693,8 +693,13 @@ final class MaxPS4Emulator: ObservableObject {
     }
 
     private func importFolder() throws -> URL {
-        let url = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("MaxPS4Games", isDirectory: true)
+        let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let url = documents.appendingPathComponent("Fichiers importés", isDirectory: true)
+        // Named MaxPS4Games before: keep the copies already imported there.
+        let previous = documents.appendingPathComponent("MaxPS4Games", isDirectory: true)
+        if !fileManager.fileExists(atPath: url.path), fileManager.fileExists(atPath: previous.path) {
+            try? fileManager.moveItem(at: previous, to: url)
+        }
         try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
@@ -738,7 +743,7 @@ final class MaxPS4Emulator: ObservableObject {
             let decoded = try JSONDecoder().decode([MaxPS4Game].self, from: data)
             // Container UUIDs may change after an iOS app update. Never trust
             // a persisted absolute sandbox path; resolve the saved filename
-            // relative to our current Documents/MaxPS4Games directory instead.
+            // relative to our current import folder instead.
             let folder = try importFolder()
             let recovered = decoded.compactMap { game -> MaxPS4Game? in
                 let fileName = URL(fileURLWithPath: game.fileName).lastPathComponent
