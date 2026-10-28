@@ -163,9 +163,9 @@ int main() {
         uint8_t wire[8]; put_le(wire, 0, value, width); assert(memory.write(address, wire, width));
     };
     auto mount = [&](uint32_t mode) {
-        uint8_t zero[96]{}; assert(memory.write(0x12000, zero, sizeof(zero)));
-        put(0x12000, 1, 4); put(0x12008, path("SAVEDATA00", 0x12100), 8); put(0x12018, mode, 4);
-        return call(S::save_mount2, 0x12000, 0x12200);
+        uint8_t zero[96]{}; assert(memory.write(0x11400, zero, sizeof(zero)));
+        put(0x11400, 1, 4); put(0x11408, path("SAVEDATA00", 0x11500), 8); put(0x11418, mode, 4);
+        return call(S::save_mount2, 0x11400, 0x11600);
     };
     const int64_t not_found = signed32(0x809f0008U);
     assert(call(S::save_init) == 0 && mount(0x22) == not_found); // No save root yet.
@@ -173,22 +173,22 @@ int main() {
     assert(mount(0x2) == not_found);
     assert(mount(0x22) == 0); // RDWR | CREATE2: created.
     char point[16]{};
-    assert(memory.read(0x12200, point, sizeof(point)) && !std::strcmp(point, "/savedata0"));
-    uint8_t status[4]{}; assert(memory.read(0x12200 + 28, status, 4) && get_le(status, 4) == 1);
+    assert(memory.read(0x11600, point, sizeof(point)) && !std::strcmp(point, "/savedata0"));
+    uint8_t status[4]{}; assert(memory.read(0x11600 + 28, status, 4) && get_le(status, 4) == 1);
     assert(mount(0x22) == signed32(0x809f0003U)); // Already mounted.
     const auto file = call(S::open, path("/savedata0/data"), 0x202);
     assert(file >= 0 && call(S::close, file) == 0);
     assert(::access((std::string(saves) + "/SAVEDATA00/data").c_str(), F_OK) == 0);
-    assert(call(S::save_umount, path("/savedata0", 0x12300)) == 0);
-    assert(call(S::save_umount, 0x12300) == signed32(0x809f0004U));
+    assert(call(S::save_umount, path("/savedata0", 0x11700)) == 0);
+    assert(call(S::save_umount, 0x11700) == signed32(0x809f0004U));
     assert(call(S::open, path("/savedata0/data")) == kernel_error(noent));
-    assert(mount(0x2) == 0 && memory.read(0x12200 + 28, status, 4) && get_le(status, 4) == 0);
+    assert(mount(0x2) == 0 && memory.read(0x11600 + 28, status, 4) && get_le(status, 4) == 0);
     assert(mount(0x4) != 0 && call(S::save_term) == 0 && mount(0x4) == signed32(0x809f0007U));
     assert(call(S::close, app) == 0); // Untouched by the save mounts.
     assert(call(S::save_dialog_init) == 0 && call(S::save_dialog_update) == 1);
-    assert(call(S::save_dialog_result, 0x12400) == signed32(0x80b80008U));
-    assert(call(S::save_dialog_open, 0x12400) == 0 && call(S::save_dialog_update) == 3);
-    assert(call(S::save_dialog_result, 0x12400) == 0 && memory.read(0x12408, status, 4) && get_le(status, 4) == 1);
+    assert(call(S::save_dialog_result, 0x11800) == signed32(0x80b80008U));
+    assert(call(S::save_dialog_open, 0x11800) == 0 && call(S::save_dialog_update) == 3);
+    assert(call(S::save_dialog_result, 0x11800) == 0 && memory.read(0x11808, status, 4) && get_le(status, 4) == 1);
     assert(call(S::save_dialog_term) == 0);
     assert(resolve_libkernel("0z45PIH+SNI", "libSceSaveData", "libSceSaveData", 1) == S::save_mount2);
     kernel.reset();
