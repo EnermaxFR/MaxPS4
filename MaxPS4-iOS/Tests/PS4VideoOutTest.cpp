@@ -122,6 +122,16 @@ int main() {
     assert(poll() == ok && read(count, 4) == 1 && read(events) == 7 && read(events + 24) == 66);
     assert(video.event_field(events, 0, 0) == 1 && video.event_field(events, 0, 2) == 15);
     assert(video.vblank_status(port, status) == 0 && read(status) == 20 && poll() == timedout);
+    // Flips wait for 1 + flip rate vblanks since the previous one: 20 have
+    // passed, so this one does not wait; the next needs two more.
+    assert(video.set_flip_rate(port, 3) == PS4VideoOut::error(0x14) && video.set_flip_rate(port, 1) == 0);
+    video.pace();
+    std::atomic<bool> paced{false};
+    std::thread pacer([&] { video.pace(); paced = true; });
+    assert(video.vblank(port) == 0 && video.vblank(port) == 0);
+    pacer.join();
+    assert(paced && video.vblank_status(port, status) == 0 && read(status) == 22);
+    while (poll() == ok) {}
     // Closing removes only VideoOut subscriptions, not user or GNM events.
     assert(queues.user_event_add(queue, 6, true) == ok && queues.user_event_trigger(queue, 6, 77) == ok);
     assert(queues.graphics_event_add(queue, 6, 88) == ok);

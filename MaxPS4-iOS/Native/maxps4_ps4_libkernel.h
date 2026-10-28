@@ -70,7 +70,7 @@ enum class PS4KernelService : uint32_t {
     video_open, video_close, video_attribute, video_register, video_unregister,
     video_submit, video_pending, video_flip_status, video_vblank_status,
     video_add_flip, video_add_vblank, video_delete_flip, video_delete_vblank,
-    video_event_id, video_event_data, video_event_count, video_resolution,
+    video_event_id, video_event_data, video_event_count, video_resolution, video_flip_rate,
     user_initialize, user_terminate, user_initial, user_login_list, user_event, user_name,
     pad_init, pad_open, pad_close, pad_read, pad_read_state, pad_information, pad_handle,
     gnm_draw_auto, gnm_draw_index, gnm_vgt, gnm_vs, gnm_ps350,

@@ -241,7 +241,7 @@ constexpr Binding bindings[] = {
     {"sceVideoOutGetEventCount", "Mt4QHHkxkOc", PS4KernelService::video_event_count, "libSceVideoOut"},
     {"sceVideoOutGetResolutionStatus", "6kPnj51T62Y", PS4KernelService::video_resolution, "libSceVideoOut"},
     // Flips follow the host display; a requested rate changes nothing.
-    {"sceVideoOutSetFlipRate", "CBiu4mCE1DA", PS4KernelService::succeed, "libSceVideoOut"},
+    {"sceVideoOutSetFlipRate", "CBiu4mCE1DA", PS4KernelService::video_flip_rate, "libSceVideoOut"},
     // Memory (shadPS4 kernel/memory.cpp).
     {"sceKernelGetDirectMemorySize", "pO96TwzOm5E", PS4KernelService::direct_size},
     {"sceKernelAllocateDirectMemory", "rTXw65xmLIA", PS4KernelService::direct_allocate},
@@ -765,6 +765,7 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
         if (result) return result;
         if (interrupts) threads_.graphics_interrupt();
         if (!flip) return 0;
+        videoout_.pace();
         // The host backend presents the GPU-rendered target: no CPU copy.
         const int64_t shown = videoout_.submit(c.r9, signed32(get_le(stack, 4)), signed32(get_le(stack + 8, 4)),
                                                get_le(stack + 16, 8), !graphics_.host_backend());
@@ -819,9 +820,10 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     }
     case S::video_register: return videoout_.register_buffers(c.rdi, signed32(c.rsi), c.rdx, signed32(c.rcx), c.r8);
     case S::video_unregister: return videoout_.unregister_buffers(c.rdi, signed32(c.rsi));
-    case S::video_submit: return videoout_.submit(c.rdi, signed32(c.rsi), signed32(c.rdx), c.rcx);
+    case S::video_submit: videoout_.pace(); return videoout_.submit(c.rdi, signed32(c.rsi), signed32(c.rdx), c.rcx);
     case S::video_pending: return videoout_.pending(c.rdi);
     case S::video_resolution: return videoout_.resolution(c.rdi, c.rsi);
+    case S::video_flip_rate: return videoout_.set_flip_rate(c.rdi, signed32(c.rsi));
     case S::video_flip_status: return videoout_.flip_status(c.rdi, c.rsi);
     case S::video_vblank_status: return videoout_.vblank_status(c.rdi, c.rsi);
     case S::video_add_flip: case S::video_add_vblank:

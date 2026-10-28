@@ -4,6 +4,7 @@
 #include <array>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <mutex>
 #include <new>
@@ -108,6 +109,26 @@ public:
         } catch (const std::bad_alloc&) { return error(0x100c); }
         return 0;
     }
+    // sceVideoOutSetFlipRate: 0, 1 or 2 for 60, 30 or 20 flips per second.
+    int64_t set_flip_rate(uint64_t port, int32_t rate) {
+        std::lock_guard<std::mutex> lock(guard_);
+        if (!valid(port)) return error(11);
+        if (rate < 0 || rate > 2) return error(0x14);
+        flip_rate_ = uint32_t(rate); return 0;
+    }
+    // A vsync flip happens at a vblank, at most one per 1 + flip rate vblanks:
+    // the caller (the game's flip) waits for that vblank, which is what holds
+    // a game to 60 images per second when the emulated CPU runs faster. The
+    // wait is bounded so a host without a vblank source (tests) or a stopping
+    // run is never held for long.
+    void pace() {
+        std::unique_lock<std::mutex> lock(guard_);
+        if (!port_) return;
+        const uint64_t due = paced_vblank_ + flip_rate_ + 1;
+        paced_.wait_for(lock, std::chrono::milliseconds(pace_timeout_ms),
+                        [&] { return !port_ || vblank_count_ >= due; });
+        paced_vblank_ = vblank_count_;
+    }
     // What sceVideoOutGetResolutionStatus reports (1920x1080 by default);
     // kept across reset, set by the host before the game runs.
     bool set_output(uint32_t width, uint32_t height) {
@@ -148,7 +169,8 @@ public:
     int64_t vblank(uint64_t port) {
         std::lock_guard<std::mutex> lock(guard_);
         if (!valid(port)) return error(11);
-        ++vblank_count_; vblank_time_ = now(); events_.video_event_notify(port_, 7, 0, vblank_time_); return 0;
+        ++vblank_count_; vblank_time_ = now(); events_.video_event_notify(port_, 7, 0, vblank_time_);
+        paced_.notify_all(); return 0;
     }
     // sceVideoOutGetResolutionStatus: a 1080p 59.94 Hz television (shadPS4
     // layout: four s32 sizes, u64 refresh rate 3, float inches, flags, zeroes).
@@ -198,10 +220,12 @@ private:
     struct Attribute { uint32_t format = 0, width = 0, height = 0, pitch = 0; bool tiled = false; size_t bytes() const { return size_t(pitch) * height * 4; } };
     struct Group { bool used = false; Attribute attribute; };
     struct Buffer { bool used = false; size_t group = 0; uint64_t address = 0; };
-    PS4GuestMemory& memory_; PS4Threads& events_; std::mutex guard_;
+    static constexpr int pace_timeout_ms = 50;
+    PS4GuestMemory& memory_; PS4Threads& events_; std::mutex guard_; std::condition_variable paced_;
     std::array<Group, group_limit> groups_{}; std::array<Buffer, buffer_limit> buffers_{};
     uint64_t port_ = 0, next_port_ = 1, next_frame_ = 1, flip_count_ = 0, vblank_count_ = 0, dropped_ = 0;
-    uint64_t last_argument_ = UINT64_MAX, flip_time_ = 0, vblank_time_ = 0;
+    uint64_t last_argument_ = UINT64_MAX, flip_time_ = 0, vblank_time_ = 0, paced_vblank_ = 0;
+    uint32_t flip_rate_ = 0;
     int32_t current_buffer_ = -1;
     uint32_t output_width_ = 1920, output_height_ = 1080;
     maxps4_videoout_frame frame_{}; std::vector<uint8_t> pixels_;
@@ -212,7 +236,8 @@ private:
     void clear() {
         if (port_) events_.video_event_remove_source(port_);
         port_ = 0; frame_ = {}; pixels_.clear(); groups_.fill({}); buffers_.fill({});
-        flip_count_ = vblank_count_ = flip_time_ = vblank_time_ = dropped_ = 0; last_argument_ = UINT64_MAX; current_buffer_ = -1;
+        flip_count_ = vblank_count_ = flip_time_ = vblank_time_ = dropped_ = paced_vblank_ = 0; flip_rate_ = 0;
+        last_argument_ = UINT64_MAX; current_buffer_ = -1; paced_.notify_all();
     }
 };
 }

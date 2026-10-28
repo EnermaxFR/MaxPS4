@@ -76,7 +76,8 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private var inputEngine: OpaquePointer?
     private var displayed = 0
     private var started: TimeInterval?
-    private var vblanksSent = 0
+    private var vblanksSent = 0 // With vblankPort, under inputLock.
+    private var vblankPort: UInt64 = 1
     private var lastTicket: UInt64 = 0
     private var relocation: UInt64 = 0
     private var vblankClock = MaxPS4VideoOutClock()
@@ -85,13 +86,14 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private var audioFailure: String?
     private let vblanks = DispatchQueue(label: "com.enermaxfr.maxps4.vblank", qos: .userInteractive)
 
+    // Under inputLock alone, like input(): the game's flips wait for vblanks,
+    // so one skipped while a display copy holds `lock` would slow the game.
     private func tick(at time: TimeInterval) {
-        guard lock.try() else { return }
-        defer { lock.unlock() }
-        guard ready, !stopped, let engine else { return }
-        sendInputLocked(engine)
+        inputLock.lock(); defer { inputLock.unlock() }
+        guard let inputEngine else { return }
+        _ = maxps4_fex_engine_pad_update(inputEngine, buttons, 128, 128, 128, 128, 0, 0, 1)
         guard vblankClock.due(at: time) else { return }
-        _ = maxps4_fex_engine_videoout_vblank(engine, port)
+        _ = maxps4_fex_engine_videoout_vblank(inputEngine, vblankPort)
         vblanksSent += 1
     }
 
@@ -105,7 +107,8 @@ final class MaxPS4GameSource: @unchecked Sendable {
         let seconds = Int(now - started)
         var activity = [CChar](repeating: 0, count: 4096)
         _ = maxps4_fex_engine_thread_activity(engine, &activity, activity.count)
-        return "Depuis le démarrage du JIT : \(seconds) s · dernier ticket VideoOut \(lastTicket) · images affichées \(displayed) · sautées \(maxps4_fex_engine_videoout_dropped(engine)) · VBlank envoyés \(vblanksSent)\n" + rates(engine, now: now) + audioStatus(engine) + "\n" + String(cString: activity) + profile(engine) + mainThreadSample(engine)
+        inputLock.lock(); let sent = vblanksSent; inputLock.unlock()
+        return "Depuis le démarrage du JIT : \(seconds) s · dernier ticket VideoOut \(lastTicket) · images affichées \(displayed) · sautées \(maxps4_fex_engine_videoout_dropped(engine)) · VBlank envoyés \(sent)\n" + rates(engine, now: now) + audioStatus(engine) + "\n" + String(cString: activity) + profile(engine) + mainThreadSample(engine)
     }
     // Since the previous heartbeat: images the game asked to flip, images the
     // host displayed, and the share of the time its thread spent in Metal
@@ -194,6 +197,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
         if status == -EAGAIN { return nil }
         guard status == 0, info.ticket != 0 else { throw failure("VideoOut", status) }
         port = info.port; lastTicket = info.ticket
+        inputLock.lock(); vblankPort = info.port; inputLock.unlock()
         return (info, address, bridge)
     }
     func snapshot() throws -> Frame? {
