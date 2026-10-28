@@ -2,6 +2,7 @@
 #include "maxps4_fex_runtime.h"
 #include "maxps4_ps4_kernel_path.h"
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <cstdio>
 #include <dirent.h>
@@ -255,6 +256,17 @@ constexpr Binding bindings[] = {
     {"sceSystemServiceGetStatus", "rPo6tV8D9bM", PS4KernelService::system_status, "libSceSystemService"},
     {"sceSystemServiceReceiveEvent", "656LMQSrg6U", PS4KernelService::system_event, "libSceSystemService"},
     {"sceSystemServiceHideSplashScreen", "Vo5V8KAwCmk", PS4KernelService::succeed, "libSceSystemService"},
+    // Save data (shadPS4 libraries/save_data): one directory at a time.
+    {"sceSaveDataInitialize3", "TywrFKCoLGY", PS4KernelService::save_init, "libSceSaveData"},
+    {"sceSaveDataTerminate", "yKDy8S5yLA0", PS4KernelService::save_term, "libSceSaveData"},
+    {"sceSaveDataMount2", "0z45PIH+SNI", PS4KernelService::save_mount2, "libSceSaveData"},
+    {"sceSaveDataUmount", "BMR4F-Uek3E", PS4KernelService::save_umount, "libSceSaveData"},
+    // The save dialog has no screen: it finishes at once, answered OK/Yes.
+    {"sceSaveDataDialogInitialize", "s9e3+YpRnzw", PS4KernelService::save_dialog_init, "libSceSaveDataDialog"},
+    {"sceSaveDataDialogOpen", "4tPhsP6FpDI", PS4KernelService::save_dialog_open, "libSceSaveDataDialog"},
+    {"sceSaveDataDialogUpdateStatus", "KK3Bdg1RWK0", PS4KernelService::save_dialog_update, "libSceSaveDataDialog"},
+    {"sceSaveDataDialogGetResult", "yEiJ-qqr6Cg", PS4KernelService::save_dialog_result, "libSceSaveDataDialog"},
+    {"sceSaveDataDialogTerminate", "YuH2FA7azqQ", PS4KernelService::save_dialog_term, "libSceSaveDataDialog"},
     // System modules are part of the HLE: loading one has nothing to do.
     {"sceSysmoduleLoadModule", "g8cM39EUZ6o", PS4KernelService::succeed, "libSceSysmodule"},
     // Audio (shadPS4 libraries/audio/audioout.cpp).
@@ -331,6 +343,7 @@ void PS4Libkernel::reset() {
     if (dynamic_) dynamic_->reset();
     threads_.reset();
     errno_table_ = errno_table_size_ = process_param_ = heap_trace_ = 0;
+    save_root_.clear(); save_dialog_status_ = 0;
     direct_.clear();
     started_us_ = monotonic_us();
 }
@@ -345,6 +358,62 @@ int64_t PS4Libkernel::mount(const char* guest, const char* directory) {
     close_files();
     if (target->root >= 0) ::close(target->root);
     target->root = fd;
+    return 0;
+}
+int64_t PS4Libkernel::set_savedata_root(const char* directory) {
+    std::lock_guard<std::mutex> guard(lock_);
+    if (!directory || !*directory) return kernel_error(inval);
+    save_root_ = directory;
+    return 0;
+}
+namespace {
+int64_t save_error(uint32_t code) { return signed32(0x809f0000U | code); }
+constexpr uint32_t save_parameter = 0, save_busy = 3, save_not_mounted = 4, save_exists = 7, save_not_found = 8;
+}
+// sceSaveDataMount2(const OrbisSaveDataMount2*, OrbisSaveDataMountResult*):
+// userId@0, dirName pointer@8 (char[32]), blocks@16, mountMode@24; the result
+// is mountPoint char[16]@0, requiredBlocks@16, mountStatus@28 (1 = created).
+// Only /savedata0 exists; its directory is opened without closing the game's
+// other descriptors (a remount through mount() would close them all).
+int64_t PS4Libkernel::save_mount(uint64_t request, uint64_t result) {
+    constexpr uint32_t read_only = 1, read_write = 2, create = 4, create2 = 32;
+    uint8_t wire[32];
+    if (!request || !result || !memory_.read(request, wire, sizeof(wire))) return save_error(save_parameter);
+    const uint32_t mode = uint32_t(get_le(wire + 24, 4));
+    char name[33];
+    if (!memory_.read_cstring(get_le(wire + 8, 8), name, sizeof(name)) || !name[0]) return save_error(save_parameter);
+    for (const char* c = name; *c; ++c)
+        if (!std::isalnum(static_cast<unsigned char>(*c)) && *c != '-' && *c != '_') return save_error(save_parameter);
+    std::lock_guard<std::mutex> guard(lock_);
+    auto& save = *std::find_if(mounts_.begin(), mounts_.end(), [](const Mount& m) { return !std::strcmp(m.prefix, "/savedata0"); });
+    if (save_root_.empty()) return save_error(save_not_found);
+    if (save.root >= 0) return save_error(save_busy);
+    const std::string path = save_root_ + "/" + name;
+    bool created = false;
+    struct stat info{};
+    if (::stat(path.c_str(), &info) != 0) {
+        if (!(mode & (create | create2))) return save_error(save_not_found);
+        if (::mkdir(path.c_str(), 0755) != 0) return kernel_error(host_error(errno));
+        created = true;
+    } else if ((mode & create) && !(mode & create2)) return save_error(save_exists);
+    const int fd = ::open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) return kernel_error(host_error(errno));
+    uint8_t out[64]{};
+    std::memcpy(out, "/savedata0", 10);
+    put_le(out, 28, created ? 1 : 0, 4);
+    if (!memory_.write(result, out, sizeof(out))) { ::close(fd); return save_error(save_parameter); }
+    save.root = fd;
+    save.writable = (mode & (read_write | create | create2)) != 0 || !(mode & read_only);
+    return 0;
+}
+int64_t PS4Libkernel::save_umount(uint64_t mount_point) {
+    // 0 (sceSaveDataTerminate): whatever is mounted.
+    char point[16] = "/savedata0";
+    if (mount_point && !memory_.read_cstring(mount_point, point, sizeof(point))) return save_error(save_parameter);
+    std::lock_guard<std::mutex> guard(lock_);
+    auto& save = *std::find_if(mounts_.begin(), mounts_.end(), [](const Mount& m) { return !std::strcmp(m.prefix, "/savedata0"); });
+    if (std::strcmp(point, "/savedata0") || save.root < 0) return save_error(save_not_mounted);
+    ::close(save.root); save.root = -1;
     return 0;
 }
 Error PS4Libkernel::resolve(uint64_t address, size_t& mount, char* relative) const {
@@ -822,6 +891,18 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     case S::video_pending: return videoout_.pending(c.rdi);
     case S::video_resolution: return videoout_.resolution(c.rdi, c.rsi);
     case S::video_flip_rate: return videoout_.set_flip_rate(c.rdi, signed32(c.rsi));
+    case S::save_init: return 0;
+    case S::save_term: save_umount(0); return 0;
+    case S::save_mount2: return save_mount(c.rdi, c.rsi);
+    case S::save_umount: return save_umount(c.rdi);
+    case S::save_dialog_init: save_dialog_status_ = 1; return 0;
+    case S::save_dialog_open: save_dialog_status_ = 3; return 0;
+    case S::save_dialog_update: return save_dialog_status_;
+    // OrbisSaveDataDialogResult: mode@0 (kept), result@4, buttonId@8 (1 = OK/Yes).
+    case S::save_dialog_result:
+        if (save_dialog_status_ != 3) return signed32(0x80b80008U); // Not finished.
+        return write(c.rdi + 4, 0, 4) && write(c.rdi + 8, 1, 4) ? 0 : signed32(0x80b80004U);
+    case S::save_dialog_term: save_dialog_status_ = 0; return 0;
     case S::video_flip_status: return videoout_.flip_status(c.rdi, c.rsi);
     case S::video_vblank_status: return videoout_.vblank_status(c.rdi, c.rsi);
     case S::video_add_flip: case S::video_add_vblank:

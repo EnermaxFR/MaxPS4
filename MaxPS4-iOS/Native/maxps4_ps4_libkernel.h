@@ -10,6 +10,7 @@
 #include "maxps4_ps4_gnm_queue.h"
 #include <array>
 #include <map>
+#include <string>
 #include <mutex>
 #include <string_view>
 
@@ -71,6 +72,8 @@ enum class PS4KernelService : uint32_t {
     video_submit, video_pending, video_flip_status, video_vblank_status,
     video_add_flip, video_add_vblank, video_delete_flip, video_delete_vblank,
     video_event_id, video_event_data, video_event_count, video_resolution, video_flip_rate,
+    save_init, save_term, save_mount2, save_umount,
+    save_dialog_init, save_dialog_open, save_dialog_update, save_dialog_result, save_dialog_term,
     user_initialize, user_terminate, user_initial, user_login_list, user_event, user_name,
     pad_init, pad_open, pad_close, pad_read, pad_read_state, pad_information, pad_handle,
     gnm_draw_auto, gnm_draw_index, gnm_vgt, gnm_vs, gnm_ps350,
@@ -136,6 +139,9 @@ public:
     // the previous one. A successful remount closes guest descriptors.
     int64_t mount(const char* guest, const char* host_directory);
     int64_t mount_app0(const char* host_directory) { return mount("/app0", host_directory); }
+    // Host directory holding this game's save directories: sceSaveDataMount2
+    // mounts <root>/<dirName> at /savedata0. Cleared by reset().
+    int64_t set_savedata_root(const char* host_directory);
     void reset();
     // `posix`: the trampoline's token had posix_token; an Orbis error result
     // becomes -1 with that error in the thread's errno cell.
@@ -164,6 +170,10 @@ private:
     uint64_t errno_table_ = 0, errno_table_size_ = 0, process_param_ = 0;
     uint64_t heap_trace_ = 0; // sceLibcHeapGetTraceInfo's zeroed tables, mapped on first use.
     std::map<uint64_t, uint64_t> direct_; // Allocated physical ranges: start -> length.
+    std::string save_root_;
+    uint32_t save_dialog_status_ = 0; // OrbisCommonDialogStatus: none, initialized, running, finished.
+    int64_t save_mount(uint64_t request, uint64_t result);
+    int64_t save_umount(uint64_t mount_point);
     int64_t memory_service(PS4KernelService service, const PS4KernelCall& call);
     int64_t posix_result(int64_t result, uint64_t thread);
     int64_t invoke_service(PS4KernelService service, const PS4KernelCall& call, uint64_t thread);

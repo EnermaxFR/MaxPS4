@@ -37,6 +37,9 @@ uint32_t maxps4_ps4_resolve_libkernel(const char *symbol, const char *library,
 int64_t maxps4_fex_engine_mount_app0(maxps4_fex_engine *engine, const char *directory);
 // The same for "/app0" (read-only), "/savedata0", "/download0" or "/temp0".
 int64_t maxps4_fex_engine_mount(maxps4_fex_engine *engine, const char *guest, const char *directory);
+// The directory holding this game's save data directories (sceSaveDataMount2
+// mounts <directory>/<dirName> at /savedata0). Also after staging.
+int64_t maxps4_fex_engine_set_savedata_root(maxps4_fex_engine *engine, const char *directory);
 // Explicit service dispatch, serialized against staging and engine accesses.
 // Returns a guest ABI result, including signed Orbis errors. Default bootstrap
 // guest thread identity is 1. No guest CPU import trampoline is installed.

@@ -309,6 +309,9 @@ final class MaxPS4GameSource: @unchecked Sendable {
             // The output resolution the game is told (sceVideoOutGetResolutionStatus).
             _ = maxps4_fex_engine_videoout_output(opened, outputHeight == 720 ? 1280 : 1920, outputHeight == 720 ? 720 : 1080)
             _ = maxps4_fex_engine_set_profiling(opened, profiling ? 1 : 0)
+            if let saves = MaxPS4Saves.root(for: url) {
+                _ = saves.path.withCString { maxps4_fex_engine_set_savedata_root(opened, $0) }
+            }
             progress(String(localized: "Jeu chargé. Préparation du rendu Metal…", bundle: .maxps4))
             guard let metal = MaxPS4GameMetalBridge(device: device, reader: { address, destination, count in
                 maxps4_fex_engine_read_memory(opened, address, destination, count) == 0

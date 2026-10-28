@@ -112,7 +112,7 @@ struct MaxPS4GameDirectoryView: View {
             guard depth < 6 else { return }
             for entry in entries where walked.count < 400
                 && (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
-                && !["Fichiers importés", "MaxPS4Games"].contains(entry.lastPathComponent) {
+                && !["Fichiers importés", "MaxPS4Games", "Sauvegardes"].contains(entry.lastPathComponent) {
                 visit(entry, depth: depth + 1)
             }
         }
@@ -145,8 +145,9 @@ struct MaxPS4GameDirectoryView: View {
             }
         }
     }
-    // TITLE from a PS4 param.sfo (PSF: key and data tables, 16-byte entries).
-    private static func title(_ url: URL) -> String? {
+    private static func title(_ url: URL) -> String? { sfoString(url, key: "TITLE") }
+    // A string value of a PS4 param.sfo (PSF: key and data tables, 16-byte entries).
+    nonisolated static func sfoString(_ url: URL, key wanted: String) -> String? {
         guard let data = try? Data(contentsOf: url), data.count >= 20,
               data.prefix(4) == Data([0, 0x50, 0x53, 0x46]) else { return nil }
         let bytes = [UInt8](data)
@@ -160,7 +161,7 @@ struct MaxPS4GameDirectoryView: View {
         let keys = u32(8), values = u32(12), count = min(u32(16), 256)
         for index in 0..<count {
             let entry = 20 + index * 16
-            guard string(keys + u16(entry), 64) == "TITLE" else { continue }
+            guard string(keys + u16(entry), 64) == wanted else { continue }
             let title = string(values + u32(entry + 12), u32(entry + 4))?.trimmingCharacters(in: .whitespacesAndNewlines)
             return title?.isEmpty == false ? title : nil
         }
@@ -197,5 +198,20 @@ struct MaxPS4GameDirectoryView: View {
     }
     private func save() {
         if let data = try? JSONEncoder().encode(folders) { UserDefaults.standard.set(data, forKey: key) }
+    }
+}
+
+// Each game's save data: Documents/Sauvegardes/<TITLE_ID>, outside the game
+// folder so replacing or copying the game again keeps them.
+enum MaxPS4Saves {
+    static func root(for game: URL) -> URL? {
+        let system = game.appendingPathComponent("sce_sys/param.sfo")
+        var name = MaxPS4GameFolders.sfoString(system, key: "TITLE_ID") ?? game.lastPathComponent
+        name = String(name.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_" })
+        guard !name.isEmpty else { return nil }
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Sauvegardes", isDirectory: true).appendingPathComponent(name, isDirectory: true)
+        do { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true) } catch { return nil }
+        return url
     }
 }
