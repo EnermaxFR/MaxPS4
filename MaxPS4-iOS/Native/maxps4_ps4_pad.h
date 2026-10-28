@@ -48,7 +48,6 @@ public:
         // A press released before any read saw it is still reported once: a
         // tap shorter than a frame would otherwise never reach the game.
         ps4::put_le(wire.data(), 0, connected_ ? buttons_ | tapped_ : 0, 4);
-        tapped_ = unread_ = 0;
         for (size_t i = 0; i < 4; ++i) wire[4+i] = connected_ ? axes_[i] : 128;
         wire[8] = connected_ ? l2_ : 0; wire[9] = connected_ ? r2_ : 0;
         ps4::put_le(wire.data(), 24, 0x3f800000, 4); // identity quaternion W
@@ -58,6 +57,7 @@ public:
         ps4::put_le(wire.data(), 80, uint64_t(now), 8);
         wire[104] = connections_;
         if (!memory_.write(output, wire.data(), wire.size())) return error(1);
+        tapped_ = unread_ = 0;
         return state ? 0 : 1;
     }
     int64_t information(int32_t handle, uint64_t output) {
