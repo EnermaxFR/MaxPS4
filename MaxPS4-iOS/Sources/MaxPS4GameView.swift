@@ -154,6 +154,7 @@ struct MaxPS4GameView: View {
     @State private var device = MTLCreateSystemDefaultDevice()
     @State private var touch: UInt32 = 0
     @State private var hasLaunched = false
+    @State private var gamepad = MaxPS4GameView.gamepadConnected()
     @AppStorage("maxps4.metal.nativeTextures") private var nativeTextures = false
     @AppStorage("maxps4.fex.tso") private var tso = true
     @AppStorage("maxps4.display.scaling") private var scaling = "fit"
@@ -171,7 +172,8 @@ struct MaxPS4GameView: View {
                     report: session.presented, failed: session.failed)
                     .ignoresSafeArea()
                     .accessibilityIdentifier("maxps4.game.surface")
-                if session.running && !showingMenu { screenControls }
+                // A connected controller replaces the touch controls.
+                if session.running && !showingMenu && !gamepad { screenControls }
                 if session.running && !session.hasPresented {
                     VStack(spacing: 12) {
                         ProgressView().tint(.cyan)
@@ -304,6 +306,12 @@ struct MaxPS4GameView: View {
             }
             session.input(buttons)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .GCControllerDidConnect)) { _ in
+            gamepad = Self.gamepadConnected(); if gamepad { touch = 0 }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .GCControllerDidDisconnect)) { _ in
+            gamepad = Self.gamepadConnected()
+        }
         .onDisappear { touch = 0; session.stop(); UIApplication.shared.isIdleTimerDisabled = false }
         .onChange(of: scenePhase) { _, phase in if phase != .active { touch = 0; session.stop() } }
         // A running game keeps the screen awake: auto-lock would stop it.
@@ -311,6 +319,9 @@ struct MaxPS4GameView: View {
 #endif
     }
 #if MAXPS4_FEX_APP
+    private static func gamepadConnected() -> Bool {
+        GCController.controllers().contains { $0.extendedGamepad != nil || $0.microGamepad != nil }
+    }
     private var screenControls: some View {
         GeometryReader { geometry in
             let size = max(44, min(56, (geometry.size.width - 32) / 6))
