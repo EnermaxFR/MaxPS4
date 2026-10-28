@@ -41,7 +41,7 @@ struct MaxPS4GameDirectoryView: View {
         .preferredColorScheme(.dark)
         .fileImporter(isPresented: $importing, allowedContentTypes: [.folder]) { result in
             switch result {
-            case .success(let url): directory = url; importError = nil
+            case .success(let url): directory = url; importError = nil; MaxPS4GameFolders.shared.add(url)
             case .failure(let error): importError = "Sélection impossible : \(error.localizedDescription)"
             }
         }
@@ -49,5 +49,56 @@ struct MaxPS4GameDirectoryView: View {
         .fullScreenCover(isPresented: $playing) {
             if let directory { MaxPS4GameView(directory: directory) }
         }
+    }
+}
+
+// Game folders chosen with "Jouer", kept in the library as bookmarks so they
+// can be launched again without picking the folder each time.
+@MainActor final class MaxPS4GameFolders: ObservableObject {
+    struct Folder: Codable, Identifiable, Equatable {
+        var id = UUID()
+        var name: String
+        var bookmark: Data
+        var addedAt = Date()
+    }
+    static let shared = MaxPS4GameFolders()
+    @Published private(set) var folders: [Folder] = []
+    private let key = "maxps4.library.folders"
+
+    private init() {
+        if let data = UserDefaults.standard.data(forKey: key),
+           let saved = try? JSONDecoder().decode([Folder].self, from: data) { folders = saved }
+    }
+    func add(_ url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let bookmark = try? url.bookmarkData() else { return }
+        // The same folder chosen again moves to the front instead of repeating.
+        let target = url.standardizedFileURL
+        folders.removeAll { Self.location($0)?.standardizedFileURL == target }
+        folders.insert(Folder(name: url.lastPathComponent, bookmark: bookmark), at: 0)
+        save()
+    }
+    // The folder's current URL, or nil once it was moved or deleted.
+    func resolve(_ folder: Folder) -> URL? {
+        var stale = false
+        guard let url = try? URL(resolvingBookmarkData: folder.bookmark, bookmarkDataIsStale: &stale) else { return nil }
+        if stale, let index = folders.firstIndex(where: { $0.id == folder.id }) {
+            let scoped = url.startAccessingSecurityScopedResource()
+            if let fresh = try? url.bookmarkData() { folders[index].bookmark = fresh; save() }
+            if scoped { url.stopAccessingSecurityScopedResource() }
+        }
+        return url
+    }
+    private static func location(_ folder: Folder) -> URL? {
+        var stale = false
+        return try? URL(resolvingBookmarkData: folder.bookmark, bookmarkDataIsStale: &stale)
+    }
+    func remove(_ folder: Folder) {
+        folders.removeAll { $0.id == folder.id }
+        save()
+    }
+    private func save() {
+        if let data = try? JSONEncoder().encode(folders) { UserDefaults.standard.set(data, forKey: key) }
     }
 }

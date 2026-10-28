@@ -3,9 +3,12 @@ import UniformTypeIdentifiers
 import UIKit
 
 private enum MaxPS4Tab: Hashable { case home, games, settings }
+private struct MaxPS4PlayingFolder: Identifiable { let id = UUID(); let url: URL }
 
 struct MaxPS4HomeView: View {
     @EnvironmentObject private var emulator: MaxPS4Emulator
+    @ObservedObject private var folders = MaxPS4GameFolders.shared
+    @State private var playingFolder: MaxPS4PlayingFolder?
     @State private var selectedTab: MaxPS4Tab = .home
     @State private var importingGame = false
     @State private var showingGameDirectory = false
@@ -26,6 +29,11 @@ struct MaxPS4HomeView: View {
         let matching = emulator.games.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }
         return gameFilter == 1 ? matching.sorted { $0.importedAt > $1.importedAt } : matching
     }
+    private var filteredFolders: [MaxPS4GameFolders.Folder] {
+        let query = gameSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return folders.folders.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }
+    }
+    private var libraryEmpty: Bool { emulator.games.isEmpty && folders.folders.isEmpty }
     var body: some View {
         ZStack {
             MaxPS4Background()
@@ -40,6 +48,7 @@ struct MaxPS4HomeView: View {
         .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) { tabBar }
         .sheet(isPresented: $showingGameDirectory) { MaxPS4GameDirectoryView() }
+        .fullScreenCover(item: $playingFolder) { MaxPS4GameView(directory: $0.url) }
         .sheet(isPresented: $showingJIT) { MaxPS4JITSetupView() }
         .sheet(item: $selectedGameDetails, onDismiss: {
             selectedTitleInfo = nil
@@ -97,10 +106,11 @@ struct MaxPS4HomeView: View {
                     showingJIT = true
                 }
                 libraryHeader
-                if emulator.games.isEmpty { emptyLibrary }
+                if libraryEmpty { emptyLibrary }
                 else {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 14) {
+                            ForEach(folders.folders.prefix(6)) { folder in folderCard(folder, fixedWidth: 158) }
                             ForEach(emulator.games.prefix(6)) { game in gameCard(game, fixedWidth: 158) }
                         }.padding(.vertical, 4)
                     }
@@ -185,6 +195,42 @@ struct MaxPS4HomeView: View {
                 } label: { Image(systemName: "ellipsis.circle").font(.title3) }
             }.foregroundStyle(.white.opacity(0.82))
         }.frame(width: fixedWidth)
+    }
+
+    private func folderCard(_ folder: MaxPS4GameFolders.Folder, fixedWidth: CGFloat?) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button { play(folder) } label: {
+                ZStack(alignment: .bottomLeading) {
+                    LinearGradient(colors: [Color.cyan.opacity(0.85), .black], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    Circle().fill(.white.opacity(0.10)).frame(width: 120, height: 120).offset(x: 58, y: -78)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Image(systemName: "folder.fill").font(.title2).foregroundStyle(.white.opacity(0.78))
+                        Spacer()
+                        Text(folder.name).font(.headline).lineLimit(2).multilineTextAlignment(.leading)
+                        Text("Dossier de jeu").font(.caption2).lineLimit(1).foregroundStyle(.white.opacity(0.56))
+                    }.padding(14)
+                }
+                .frame(maxWidth: fixedWidth == nil ? .infinity : nil)
+                .frame(width: fixedWidth, height: 220).clipShape(RoundedRectangle(cornerRadius: 20))
+                .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.12), lineWidth: 1))
+            }.buttonStyle(.plain)
+            HStack {
+                Button { play(folder) } label: {
+                    Label("Jouer", systemImage: "play.fill").font(.caption.weight(.semibold))
+                }
+                Spacer()
+                Menu {
+                    Button(role: .destructive) { folders.remove(folder) } label: {
+                        Label("Retirer de la bibliothèque", systemImage: "minus.circle")
+                    }
+                } label: { Image(systemName: "ellipsis.circle").font(.title3) }
+            }.foregroundStyle(.white.opacity(0.82))
+        }.frame(width: fixedWidth)
+    }
+
+    private func play(_ folder: MaxPS4GameFolders.Folder) {
+        if let url = folders.resolve(folder) { playingFolder = MaxPS4PlayingFolder(url: url) }
+        else { message = "Dossier introuvable : il a été déplacé ou supprimé. Choisis-le à nouveau avec Jouer." }
     }
 
     private func gameDetails(_ game: MaxPS4Game) -> some View {
@@ -411,18 +457,15 @@ struct MaxPS4HomeView: View {
                         .font(.title2.bold())
                 }
 
-                Text(
-                    emulator.games.isEmpty
-                        ? "Aucun jeu importé"
-                        : "\(emulator.games.count) élément\(emulator.games.count > 1 ? "s" : "")"
-                )
+                let count = emulator.games.count + folders.folders.count
+                Text(count == 0 ? "Aucun jeu" : "\(count) élément\(count > 1 ? "s" : "")")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.58))
             }
 
             Spacer()
 
-            if !emulator.games.isEmpty {
+            if !libraryEmpty {
                 Button {
                     selectedTab = .games
                 } label: {
@@ -446,7 +489,7 @@ struct MaxPS4HomeView: View {
                         Text("BIBLIOTHÈQUE")
                             .font(.system(size: 36, weight: .black, design: .rounded))
 
-                        Text("Tes fichiers importés")
+                        Text("Tes dossiers de jeu et fichiers importés")
                             .foregroundStyle(.white.opacity(0.58))
                     }
 
@@ -481,8 +524,15 @@ struct MaxPS4HomeView: View {
                 .pickerStyle(.segmented)
                 .tint(.cyan)
 
-                if emulator.games.isEmpty {
+                if !filteredFolders.isEmpty {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 18) {
+                        ForEach(filteredFolders) { folder in folderCard(folder, fixedWidth: nil) }
+                    }
+                }
+                if libraryEmpty {
                     emptyLibrary.padding(.top, 24)
+                } else if emulator.games.isEmpty {
+                    EmptyView()
                 } else if filteredGames.isEmpty {
                     Text("Aucun jeu correspondant")
                         .foregroundStyle(.white.opacity(0.65))
