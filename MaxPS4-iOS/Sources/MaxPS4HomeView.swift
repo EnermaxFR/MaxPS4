@@ -104,29 +104,102 @@ struct MaxPS4HomeView: View {
 
     private var home: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 20) {
-                header
-                heroPanel
-                primaryAction(icon: "play.fill", title: "Jouer", subtitle: "Choisir le dossier complet de ton jeu") {
-                    showingGameDirectory = true
-                }.accessibilityIdentifier("maxps4.openGameDirectory")
-                secondaryAction(icon: "bolt.fill", title: "Activer le JIT", subtitle: "Préparer MaxPS4 avec StikDebug") {
-                    showingJIT = true
-                }
-                libraryHeader
-                if libraryEmpty { emptyLibrary }
-                else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 14) {
-                            ForEach(folders.local.prefix(6)) { game in localCard(game, fixedWidth: 158) }
-                            ForEach(folders.folders.prefix(6)) { folder in folderCard(folder, fixedWidth: 158) }
-                            ForEach(emulator.games.prefix(6)) { game in gameCard(game, fixedWidth: 158) }
-                        }.padding(.vertical, 4)
+            VStack(alignment: .leading, spacing: 22) {
+                HStack {
+                    Text(verbatim: "MaxPS4").font(.system(size: 32, weight: .bold, design: .rounded))
+                    Spacer()
+                    Button { showingJIT = true } label: {
+                        Label("JIT", systemImage: "bolt.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 14).padding(.vertical, 8)
+                            .background(.white.opacity(0.08), in: Capsule())
                     }
+                    .tint(.cyan)
+                    .accessibilityLabel("Activer le JIT")
                 }
+                .padding(.top, 8)
+                Text("Mes jeux").font(.title3.bold())
+                if libraryEmpty {
+                    Text("Copie le dossier d’un jeu dans « Sur mon iPhone › MaxPS4 › Jeux » avec l’app Fichiers, ou ajoute-le ici.")
+                        .font(.subheadline).foregroundStyle(.white.opacity(0.6))
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(folders.local) { game in
+                            gameRow(game.name, subtitle: "Dossier de jeu", icon: game.icon) {
+                                playingFolder = MaxPS4PlayingFolder(url: game.url)
+                            }
+                            Divider().overlay(.white.opacity(0.08))
+                        }
+                        ForEach(folders.folders) { folder in
+                            gameRow(folder.name, subtitle: "Dossier de jeu", icon: nil) { play(folder) }
+                                .contextMenu {
+                                    Button(role: .destructive) { folders.remove(folder) } label: {
+                                        Label("Retirer de la bibliothèque", systemImage: "minus.circle")
+                                    }
+                                }
+                            Divider().overlay(.white.opacity(0.08))
+                        }
+                        ForEach(emulator.games) { game in
+                            gameRow(game.name, subtitle: "Fichier importé", icon: nil, pkg: game) { selectedGameDetails = game }
+                                .contextMenu {
+                                    Button { renamedGameTitle = game.name; gameToRename = game } label: { Label("Renommer", systemImage: "pencil") }
+                                    Button(role: .destructive) { gameToDelete = game } label: { Label("Supprimer…", systemImage: "trash") }
+                                }
+                            Divider().overlay(.white.opacity(0.08))
+                        }
+                    }
+                    .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18))
+                }
+                Menu {
+                    Button { showingGameDirectory = true } label: { Label("Choisir un dossier", systemImage: "folder") }
+                    Button { importingGame = true } label: { Label("Importer un fichier", systemImage: "doc") }
+                } label: {
+                    Label("Ajouter un jeu", systemImage: "plus")
+                        .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 14)
+                        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18))
+                }
+                .tint(.cyan)
                 Spacer(minLength: 30)
             }.padding(.horizontal, 20).padding(.top, 12)
         }
+    }
+
+    // One game of the home list. A folder plays at once; an imported file
+    // (`pkg`) opens its details, since a file alone cannot be launched.
+    private func gameRow(_ name: String, subtitle: LocalizedStringKey, icon: URL?, pkg: MaxPS4Game? = nil,
+                         action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Group {
+                    if let icon, let image = UIImage(contentsOfFile: icon.path) {
+                        Image(uiImage: image).resizable().scaledToFill()
+                    } else if let pkg, pkg.fileName.lowercased().hasSuffix(".pkg") {
+                        MaxPS4PKGArtworkView(path: pkg.localPath, entryID: 0x1200).scaledToFill()
+                    } else {
+                        Image(systemName: pkg == nil ? "folder.fill" : "doc.fill")
+                            .font(.title3).foregroundStyle(.cyan)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(.white.opacity(0.08))
+                    }
+                }
+                .frame(width: 52, height: 52).clipShape(RoundedRectangle(cornerRadius: 12))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(verbatim: name).font(.headline).lineLimit(1)
+                    Text(subtitle).font(.caption).foregroundStyle(.white.opacity(0.55))
+                }
+                Spacer(minLength: 8)
+                if pkg == nil {
+                    Label("Jouer", systemImage: "play.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(Color.cyan, in: Capsule()).foregroundStyle(.black)
+                } else {
+                    Image(systemName: "chevron.right").foregroundStyle(.white.opacity(0.4))
+                }
+            }
+            .padding(12).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var settings: some View {
@@ -338,73 +411,6 @@ struct MaxPS4HomeView: View {
         }.buttonStyle(.plain).accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 0) {
-                Text("Max")
-                    .foregroundStyle(.white)
-                Text("PS4")
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.cyan, .purple, .blue],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-            }
-            .font(.system(size: 42, weight: .black, design: .rounded))
-
-            Text("AU-DESSUS DES NUAGES • MAXPS4")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.white.opacity(0.60))
-        }
-        .padding(.top, 8)
-    }
-
-    private var heroPanel: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Label("MAXPS4  /  ÉDITION NOCTURNE", systemImage: "moon.stars.fill")
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .tracking(2)
-                    .foregroundStyle(.cyan)
-                Spacer()
-                Text("MaxPS4")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.55))
-            }
-            Text("Dans la légende")
-                .font(.system(size: 34, weight: .black, design: .rounded))
-                .foregroundStyle(.white)
-            Text("Retrouve tes jeux et lance une session.")
-                .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.66))
-            HStack(spacing: 10) {
-                Label("\(emulator.games.count) FICHIERS", systemImage: "gamecontroller.fill")
-                Spacer()
-                Label("iOS", systemImage: "iphone.gen3")
-            }
-            .font(.system(size: 11, weight: .bold, design: .monospaced))
-            .foregroundStyle(.cyan)
-            Label("Active le JIT avant de lancer une session", systemImage: "bolt.fill")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.white.opacity(0.70))
-        }
-        .padding(22)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            LinearGradient(colors: [
-                Color(red: 0.025, green: 0.045, blue: 0.10),
-                Color(red: 0.11, green: 0.075, blue: 0.20),
-                Color(red: 0.015, green: 0.02, blue: 0.06)
-            ], startPoint: .topLeading, endPoint: .bottomTrailing),
-            in: RoundedRectangle(cornerRadius: 28)
-        )
-        .overlay(RoundedRectangle(cornerRadius: 28)
-            .stroke(LinearGradient(colors: [.cyan.opacity(0.8), .purple.opacity(0.65)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.3))
-        .shadow(color: .purple.opacity(0.22), radius: 20, y: 8)
-    }
-
     private func primaryAction(
         icon: String,
         title: LocalizedStringKey,
@@ -485,41 +491,6 @@ struct MaxPS4HomeView: View {
             )
         }
         .buttonStyle(.plain)
-    }
-
-    private var libraryHeader: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Image(systemName: "gamecontroller.fill")
-                        .foregroundStyle(.cyan)
-                    Text("Bibliothèque")
-                        .font(.title2.bold())
-                }
-
-                let count = emulator.games.count + folders.folders.count + folders.local.count
-                let summary: LocalizedStringKey = count == 0 ? "Aucun jeu" : count == 1 ? "1 élément" : "\(count) éléments"
-                Text(summary)
-                .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.58))
-            }
-
-            Spacer()
-
-            if !libraryEmpty {
-                Button {
-                    selectedTab = .games
-                } label: {
-                    HStack(spacing: 4) {
-                        Text("Tout voir")
-                        Image(systemName: "chevron.right")
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.cyan)
-                }
-            }
-        }
-        .padding(.top, 4)
     }
 
     private var library: some View {

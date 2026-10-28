@@ -13,9 +13,7 @@
 "Fermer" = "Cerrar";
 "Import impossible : %@" = "No se pudo importar: %@";
 "Jouer" = "Jugar";
-"Choisir le dossier complet de ton jeu" = "Elige la carpeta completa de tu juego";
 "Activer le JIT" = "Activar JIT";
-"Préparer MaxPS4 avec StikDebug" = "Preparar MaxPS4 con StikDebug";
 "RÉGLAGES" = "AJUSTES";
 "Langue" = "Idioma";
 "Langue de l’iPhone" = "Idioma del iPhone";
@@ -43,16 +41,6 @@
 "Accueil" = "Inicio";
 "Bibliothèque" = "Biblioteca";
 "Réglages" = "Ajustes";
-"AU-DESSUS DES NUAGES • MAXPS4" = "SOBRE LAS NUBES • MAXPS4";
-"MAXPS4  /  ÉDITION NOCTURNE" = "MAXPS4  /  EDICIÓN NOCTURNA";
-"Dans la légende" = "En la leyenda";
-"Retrouve tes jeux et lance une session." = "Encuentra tus juegos e inicia una sesión.";
-"%lld FICHIERS" = "%lld ARCHIVOS";
-"Active le JIT avant de lancer une session" = "Activa el JIT antes de iniciar una sesión";
-"Aucun jeu" = "Ningún juego";
-"1 élément" = "1 elemento";
-"%lld éléments" = "%lld elementos";
-"Tout voir" = "Ver todo";
 "BIBLIOTHÈQUE" = "BIBLIOTECA";
 "Tes dossiers de jeu et fichiers importés" = "Tus carpetas de juegos y archivos importados";
 "Jouer depuis un dossier" = "Jugar desde una carpeta";
@@ -159,3 +147,8 @@
 "Jeu supprimé" = "Juego eliminado";
 "Suppression impossible : %@" = "No se pudo eliminar: %@";
 "Bibliothèque vidée" = "Biblioteca vaciada";
+"Mes jeux" = "Mis juegos";
+"Copie le dossier d’un jeu dans « Sur mon iPhone › MaxPS4 › Jeux » avec l’app Fichiers, ou ajoute-le ici." = "Copia la carpeta de un juego en «En mi iPhone › MaxPS4 › Jeux» con la app Archivos, o añádela aquí.";
+"Fichier importé" = "Archivo importado";
+"Choisir un dossier" = "Elegir una carpeta";
+"Ajouter un jeu" = "Añadir un juego";
