@@ -162,12 +162,12 @@ int main() {
     assert(threads.sema_wait(sema, 1, 0, true) == ok && threads.sema_wait(sema, 1, 0, true) == busy);
     assert(threads.sema_signal(sema, 4) == inval && threads.sema_wait(sema + 1, 1, 0, true) == srch);
     std::atomic<bool> taken{false};
-    std::thread waiter([&] { assert(threads.sema_wait(sema, 2, 0, false) == ok); taken = true; });
+    std::thread sema_waiter([&] { assert(threads.sema_wait(sema, 2, 0, false) == ok); taken = true; });
     std::this_thread::sleep_for(20ms);
     assert(!taken && threads.sema_signal(sema, 1) == ok);
     std::this_thread::sleep_for(20ms);
     assert(!taken && threads.sema_signal(sema, 1) == ok);
-    waiter.join();
+    sema_waiter.join();
     assert(taken);
     write(left, 20000, 4);
     assert(threads.sema_wait(sema, 1, left, false) == timedout && read(left, 4) == 0);
@@ -176,10 +176,10 @@ int main() {
     assert(threads.sema_cancel(sema, 1, result) == ok && read(result, 4) == 1);
     cancelled.join();
     assert(threads.sema_wait(sema, 1, 0, true) == ok); // Cancel set the count to 1.
-    std::thread deleted([&] { assert(threads.sema_wait(sema, 1, 0, false) == canceled); });
+    std::thread sema_deleted([&] { assert(threads.sema_wait(sema, 1, 0, false) == canceled); });
     std::this_thread::sleep_for(20ms);
     assert(threads.sema_delete(sema) == ok);
-    deleted.join();
+    sema_deleted.join();
     assert(threads.sema_delete(sema) == srch);
     // Event flags: and/or waits, clearing modes, result pattern, single waiter.
     assert(threads.flag_create(handle, name, 0x10, 0x1) == ok);

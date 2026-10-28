@@ -26,6 +26,7 @@ struct MaxPS4HomeView: View {
     @State private var pendingDirectory = false
     @State private var message: String?
     @AppStorage(MaxPS4Language.key) private var language = ""
+    @AppStorage("maxps4.developer") private var developer = false
 
     private var filteredGames: [MaxPS4Game] {
         let query = gameSearch.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -259,6 +260,13 @@ struct MaxPS4HomeView: View {
                 }
                 .padding(18).frame(maxWidth: .infinity, alignment: .leading)
                 .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 22))
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Mode développeur", isOn: $developer).font(.headline).tint(.cyan)
+                    Text("Affiche les options de test et les rapports techniques, utiles pour le développement de MaxPS4.")
+                        .font(.footnote).foregroundStyle(.white.opacity(0.55))
+                }
+                .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 22))
                 Text("MaxPS4 · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") · build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "")")
                     .font(.footnote).foregroundStyle(.white.opacity(0.55))
                 Text("Aucun jeu ni firmware n’est inclus. Utilise uniquement tes fichiers autorisés.")
@@ -400,8 +408,10 @@ struct MaxPS4HomeView: View {
                         if game.fileName.lowercased().hasSuffix(".pkg") {
                             Text("Un fichier PKG seul ne suffit pas au lancement. Sélectionne le dossier du jeu avec eboot.bin et ses données.")
                                 .font(.footnote).foregroundStyle(.secondary)
-                            NavigationLink("Extraire un fichier du PKG") { MaxPS4PFSExportView(source: URL(fileURLWithPath: game.localPath)) }
-                                .tint(.cyan)
+                            if developer {
+                                NavigationLink("Extraire un fichier du PKG") { MaxPS4PFSExportView(source: URL(fileURLWithPath: game.localPath)) }
+                                    .tint(.cyan)
+                            }
                         }
                     }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
                 }

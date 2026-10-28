@@ -177,6 +177,8 @@ struct MaxPS4GameView: View {
     @AppStorage("maxps4.display.scaling") private var scaling = "fit"
     @AppStorage("maxps4.video.height") private var outputHeight = 1080
     @AppStorage("maxps4.fex.profile") private var profiling = false
+    // Réglages › Mode développeur: test options and the technical session report.
+    @AppStorage("maxps4.developer") private var developer = false
     private let poll = Timer.publish(every: 1.0 / 60, on: .main, in: .common).autoconnect()
 #endif
     init(directory: URL) {
@@ -243,7 +245,7 @@ struct MaxPS4GameView: View {
                             touch = 0; hasLaunched = true
                             MaxPS4GameFolders.shared.remember(directory)
                             session.start(url: directory, device: device, nativeTextures: nativeTextures, tso: tso,
-                                          outputHeight: outputHeight, profiling: profiling)
+                                          outputHeight: outputHeight, profiling: developer && profiling)
                         }.buttonStyle(.borderedProminent).tint(.cyan)
                         Picker("Affichage", selection: $scaling) {
                             Text("Ajuster").tag("fit")
@@ -256,12 +258,14 @@ struct MaxPS4GameView: View {
                         }.pickerStyle(.segmented).frame(maxWidth: 320)
                         Text("Résolution annoncée au jeu : 720p peut alléger le rendu si le jeu s’y adapte.")
                             .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 320)
-                        Toggle("Textures Metal natives (expérimental)", isOn: $nativeTextures)
-                            .font(.footnote).frame(maxWidth: 320)
-                        Toggle("Ordre mémoire x86 (TSO)", isOn: $tso)
-                            .font(.footnote).frame(maxWidth: 320)
-                        Toggle("Profileur processeur (diagnostic)", isOn: $profiling)
-                            .font(.footnote).frame(maxWidth: 320)
+                        if developer {
+                            Toggle("Textures Metal natives (expérimental)", isOn: $nativeTextures)
+                                .font(.footnote).frame(maxWidth: 320)
+                            Toggle("Ordre mémoire x86 (TSO)", isOn: $tso)
+                                .font(.footnote).frame(maxWidth: 320)
+                            Toggle("Profileur processeur (diagnostic)", isOn: $profiling)
+                                .font(.footnote).frame(maxWidth: 320)
+                        }
                         Text("Ces réglages sont mémorisés pour ce jeu.")
                             .font(.caption2).foregroundStyle(.secondary).frame(maxWidth: 320)
                         Text("Tourne l’iPhone pour jouer en paysage.")
@@ -328,6 +332,7 @@ struct MaxPS4GameView: View {
                             }
                             // A snapshot of the report, refreshed on demand: the live
                             // report changes every second while the game runs.
+                            if developer {
                             DisclosureGroup("Détails de la session", isExpanded: $showingDetails) {
                                 VStack(alignment: .leading, spacing: 12) {
                                     // One lazily laid-out view per line: a single Text of
@@ -346,6 +351,7 @@ struct MaxPS4GameView: View {
                             }
                             .tint(.cyan)
                             .onChange(of: showingDetails) { _, open in if open { details = session.sharedReport } }
+                            }
 #endif
                             Button("Quitter le jeu", role: .destructive) { dismiss() }
                         }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
