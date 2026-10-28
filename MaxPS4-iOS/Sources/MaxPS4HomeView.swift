@@ -159,6 +159,7 @@ struct MaxPS4HomeView: View {
                         .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18))
                 }
                 .tint(.cyan)
+                .accessibilityIdentifier("maxps4.openGameDirectory")
                 Spacer(minLength: 30)
             }.padding(.horizontal, 20).padding(.top, 12)
         }
