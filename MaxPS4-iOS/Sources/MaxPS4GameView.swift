@@ -15,7 +15,7 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
     private var reportFrames = 0
     // MTKView refresh callbacks (not the redraws a finished copy asks for):
     // the screen's real rate, 30 Hz in Low Power Mode.
-    private var refreshes = 0, manualDraw = false
+    private var refreshes = 0
     private var preparationSeconds = 0.0
     private var needsRedraw = true
     // "fit" (whole image, black bars), "fill" (cropped) or "stretch".
@@ -44,7 +44,7 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
     // the next copy starts while this one is shown. Every refresh shows the
     // newest copy; flips the copy loop misses are skipped by VideoOut.
     func draw(in view: MTKView) {
-        if !manualDraw { refreshes += 1 }
+        refreshes += 1
         guard !view.isPaused, view.drawableSize.width > 0, view.drawableSize.height > 0, let source else { return }
         // Acquire the drawable and encode only inside MTKView's draw cycle.
         if let texture = pendingTexture {
@@ -76,14 +76,16 @@ private final class GameMetalDisplay: NSObject, MTKViewDelegate {
                         let fps = Double(self.reportFrames) / span
                         let ms = self.preparationSeconds * 1000 / Double(self.reportFrames)
                         let hertz = Double(self.refreshes) / span
-                        let power = ProcessInfo.processInfo.isLowPowerModeEnabled ? " (économie d’énergie)" : ""
+                        let info = ProcessInfo.processInfo
+                        let power = (info.isLowPowerModeEnabled ? " (économie d’énergie)" : "")
+                            + (info.thermalState == .serious ? " (chauffe)" : info.thermalState == .critical ? " (chauffe critique)" : "")
                         self.report(String(format: "%.1f images/s · écran %.0f Hz%@ · préparation image %.2f ms · ", fps, hertz, power, ms) + frame.report)
                         self.reportTime = now; self.reportFrames = 0; self.preparationSeconds = 0; self.refreshes = 0
                     }
+                    // Shown on the next refresh, which also starts the next copy.
+                    // Drawing at once here could wait for a free drawable and
+                    // make the main thread miss every other refresh (31 Hz).
                     self.pendingTexture = frame.texture
-                    // Show it now and start the next copy, rather than losing
-                    // a refresh interval before the MTKView timer runs.
-                    self.manualDraw = true; view.draw(); self.manualDraw = false
                 case .failure(let error): self.failed(error.localizedDescription)
                 }
             }
@@ -125,9 +127,8 @@ private struct GameMetalSurface: UIViewRepresentable {
         view.colorPixelFormat = .bgra8Unorm_srgb
         view.clearColor = MTLClearColorMake(0, 0, 0, 1)
         // 120 Hz where the screen allows it (more chances to show a new copy
-        // early) and two drawables instead of three: one less queued image.
+        // early). Three drawables: with two, presenting could wait for one.
         view.preferredFramesPerSecond = 120; view.isPaused = true
-        (view.layer as? CAMetalLayer)?.maximumDrawableCount = 2
         do {
             context.coordinator.renderer = try GameMetalDisplay(device: device, report: report, failed: failed)
             view.delegate = context.coordinator.renderer
