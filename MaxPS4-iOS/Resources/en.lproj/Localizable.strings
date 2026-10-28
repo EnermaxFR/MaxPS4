@@ -152,3 +152,7 @@
 "Fichier importé" = "Imported file";
 "Choisir un dossier" = "Choose a folder";
 "Ajouter un jeu" = "Add a game";
+"Commandes" = "Controls";
+"Stick gauche comme croix directionnelle" = "Left stick as D-pad";
+"Taille des commandes tactiles" = "Touch controls size";
+"Opacité des commandes tactiles" = "Touch controls opacity";

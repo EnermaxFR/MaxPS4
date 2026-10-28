@@ -152,3 +152,7 @@
 "Fichier importé" = "Importierte Datei";
 "Choisir un dossier" = "Ordner wählen";
 "Ajouter un jeu" = "Spiel hinzufügen";
+"Commandes" = "Steuerung";
+"Stick gauche comme croix directionnelle" = "Linker Stick als Steuerkreuz";
+"Taille des commandes tactiles" = "Größe der Touch-Steuerung";
+"Opacité des commandes tactiles" = "Deckkraft der Touch-Steuerung";

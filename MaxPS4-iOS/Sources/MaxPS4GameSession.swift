@@ -72,7 +72,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private var port: UInt64 = 1
     private var missingSince: Date?
     private var lockWait: TimeInterval = 0 // Last snapshot's wait for `lock`.
-    private var buttons: UInt32 = 0
+    private var pad = MaxPS4PadState()
     private var inputEngine: OpaquePointer?
     private var displayed = 0
     private var started: TimeInterval?
@@ -94,7 +94,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private func tick(at time: TimeInterval) {
         inputLock.lock(); defer { inputLock.unlock() }
         guard let inputEngine else { return }
-        _ = maxps4_fex_engine_pad_update(inputEngine, buttons, 128, 128, 128, 128, 0, 0, 1)
+        pad.send(to: inputEngine)
         guard !screenPaced(at: time), vblankClock.due(at: time) else { return }
         _ = maxps4_fex_engine_videoout_vblank(inputEngine, vblankPort)
         vblanksSent += 1
@@ -199,14 +199,14 @@ final class MaxPS4GameSource: @unchecked Sendable {
     // Input goes straight to the engine under inputLock alone, never waiting
     // for `lock` (display copies, completions, reports). `inputEngine` is set
     // while the game runs and cleared under inputLock before the engine closes.
-    func input(_ buttons: UInt32) {
+    func input(_ pad: MaxPS4PadState) {
         inputLock.lock(); defer { inputLock.unlock() }
-        self.buttons = buttons
-        if let inputEngine { _ = maxps4_fex_engine_pad_update(inputEngine, buttons, 128, 128, 128, 128, 0, 0, 1) }
+        self.pad = pad
+        if let inputEngine { pad.send(to: inputEngine) }
     }
     private func sendInputLocked(_ engine: OpaquePointer) {
-        inputLock.lock(); let latest = buttons; inputLock.unlock()
-        _ = maxps4_fex_engine_pad_update(engine, latest, 128, 128, 128, 128, 0, 0, 1)
+        inputLock.lock(); let latest = pad; inputLock.unlock()
+        latest.send(to: engine)
     }
     private func snapshotTarget() throws -> (maxps4_videoout_frame, UInt64, MaxPS4GameMetalBridge)? {
         let asked = ProcessInfo.processInfo.systemUptime
@@ -413,7 +413,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
             }
         }
     }
-    func input(_ buttons: UInt32) { worker?.input(buttons) }
+    func input(_ pad: MaxPS4PadState) { worker?.input(pad) }
     func presented(_ text: String) { if running { hasPresented = true; report = text } }
     func failed(_ text: String) { stop(); stopping = nil; report = text }
     func stop() {
@@ -427,3 +427,23 @@ final class MaxPS4GameSource: @unchecked Sendable {
     deinit { worker?.stop() }
 }
 #endif
+
+// What the virtual DualShock 4 reports: PS4 button bits (sceKernel pad
+// layout), sticks (0...255, 128 centred, Y down) and analog L2/R2.
+struct MaxPS4PadState: Equatable {
+    static let l3: UInt32 = 0x2, r3: UInt32 = 0x4, options: UInt32 = 0x8
+    static let up: UInt32 = 0x10, right: UInt32 = 0x20, down: UInt32 = 0x40, left: UInt32 = 0x80
+    static let l2: UInt32 = 0x100, r2: UInt32 = 0x200, l1: UInt32 = 0x400, r1: UInt32 = 0x800
+    static let triangle: UInt32 = 0x1000, circle: UInt32 = 0x2000, cross: UInt32 = 0x4000, square: UInt32 = 0x8000
+    static let touchpad: UInt32 = 0x100000
+    var buttons: UInt32 = 0
+    var lx: UInt8 = 128, ly: UInt8 = 128, rx: UInt8 = 128, ry: UInt8 = 128
+    var l2: UInt8 = 0, r2: UInt8 = 0
+    // Touch buttons: L2/R2 pressed all the way.
+    static func touch(_ buttons: UInt32) -> Self {
+        Self(buttons: buttons, l2: buttons & l2 != 0 ? 255 : 0, r2: buttons & r2 != 0 ? 255 : 0)
+    }
+    func send(to engine: OpaquePointer) {
+        _ = maxps4_fex_engine_pad_update(engine, buttons, lx, ly, rx, ry, l2, r2, 1)
+    }
+}

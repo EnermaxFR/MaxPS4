@@ -167,6 +167,9 @@ struct MaxPS4GameView: View {
     @StateObject private var session = MaxPS4GameSession()
     @State private var device = MTLCreateSystemDefaultDevice()
     @State private var touch: UInt32 = 0
+    @AppStorage("maxps4.touch.scale") private var touchScale = 1.0
+    @AppStorage("maxps4.touch.opacity") private var touchOpacity = 0.85
+    @AppStorage("maxps4.pad.stickDpad") private var stickAsDpad = true
     @State private var hasLaunched = false
     @State private var gamepad = MaxPS4GameView.gamepadConnected()
     @AppStorage("maxps4.metal.nativeTextures") private var nativeTextures = false
@@ -241,7 +244,7 @@ struct MaxPS4GameView: View {
                 HStack {
                     Button {
 #if MAXPS4_FEX_APP
-                        touch = 0; session.input(0)
+                        touch = 0; session.input(MaxPS4PadState())
 #endif
                         showingMenu = true
                     } label: {
@@ -275,6 +278,14 @@ struct MaxPS4GameView: View {
                                 Text("Remplir").tag("fill")
                                 Text("Étirer").tag("stretch")
                             }.pickerStyle(.segmented)
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Commandes").font(.headline)
+                                Toggle("Stick gauche comme croix directionnelle", isOn: $stickAsDpad)
+                                Text("Taille des commandes tactiles")
+                                Slider(value: $touchScale, in: 0.7...1.5)
+                                Text("Opacité des commandes tactiles")
+                                Slider(value: $touchOpacity, in: 0.25...1)
+                            }.font(.subheadline).tint(.cyan)
                             if session.running {
                                 Button("Arrêter la session", role: .destructive) {
                                     touch = 0; session.stop(); showingMenu = false
@@ -312,29 +323,7 @@ struct MaxPS4GameView: View {
 #if MAXPS4_FEX_APP
         .onReceive(poll) { _ in
             guard session.running, scenePhase == .active, !showingMenu else { return }
-            var buttons = touch
-            for controller in GCController.controllers() {
-                if let pad = controller.extendedGamepad {
-                    if pad.dpad.left.isPressed || pad.leftThumbstick.xAxis.value < -0.3 { buttons |= 0x80 }
-                    if pad.dpad.right.isPressed || pad.leftThumbstick.xAxis.value > 0.3 { buttons |= 0x20 }
-                    if pad.dpad.up.isPressed || pad.leftThumbstick.yAxis.value > 0.3 { buttons |= 0x10 }
-                    if pad.dpad.down.isPressed || pad.leftThumbstick.yAxis.value < -0.3 { buttons |= 0x40 }
-                    if pad.buttonA.isPressed { buttons |= 0x4000 }
-                    if pad.buttonB.isPressed { buttons |= 0x2000 }
-                    if pad.buttonX.isPressed { buttons |= 0x8000 }
-                    if pad.buttonY.isPressed { buttons |= 0x1000 }
-                    if pad.buttonMenu.isPressed { buttons |= 0x8 }
-                } else if let pad = controller.microGamepad {
-                    if pad.dpad.xAxis.value < -0.3 { buttons |= 0x80 }
-                    if pad.dpad.xAxis.value > 0.3 { buttons |= 0x20 }
-                    if pad.dpad.yAxis.value > 0.3 { buttons |= 0x10 }
-                    if pad.dpad.yAxis.value < -0.3 { buttons |= 0x40 }
-                    if pad.buttonA.isPressed { buttons |= 0x4000 }
-                    if pad.buttonX.isPressed { buttons |= 0x8000 }
-                    if pad.buttonMenu.isPressed { buttons |= 0x8 }
-                }
-            }
-            session.input(buttons)
+            session.input(Self.padState(touch: touch, stickAsDpad: stickAsDpad))
         }
         .onReceive(NotificationCenter.default.publisher(for: .GCControllerDidConnect)) { _ in
             gamepad = Self.gamepadConnected(); if gamepad { touch = 0 }
@@ -349,16 +338,84 @@ struct MaxPS4GameView: View {
 #endif
     }
 #if MAXPS4_FEX_APP
+    // The touch controls plus every connected controller, as one DualShock 4.
+    // `stickAsDpad` also presses the D-pad with the left stick (2D games that
+    // read only the D-pad); the stick's analog position is always sent.
+    private static func padState(touch: UInt32, stickAsDpad: Bool) -> MaxPS4PadState {
+        typealias P = MaxPS4PadState
+        var state = P.touch(touch)
+        var left: Float = 0.1, right: Float = 0.1 // Deflection to beat (dead zone first).
+        func axis(_ value: Float) -> UInt8 { UInt8(max(0, min(255, ((value + 1) * 127.5).rounded()))) }
+        func analog(_ value: Float) -> UInt8 { UInt8(max(0, min(255, (value * 255).rounded()))) }
+        for controller in GCController.controllers() {
+            var b: UInt32 = 0
+            if let pad = controller.extendedGamepad {
+                let lx = pad.leftThumbstick.xAxis.value, ly = pad.leftThumbstick.yAxis.value
+                let rx = pad.rightThumbstick.xAxis.value, ry = pad.rightThumbstick.yAxis.value
+                if pad.dpad.left.isPressed || (stickAsDpad && lx < -0.3) { b |= P.left }
+                if pad.dpad.right.isPressed || (stickAsDpad && lx > 0.3) { b |= P.right }
+                if pad.dpad.up.isPressed || (stickAsDpad && ly > 0.3) { b |= P.up }
+                if pad.dpad.down.isPressed || (stickAsDpad && ly < -0.3) { b |= P.down }
+                if pad.buttonA.isPressed { b |= P.cross }
+                if pad.buttonB.isPressed { b |= P.circle }
+                if pad.buttonX.isPressed { b |= P.square }
+                if pad.buttonY.isPressed { b |= P.triangle }
+                if pad.buttonMenu.isPressed { b |= P.options }
+                if pad.leftShoulder.isPressed { b |= P.l1 }
+                if pad.rightShoulder.isPressed { b |= P.r1 }
+                if pad.leftTrigger.isPressed { b |= P.l2 }
+                if pad.rightTrigger.isPressed { b |= P.r2 }
+                if pad.leftThumbstickButton?.isPressed == true { b |= P.l3 }
+                if pad.rightThumbstickButton?.isPressed == true { b |= P.r3 }
+                // The touchpad click; on other controllers the View/Select button.
+                if let dualSense = pad as? GCDualSenseGamepad {
+                    if dualSense.touchpadButton.isPressed { b |= P.touchpad }
+                } else if let dualShock = pad as? GCDualShockGamepad {
+                    if dualShock.touchpadButton.isPressed { b |= P.touchpad }
+                } else if pad.buttonOptions?.isPressed == true { b |= P.touchpad }
+                state.l2 = max(state.l2, analog(pad.leftTrigger.value))
+                state.r2 = max(state.r2, analog(pad.rightTrigger.value))
+                // PS4 sticks grow downwards; the most deflected controller wins.
+                if abs(lx) + abs(ly) > left { left = abs(lx) + abs(ly); state.lx = axis(lx); state.ly = axis(-ly) }
+                if abs(rx) + abs(ry) > right { right = abs(rx) + abs(ry); state.rx = axis(rx); state.ry = axis(-ry) }
+            } else if let pad = controller.microGamepad {
+                if pad.dpad.xAxis.value < -0.3 { b |= P.left }
+                if pad.dpad.xAxis.value > 0.3 { b |= P.right }
+                if pad.dpad.yAxis.value > 0.3 { b |= P.up }
+                if pad.dpad.yAxis.value < -0.3 { b |= P.down }
+                if pad.buttonA.isPressed { b |= P.cross }
+                if pad.buttonX.isPressed { b |= P.square }
+                if pad.buttonMenu.isPressed { b |= P.options }
+            }
+            state.buttons |= b
+        }
+        return state
+    }
     private static func gamepadConnected() -> Bool {
         GCController.controllers().contains { $0.extendedGamepad != nil || $0.microGamepad != nil }
     }
     private var screenControls: some View {
         GeometryReader { geometry in
-            let size = max(44, min(56, (geometry.size.width - 32) / 6))
+            let size = max(36, min(80, max(44, min(56, (geometry.size.width - 32) / 6)) * touchScale))
             VStack(spacing: 0) {
                 control("Options", label: "Options", bit: 0x8, size: 44)
                 Spacer(minLength: 0)
             }.frame(maxWidth: .infinity)
+            // Shoulder buttons below the menu button's corner.
+            VStack {
+                HStack {
+                    VStack(spacing: 8) {
+                        control("L2", label: "L2", bit: MaxPS4PadState.l2, size: size * 0.8)
+                        control("L1", label: "L1", bit: MaxPS4PadState.l1, size: size * 0.8)
+                    }
+                    Spacer(minLength: 0)
+                    VStack(spacing: 8) {
+                        control("R2", label: "R2", bit: MaxPS4PadState.r2, size: size * 0.8)
+                        control("R1", label: "R1", bit: MaxPS4PadState.r1, size: size * 0.8)
+                    }
+                }
+                Spacer(minLength: 0)
+            }.padding(.top, 56)
             HStack(alignment: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     control("↑", label: "Haut", bit: 0x10, size: size)
@@ -382,13 +439,14 @@ struct MaxPS4GameView: View {
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
         .padding(6)
+        .opacity(touchOpacity)
         .accessibilityIdentifier("maxps4.game.controls")
     }
 
     private func control(_ name: String, label: LocalizedStringKey, bit: UInt32, size: CGFloat) -> some View {
         let pressed = touch & bit != 0
         return Text(name)
-            .font(.system(size: name == "Options" ? 10 : 22, weight: .bold, design: .rounded))
+            .font(.system(size: name == "Options" ? 10 : name.count == 2 ? 14 : 22, weight: .bold, design: .rounded))
             .foregroundStyle(.white.opacity(pressed ? 1 : 0.85))
             .frame(width: size, height: size)
             .background(pressed ? Color.cyan.opacity(0.50) : Color.black.opacity(0.25), in: Circle())
@@ -397,12 +455,12 @@ struct MaxPS4GameView: View {
             .contentShape(Circle())
             .accessibilityLabel(label).accessibilityAddTraits(.isButton)
             .accessibilityAction {
-                touch |= bit; session.input(touch)
+                touch |= bit; session.input(MaxPS4PadState.touch(touch))
                 touch &= ~bit
             }
             .gesture(DragGesture(minimumDistance: 0)
-                .onChanged { _ in touch |= bit; session.input(touch) }
-                .onEnded { _ in touch &= ~bit; session.input(touch) })
+                .onChanged { _ in touch |= bit; session.input(MaxPS4PadState.touch(touch)) }
+                .onEnded { _ in touch &= ~bit; session.input(MaxPS4PadState.touch(touch)) })
     }
 #endif
 }
