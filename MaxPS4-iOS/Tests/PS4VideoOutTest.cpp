@@ -81,6 +81,15 @@ int main() {
     assert(read(status) == 0 && read(status + 52, 4) == 1 && read(status + 56, 4) == UINT32_MAX);
     assert(video.submit(port, 1, 1, 0) == PS4VideoOut::error(0x12));
     assert(video.dropped() == 0); video.count_dropped(); assert(video.dropped() == 1);
+    // A GNM flip replaces a pending one the host has not taken, once taken not.
+    maxps4_videoout_frame replaced{}; uint64_t replaced_address = 0;
+    const uint64_t first = (video.target(replaced, replaced_address), replaced.ticket);
+    assert(video.complete(first, false) == 0 && video.submit(port, 0, 1, uint64_t(int64_t(-123))) == 0);
+    assert(video.submit(port, 1, 1, 0, true, true) == 0 && video.dropped() == 2);
+    assert(video.target(replaced, replaced_address) == 0 && replaced.buffer_index == 1);
+    assert(video.submit(port, 0, 1, 0, true, true) == PS4VideoOut::error(0x12) && video.dropped() == 2);
+    assert(video.complete(replaced.ticket, false) == 0);
+    assert(video.submit(port, 0, 1, uint64_t(int64_t(-123))) == 0);
     assert(video.unregister_buffers(port, 0) == PS4VideoOut::error(9));
     maxps4_videoout_frame frame{};
     assert(video.snapshot(frame, nullptr, 0) == 0 && frame.ticket && frame.port == port);

@@ -93,19 +93,24 @@ public:
     // presents the GPU-rendered target through target() passes false: the
     // copy (8 MB at 1080p) would only cost the game thread, under the lock
     // that the host's target(), complete() and vblank() wait on.
-    int64_t submit(uint64_t port, int32_t index, int32_t mode, uint64_t argument, bool copy = true) {
+    // `replace`: a pending flip the host has not taken yet (target/snapshot)
+    // gives way to this newer one, counted as dropped, instead of refusing
+    // it. The host polls on its own refresh, which is not the game's vblank,
+    // so keeping the older flip lost every other image.
+    int64_t submit(uint64_t port, int32_t index, int32_t mode, uint64_t argument, bool copy = true, bool replace = false) {
         std::lock_guard<std::mutex> lock(guard_);
         if (!valid(port)) return error(11);
         if (index < 0 || size_t(index) >= buffers_.size() || !buffers_[size_t(index)].used) return error(10);
         if (mode != 1) return error(6);
-        if (frame_.ticket) return error(0x12);
+        if (frame_.ticket && (!replace || taken_)) return error(0x12);
         if (next_frame_ == UINT64_MAX) return error(0x17);
         const auto& buffer = buffers_[size_t(index)]; const auto& attr = groups_[buffer.group].attribute;
         try {
             std::vector<uint8_t> pixels(copy ? attr.bytes() : 0);
             if (copy && !memory_.read(buffer.address, pixels.data(), pixels.size())) return error(0x13);
+            if (frame_.ticket) { ++dropped_; ++replaced_; }
             frame_ = {next_frame_++, port_, argument, attr.width, attr.height, attr.pitch, attr.format, uint32_t(index), attr.tiled ? 1U : 0U, attr.bytes()};
-            pixels_.swap(pixels);
+            pixels_.swap(pixels); taken_ = false;
         } catch (const std::bad_alloc&) { return error(0x100c); }
         return 0;
     }
@@ -156,13 +161,13 @@ public:
     void count_dropped() { std::lock_guard<std::mutex> lock(guard_); ++dropped_; }
     uint64_t dropped() { std::lock_guard<std::mutex> lock(guard_); return dropped_; }
     // Flips the game asked for: accepted (tickets issued) plus skipped.
-    uint64_t requested() { std::lock_guard<std::mutex> lock(guard_); return next_frame_ - 1 + dropped_; }
+    uint64_t requested() { std::lock_guard<std::mutex> lock(guard_); return next_frame_ - 1 + dropped_ - replaced_; }
     // Metadata of the pending flip, without copying CPU surface pixels.
     int32_t target(maxps4_videoout_frame& info, uint64_t& address) {
         info={}; address=0;
         std::lock_guard<std::mutex> lock(guard_);
         if (!frame_.ticket) return -EAGAIN;
-        info=frame_; address=buffers_[frame_.buffer_index].address; return 0;
+        info=frame_; address=buffers_[frame_.buffer_index].address; taken_ = true; return 0;
     }
     int32_t snapshot(maxps4_videoout_frame& info, uint8_t* pixels, size_t capacity) {
         info = {};
@@ -171,7 +176,7 @@ public:
         if (pixels_.size() != frame_.byte_count) return -ENODATA; // Submitted without a CPU copy.
         if ((!pixels && capacity) || (pixels && capacity < pixels_.size())) return -EINVAL;
         if (pixels) std::memcpy(pixels, pixels_.data(), pixels_.size());
-        info = frame_; return 0;
+        info = frame_; taken_ = true; return 0;
     }
     int64_t complete(uint64_t ticket, bool presented) {
         std::lock_guard<std::mutex> lock(guard_);
@@ -180,7 +185,7 @@ public:
             ++flip_count_; last_argument_ = frame_.flip_argument; current_buffer_ = int32_t(frame_.buffer_index);
             flip_time_ = now(); events_.video_event_notify(port_, 6, last_argument_, flip_time_);
         }
-        frame_ = {}; pixels_.clear(); return 0;
+        frame_ = {}; pixels_.clear(); taken_ = false; return 0;
     }
     int64_t vblank(uint64_t port) {
         std::lock_guard<std::mutex> lock(guard_);
@@ -247,6 +252,8 @@ private:
     int32_t current_buffer_ = -1;
     uint32_t output_width_ = 1920, output_height_ = 1080;
     maxps4_videoout_frame frame_{}; std::vector<uint8_t> pixels_; Deferred deferred_{};
+    bool taken_ = false; // The host holds frame_'s ticket: it may complete it.
+    uint64_t replaced_ = 0; // Dropped flips that had a ticket (requested() counts them once).
     bool valid(uint64_t port) const { return port && port == port_; }
     bool retire() {
         const Deferred flip = deferred_; deferred_ = {}; paced_vblank_ = vblank_count_; paced_.notify_all();
@@ -260,8 +267,8 @@ private:
     }
     void clear() {
         if (port_) events_.video_event_remove_source(port_);
-        port_ = 0; frame_ = {}; pixels_.clear(); groups_.fill({}); buffers_.fill({}); deferred_ = {};
-        flip_count_ = vblank_count_ = flip_time_ = vblank_time_ = dropped_ = paced_vblank_ = 0; flip_rate_ = 0;
+        port_ = 0; frame_ = {}; pixels_.clear(); groups_.fill({}); buffers_.fill({}); deferred_ = {}; taken_ = false;
+        flip_count_ = vblank_count_ = flip_time_ = vblank_time_ = dropped_ = paced_vblank_ = replaced_ = 0; flip_rate_ = 0;
         last_argument_ = UINT64_MAX; current_buffer_ = -1; paced_.notify_all();
     }
 };
