@@ -149,6 +149,8 @@ struct MaxPS4GameView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var showingMenu = false
+    @State private var showingDetails = false
+    @State private var details = ""
 #if MAXPS4_FEX_APP
     @StateObject private var session = MaxPS4GameSession()
     @State private var device = MTLCreateSystemDefaultDevice()
@@ -266,10 +268,20 @@ struct MaxPS4GameView: View {
                                     touch = 0; session.stop(); showingMenu = false
                                 }
                             }
-                            DisclosureGroup("Détails de la session") {
-                                Text(session.sharedReport).font(.footnote.monospaced()).textSelection(.enabled)
-                                ShareLink(item: session.sharedReport) { Label("Partager le rapport", systemImage: "square.and.arrow.up") }
-                            }.tint(.cyan)
+                            // A snapshot of the report, refreshed on demand: the live
+                            // report changes every second while the game runs.
+                            DisclosureGroup("Détails de la session", isExpanded: $showingDetails) {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text(verbatim: details).font(.footnote.monospaced())
+                                    HStack {
+                                        Button("Actualiser") { details = session.sharedReport }
+                                        Spacer()
+                                        ShareLink(item: details) { Label("Partager le rapport", systemImage: "square.and.arrow.up") }
+                                    }
+                                }.padding(.top, 8)
+                            }
+                            .tint(.cyan)
+                            .onChange(of: showingDetails) { _, open in if open { details = session.sharedReport } }
 #endif
                             Button("Quitter le jeu", role: .destructive) { dismiss() }
                         }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
