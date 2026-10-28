@@ -278,7 +278,13 @@ struct MaxPS4GameView: View {
                             // report changes every second while the game runs.
                             DisclosureGroup("Détails de la session", isExpanded: $showingDetails) {
                                 VStack(alignment: .leading, spacing: 12) {
-                                    Text(verbatim: details).font(.footnote.monospaced())
+                                    // One lazily laid-out view per line: a single Text of
+                                    // the whole report stalled the menu while it was laid out.
+                                    LazyVStack(alignment: .leading, spacing: 2) {
+                                        ForEach(Array(details.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) {
+                                            Text(verbatim: String($0.element)).font(.footnote.monospaced())
+                                        }
+                                    }
                                     HStack {
                                         Button("Actualiser") { details = session.sharedReport }
                                         Spacer()
