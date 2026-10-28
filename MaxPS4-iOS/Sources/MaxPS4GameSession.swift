@@ -75,6 +75,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
     private var missingSince: Date?
     private var lockWait: TimeInterval = 0 // Last snapshot's wait for `lock`.
     private var pad = MaxPS4PadState()
+    private var lastBeat = "" // The last heartbeat() text, under lock.
     // What the last run left for the player, set before run() returns.
     struct Outcome { var missing: [String] = []; var crashed = false; var report: URL? }
     private(set) var outcome = Outcome()
@@ -138,7 +139,9 @@ final class MaxPS4GameSource: @unchecked Sendable {
         let missing = missingImports(engine)
         let compatibility = missing.called.isEmpty ? "" : "Fonctions PS4 manquantes appelées : \(missing.called.count) sur \(missing.total) absentes · "
             + missing.called.prefix(5).joined(separator: " · ") + "\n"
-        return compatibility + "Depuis le démarrage du JIT : \(seconds) s · dernier ticket VideoOut \(lastTicket) · images affichées \(displayed) · sautées \(maxps4_fex_engine_videoout_dropped(engine)) · VBlank envoyés \(sent)\n" + rates(engine, now: now) + audioStatus(engine) + "\n" + String(cString: activity) + profile(engine) + mainThreadSample(engine)
+        let text = compatibility + "Depuis le démarrage du JIT : \(seconds) s · dernier ticket VideoOut \(lastTicket) · images affichées \(displayed) · sautées \(maxps4_fex_engine_videoout_dropped(engine)) · VBlank envoyés \(sent)\n" + rates(engine, now: now) + audioStatus(engine) + "\n" + String(cString: activity) + profile(engine) + mainThreadSample(engine)
+        lastBeat = text
+        return text
     }
     // The game's imports MaxPS4 stubs: those it called ("<library> <NID> (n appels)"), and how many exist.
     private func missingImports(_ engine: OpaquePointer) -> (called: [String], total: Int) {
@@ -383,7 +386,9 @@ final class MaxPS4GameSource: @unchecked Sendable {
             let relativeRIP = fault.rip >= relocation ? fault.rip - relocation : fault.rip
             let missing = missingImports(opened)
             let crashed = !wasStopped && (ran != 0 || fault.signal != 0)
-            let live = heartbeat() ?? ""
+            // The last live report, not a new one: reading the engine now would
+            // sample the main guest thread, which is this very thread.
+            lock.lock(); let live = lastBeat; lock.unlock()
             defer {
                 let text = [result(of: ran, backend: backend, wasStopped: wasStopped, frames: frames, metal: metal.report, fault: fault, relative: relativeRIP),
                             "Fonctions PS4 manquantes appelées (\(missing.called.count) sur \(missing.total) absentes) :",

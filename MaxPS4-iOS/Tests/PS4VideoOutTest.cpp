@@ -164,6 +164,13 @@ int main() {
     assert(video.vblank(port) == 0);
     held.join();
     assert(resumed && read(status, 4) == 9);
+    // A requested stop: even paused, a flip neither sleeps nor waits for a vblank.
+    video.set_paused(true); video.interrupt();
+    const auto stop_started = std::chrono::steady_clock::now();
+    assert(video.flip_at_vblank(true, status, 10, false) && read(status, 4) == 10);
+    assert(video.flip_at_vblank(true, status, 11, false) && read(status, 4) == 11);
+    assert(std::chrono::steady_clock::now() - stop_started < std::chrono::milliseconds(40));
+    video.set_paused(false);
     while (poll() == ok) {}
     // Closing removes only VideoOut subscriptions, not user or GNM events.
     assert(queues.user_event_add(queue, 6, true) == ok && queues.user_event_trigger(queue, 6, 77) == ok);

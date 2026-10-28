@@ -1039,7 +1039,9 @@ extern "C" int32_t maxps4_fex_engine_set_time_limit(maxps4_fex_engine* engine,
 }
 extern "C" int32_t maxps4_fex_engine_request_stop(maxps4_fex_engine* engine) {
     if (!engine) return -EINVAL;
-    engine->stop_requested=true; return 0;
+    engine->stop_requested=true;
+    engine->libkernel.videoout().interrupt(); // Flip waits end at once.
+    return 0;
 }
 extern "C" int32_t maxps4_fex_engine_cpuid(maxps4_fex_engine *engine,
                                           uint32_t leaf, uint32_t subleaf,
@@ -1902,6 +1904,9 @@ extern "C" int32_t maxps4_fex_engine_sample_main_thread(maxps4_fex_engine* engin
     std::lock_guard lock(engine->sample_lock);
     auto* guard = engine->main_guard;
     if (!guard) return -ESRCH;
+    // The run's own thread (the main guest thread's host thread, once
+    // run_orbis returned) would suspend itself and never resume.
+    if (::pthread_equal(guard->host, ::pthread_self())) return -EDEADLK;
     const uint32_t before = guard->sample_sequence.load(std::memory_order_acquire);
     guard->sample_request = true;
     for (int i = 0; i < 50 && guard->sample_sequence.load(std::memory_order_acquire) == before; ++i) {

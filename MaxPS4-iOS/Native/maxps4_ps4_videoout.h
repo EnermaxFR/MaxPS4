@@ -206,6 +206,12 @@ public:
     void set_paused(bool paused) {
         std::lock_guard<std::mutex> lock(guard_); paused_ = paused; paced_.notify_all();
     }
+    // A stop was requested: no flip waits any more, so the game's thread goes
+    // back to guest code where the stop signal lands (a thread kept waiting
+    // for vblanks that no longer come would almost never take it).
+    void interrupt() {
+        std::lock_guard<std::mutex> lock(guard_); stopping_ = true; paced_.notify_all();
+    }
     int64_t vblank(uint64_t port) {
         std::lock_guard<std::mutex> lock(guard_);
         if (!valid(port)) return error(11);
@@ -275,13 +281,15 @@ private:
     maxps4_videoout_frame frame_{}; std::vector<uint8_t> pixels_; Deferred deferred_{};
     bool taken_ = false; // The host holds frame_'s ticket: it may complete it.
     bool paused_ = false; // Kept across reset: the host's state, not the game's.
+    bool stopping_ = false; // Until reset: the run is ending.
     uint64_t replaced_ = 0; // Dropped flips that had a ticket (requested() counts them once).
     uint64_t flip_returned_ = 0, retired_at_ = 0; // When the last flip returned / was retired (now()).
     bool valid(uint64_t port) const { return port && port == port_; }
     // Bounded wait for `done`, extended while the host has paused the game.
     template <class Done> void wait_paced(std::unique_lock<std::mutex>& lock, Done done) {
-        do paced_.wait_for(lock, std::chrono::milliseconds(pace_timeout_ms), [&] { return !port_ || done(); });
-        while (paused_ && port_ && !done());
+        if (stopping_) return;
+        do paced_.wait_for(lock, std::chrono::milliseconds(pace_timeout_ms), [&] { return !port_ || stopping_ || done(); });
+        while (paused_ && !stopping_ && port_ && !done());
     }
     bool retire() {
         const Deferred flip = deferred_; deferred_ = {}; paced_vblank_ = vblank_count_; paced_.notify_all();
@@ -297,7 +305,7 @@ private:
     void clear() {
         if (port_) events_.video_event_remove_source(port_);
         port_ = 0; frame_ = {}; pixels_.clear(); groups_.fill({}); buffers_.fill({}); deferred_ = {}; taken_ = false;
-        flip_count_ = vblank_count_ = flip_time_ = vblank_time_ = dropped_ = paced_vblank_ = replaced_ = flip_returned_ = retired_at_ = 0; flip_rate_ = 0;
+        flip_count_ = vblank_count_ = flip_time_ = vblank_time_ = dropped_ = paced_vblank_ = replaced_ = flip_returned_ = retired_at_ = 0; stopping_ = false; flip_rate_ = 0;
         last_argument_ = UINT64_MAX; current_buffer_ = -1; paced_.notify_all();
     }
 };
