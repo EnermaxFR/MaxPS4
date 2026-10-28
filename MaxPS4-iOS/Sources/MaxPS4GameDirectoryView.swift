@@ -73,6 +73,8 @@ struct MaxPS4GameDirectoryView: View {
     @Published private(set) var folders: [Folder] = []
     @Published private(set) var local: [LocalGame] = []
     @Published private(set) var searched = 0 // Folders walked by the last scan.
+    @Published private(set) var recent: URL? // The last game launched (home's Reprendre).
+    private let recentKey = "maxps4.library.recent"
     private let key = "maxps4.library.folders"
     private var watchers: [DispatchSourceFileSystemObject] = []
     private var rescanPending = false
@@ -80,6 +82,10 @@ struct MaxPS4GameDirectoryView: View {
     private init() {
         if let data = UserDefaults.standard.data(forKey: key),
            let saved = try? JSONDecoder().decode([Folder].self, from: data) { folders = saved }
+        if let data = UserDefaults.standard.data(forKey: recentKey) {
+            var stale = false
+            recent = try? URL(resolvingBookmarkData: data, bookmarkDataIsStale: &stale)
+        }
         scanDocuments()
     }
 
@@ -192,6 +198,19 @@ struct MaxPS4GameDirectoryView: View {
         var stale = false
         return try? URL(resolvingBookmarkData: folder.bookmark, bookmarkDataIsStale: &stale)
     }
+    func remember(_ url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        if let data = try? url.bookmarkData() { UserDefaults.standard.set(data, forKey: recentKey) }
+        recent = url
+    }
+    // The recent game's name and icon: from the scanned list, else its param.sfo.
+    func describe(_ url: URL) -> (name: String, icon: URL?) {
+        if let game = local.first(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) { return (game.name, game.icon) }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        return (Self.sfoString(url.appendingPathComponent("sce_sys/param.sfo"), key: "TITLE") ?? url.lastPathComponent, nil)
+    }
     func remove(_ folder: Folder) {
         folders.removeAll { $0.id == folder.id }
         save()
@@ -204,11 +223,16 @@ struct MaxPS4GameDirectoryView: View {
 // Each game's save data: Documents/Sauvegardes/<TITLE_ID>, outside the game
 // folder so replacing or copying the game again keeps them.
 enum MaxPS4Saves {
-    static func root(for game: URL) -> URL? {
+    // The game's TITLE_ID (CUSA07010), else its folder name, safe as a path
+    // component; also the key of its own settings.
+    static func gameID(for game: URL) -> String {
         let system = game.appendingPathComponent("sce_sys/param.sfo")
-        var name = MaxPS4GameFolders.sfoString(system, key: "TITLE_ID") ?? game.lastPathComponent
-        name = String(name.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_" })
-        guard !name.isEmpty else { return nil }
+        let name = MaxPS4GameFolders.sfoString(system, key: "TITLE_ID") ?? game.lastPathComponent
+        let safe = String(name.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_" })
+        return safe.isEmpty ? "jeu" : safe
+    }
+    static func root(for game: URL) -> URL? {
+        let name = gameID(for: game)
         let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Sauvegardes", isDirectory: true).appendingPathComponent(name, isDirectory: true)
         do { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true) } catch { return nil }

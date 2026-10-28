@@ -156,3 +156,10 @@
 "Stick gauche comme croix directionnelle" = "Left stick as D-pad";
 "Taille des commandes tactiles" = "Touch controls size";
 "Opacité des commandes tactiles" = "Touch controls opacity";
+"Dernier jeu lancé" = "Last game played";
+"Reprendre" = "Resume";
+"Sauvegardes" = "Saves";
+"Aucune sauvegarde" = "No saves";
+"Voir dans Fichiers" = "Show in Files";
+"Dossier" = "Folder";
+"Ces réglages sont mémorisés pour ce jeu." = "These settings are saved for this game.";

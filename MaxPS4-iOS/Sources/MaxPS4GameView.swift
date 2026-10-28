@@ -179,6 +179,23 @@ struct MaxPS4GameView: View {
     @AppStorage("maxps4.fex.profile") private var profiling = false
     private let poll = Timer.publish(every: 1.0 / 60, on: .main, in: .common).autoconnect()
 #endif
+    init(directory: URL) {
+        self.directory = directory
+#if MAXPS4_FEX_APP
+        // Each game keeps its own settings under "<key>.<game ID>"; a game
+        // played for the first time starts from the app-wide values.
+        let id = MaxPS4Saves.gameID(for: directory), defaults = UserDefaults.standard
+        func own(_ key: String) -> String { key + "." + id }
+        func value<T>(_ key: String, _ fallback: T) -> T { defaults.object(forKey: key) as? T ?? fallback }
+        _touchScale = AppStorage(wrappedValue: value("maxps4.touch.scale", 1.0), own("maxps4.touch.scale"))
+        _touchOpacity = AppStorage(wrappedValue: value("maxps4.touch.opacity", 0.85), own("maxps4.touch.opacity"))
+        _stickAsDpad = AppStorage(wrappedValue: value("maxps4.pad.stickDpad", true), own("maxps4.pad.stickDpad"))
+        _nativeTextures = AppStorage(wrappedValue: value("maxps4.metal.nativeTextures", false), own("maxps4.metal.nativeTextures"))
+        _tso = AppStorage(wrappedValue: value("maxps4.fex.tso", true), own("maxps4.fex.tso"))
+        _scaling = AppStorage(wrappedValue: value("maxps4.display.scaling", "fit"), own("maxps4.display.scaling"))
+        _outputHeight = AppStorage(wrappedValue: value("maxps4.video.height", 1080), own("maxps4.video.height"))
+#endif
+    }
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -209,6 +226,7 @@ struct MaxPS4GameView: View {
                         }
                         Button(hasLaunched ? "Rejouer" : "Jouer") {
                             touch = 0; hasLaunched = true
+                            MaxPS4GameFolders.shared.remember(directory)
                             session.start(url: directory, device: device, nativeTextures: nativeTextures, tso: tso,
                                           outputHeight: outputHeight, profiling: profiling)
                         }.buttonStyle(.borderedProminent).tint(.cyan)
@@ -229,6 +247,8 @@ struct MaxPS4GameView: View {
                             .font(.footnote).frame(maxWidth: 320)
                         Toggle("Profileur processeur (diagnostic)", isOn: $profiling)
                             .font(.footnote).frame(maxWidth: 320)
+                        Text("Ces réglages sont mémorisés pour ce jeu.")
+                            .font(.caption2).foregroundStyle(.secondary).frame(maxWidth: 320)
                         Text("Tourne l’iPhone pour jouer en paysage.")
                             .font(.caption).foregroundStyle(.secondary)
                     }

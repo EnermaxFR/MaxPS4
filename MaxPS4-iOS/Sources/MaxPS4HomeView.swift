@@ -10,6 +10,7 @@ struct MaxPS4HomeView: View {
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var folders = MaxPS4GameFolders.shared
     @State private var playingFolder: MaxPS4PlayingFolder?
+    @State private var detailsFolder: MaxPS4PlayingFolder?
     @State private var selectedTab: MaxPS4Tab = .home
     @State private var importingGame = false
     @State private var showingGameDirectory = false
@@ -55,6 +56,12 @@ struct MaxPS4HomeView: View {
         .safeAreaInset(edge: .bottom) { tabBar }
         .sheet(isPresented: $showingGameDirectory) { MaxPS4GameDirectoryView() }
         .fullScreenCover(item: $playingFolder) { MaxPS4GameView(directory: $0.url) }
+        .sheet(item: $detailsFolder) { folder in
+            MaxPS4GameDetailsView(url: folder.url) {
+                // Once the sheet is gone: a cover cannot open over it.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { playingFolder = MaxPS4PlayingFolder(url: folder.url) }
+            }
+        }
         // Back from the Files app: pick up games copied into MaxPS4's folder.
         .onChange(of: scenePhase) { _, phase in if phase == .active { folders.scanDocuments() } }
         .sheet(isPresented: $showingJIT) { MaxPS4JITSetupView() }
@@ -118,6 +125,14 @@ struct MaxPS4HomeView: View {
                     .accessibilityLabel("Activer le JIT")
                 }
                 .padding(.top, 8)
+                if let recent = folders.recent, FileManager.default.fileExists(atPath: recent.path) {
+                    let described = folders.describe(recent)
+                    gameRow(described.name, subtitle: "Dernier jeu lancé", icon: described.icon, playLabel: "Reprendre",
+                            play: { playingFolder = MaxPS4PlayingFolder(url: recent) }) {
+                        detailsFolder = MaxPS4PlayingFolder(url: recent)
+                    }
+                    .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18))
+                }
                 Text("Mes jeux").font(.title3.bold())
                 if libraryEmpty {
                     Text("Copie le dossier d’un jeu dans « Sur mon iPhone › MaxPS4 › Jeux » avec l’app Fichiers, ou ajoute-le ici.")
@@ -125,13 +140,16 @@ struct MaxPS4HomeView: View {
                 } else {
                     VStack(spacing: 0) {
                         ForEach(folders.local) { game in
-                            gameRow(game.name, subtitle: "Dossier de jeu", icon: game.icon) {
-                                playingFolder = MaxPS4PlayingFolder(url: game.url)
+                            gameRow(game.name, subtitle: "Dossier de jeu", icon: game.icon,
+                                    play: { playingFolder = MaxPS4PlayingFolder(url: game.url) }) {
+                                detailsFolder = MaxPS4PlayingFolder(url: game.url)
                             }
                             Divider().overlay(.white.opacity(0.08))
                         }
                         ForEach(folders.folders) { folder in
-                            gameRow(folder.name, subtitle: "Dossier de jeu", icon: nil) { play(folder) }
+                            gameRow(folder.name, subtitle: "Dossier de jeu", icon: nil, play: { play(folder) }) {
+                                if let url = folders.resolve(folder) { detailsFolder = MaxPS4PlayingFolder(url: url) } else { play(folder) }
+                            }
                                 .contextMenu {
                                     Button(role: .destructive) { folders.remove(folder) } label: {
                                         Label("Retirer de la bibliothèque", systemImage: "minus.circle")
@@ -167,40 +185,46 @@ struct MaxPS4HomeView: View {
 
     // One game of the home list. A folder plays at once; an imported file
     // (`pkg`) opens its details, since a file alone cannot be launched.
+    // One game of the home list: the row opens its sheet; `play` (a folder)
+    // adds a Jouer button. An imported file alone cannot be launched.
     private func gameRow(_ name: String, subtitle: LocalizedStringKey, icon: URL?, pkg: MaxPS4Game? = nil,
-                         action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Group {
-                    if let icon, let image = UIImage(contentsOfFile: icon.path) {
-                        Image(uiImage: image).resizable().scaledToFill()
-                    } else if let pkg, pkg.fileName.lowercased().hasSuffix(".pkg") {
-                        MaxPS4PKGArtworkView(path: pkg.localPath, entryID: 0x1200).scaledToFill()
-                    } else {
-                        Image(systemName: pkg == nil ? "folder.fill" : "doc.fill")
-                            .font(.title3).foregroundStyle(.cyan)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(.white.opacity(0.08))
+                         playLabel: LocalizedStringKey = "Jouer", play: (() -> Void)? = nil,
+                         open: @escaping () -> Void) -> some View {
+        HStack(spacing: 14) {
+            Button(action: open) {
+                HStack(spacing: 14) {
+                    Group {
+                        if let icon, let image = UIImage(contentsOfFile: icon.path) {
+                            Image(uiImage: image).resizable().scaledToFill()
+                        } else if let pkg, pkg.fileName.lowercased().hasSuffix(".pkg") {
+                            MaxPS4PKGArtworkView(path: pkg.localPath, entryID: 0x1200).scaledToFill()
+                        } else {
+                            Image(systemName: pkg == nil ? "folder.fill" : "doc.fill")
+                                .font(.title3).foregroundStyle(.cyan)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .background(.white.opacity(0.08))
+                        }
                     }
-                }
-                .frame(width: 52, height: 52).clipShape(RoundedRectangle(cornerRadius: 12))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(verbatim: name).font(.headline).lineLimit(1)
-                    Text(subtitle).font(.caption).foregroundStyle(.white.opacity(0.55))
-                }
-                Spacer(minLength: 8)
-                if pkg == nil {
-                    Label("Jouer", systemImage: "play.fill")
+                    .frame(width: 52, height: 52).clipShape(RoundedRectangle(cornerRadius: 12))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(verbatim: name).font(.headline).lineLimit(1)
+                        Text(subtitle).font(.caption).foregroundStyle(.white.opacity(0.55))
+                    }
+                    Spacer(minLength: 8)
+                }.contentShape(Rectangle())
+            }.buttonStyle(.plain)
+            if let play {
+                Button(action: play) {
+                    Label(playLabel, systemImage: "play.fill")
                         .font(.subheadline.weight(.semibold))
                         .padding(.horizontal, 14).padding(.vertical, 8)
                         .background(Color.cyan, in: Capsule()).foregroundStyle(.black)
-                } else {
-                    Image(systemName: "chevron.right").foregroundStyle(.white.opacity(0.4))
-                }
+                }.buttonStyle(.plain)
+            } else {
+                Image(systemName: "chevron.right").foregroundStyle(.white.opacity(0.4))
             }
-            .padding(12).contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .padding(12)
     }
 
     private var settings: some View {

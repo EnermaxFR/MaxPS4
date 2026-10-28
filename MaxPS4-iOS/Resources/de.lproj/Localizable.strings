@@ -156,3 +156,10 @@
 "Stick gauche comme croix directionnelle" = "Linker Stick als Steuerkreuz";
 "Taille des commandes tactiles" = "Größe der Touch-Steuerung";
 "Opacité des commandes tactiles" = "Deckkraft der Touch-Steuerung";
+"Dernier jeu lancé" = "Zuletzt gespieltes Spiel";
+"Reprendre" = "Fortsetzen";
+"Sauvegardes" = "Spielstände";
+"Aucune sauvegarde" = "Keine Spielstände";
+"Voir dans Fichiers" = "In „Dateien“ zeigen";
+"Dossier" = "Ordner";
+"Ces réglages sont mémorisés pour ce jeu." = "Diese Einstellungen werden für dieses Spiel gespeichert.";
