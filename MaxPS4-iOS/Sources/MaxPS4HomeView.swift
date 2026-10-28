@@ -7,6 +7,7 @@ private struct MaxPS4PlayingFolder: Identifiable { let id = UUID(); let url: URL
 
 struct MaxPS4HomeView: View {
     @EnvironmentObject private var emulator: MaxPS4Emulator
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var folders = MaxPS4GameFolders.shared
     @State private var playingFolder: MaxPS4PlayingFolder?
     @State private var selectedTab: MaxPS4Tab = .home
@@ -33,7 +34,11 @@ struct MaxPS4HomeView: View {
         let query = gameSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         return folders.folders.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }
     }
-    private var libraryEmpty: Bool { emulator.games.isEmpty && folders.folders.isEmpty }
+    private var filteredLocal: [MaxPS4GameFolders.LocalGame] {
+        let query = gameSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return folders.local.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }
+    }
+    private var libraryEmpty: Bool { emulator.games.isEmpty && folders.folders.isEmpty && folders.local.isEmpty }
     var body: some View {
         ZStack {
             MaxPS4Background()
@@ -49,6 +54,8 @@ struct MaxPS4HomeView: View {
         .safeAreaInset(edge: .bottom) { tabBar }
         .sheet(isPresented: $showingGameDirectory) { MaxPS4GameDirectoryView() }
         .fullScreenCover(item: $playingFolder) { MaxPS4GameView(directory: $0.url) }
+        // Back from the Files app: pick up games copied into MaxPS4's folder.
+        .onChange(of: scenePhase) { _, phase in if phase == .active { folders.scanDocuments() } }
         .sheet(isPresented: $showingJIT) { MaxPS4JITSetupView() }
         .sheet(item: $selectedGameDetails, onDismiss: {
             selectedTitleInfo = nil
@@ -110,6 +117,7 @@ struct MaxPS4HomeView: View {
                 else {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 14) {
+                            ForEach(folders.local.prefix(6)) { game in localCard(game, fixedWidth: 158) }
                             ForEach(folders.folders.prefix(6)) { folder in folderCard(folder, fixedWidth: 158) }
                             ForEach(emulator.games.prefix(6)) { game in gameCard(game, fixedWidth: 158) }
                         }.padding(.vertical, 4)
@@ -148,7 +156,7 @@ struct MaxPS4HomeView: View {
         VStack(spacing: 14) {
             Image(systemName: "gamecontroller").font(.system(size: 36)).foregroundStyle(.cyan)
             Text("Ta bibliothèque commence ici").font(.headline)
-            Text("Lance un jeu depuis son dossier ou importe un fichier dans ta bibliothèque.")
+            Text("Copie le dossier d’un jeu dans « Sur mon iPhone › MaxPS4 › Jeux » avec l’app Fichiers, lance-le depuis son dossier ou importe un fichier.")
                 .font(.subheadline).foregroundStyle(.white.opacity(0.58)).multilineTextAlignment(.center)
             Button("Importer un fichier") { importingGame = true }.buttonStyle(.bordered).tint(.cyan)
         }
@@ -198,15 +206,33 @@ struct MaxPS4HomeView: View {
     }
 
     private func folderCard(_ folder: MaxPS4GameFolders.Folder, fixedWidth: CGFloat?) -> some View {
+        folderCard(name: folder.name, icon: nil, fixedWidth: fixedWidth, play: { play(folder) },
+                   remove: { folders.remove(folder) })
+    }
+
+    private func localCard(_ game: MaxPS4GameFolders.LocalGame, fixedWidth: CGFloat?) -> some View {
+        folderCard(name: game.name, icon: game.icon, fixedWidth: fixedWidth,
+                   play: { playingFolder = MaxPS4PlayingFolder(url: game.url) }, remove: nil)
+    }
+
+    // `remove` is nil for a game found in MaxPS4's folder: delete it with Files.
+    private func folderCard(name: String, icon: URL?, fixedWidth: CGFloat?, play: @escaping () -> Void,
+                            remove: (() -> Void)?) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Button { play(folder) } label: {
+            Button(action: play) {
                 ZStack(alignment: .bottomLeading) {
                     LinearGradient(colors: [Color.cyan.opacity(0.85), .black], startPoint: .topLeading, endPoint: .bottomTrailing)
-                    Circle().fill(.white.opacity(0.10)).frame(width: 120, height: 120).offset(x: 58, y: -78)
+                    if let icon, let image = UIImage(contentsOfFile: icon.path) {
+                        Image(uiImage: image).resizable().scaledToFill()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
+                        LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .center, endPoint: .bottom)
+                    } else {
+                        Circle().fill(.white.opacity(0.10)).frame(width: 120, height: 120).offset(x: 58, y: -78)
+                    }
                     VStack(alignment: .leading, spacing: 6) {
                         Image(systemName: "folder.fill").font(.title2).foregroundStyle(.white.opacity(0.78))
                         Spacer()
-                        Text(folder.name).font(.headline).lineLimit(2).multilineTextAlignment(.leading)
+                        Text(name).font(.headline).lineLimit(2).multilineTextAlignment(.leading)
                         Text("Dossier de jeu").font(.caption2).lineLimit(1).foregroundStyle(.white.opacity(0.56))
                     }.padding(14)
                 }
@@ -215,15 +241,17 @@ struct MaxPS4HomeView: View {
                 .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.12), lineWidth: 1))
             }.buttonStyle(.plain)
             HStack {
-                Button { play(folder) } label: {
+                Button(action: play) {
                     Label("Jouer", systemImage: "play.fill").font(.caption.weight(.semibold))
                 }
                 Spacer()
-                Menu {
-                    Button(role: .destructive) { folders.remove(folder) } label: {
-                        Label("Retirer de la bibliothèque", systemImage: "minus.circle")
-                    }
-                } label: { Image(systemName: "ellipsis.circle").font(.title3) }
+                if let remove {
+                    Menu {
+                        Button(role: .destructive, action: remove) {
+                            Label("Retirer de la bibliothèque", systemImage: "minus.circle")
+                        }
+                    } label: { Image(systemName: "ellipsis.circle").font(.title3) }
+                }
             }.foregroundStyle(.white.opacity(0.82))
         }.frame(width: fixedWidth)
     }
@@ -457,7 +485,7 @@ struct MaxPS4HomeView: View {
                         .font(.title2.bold())
                 }
 
-                let count = emulator.games.count + folders.folders.count
+                let count = emulator.games.count + folders.folders.count + folders.local.count
                 Text(count == 0 ? "Aucun jeu" : "\(count) élément\(count > 1 ? "s" : "")")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.58))
@@ -524,8 +552,9 @@ struct MaxPS4HomeView: View {
                 .pickerStyle(.segmented)
                 .tint(.cyan)
 
-                if !filteredFolders.isEmpty {
+                if !filteredFolders.isEmpty || !filteredLocal.isEmpty {
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 18) {
+                        ForEach(filteredLocal) { game in localCard(game, fixedWidth: nil) }
                         ForEach(filteredFolders) { folder in folderCard(folder, fixedWidth: nil) }
                     }
                 }
