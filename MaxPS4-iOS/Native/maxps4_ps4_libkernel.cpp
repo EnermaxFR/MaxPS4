@@ -83,6 +83,29 @@ constexpr Binding bindings[] = {
     {"sceKernelClockGetres", "wRYVA5Zolso", PS4KernelService::clock_getres},
     {"sceKernelGettimeofday", "ejekcaNQNq0", PS4KernelService::gettimeofday},
     {"sceKernelGetProcessTime", "4J2sUJmuHZQ", PS4KernelService::process_time},
+    // One nanosecond counter stands for both the process time counter and the TSC.
+    {"sceKernelGetProcessTimeCounter", "fgxnMeTNUtY", PS4KernelService::process_counter},
+    {"sceKernelGetProcessTimeCounterFrequency", "BNowx2l588E", PS4KernelService::counter_frequency},
+    {"sceKernelReadTsc", "-2IRUCO--PM", PS4KernelService::process_counter},
+    {"sceKernelGetTscFrequency", "1j3S3n-tTW4", PS4KernelService::counter_frequency},
+    {"sceKernelSleep", "-ZR+hG7aDHw", PS4KernelService::kernel_sleep},
+    {"sceKernelNanosleep", "QvsZxomvUHs", PS4KernelService::nanosleep},
+    {"sceKernelGetCpumode", "VOx8NGmHXTs", PS4KernelService::succeed},
+    {"sceKernelGetCurrentCpu", "g0VTBxfJyu0", PS4KernelService::succeed},
+    // Semaphores and event flags (shadPS4 kernel/threads/semaphore.cpp, event_flag.cpp).
+    {"sceKernelCreateSema", "188x57JYp0g", PS4KernelService::sema_create},
+    {"sceKernelDeleteSema", "R1Jvn8bSCW8", PS4KernelService::sema_delete},
+    {"sceKernelWaitSema", "Zxa0VhQVTsk", PS4KernelService::sema_wait},
+    {"sceKernelPollSema", "12wOHk8ywb0", PS4KernelService::sema_poll},
+    {"sceKernelSignalSema", "4czppHBiriw", PS4KernelService::sema_signal},
+    {"sceKernelCancelSema", "4DM06U2BNEY", PS4KernelService::sema_cancel},
+    {"sceKernelCreateEventFlag", "BpFoboUJoZU", PS4KernelService::flag_create},
+    {"sceKernelDeleteEventFlag", "8mql9OcQnd4", PS4KernelService::flag_delete},
+    {"sceKernelSetEventFlag", "IOnSvHzqu6A", PS4KernelService::flag_set},
+    {"sceKernelClearEventFlag", "7uhBFWRAS60", PS4KernelService::flag_clear},
+    {"sceKernelWaitEventFlag", "JTvBflhYazQ", PS4KernelService::flag_wait},
+    {"sceKernelPollEventFlag", "9lvj5DjHZiA", PS4KernelService::flag_poll},
+    {"sceKernelCancelEventFlag", "PZku4ZrXJqg", PS4KernelService::flag_cancel},
     {"scePthreadSelf", "aI+OeCz8xrQ", PS4KernelService::thread_self},
     {"scePthreadMutexInit", "cmo1RIYva9o", PS4KernelService::mutex_init},
     {"scePthreadMutexTrylock", "upoVrzMHFeE", PS4KernelService::mutex_trylock},
@@ -891,6 +914,27 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     case S::video_pending: return videoout_.pending(c.rdi);
     case S::video_resolution: return videoout_.resolution(c.rdi, c.rsi);
     case S::video_flip_rate: return videoout_.set_flip_rate(c.rdi, signed32(c.rsi));
+    case S::sema_create: return kernel_error(threads_.sema_create(c.rdi, c.rsi, signed32(c.rcx), signed32(c.r8)));
+    case S::sema_delete: return kernel_error(threads_.sema_delete(c.rdi));
+    case S::sema_wait: case S::sema_poll:
+        return kernel_error(threads_.sema_wait(c.rdi, signed32(c.rsi), service == S::sema_wait ? c.rdx : 0, service == S::sema_poll));
+    case S::sema_signal: return kernel_error(threads_.sema_signal(c.rdi, signed32(c.rsi)));
+    case S::sema_cancel: return kernel_error(threads_.sema_cancel(c.rdi, signed32(c.rsi), c.rdx));
+    case S::flag_create: return kernel_error(threads_.flag_create(c.rdi, c.rsi, uint32_t(c.rdx), c.rcx));
+    case S::flag_delete: return kernel_error(threads_.flag_delete(c.rdi));
+    case S::flag_set: case S::flag_clear: return kernel_error(threads_.flag_set(c.rdi, c.rsi, service == S::flag_clear));
+    case S::flag_wait: case S::flag_poll:
+        return kernel_error(threads_.flag_wait(c.rdi, c.rsi, uint32_t(c.rdx), c.rcx,
+                                               service == S::flag_wait ? c.r8 : 0, service == S::flag_poll));
+    case S::flag_cancel: return kernel_error(threads_.flag_cancel(c.rdi, c.rsi, c.rdx));
+    case S::process_counter: {
+        timespec t{};
+        if (::clock_gettime(CLOCK_MONOTONIC, &t) != 0) return 0;
+        const uint64_t now = uint64_t(t.tv_sec) * 1000000000ULL + uint64_t(t.tv_nsec);
+        return int64_t(now - std::min(now, started_us_ * 1000));
+    }
+    case S::counter_frequency: return 1000000000;
+    case S::kernel_sleep: return kernel_error(threads_.sleep(uint64_t(uint32_t(c.rdi)) * 1000000));
     case S::save_init: return 0;
     case S::save_term: save_umount(0); return 0;
     case S::save_mount2: return save_mount(c.rdi, c.rsi);

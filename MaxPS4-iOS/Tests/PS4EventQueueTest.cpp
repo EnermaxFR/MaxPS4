@@ -153,5 +153,56 @@ int main() {
     assert(kernel.invoke(S::equeue_delete, {dispatched}) == 0);
     assert(kernel.invoke(S::equeue_delete, {dispatched}) == kernel_error(badf));
 #endif
+    // Semaphores: counts, polling, a waiter woken by a signal, timeout written
+    // back, cancellation and deletion.
+    threads.resume();
+    constexpr uint64_t handle = slot + 0x400, left = slot + 0x408, result = slot + 0x410;
+    assert(threads.sema_create(handle, name, 2, 1) == inval && threads.sema_create(handle, name, 1, 3) == ok);
+    const uint64_t sema = read(handle);
+    assert(threads.sema_wait(sema, 1, 0, true) == ok && threads.sema_wait(sema, 1, 0, true) == busy);
+    assert(threads.sema_signal(sema, 4) == inval && threads.sema_wait(sema + 1, 1, 0, true) == srch);
+    std::atomic<bool> taken{false};
+    std::thread waiter([&] { assert(threads.sema_wait(sema, 2, 0, false) == ok); taken = true; });
+    std::this_thread::sleep_for(20ms);
+    assert(!taken && threads.sema_signal(sema, 1) == ok);
+    std::this_thread::sleep_for(20ms);
+    assert(!taken && threads.sema_signal(sema, 1) == ok);
+    waiter.join();
+    assert(taken);
+    write(left, 20000, 4);
+    assert(threads.sema_wait(sema, 1, left, false) == timedout && read(left, 4) == 0);
+    std::thread cancelled([&] { assert(threads.sema_wait(sema, 1, 0, false) == canceled); });
+    std::this_thread::sleep_for(20ms);
+    assert(threads.sema_cancel(sema, 1, result) == ok && read(result, 4) == 1);
+    cancelled.join();
+    assert(threads.sema_wait(sema, 1, 0, true) == ok); // Cancel set the count to 1.
+    std::thread deleted([&] { assert(threads.sema_wait(sema, 1, 0, false) == canceled); });
+    std::this_thread::sleep_for(20ms);
+    assert(threads.sema_delete(sema) == ok);
+    deleted.join();
+    assert(threads.sema_delete(sema) == srch);
+    // Event flags: and/or waits, clearing modes, result pattern, single waiter.
+    assert(threads.flag_create(handle, name, 0x10, 0x1) == ok);
+    const uint64_t flag = read(handle);
+    assert(threads.flag_wait(flag, 0, 1, result, 0, true) == inval);
+    assert(threads.flag_wait(flag, 0x3, 1, result, 0, true) == busy && read(result) == 0x1);
+    assert(threads.flag_wait(flag, 0x3, 2, result, 0, true) == ok && read(result) == 0x1);
+    std::atomic<bool> woken{false};
+    std::thread flagged([&] { assert(threads.flag_wait(flag, 0x6, 1 | 0x20, result, 0, false) == ok); woken = true; });
+    std::this_thread::sleep_for(20ms);
+    assert(threads.flag_wait(flag, 0x8, 2, 0, 0, false) == perm); // Single-waiter flag.
+    assert(threads.flag_set(flag, 0x2, false) == ok);
+    std::this_thread::sleep_for(20ms);
+    assert(!woken && threads.flag_set(flag, 0x4, false) == ok);
+    flagged.join();
+    assert(woken && read(result) == 0x7);
+    assert(threads.flag_wait(flag, 0x1, 2 | 0x10, result, 0, true) == ok && read(result) == 0x1); // Waited bits cleared, then all.
+    assert(threads.flag_wait(flag, 0x1, 2, result, 0, true) == busy && read(result) == 0);
+    assert(threads.flag_set(flag, 0xff, false) == ok && threads.flag_set(flag, 0x0f, true) == ok);
+    assert(threads.flag_wait(flag, 0xf0, 2, result, 0, true) == busy && read(result) == 0x0f);
+    write(left, 10000, 4);
+    assert(threads.flag_wait(flag, 0xf0, 2, result, left, false) == timedout && read(left, 4) == 0);
+    assert(threads.flag_delete(flag) == ok && threads.flag_delete(flag) == srch);
     std::puts("PASS Orbis event queues: user/edge events, wire ABI, polling, timeout, wakeup, interruption, deletion and bounds");
+    std::puts("PASS kernel semaphores and event flags: counts, poll, wakeup, timeout, cancel, delete, modes, single waiter");
 }

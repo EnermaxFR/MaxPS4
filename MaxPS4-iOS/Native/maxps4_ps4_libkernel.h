@@ -73,6 +73,9 @@ enum class PS4KernelService : uint32_t {
     video_add_flip, video_add_vblank, video_delete_flip, video_delete_vblank,
     video_event_id, video_event_data, video_event_count, video_resolution, video_flip_rate,
     save_init, save_term, save_mount2, save_umount,
+    sema_create, sema_delete, sema_wait, sema_poll, sema_signal, sema_cancel,
+    flag_create, flag_delete, flag_set, flag_clear, flag_wait, flag_poll, flag_cancel,
+    process_counter, counter_frequency, kernel_sleep,
     save_dialog_init, save_dialog_open, save_dialog_update, save_dialog_result, save_dialog_term,
     user_initialize, user_terminate, user_initial, user_login_list, user_event, user_name,
     pad_init, pad_open, pad_close, pad_read, pad_read_state, pad_information, pad_handle,
@@ -104,7 +107,8 @@ constexpr bool general_only(PS4KernelService service) {
     return service == PS4KernelService::thread_create || service == PS4KernelService::thread_join ||
            service == PS4KernelService::thread_exit || service == PS4KernelService::thread_detach ||
            service == PS4KernelService::cond_wait || service == PS4KernelService::cond_timedwait ||
-           service == PS4KernelService::equeue_wait || service == PS4KernelService::video_attribute;
+           service == PS4KernelService::equeue_wait || service == PS4KernelService::video_attribute ||
+           service == PS4KernelService::sema_wait || service == PS4KernelService::flag_wait;
 }
 // Implemented libkernel functions (name, NID, service), e.g. for an HLE registry.
 // `posix`: POSIX convention (see posix_token). `noreturn`: the trampoline ends
