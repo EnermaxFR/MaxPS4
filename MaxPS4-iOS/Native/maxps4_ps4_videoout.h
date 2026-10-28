@@ -118,12 +118,12 @@ public:
     }
     // A vsync flip happens at a vblank, at most one per 1 + flip rate vblanks:
     // the caller (the game's flip) waits for that vblank, which is what holds
-    // a game to 60 images per second when the emulated CPU runs faster. The
-    // wait is bounded so a host without a vblank source (tests) or a stopping
-    // run is never held for long.
+    // a game to 60 images per second when the emulated CPU runs faster. A host
+    // that never sent a vblank (tests) is not paced; the wait is bounded so a
+    // stopping run is never held for long.
     void pace() {
         std::unique_lock<std::mutex> lock(guard_);
-        if (!port_) return;
+        if (!port_ || !vblank_count_) return;
         const uint64_t due = paced_vblank_ + flip_rate_ + 1;
         paced_.wait_for(lock, std::chrono::milliseconds(pace_timeout_ms),
                         [&] { return !port_ || vblank_count_ >= due; });
