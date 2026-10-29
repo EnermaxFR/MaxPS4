@@ -172,7 +172,7 @@ struct MaxPS4GameView: View {
     @AppStorage("maxps4.pad.stickDpad") private var stickAsDpad = true
     @State private var hasLaunched = false
     @State private var gamepad = MaxPS4GameView.gamepadConnected()
-    @AppStorage("maxps4.metal.nativeTextures") private var nativeTextures = false
+    @AppStorage("maxps4.metal.nativeTextures") private var nativeTextures = true
     @AppStorage("maxps4.fex.tso") private var tso = true
     @AppStorage("maxps4.display.scaling") private var scaling = "fit"
     @AppStorage("maxps4.video.height") private var outputHeight = 1080
@@ -192,7 +192,7 @@ struct MaxPS4GameView: View {
         _touchScale = AppStorage(wrappedValue: value("maxps4.touch.scale", 1.0), own("maxps4.touch.scale"))
         _touchOpacity = AppStorage(wrappedValue: value("maxps4.touch.opacity", 0.85), own("maxps4.touch.opacity"))
         _stickAsDpad = AppStorage(wrappedValue: value("maxps4.pad.stickDpad", true), own("maxps4.pad.stickDpad"))
-        _nativeTextures = AppStorage(wrappedValue: value("maxps4.metal.nativeTextures", false), own("maxps4.metal.nativeTextures"))
+        _nativeTextures = AppStorage(wrappedValue: value("maxps4.metal.nativeTextures", true), own("maxps4.metal.nativeTextures"))
         _tso = AppStorage(wrappedValue: value("maxps4.fex.tso", true), own("maxps4.fex.tso"))
         _scaling = AppStorage(wrappedValue: value("maxps4.display.scaling", "fit"), own("maxps4.display.scaling"))
         _outputHeight = AppStorage(wrappedValue: value("maxps4.video.height", 1080), own("maxps4.video.height"))
@@ -246,11 +246,11 @@ struct MaxPS4GameView: View {
                             MaxPS4GameFolders.shared.remember(directory)
                             let update = MaxPS4GameFolders.useUpdate(for: directory) ? MaxPS4GameFolders.shared.update(for: directory)?.url : nil
                             let addons = MaxPS4GameFolders.shared.addons(for: directory)
-                            // Without developer mode the test options take their safe
-                            // values whatever was stored: TSO on (Sonic Mania stutters
-                            // without it), native textures and the profiler off.
+                            // Without developer mode the options take their default
+                            // values whatever was stored: TSO and native textures on
+                            // (Sonic Mania stutters without TSO), the profiler off.
                             session.start(url: directory, update: update, addons: addons, device: device,
-                                          nativeTextures: developer && nativeTextures, tso: !developer || tso,
+                                          nativeTextures: !developer || nativeTextures, tso: !developer || tso,
                                           outputHeight: outputHeight, profiling: developer && profiling)
                         }.buttonStyle(.borderedProminent).tint(.cyan)
                         Picker("Affichage", selection: $scaling) {
