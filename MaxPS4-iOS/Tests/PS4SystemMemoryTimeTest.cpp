@@ -100,6 +100,12 @@ int main() {
     assert(invoke(S::direct_map, {where, 0x8000, 3, 0, 0x20000, 0}) == kernel_error(inval)); // Not allocated.
     assert(invoke(S::direct_map, {where, 0x4000, 7, 0, 0, 0}) == kernel_error(inval)); // Executable.
     assert(invoke(S::direct_release, {0, 0x8000}) == 0 && invoke(S::direct_release, {0, 0x8000}) == kernel_error(noent));
+    // The largest free direct range: [0, 0x10000) before the one at 0x10000.
+    constexpr uint64_t size_out = 0x11220;
+    assert(invoke(S::direct_available, {0, 0x20000, 0x4000, phys, size_out}) == 0);
+    assert(memory.read(phys, word, 8) && get_le(word, 8) == 0 && memory.read(size_out, word, 8) && get_le(word, 8) == 0x10000);
+    assert(invoke(S::direct_allocate_main, {0x4000, 0, 0, phys}) == 0 && memory.read(phys, word, 8) && get_le(word, 8) == 0);
+    assert(invoke(S::direct_available, {0x10000, 0x14000, 0x4000, phys, size_out}) == kernel_error(nomem));
     // Flexible memory needs a name; POSIX mmap returns the address, or -1.
     const char flexible[] = "heap";
     assert(memory.write(name, flexible, sizeof(flexible)));
@@ -107,6 +113,19 @@ int main() {
     assert(invoke(S::flexible_map, {where, 0x4000, 3, 0, name}) == 0 && memory.read(where, word, 8));
     assert(memory.permitted(get_le(word, 8), 0x4000, 6));
     assert(invoke(S::flexible_map, {where, 0x4000, 3, 0, 0}) == kernel_error(fault));
+    // Unnamed flexible memory, queried and released.
+    put_le(word, 0, 0, 8); assert(memory.write(where, word, 8));
+    assert(invoke(S::flexible_map_unnamed, {where, 0x8000, 1, 0}) == 0 && memory.read(where, word, 8));
+    const uint64_t flexible_at = get_le(word, 8);
+    constexpr uint64_t start_out = 0x11228, end_out = 0x11230, prot_out = 0x11238, info = 0x11300;
+    assert(invoke(S::query_protection, {flexible_at + 0x4000, start_out, end_out, prot_out}) == 0);
+    assert(memory.read(start_out, word, 8) && get_le(word, 8) == flexible_at);
+    assert(memory.read(end_out, word, 8) && get_le(word, 8) == flexible_at + 0x8000);
+    assert(memory.read(prot_out, word, 4) && get_le(word, 4) == 1); // Read only.
+    assert(invoke(S::virtual_query, {flexible_at, 0, info, 0x48}) == 0 && memory.read(info, word, 8) && get_le(word, 8) == flexible_at);
+    assert(invoke(S::flexible_release, {flexible_at, 0x8000}) == 0);
+    assert(invoke(S::query_protection, {flexible_at, start_out, end_out, prot_out}) == kernel_error(access));
+    assert(invoke(S::sdk_version, {prot_out}) == 0 && memory.read(prot_out, word, 4) && get_le(word, 4) == 0x09008001);
     const int64_t anonymous = kernel.invoke(S::posix_mmap, {0, 0x4000, 3, 0x1002, uint64_t(-1LL), 0}, 1, true);
     assert(anonymous > 0 && memory.permitted(uint64_t(anonymous), 0x4000, 6));
     assert(kernel.invoke(S::posix_mmap, {0, 0x4000, 3, 0x2, 3, 0}, 1, true) == -1); // File mapping.

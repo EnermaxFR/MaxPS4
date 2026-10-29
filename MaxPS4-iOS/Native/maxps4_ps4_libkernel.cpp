@@ -326,6 +326,15 @@ constexpr Binding bindings[] = {
     {"sceKernelReleaseDirectMemory", "MBuItvba6z8", PS4KernelService::direct_release},
     {"sceKernelMapDirectMemory", "L-Q3LEjIbgA", PS4KernelService::direct_map},
     {"sceKernelMapNamedFlexibleMemory", "mL8NDH86iQI", PS4KernelService::flexible_map},
+    {"sceKernelMapFlexibleMemory", "IWIBBdTHit4", PS4KernelService::flexible_map_unnamed},
+    {"sceKernelReleaseFlexibleMemory", "teiItL2boFw", PS4KernelService::flexible_release},
+    {"sceKernelAvailableDirectMemorySize", "C0f7TJcbfac", PS4KernelService::direct_available},
+    {"sceKernelAllocateMainDirectMemory", "B+vc2AO2Zrc", PS4KernelService::direct_allocate_main},
+    {"sceKernelCheckedReleaseDirectMemory", "hwVSPCmp5tM", PS4KernelService::direct_release},
+    {"sceKernelVirtualQuery", "rVjRvHJ0X6c", PS4KernelService::virtual_query},
+    {"sceKernelQueryMemoryProtection", "WFcfL2lzido", PS4KernelService::query_protection},
+    {"sceKernelGetCompiledSdkVersion", "WB66evu8bsU", PS4KernelService::sdk_version},
+    {"sceKernelGetSystemSwVersion", "Mv1zUObHvXI", PS4KernelService::system_version},
     {"mmap", "BPE9s9vQQXo", PS4KernelService::posix_mmap, "libkernel", true},
     {"sceLibcHeapGetTraceInfo", "NWtTN10cJzE", PS4KernelService::heap_trace_info, "libSceLibcInternalExt",
      false, false, 0, nullptr, 0, "libSceLibcInternal"},
@@ -1503,6 +1512,8 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     }
     case S::direct_size: case S::direct_allocate: case S::direct_release:
     case S::direct_map: case S::flexible_map: case S::posix_mmap:
+    case S::direct_available: case S::direct_allocate_main: case S::flexible_map_unnamed: case S::flexible_release:
+    case S::virtual_query: case S::query_protection: case S::sdk_version: case S::system_version:
         return memory_service(service, c);
     case S::proc_param: return int64_t(process_param_);
     // sceLibcHeapGetTraceInfo(info{u64 size; u32 flag, get_segment_info;
@@ -1553,6 +1564,20 @@ int64_t PS4Libkernel::memory_service(PS4KernelService service, const PS4KernelCa
     // The PS4's direct memory: 5056 MiB of physical address space.
     constexpr uint64_t direct_total = uint64_t(5056) * 1024 * 1024, page = PS4VirtualMemory::page_size;
     if (service == S::direct_size) return int64_t(direct_total);
+    auto put = [&](uint64_t address, uint64_t value, size_t width) {
+        uint8_t wire[8]; put_le(wire, 0, value, width); return address && memory_.write(address, wire, width);
+    };
+    // GetCompiledSdkVersion(s32*): the SDK the game reports building with does
+    // not change anything here; 9.00. GetSystemSwVersion(info*): u64 size 0x28,
+    // char text[0x1c], u32 hex version.
+    if (service == S::sdk_version) return put(c.rdi, 0x09008001, 4) ? 0 : kernel_error(fault);
+    if (service == S::system_version) {
+        uint8_t info[0x28]{};
+        put_le(info, 0, sizeof(info), 8);
+        std::memcpy(info + 8, " 9.000", 6);
+        put_le(info, 0x24, 0x09008001, 4);
+        return c.rdi && memory_.write(c.rdi, info, sizeof(info)) ? 0 : kernel_error(fault);
+    }
     std::lock_guard<std::mutex> guard(lock_);
     if (!dynamic_) return kernel_error(nosys);
     auto aligned = [&](uint64_t value) { return value % page == 0; };
@@ -1580,11 +1605,14 @@ int64_t PS4Libkernel::memory_service(PS4KernelService service, const PS4KernelCa
     switch (service) {
     // sceKernelAllocateDirectMemory(start, end, length, alignment, type, s64* physical):
     // the first fit in [start, end), aligned.
-    case S::direct_allocate: {
-        const int64_t start = signed64(c.rdi), end = signed64(c.rsi);
-        const uint64_t length = c.rdx, alignment = c.rcx ? c.rcx : page;
+    case S::direct_allocate: case S::direct_allocate_main: {
+        // AllocateMainDirectMemory(length, alignment, type, s64* physical): anywhere.
+        const PS4KernelCall a = service == S::direct_allocate ? c :
+            PS4KernelCall{0, direct_total, c.rdi, c.rsi, c.rdx, c.rcx, c.rsp};
+        const int64_t start = signed64(a.rdi), end = signed64(a.rsi);
+        const uint64_t length = a.rdx, alignment = a.rcx ? a.rcx : page;
         if (start < 0 || end < 0 || !length || !aligned(length) || !aligned(alignment) ||
-            (alignment & (alignment - 1)) || uint32_t(c.r8) > 10 || !c.r9) return kernel_error(inval);
+            (alignment & (alignment - 1)) || uint32_t(a.r8) > 10 || !a.r9) return kernel_error(inval);
         if (length > direct_total) return kernel_error(again);
         const uint64_t limit = std::min<uint64_t>(uint64_t(end), direct_total);
         uint64_t candidate = (uint64_t(start) + alignment - 1) & ~(alignment - 1);
@@ -1594,8 +1622,67 @@ int64_t PS4Libkernel::memory_service(PS4KernelService service, const PS4KernelCa
             candidate = (at + bytes + alignment - 1) & ~(alignment - 1);
         }
         if (candidate > limit || length > limit - candidate) return kernel_error(again);
-        if (!write_pointer(c.r9, candidate)) return kernel_error(fault);
+        if (!write_pointer(a.r9, candidate)) return kernel_error(fault);
         direct_[candidate] = length;
+        return 0;
+    }
+    // AvailableDirectMemorySize(start, end, alignment, s64* physical, size_t* size):
+    // the largest free aligned gap of direct memory in [start, end).
+    case S::direct_available: {
+        const int64_t start = signed64(c.rdi), end = signed64(c.rsi);
+        const uint64_t alignment = c.rdx ? c.rdx : page;
+        if (start < 0 || end < start || !aligned(alignment) || (alignment & (alignment - 1)) || !c.r8) return kernel_error(inval);
+        const uint64_t limit = std::min<uint64_t>(uint64_t(end), direct_total);
+        uint64_t best_at = 0, best = 0, cursor = uint64_t(start);
+        auto consider = [&](uint64_t gap_start, uint64_t gap_end) {
+            const uint64_t at = (gap_start + alignment - 1) & ~(alignment - 1);
+            if (at < gap_end && gap_end - at > best) { best = gap_end - at; best_at = at; }
+        };
+        for (const auto& [at, bytes] : direct_) {
+            if (at + bytes <= cursor) continue;
+            if (at >= limit) break;
+            if (at > cursor) consider(cursor, std::min(at, limit));
+            cursor = std::max(cursor, at + bytes);
+        }
+        if (cursor < limit) consider(cursor, limit);
+        if (!best) return kernel_error(nomem);
+        if (c.rcx && !write_pointer(c.rcx, best_at)) return kernel_error(fault);
+        return write_pointer(c.r8, best) ? 0 : kernel_error(fault);
+    }
+    // MapFlexibleMemory(void** address, length, protection, flags): unnamed.
+    case S::flexible_map_unnamed: {
+        uint64_t hint = 0;
+        uint32_t protection = 0;
+        if (!read_pointer(c.rdi, hint)) return kernel_error(fault);
+        if (!c.rsi || !aligned(c.rsi) || !cpu(c.rdx, protection)) return kernel_error(inval);
+        uint64_t mapped = 0;
+        const Error e = dynamic_->place(hint, c.rsi, page, protection, (c.rcx & 0x10) != 0 && hint, mapped);
+        if (e) return kernel_error(e);
+        return write_pointer(c.rdi, mapped) ? 0 : (dynamic_->unmap(mapped, c.rsi), kernel_error(fault));
+    }
+    case S::flexible_release: return kernel_error(dynamic_->unmap(c.rdi, c.rsi));
+    // VirtualQuery(address, flags, info*, size): flags 1 finds the next
+    // mapping. OrbisVirtualQueryInfo: start, end, offset (u64), protection,
+    // memory type (s32), flag bits (flexible 1, direct 2, stack 4, pooled 8,
+    // committed 16), name char[32]: 0x48 bytes.
+    case S::virtual_query: {
+        uint64_t start = 0, end = 0;
+        uint32_t protection = 0;
+        if (!c.rdx || c.rcx < 0x48) return kernel_error(inval);
+        if (!dynamic_->query(c.rdi, (c.rsi & 1) != 0, start, end, protection)) return kernel_error(access);
+        uint8_t info[0x48]{};
+        put_le(info, 0, start, 8); put_le(info, 8, end, 8);
+        put_le(info, 24, protection, 4);
+        info[32] = 1 | 16; // Flexible, committed.
+        return memory_.write(c.rdx, info, sizeof(info)) ? 0 : kernel_error(fault);
+    }
+    // QueryMemoryProtection(address, void** start, void** end, s32* protection).
+    case S::query_protection: {
+        uint64_t start = 0, end = 0;
+        uint32_t protection = 0;
+        if (!dynamic_->query(c.rdi, false, start, end, protection)) return kernel_error(access);
+        if ((c.rsi && !write_pointer(c.rsi, start)) || (c.rdx && !write_pointer(c.rdx, end)) ||
+            (c.rcx && !put(c.rcx, protection, 4))) return kernel_error(fault);
         return 0;
     }
     // sceKernelReleaseDirectMemory(start, length): whole allocations in the range.

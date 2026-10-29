@@ -12,6 +12,30 @@ Error PS4VirtualMemory::permissions(uint32_t protection, uint8_t& out) {
     out = uint8_t(((protection & 1U) << 2) | (protection & 2U) | ((protection & 4U) >> 2));
     return ok;
 }
+bool PS4VirtualMemory::query(uint64_t address, bool next, uint64_t& start, uint64_t& end, uint32_t& protection) const {
+    const Region* best = nullptr;
+    size_t first = 0;
+    for (const auto& region : regions_) {
+        for (size_t i = 0; i < region.pages.size(); ++i) {
+            if (region.pages[i] == 0xff) continue;
+            const uint64_t page_start = region.address + i * page_size;
+            const bool holds = address >= page_start && address < page_start + page_size;
+            if (!holds && (!next || page_start < address)) continue;
+            if (!best || page_start < best->address + first * page_size) { best = &region; first = i; }
+            break;
+        }
+    }
+    if (!best) return false;
+    const uint8_t p = best->pages[first];
+    size_t last = first;
+    while (last + 1 < best->pages.size() && best->pages[last + 1] == p) ++last;
+    size_t begin = first;
+    while (begin > 0 && best->pages[begin - 1] == p) --begin;
+    start = best->address + begin * page_size;
+    end = best->address + (last + 1) * page_size;
+    protection = ((p & 4U) ? 1U : 0U) | (p & 2U) | ((p & 1U) ? 4U : 0U);
+    return true;
+}
 bool PS4VirtualMemory::rounded(uint64_t length, uint64_t& out) {
     if (!length || length > UINT64_MAX - (page_size - 1)) return false;
     out = (length + page_size - 1) / page_size * page_size;

@@ -80,6 +80,8 @@ enum class PS4KernelService : uint32_t {
     np_state, np_signed_out, np_create_request, app_init, app_addcont_list, app_param_int,
     app_addcont_info, app_addcont_mount, app_addcont_unmount,
     module_load_start, module_dlsym, module_list, module_info_unwind,
+    direct_available, direct_allocate_main, flexible_map_unnamed, flexible_release,
+    virtual_query, query_protection, sdk_version, system_version,
     app_temp_mount, rtc_current_tick, rtc_current_clock, rtc_current_local, rtc_get_tick, rtc_set_tick,
     rtc_resolution, rtc_utc_to_local, safe_area, trophy_create_context, trophy_create_handle, trophy_unlock,
     save_dialog_init, save_dialog_open, save_dialog_update, save_dialog_result, save_dialog_term,

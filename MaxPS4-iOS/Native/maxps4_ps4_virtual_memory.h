@@ -39,6 +39,10 @@ public:
     size_t contiguous(uint64_t address, size_t limit, uint32_t permissions) const override;
     void reset();
     size_t allocated() const { return used_; }
+    // The mapping holding `address` (or, with `next`, the first at or after it):
+    // its span of pages with the same permissions and their PS4 protection
+    // (READ 1, WRITE 2, EXEC 4). False when there is none.
+    bool query(uint64_t address, bool next, uint64_t& start, uint64_t& end, uint32_t& protection) const;
 private:
     struct Region {
         uint64_t address;
