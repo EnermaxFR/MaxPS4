@@ -263,6 +263,11 @@ int main() {
     assert(call(S::open, path("/addcont0/extra"), 0) == kernel_error(noent));
     assert(::unlink((std::string(dlc_dir) + "/extra").c_str()) == 0 && ::rmdir(dlc_dir) == 0);
     assert(resolve_libkernel("18B2NS1y9UU", "libSceRtc", "libSceRtc", 1) == S::rtc_current_tick);
+    // POSIX pthread_* reuse the scePthread services and return errno numbers.
+    assert(resolve_libkernel("7H0iTOciTLo", "libkernel", "libkernel", 1) == S::mutex_lock);
+    assert(resolve_libkernel("OxhIB8LB-PQ", "libkernel", "libkernel", 1) == S::thread_create);
+    assert(pthread_result(0) == 0 && pthread_result(kernel_error(busy)) == 16 && pthread_result(kernel_error(timedout)) == 60);
+    assert(pthread_result(42) == 42);
     kernel.reset();
     assert(call(S::system_param_int, 1, 0x11900) == 0 && value32(0x11900) == 1);
     std::puts("PS4 writable files, positioned I/O and directory checks passed");

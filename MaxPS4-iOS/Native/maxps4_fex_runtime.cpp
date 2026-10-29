@@ -146,7 +146,9 @@ public:
             // seventh (stack) argument is readable for general images only.
             // The posix_token bit selects the POSIX convention (errno, -1).
             const bool posix = (r[x86::REG_RAX] & maxps4::posix_token) != 0;
-            const auto orbis = static_cast<maxps4::PS4KernelService>(r[x86::REG_RAX] & ~uint64_t{maxps4::posix_token});
+            const bool pthread = (r[x86::REG_RAX] & maxps4::pthread_token) != 0;
+            const auto orbis = static_cast<maxps4::PS4KernelService>(
+                r[x86::REG_RAX] & ~uint64_t{maxps4::posix_token | maxps4::pthread_token});
             // Admitted code builds pointers with RIP-relative LEA, i.e. rebased host
             // addresses. libkernel works on logical PS4 addresses and re-checks
             // permissions, so translate any argument that lies in the image arena.
@@ -154,13 +156,32 @@ public:
                 uint64_t guest = 0;
                 return image->guest_address(value, guest) ? guest : value;
             };
-            const maxps4::PS4KernelCall call{logical(r[x86::REG_RDI]),logical(r[x86::REG_RSI]),
+            maxps4::PS4KernelCall call{logical(r[x86::REG_RDI]),logical(r[x86::REG_RSI]),
                 logical(r[x86::REG_RDX]),logical(r[x86::REG_R10]),logical(r[x86::REG_R8]),
                 logical(r[x86::REG_R9]),
                 // A general image's stack is guest memory: stack arguments (the
                 // seventh, at RSP+8 past the trampoline's return address) are
                 // readable. Bounded images keep 0, which makes them fault.
                 image->general() ? r[x86::REG_RSP] : 0};
+            // POSIX pthread_* (see pthread_token): no name arguments, and an
+            // absolute CLOCK_REALTIME deadline turned into the microseconds left.
+            if (pthread) {
+                using S = maxps4::PS4KernelService;
+                if (orbis == S::mutex_init || orbis == S::cond_init || orbis == S::rwlock_init) call.rdx = 0;
+                if (orbis == S::thread_create) call.r8 = 0;
+                if (orbis == S::cond_timedwait) {
+                    uint8_t wire[16] {};
+                    timespec now {};
+                    ::clock_gettime(CLOCK_REALTIME, &now);
+                    if (!call.rdx || !memory->read(call.rdx, wire, sizeof(wire))) call.rdx = 0;
+                    else {
+                        int64_t seconds = 0, nanoseconds = 0;
+                        std::memcpy(&seconds, wire, 8); std::memcpy(&nanoseconds, wire + 8, 8);
+                        const int64_t left = (seconds - int64_t(now.tv_sec)) * 1000000 + (nanoseconds - int64_t(now.tv_nsec)) / 1000;
+                        call.rdx = uint64_t(std::max<int64_t>(left, 0));
+                    }
+                }
+            }
             Activity* slot = activity_slot();
             if (slot) { slot->service = static_cast<uint32_t>(orbis); slot->since = now_ns(); slot->inside = true; }
             const uint32_t stub = static_cast<uint32_t>(orbis) - maxps4::missing_import_token;
@@ -208,6 +229,7 @@ public:
             } else {
                 result = kernel->invoke(orbis,call,guest_thread,posix);
             }
+            if (pthread) result = maxps4::pthread_result(result);
             if (slot) { slot->since = now_ns(); slot->inside = false; ++slot->returned; }
             ++calls;
             char path[256] = {};
@@ -1408,7 +1430,8 @@ int orbisInputs(const maxps4_orbis_module* modules, size_t count, bool general,
         maxps4::OrbisLinker::Identity id{e.nid,e.library,e.module ? e.module : e.library,1,1,uint8_t(e.data ? 1 : 2)};
         if (e.data) { hle.push_back({id,0,e.data}); continue; }
         if (e.code) { hle.push_back({id,0,0,false,std::vector<uint8_t>(e.code,e.code+e.code_size)}); continue; }
-        const uint32_t token = static_cast<uint32_t>(e.service) | (e.posix ? maxps4::posix_token : 0);
+        const uint32_t token = static_cast<uint32_t>(e.service) | (e.posix ? maxps4::posix_token : 0) |
+            (!e.posix && !std::strncmp(e.name, "pthread_", 8) ? maxps4::pthread_token : 0);
         hle.push_back({id,0,token,e.noreturn || e.service == maxps4::PS4KernelService::thread_exit});
     }
     if (!missing) return 0;

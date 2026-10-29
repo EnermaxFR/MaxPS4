@@ -102,6 +102,14 @@ enum class PS4KernelService : uint32_t {
 // with the error in the calling thread's errno (__Error) instead of an Orbis
 // kernel error code.
 constexpr uint32_t posix_token = 0x40000000;
+// Token bit of a POSIX pthread_* trampoline over a scePthread* service: the
+// result is returned as an errno number (pthread_result), the services' name
+// arguments are absent (passed as 0) and pthread_cond_timedwait's deadline is
+// absolute (CLOCK_REALTIME) instead of a relative microsecond count.
+constexpr uint32_t pthread_token = 0x10000000;
+constexpr int64_t pthread_result(int64_t result) {
+    return result <= -int64_t(0x7ffe0000) + 0xffff && result > -int64_t(0x7ffe0000) ? result + 0x7ffe0000 : result;
+}
 // Tokens from missing_import_token on are the boot probe's stubs (see
 // maxps4_fex_engine_set_import_probe): token - missing_import_token indexes
 // the engine's list of stubbed imports. Never a PS4KernelService.
