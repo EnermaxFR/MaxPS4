@@ -1504,6 +1504,14 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine* en
                         status = -EFAULT;
                     }
             engine->libkernel.set_process_param(engine->staged_ps4.process_param());
+            std::vector<maxps4::PS4Libkernel::LoadedModule> loaded;
+            for (const auto& record : engine->staged_ps4.module_records()) {
+                maxps4::PS4Libkernel::LoadedModule module{record.name, record.base, record.end,
+                    record.eh_frame_hdr, record.eh_frame_hdr_size, {}};
+                for (const auto& [nid, address] : record.exports) module.exports.emplace(nid, address);
+                loaded.push_back(std::move(module));
+            }
+            engine->libkernel.set_modules(std::move(loaded));
             // A game's libc writes into the objects behind its mutexes and
             // conditions (PS4Threads::set_object_arena): give them memory.
             constexpr uint64_t arena = 4 * 1024 * 1024;

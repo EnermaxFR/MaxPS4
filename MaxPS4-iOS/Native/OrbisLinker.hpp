@@ -90,6 +90,10 @@ public:
         // nothing here: their own startup code runs their initializers from the
         // entry. All DT_INIT/FINI(_ARRAY) entries are still validated.
         std::vector<uint64_t> initializers;
+        // Every defined, non-TLS export of the supplied modules (by module index),
+        // for a runtime's sceKernelDlsym.
+        struct Exported { size_t module; std::string nid; uint64_t address; };
+        std::vector<Exported> exported;
         // A backend must copy/map these bytes at their guest addresses and apply
         // the advertised permissions. No identity mapping is implied.
         std::vector<Mapping> mappings() const {
@@ -495,6 +499,8 @@ private:
         for (size_t i = 0; i < dynamic.size(); ++i) for (const auto& s : dynamic[i].symbols) if (s.defined && !s.local)
             require(exports.emplace(s.identity, Export{s.type == 6 ? s.value : add(out.modules[i].bias, s.value), i}).second,
                     "duplicate or ambiguous export: " + s.identity.nid);
+        for (size_t i = 0; i < dynamic.size(); ++i) for (const auto& s : dynamic[i].symbols)
+            if (s.defined && !s.local && s.type != 6) out.exported.push_back({i, s.identity.nid, add(out.modules[i].bias, s.value)});
         // Synthesized trampolines live in one RX module after every supplied
         // module, separated by a 16 KiB guard (iOS page size).
         size_t synthesized = 0;

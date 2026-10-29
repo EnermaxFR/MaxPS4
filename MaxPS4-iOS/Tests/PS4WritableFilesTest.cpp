@@ -263,6 +263,20 @@ int main() {
     assert(call(S::open, path("/addcont0/extra"), 0) == kernel_error(noent));
     assert(::unlink((std::string(dlc_dir) + "/extra").c_str()) == 0 && ::rmdir(dlc_dir) == 0);
     assert(resolve_libkernel("18B2NS1y9UU", "libSceRtc", "libSceRtc", 1) == S::rtc_current_tick);
+    // Loaded modules: LoadStartModule by file name, Dlsym by NID, unwind info.
+    assert(ps4_nid("sceGnmSetPsShader350") == "5uFKckiJYRM" && ps4_nid("sceKernelDlsym") == "LwG8g3niqwA");
+    kernel.set_modules({{"libfoo.prx", 0x10000, 0x20000, 0, 0, {{ps4_nid("fooFunction"), 0x12345}}}});
+    assert(call(S::module_load_start, path("/app0/sce_module/LIBFOO.prx"), 0, 0, 0) == 1);
+    assert(call(S::module_load_start, path("/app0/sce_module/libbar.prx"), 0, 0, 0) == kernel_error(noent));
+    assert(memory.write(0x11c40, "fooFunction", 12) && memory.write(0x11c60, "barFunction", 12));
+    assert(call(S::module_dlsym, 1, 0x11c40, 0x11c80) == 0);
+    uint8_t address[8]{}; assert(memory.read(0x11c80, address, 8) && get_le(address, 8) == 0x12345);
+    assert(call(S::module_dlsym, 1, 0x11c60, 0x11c80) == kernel_error(srch));
+    assert(call(S::module_dlsym, 2, 0x11c40, 0x11c80) == kernel_error(srch));
+    assert(call(S::module_info_unwind, 0x10800, 0, 0x11e00) == 0);
+    char unwind_name[16]{}; assert(memory.read(0x11e08, unwind_name, 11) && !std::strcmp(unwind_name, "libfoo.prx"));
+    uint8_t segment[8]{}; assert(memory.read(0x11e00 + 288, segment, 8) && get_le(segment, 8) == 0x10000);
+    assert(call(S::module_info_unwind, 0x30000, 0, 0x11e00) == kernel_error(srch));
     // POSIX pthread_* reuse the scePthread services and return errno numbers.
     assert(resolve_libkernel("7H0iTOciTLo", "libkernel", "libkernel", 1) == S::mutex_lock);
     assert(resolve_libkernel("OxhIB8LB-PQ", "libkernel", "libkernel", 1) == S::thread_create);

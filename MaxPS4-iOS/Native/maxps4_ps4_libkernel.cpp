@@ -11,6 +11,7 @@
 #include <new>
 #include <random>
 #include <thread>
+#include <strings.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <time.h>
@@ -239,7 +240,13 @@ constexpr Binding bindings[] = {
     {"sceKernelGetProcParam", "959qrazPIrg", PS4KernelService::proc_param},
     {"_sceKernelRtldSetApplicationHeapAPI", "p5EcQeEeJAE", PS4KernelService::succeed},
     {"sceKernelGetModuleInfoFromAddr", "f7KBOafysXo", PS4KernelService::module_info_from_addr},
-    {"sceKernelGetModuleInfoForUnwind", "RpQJJVKTiFM", PS4KernelService::module_info_from_addr},
+    {"sceKernelGetModuleInfoForUnwind", "RpQJJVKTiFM", PS4KernelService::module_info_unwind},
+    // The game's own modules are all loaded at boot (load_game): loading one
+    // again only gives its handle, unloading has nothing to do.
+    {"sceKernelLoadStartModule", "wzvqT4UqKX8", PS4KernelService::module_load_start},
+    {"sceKernelStopUnloadModule", "QKd0qM58Qes", PS4KernelService::succeed},
+    {"sceKernelDlsym", "LwG8g3niqwA", PS4KernelService::module_dlsym},
+    {"sceKernelGetModuleList", "IuxnUuXk6Bg", PS4KernelService::module_list},
     {"sceKernelInternalMemoryGetModuleSegmentInfo", "-YTW+qXc3CQ", PS4KernelService::module_info_from_addr},
     {"__elf_phdr_match_addr", "Fjc4-n1+y2g", PS4KernelService::succeed, "libkernel", true},
     {"sceKernelPrintBacktraceWithModuleInfo", "Wl2o5hOVZdw", PS4KernelService::succeed},
@@ -451,7 +458,7 @@ void PS4Libkernel::reset() {
     if (dynamic_) dynamic_->reset();
     threads_.reset();
     errno_table_ = errno_table_size_ = process_param_ = heap_trace_ = 0;
-    save_root_.clear(); save_dialog_status_ = 0; system_language_ = 1; addcont_.clear();
+    save_root_.clear(); save_dialog_status_ = 0; system_language_ = 1; addcont_.clear(); modules_.clear();
     direct_.clear();
     started_us_ = monotonic_us();
 }
@@ -552,6 +559,145 @@ int64_t PS4Libkernel::temp_mount(uint64_t mount_point) {
     if (temp.root >= 0) ::close(temp.root);
     temp.root = fd;
     return 0;
+}
+namespace {
+// SHA-1 (FIPS 180-4), for the NID of a symbol name sceKernelDlsym is given.
+std::array<uint8_t, 20> sha1(const uint8_t* data, size_t size) {
+    uint32_t h[5] = {0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0};
+    std::vector<uint8_t> m(data, data + size);
+    const uint64_t bits = uint64_t(size) * 8;
+    m.push_back(0x80);
+    while (m.size() % 64 != 56) m.push_back(0);
+    for (int i = 7; i >= 0; --i) m.push_back(uint8_t(bits >> (i * 8)));
+    auto rotl = [](uint32_t x, int n) { return (x << n) | (x >> (32 - n)); };
+    for (size_t chunk = 0; chunk < m.size(); chunk += 64) {
+        uint32_t w[80];
+        for (int i = 0; i < 16; ++i)
+            w[i] = uint32_t(m[chunk + 4 * i]) << 24 | uint32_t(m[chunk + 4 * i + 1]) << 16 |
+                   uint32_t(m[chunk + 4 * i + 2]) << 8 | uint32_t(m[chunk + 4 * i + 3]);
+        for (int i = 16; i < 80; ++i) w[i] = rotl(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
+        uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4];
+        for (int i = 0; i < 80; ++i) {
+            const uint32_t f = i < 20 ? (b & c) | (~b & d) : i < 40 ? b ^ c ^ d : i < 60 ? (b & c) | (b & d) | (c & d) : b ^ c ^ d;
+            const uint32_t k = i < 20 ? 0x5A827999 : i < 40 ? 0x6ED9EBA1 : i < 60 ? 0x8F1BBCDC : 0xCA62C1D6;
+            const uint32_t t = rotl(a, 5) + f + e + k + w[i];
+            e = d; d = c; c = rotl(b, 30); b = a; a = t;
+        }
+        h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e;
+    }
+    std::array<uint8_t, 20> out{};
+    for (int i = 0; i < 5; ++i) for (int j = 0; j < 4; ++j) out[size_t(4 * i + j)] = uint8_t(h[i] >> (24 - 8 * j));
+    return out;
+}
+}
+// A symbol's NID: the first 8 bytes of SHA-1(name + fixed suffix), reversed,
+// in base64 with '-' for '/' and no padding (11 characters).
+std::string ps4_nid(const std::string& name) {
+    static const uint8_t suffix[16] = {0x51,0x8D,0x64,0xA6,0x35,0xDE,0xD8,0xC1,0xE6,0xB0,0x39,0xB1,0xC3,0xE5,0x52,0x30};
+    std::vector<uint8_t> input(name.begin(), name.end());
+    input.insert(input.end(), std::begin(suffix), std::end(suffix));
+    const auto digest = sha1(input.data(), input.size());
+    uint8_t bytes[8];
+    for (int i = 0; i < 8; ++i) bytes[i] = digest[size_t(7 - i)];
+    static const char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-";
+    std::string out;
+    uint32_t buffer = 0; int held = 0;
+    for (uint8_t byte : bytes) {
+        buffer = buffer << 8 | byte; held += 8;
+        while (held >= 6) { held -= 6; out += alphabet[(buffer >> held) & 63]; }
+    }
+    if (held) out += alphabet[(buffer << (6 - held)) & 63];
+    return out;
+}
+int64_t PS4Libkernel::module_service(PS4KernelService service, const PS4KernelCall& c) {
+    using S = PS4KernelService;
+    std::lock_guard<std::mutex> guard(lock_);
+    auto put = [&](uint64_t address, uint64_t value, size_t width) {
+        uint8_t wire[8]; put_le(wire, 0, value, width); return address && memory_.write(address, wire, width);
+    };
+    switch (service) {
+    // LoadStartModule(path, args, argp, flags, opt, int* result): the loaded
+    // module of that file name (any directory), started at boot.
+    case S::module_load_start: {
+        char path[PS4KernelPath::max_path];
+        if (!memory_.read_cstring(c.rdi, path, sizeof(path))) return kernel_error(fault);
+        const char* slash = std::strrchr(path, '/');
+        const std::string file = slash ? slash + 1 : path;
+        for (size_t i = 0; i < modules_.size(); ++i) {
+            const auto& name = modules_[i].name;
+            const char* tail = std::strrchr(name.c_str(), '/');
+            if (::strcasecmp(tail ? tail + 1 : name.c_str(), file.c_str()) != 0) continue;
+            if (c.r9 && !put(c.r9, 0, 4)) return kernel_error(fault);
+            return int64_t(i + 1);
+        }
+        return kernel_error(noent);
+    }
+    // Dlsym(handle, const char* symbol, void** address).
+    case S::module_dlsym: {
+        if (!c.rdi || c.rdi > modules_.size()) return kernel_error(srch);
+        char symbol[256];
+        if (!memory_.read_cstring(c.rsi, symbol, sizeof(symbol)) || !c.rdx) return kernel_error(fault);
+        const auto& exports = modules_[size_t(c.rdi - 1)].exports;
+        const auto found = exports.find(ps4_nid(symbol));
+        if (found == exports.end()) return kernel_error(srch);
+        return put(c.rdx, found->second, 8) ? 0 : kernel_error(fault);
+    }
+    // GetModuleList(int* handles, size_t capacity, size_t* count).
+    case S::module_list: {
+        const size_t n = std::min<size_t>(modules_.size(), c.rsi);
+        for (size_t i = 0; i < n; ++i) if (!put(c.rdi + 4 * i, i + 1, 4)) return kernel_error(fault);
+        return put(c.rdx, modules_.size(), 8) ? 0 : kernel_error(fault);
+    }
+    // GetModuleInfoForUnwind(address, flags, info*): u64 size (0x130), name
+    // char[256], eh_frame_hdr, eh_frame, eh_frame size, first segment and size.
+    case S::module_info_unwind: {
+        const LoadedModule* found = nullptr;
+        for (const auto& m : modules_) if (c.rdi >= m.base && c.rdi < m.end) found = &m;
+        if (!found || !c.rdx) return kernel_error(srch);
+        uint64_t eh_frame = 0, eh_size = 0;
+        uint8_t hdr[12]{};
+        if (found->eh_frame_hdr && memory_.read(found->eh_frame_hdr, hdr, sizeof(hdr)) && hdr[0] == 1) {
+            // eh_frame_ptr, encoded by hdr[1]: (pc-relative 0x10 |) udata4 3,
+            // sdata4 0x0b, udata8 4 or sdata8 0x0c.
+            const uint8_t encoding = hdr[1];
+            const uint64_t field = found->eh_frame_hdr + 4;
+            int64_t value = 0;
+            switch (encoding & 0x0f) {
+            case 0x03: value = int64_t(get_le(hdr + 4, 4)); break;
+            case 0x0b: value = int64_t(int32_t(get_le(hdr + 4, 4))); break;
+            case 0x04: case 0x0c: value = int64_t(get_le(hdr + 4, 8)); break;
+            default: break;
+            }
+            if ((encoding & 0x70) == 0x10) eh_frame = uint64_t(int64_t(field) + value);
+            else if ((encoding & 0x70) == 0) eh_frame = uint64_t(value);
+            // Its size: CIE/FDE records up to the zero terminator, in the module.
+            for (uint64_t at = eh_frame; eh_frame && at + 4 <= found->end;) {
+                uint8_t word[12];
+                if (!memory_.read(at, word, 4)) break;
+                uint64_t length = get_le(word, 4), header = 4;
+                if (length == 0) { eh_size = at + 4 - eh_frame; break; }
+                if (length == 0xffffffffULL) {
+                    if (!memory_.read(at + 4, word + 4, 8)) break;
+                    length = get_le(word + 4, 8); header = 12;
+                }
+                if (length > found->end - at) break;
+                at += header + length;
+            }
+        }
+        uint8_t info[0x130]{};
+        put_le(info, 0, sizeof(info), 8);
+        const char* tail = std::strrchr(found->name.c_str(), '/');
+        const char* name = tail ? tail + 1 : found->name.c_str();
+        std::memcpy(info + 8, name, std::min<size_t>(std::strlen(name), 255));
+        put_le(info, 264, found->eh_frame_hdr, 8);
+        put_le(info, 272, eh_frame, 8);
+        put_le(info, 280, eh_size, 8);
+        put_le(info, 288, found->base, 8);
+        put_le(info, 296, found->end - found->base, 8);
+        return memory_.write(c.rdx, info, sizeof(info)) ? 0 : kernel_error(fault);
+    }
+    default: return kernel_error(nosys);
+    }
 }
 int64_t PS4Libkernel::add_addcont(const char* label, const char* directory) {
     if (!label || std::strlen(label) != 16 || !directory || !*directory) return kernel_error(inval);
@@ -1230,6 +1376,8 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     case S::np_create_request: return next_np_request_++;
     // sceAppContentInitialize(initParam, bootParam*): bootParam.attr 0 (normal boot).
     case S::app_init: return !c.rsi || write(c.rsi, 0, 4) ? 0 : signed32(0x80D90002U);
+    case S::module_load_start: case S::module_dlsym: case S::module_list: case S::module_info_unwind:
+        return module_service(service, c);
     case S::app_addcont_list: return addcont_list(c.rsi, uint32_t(c.rdx), c.rcx);
     case S::app_addcont_info: return addcont_info(c.rsi, c.rdx);
     case S::app_addcont_mount: return addcont_mount(c.rsi, c.rdx);

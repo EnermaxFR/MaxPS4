@@ -79,6 +79,7 @@ enum class PS4KernelService : uint32_t {
     process_counter, counter_frequency, kernel_sleep,
     np_state, np_signed_out, np_create_request, app_init, app_addcont_list, app_param_int,
     app_addcont_info, app_addcont_mount, app_addcont_unmount,
+    module_load_start, module_dlsym, module_list, module_info_unwind,
     app_temp_mount, rtc_current_tick, rtc_current_clock, rtc_current_local, rtc_get_tick, rtc_set_tick,
     rtc_resolution, rtc_utc_to_local, safe_area, trophy_create_context, trophy_create_handle, trophy_unlock,
     save_dialog_init, save_dialog_open, save_dialog_update, save_dialog_result, save_dialog_term,
@@ -137,6 +138,8 @@ struct PS4KernelExport {
     const char* module = nullptr; // When it is not the library's own name.
 };
 const PS4KernelExport* libkernel_exports(size_t& count);
+// The NID of a PS4 symbol name (what sceKernelDlsym looks up).
+std::string ps4_nid(const std::string& name);
 // Library/module/version are decoded by an ELF/PRX loader before resolution.
 // This resolver deliberately does not guess the meaning of encoded # IDs.
 PS4KernelService resolve_libkernel(std::string_view symbol,
@@ -168,6 +171,15 @@ public:
     // An installed add-on content: its 16-character entitlement label and the
     // host directory sceAppContentAddcontMount mounts at /addcont0. Cleared by reset().
     int64_t add_addcont(const char* label, const char* host_directory);
+    // The game's modules as loaded, for sceKernelLoadStartModule (by file
+    // name; handles are 1-based positions), sceKernelDlsym (exports by NID),
+    // sceKernelGetModuleList and sceKernelGetModuleInfoForUnwind (by address).
+    struct LoadedModule {
+        std::string name;
+        uint64_t base = 0, end = 0, eh_frame_hdr = 0, eh_frame_hdr_size = 0;
+        std::map<std::string, uint64_t> exports;
+    };
+    void set_modules(std::vector<LoadedModule> modules) { std::lock_guard<std::mutex> guard(lock_); modules_ = std::move(modules); }
     void reset();
     // `posix`: the trampoline's token had posix_token; an Orbis error result
     // becomes -1 with that error in the thread's errno cell.
@@ -203,6 +215,8 @@ private:
     int64_t save_mount(uint64_t request, uint64_t result);
     int64_t save_umount(uint64_t mount_point);
     int64_t temp_mount(uint64_t mount_point);
+    std::vector<LoadedModule> modules_;
+    int64_t module_service(PS4KernelService service, const PS4KernelCall& call);
     struct Addcont { std::string label, path; };
     std::vector<Addcont> addcont_;
     // The add-on content named by a guest OrbisNpUnifiedEntitlementLabel, or null.

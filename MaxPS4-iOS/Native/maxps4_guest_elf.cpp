@@ -86,6 +86,7 @@ void GuestELF::clear() {
     thunks.clear();
     hle_data.clear();
     process_param_address = 0;
+    records.clear();
     tls_blocks.clear();
     blockers = 0;
     regions.clear();
@@ -686,6 +687,23 @@ int GuestELF::prepare_linked(const OrbisLinker::Image& linked, const std::string
         hle_data = copy.data;
         for (const auto& module : copy.modules) if (module.path == root)
             for (const auto& h : module.image.headers) if (h.type == 0x61000001) process_param_address = module.bias + h.address;
+        for (size_t m = 0; m < copy.modules.size(); ++m) {
+            const auto& module = copy.modules[m];
+            if (module.path.empty() || module.path[0] == '<') continue; // Synthesized.
+            ModuleRecord record;
+            record.name = module.path;
+            record.base = UINT64_MAX;
+            for (const auto& segment : module.image.segments) {
+                record.base = std::min(record.base, module.bias + segment.header.address);
+                record.end = std::max(record.end, module.bias + segment.header.address + segment.header.memorySize);
+            }
+            if (record.base == UINT64_MAX) continue;
+            for (const auto& h : module.image.headers) if (h.type == 0x6474e550) { // PT_GNU_EH_FRAME
+                record.eh_frame_hdr = module.bias + h.address; record.eh_frame_hdr_size = h.memorySize;
+            }
+            for (const auto& e : copy.exported) if (e.module == m) record.exports.push_back({e.nid, e.address});
+            records.push_back(std::move(record));
+        }
         start_address = start;
         if (tp) tls_blocks = copy.tls;
         if (tp) {

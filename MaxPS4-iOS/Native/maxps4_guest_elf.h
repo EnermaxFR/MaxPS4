@@ -138,6 +138,14 @@ public:
     // PT_SCE_PROCPARAM address (0 if none), for the runtime to fill and report.
     const std::vector<OrbisLinker::DataObject>& data_objects() const { return hle_data; }
     uint64_t process_param() const { return process_param_address; }
+    // The supplied modules as loaded (general images): name, address span,
+    // PT_GNU_EH_FRAME and exports (NID -> address), in load order.
+    struct ModuleRecord {
+        std::string name;
+        uint64_t base = 0, end = 0, eh_frame_hdr = 0, eh_frame_hdr_size = 0;
+        std::vector<std::pair<std::string, uint64_t>> exports;
+    };
+    const std::vector<ModuleRecord>& module_records() const { return records; }
     const std::vector<Segment>& segments() const { return regions; }
 private:
     friend class PS4DynamicLinker;
@@ -159,6 +167,7 @@ private:
     std::vector<OrbisLinker::Thunk> thunks;
     std::vector<OrbisLinker::DataObject> hle_data;
     uint64_t process_param_address = 0;
+    std::vector<ModuleRecord> records;
     std::vector<OrbisLinker::TLSBlock> tls_blocks;
     std::vector<uint8_t> tls_image; // Static TLS region as initialized (blocks + TCB).
 };
