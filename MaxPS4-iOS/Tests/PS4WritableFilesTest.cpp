@@ -277,6 +277,17 @@ int main() {
     char unwind_name[16]{}; assert(memory.read(0x11e08, unwind_name, 11) && !std::strcmp(unwind_name, "libfoo.prx"));
     uint8_t segment[8]{}; assert(memory.read(0x11e00 + 288, segment, 8) && get_le(segment, 8) == 0x10000);
     assert(call(S::module_info_unwind, 0x30000, 0, 0x11e00) == kernel_error(srch));
+    // Dialogs finish at once answered OK; networking is never connected.
+    assert(call(S::msg_init) == 0 && call(S::msg_status) == 1);
+    assert(call(S::msg_result, 0x11c80) == signed32(0x80b80008U));
+    assert(call(S::msg_open, 0x11c80) == 0 && call(S::msg_status) == 3);
+    assert(call(S::msg_result, 0x11c80) == 0 && value32(0x11c88) == 1);
+    assert(call(S::msg_term) == 0 && call(S::msg_status) == 0);
+    assert(call(S::error_init) == 0 && call(S::error_open, 0) == 0 && call(S::error_status) == 3 && call(S::error_term) == 0);
+    assert(call(S::netctl_state, 0x11900) == 0 && value32(0x11900) == 0);
+    assert(call(S::netctl_info, 1, 0x11c80) == signed32(0x80412108U));
+    assert(call(S::netctl_callback, 0, 0, 0x11900) == 0 && value32(0x11900) == 1);
+    assert(call(S::audio_port_state, 1, 0x11c80) == 0 && value32(0x11c80) == (1 | 2 << 16));
     // POSIX pthread_* reuse the scePthread services and return errno numbers.
     assert(resolve_libkernel("7H0iTOciTLo", "libkernel", "libkernel", 1) == S::mutex_lock);
     assert(resolve_libkernel("OxhIB8LB-PQ", "libkernel", "libkernel", 1) == S::thread_create);

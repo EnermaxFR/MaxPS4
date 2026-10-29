@@ -388,6 +388,29 @@ constexpr Binding bindings[] = {
     {"sceNpTrophyCreateHandle", "q7U6tEAQf7c", PS4KernelService::trophy_create_handle, "libSceNpTrophy"},
     {"sceNpTrophyRegisterContext", "TJCAxto9SEU", PS4KernelService::succeed, "libSceNpTrophy"},
     {"sceNpTrophyUnlockTrophy", "28xmRUFao68", PS4KernelService::trophy_unlock, "libSceNpTrophy"},
+    // Message and error dialogs have no screen: they finish at once, answered
+    // OK/Yes, so a game waiting for FINISHED goes on.
+    {"sceMsgDialogInitialize", "lDqxaY1UbEo", PS4KernelService::msg_init, "libSceMsgDialog"},
+    {"sceMsgDialogOpen", "b06Hh0DPEaE", PS4KernelService::msg_open, "libSceMsgDialog"},
+    {"sceMsgDialogUpdateStatus", "6fIC3XKt2k0", PS4KernelService::msg_status, "libSceMsgDialog"},
+    {"sceMsgDialogGetStatus", "CWVW78Qc3fI", PS4KernelService::msg_status, "libSceMsgDialog"},
+    {"sceMsgDialogGetResult", "Lr8ovHH9l6A", PS4KernelService::msg_result, "libSceMsgDialog"},
+    {"sceMsgDialogClose", "HTrcDKlFKuM", PS4KernelService::msg_close, "libSceMsgDialog"},
+    {"sceMsgDialogTerminate", "ePw-kqZmelo", PS4KernelService::msg_term, "libSceMsgDialog"},
+    {"sceErrorDialogInitialize", "I88KChlynSs", PS4KernelService::error_init, "libSceErrorDialog"},
+    {"sceErrorDialogOpen", "M2ZF-ClLhgY", PS4KernelService::error_open, "libSceErrorDialog"},
+    {"sceErrorDialogUpdateStatus", "WWiGuh9XfgQ", PS4KernelService::error_status, "libSceErrorDialog"},
+    {"sceErrorDialogGetStatus", "t2FvHRXzgqk", PS4KernelService::error_status, "libSceErrorDialog"},
+    {"sceErrorDialogClose", "ekXHb1kDBl0", PS4KernelService::error_close, "libSceErrorDialog"},
+    {"sceErrorDialogTerminate", "9XAxK2PMwk8", PS4KernelService::error_term, "libSceErrorDialog"},
+    // Networking: never connected, so games take their offline path.
+    {"sceNetCtlInit", "gky0+oaNM4k", PS4KernelService::succeed, "libSceNetCtl"},
+    {"sceNetCtlGetState", "uBPlr0lbuiI", PS4KernelService::netctl_state, "libSceNetCtl"},
+    {"sceNetCtlGetInfo", "obuxdTiwkF8", PS4KernelService::netctl_info, "libSceNetCtl"},
+    {"sceNetCtlRegisterCallback", "UJ+Z7Q+4ck0", PS4KernelService::netctl_callback, "libSceNetCtl"},
+    {"sceNetCtlCheckCallback", "iQw3iQPhvUQ", PS4KernelService::succeed, "libSceNetCtl"},
+    {"sceNetInit", "Nlev7Lg8k3A", PS4KernelService::succeed, "libSceNet"},
+    {"sceNetPoolCreate", "dgJBaeJnGpo", PS4KernelService::net_pool, "libSceNet"},
     // System modules are part of the HLE: loading one has nothing to do.
     {"sceSysmoduleLoadModule", "g8cM39EUZ6o", PS4KernelService::succeed, "libSceSysmodule"},
     // Audio (shadPS4 libraries/audio/audioout.cpp).
@@ -395,6 +418,9 @@ constexpr Binding bindings[] = {
     {"sceAudioOutOpen", "ekNvsT22rsY", PS4KernelService::audio_open, "libSceAudioOut"},
     {"sceAudioOutClose", "s1--uE9mBFw", PS4KernelService::audio_close, "libSceAudioOut"},
     {"sceAudioOutOutput", "QOQtbeDqsT4", PS4KernelService::audio_output, "libSceAudioOut"},
+    {"sceAudioOutOutputs", "w3PdaSTSwGE", PS4KernelService::audio_outputs, "libSceAudioOut"},
+    {"sceAudioOutGetPortState", "GrQ9s4IrNaQ", PS4KernelService::audio_port_state, "libSceAudioOut"},
+    {"sceAudioOutSetVolume", "b+uAV89IlxE", PS4KernelService::succeed, "libSceAudioOut"},
     {"msync", "tZY4+SZNFhA", PS4KernelService::succeed, "libkernel", true},
     {"sceKernelMlock", "3k6kx-zOOSQ", PS4KernelService::succeed},
     // Files (shadPS4 kernel/file_system.cpp).
@@ -467,7 +493,7 @@ void PS4Libkernel::reset() {
     if (dynamic_) dynamic_->reset();
     threads_.reset();
     errno_table_ = errno_table_size_ = process_param_ = heap_trace_ = 0;
-    save_root_.clear(); save_dialog_status_ = 0; system_language_ = 1; addcont_.clear(); modules_.clear();
+    save_root_.clear(); save_dialog_status_ = msg_dialog_status_ = error_dialog_status_ = 0; system_language_ = 1; addcont_.clear(); modules_.clear();
     direct_.clear();
     started_us_ = monotonic_us();
 }
@@ -1417,6 +1443,44 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
         if (save_dialog_status_ != 3) return signed32(0x80b80008U); // Not finished.
         return write(c.rdi + 4, 0, 4) && write(c.rdi + 8, 1, 4) ? 0 : signed32(0x80b80004U);
     case S::save_dialog_term: save_dialog_status_ = 0; return 0;
+    // Dialog status: 0 none, 1 initialized, 2 running, 3 finished.
+    case S::msg_init: msg_dialog_status_ = 1; return 0;
+    case S::msg_open: msg_dialog_status_ = 3; return 0;
+    case S::msg_status: return msg_dialog_status_;
+    // OrbisMsgDialogResult: mode@0 (kept), result@4, buttonId@8 (1 = OK/Yes).
+    case S::msg_result:
+        if (msg_dialog_status_ != 3) return signed32(0x80B80008U);
+        return c.rdi && write(c.rdi + 4, 0, 4) && write(c.rdi + 8, 1, 4) ? 0 : signed32(0x80B80004U);
+    case S::msg_close: if (msg_dialog_status_) msg_dialog_status_ = 3; return 0;
+    case S::msg_term: msg_dialog_status_ = 0; return 0;
+    case S::error_init: error_dialog_status_ = 1; return 0;
+    case S::error_open: error_dialog_status_ = 3; return 0;
+    case S::error_status: return error_dialog_status_;
+    case S::error_close: if (error_dialog_status_) error_dialog_status_ = 3; return 0;
+    case S::error_term: error_dialog_status_ = 0; return 0;
+    // GetState(s32*): 0, disconnected. GetInfo: not connected.
+    case S::netctl_state: return c.rdi && write(c.rdi, 0, 4) ? 0 : signed32(0x80412101U);
+    case S::netctl_info: return signed32(0x80412108U);
+    // RegisterCallback(func, arg, s32* id): never called back.
+    case S::netctl_callback: return !c.rdx || write(c.rdx, 1, 4) ? 0 : signed32(0x80412101U);
+    case S::net_pool: return 1;
+    // Outputs(OrbisAudioOutOutputParam* {s32 handle; u32; const void* samples}, count).
+    case S::audio_outputs: {
+        if (!c.rdi || !c.rsi || c.rsi > 25) return signed32(0x8026000AU);
+        int64_t result = 0;
+        for (uint64_t i = 0; i < c.rsi && !result; ++i) {
+            uint8_t entry[16];
+            if (!memory_.read(c.rdi + 16 * i, entry, sizeof(entry))) return signed32(0x80260005U);
+            result = audio_.output(signed32(get_le(entry, 4)), get_le(entry + 8, 8));
+        }
+        return result;
+    }
+    // GetPortState(handle, state*): the main output, stereo, full volume.
+    case S::audio_port_state: {
+        uint8_t state[32]{};
+        put_le(state, 0, 1, 2); state[2] = 2; put_le(state, 4, 127, 2);
+        return c.rsi && memory_.write(c.rsi, state, sizeof(state)) ? 0 : signed32(0x80260005U);
+    }
     case S::video_flip_status: return videoout_.flip_status(c.rdi, c.rsi);
     case S::video_vblank_status: return videoout_.vblank_status(c.rdi, c.rsi);
     case S::video_add_flip: case S::video_add_vblank:
