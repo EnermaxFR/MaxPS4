@@ -42,6 +42,7 @@ struct MaxPS4HomeView: View {
         return folders.local.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }
     }
     private var libraryEmpty: Bool { emulator.games.isEmpty && folders.folders.isEmpty && folders.local.isEmpty }
+    private var libraryCount: Int { folders.local.count + folders.folders.count + emulator.games.count }
     var body: some View {
         ZStack {
             MaxPS4Background()
@@ -249,7 +250,7 @@ struct MaxPS4HomeView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     Label("Stockage", systemImage: "internaldrive").font(.headline)
                     // Game folders (found in Jeux or chosen with Jouer) count too, not only imported files.
-                    Text("\(folders.local.count + folders.folders.count + emulator.games.count) jeu(x) dans la bibliothèque")
+                    Text("\(libraryCount) jeu(x) dans la bibliothèque")
                         .foregroundStyle(.white.opacity(0.65))
                     if !emulator.games.isEmpty {
                         Text("dont \(emulator.games.count) fichier(s) importé(s)").font(.footnote).foregroundStyle(.white.opacity(0.5))
