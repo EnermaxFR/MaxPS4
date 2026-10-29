@@ -309,7 +309,7 @@ int main() {
         assert(memory.write(0x11700, "/savedata0", 11));
         assert(memory.write(0x10400, "Green Hill", 11) && call(S::save_set_param, 0x11700, 1, 0x10400, 128) == 0);
         uint8_t title[16]{};
-        assert(call(S::save_get_param, 0x11700, 1, 0x10500, 128, 0x11900) == 0 && value32(0x11900) == 128);
+        assert(kernel.invoke(S::save_get_param, {0x11700, 1, 0x10500, 128, 0x11900}) == 0 && value32(0x11900) == 128);
         assert(memory.read(0x10500, title, 11) && !std::strcmp(reinterpret_cast<char*>(title), "Green Hill"));
         assert(call(S::save_mount_info, 0x11700, 0x11a00) == 0);
         assert(call(S::save_umount2, 0, 0x11700) == 0);
