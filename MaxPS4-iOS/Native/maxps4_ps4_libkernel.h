@@ -11,6 +11,7 @@
 #include <array>
 #include <map>
 #include <string>
+#include <vector>
 #include <mutex>
 #include <string_view>
 
@@ -77,6 +78,7 @@ enum class PS4KernelService : uint32_t {
     flag_create, flag_delete, flag_set, flag_clear, flag_wait, flag_poll, flag_cancel,
     process_counter, counter_frequency, kernel_sleep,
     np_state, np_signed_out, np_create_request, app_init, app_addcont_list, app_param_int,
+    app_addcont_info, app_addcont_mount, app_addcont_unmount,
     app_temp_mount, rtc_current_tick, rtc_current_clock, rtc_current_local, rtc_get_tick, rtc_set_tick,
     rtc_resolution, rtc_utc_to_local, safe_area, trophy_create_context, trophy_create_handle, trophy_unlock,
     save_dialog_init, save_dialog_open, save_dialog_update, save_dialog_result, save_dialog_term,
@@ -155,6 +157,9 @@ public:
     // The console language games read (sceSystemServiceParamGetInt 1): a PS4
     // language ID, 1 (English US) until set. Cleared by reset().
     void set_system_language(int32_t language) { system_language_ = language; }
+    // An installed add-on content: its 16-character entitlement label and the
+    // host directory sceAppContentAddcontMount mounts at /addcont0. Cleared by reset().
+    int64_t add_addcont(const char* label, const char* host_directory);
     void reset();
     // `posix`: the trampoline's token had posix_token; an Orbis error result
     // becomes -1 with that error in the thread's errno cell.
@@ -190,6 +195,14 @@ private:
     int64_t save_mount(uint64_t request, uint64_t result);
     int64_t save_umount(uint64_t mount_point);
     int64_t temp_mount(uint64_t mount_point);
+    struct Addcont { std::string label, path; };
+    std::vector<Addcont> addcont_;
+    // The add-on content named by a guest OrbisNpUnifiedEntitlementLabel, or null.
+    const Addcont* find_addcont(uint64_t label) const;
+    int64_t addcont_list(uint64_t list, uint32_t count, uint64_t hit);
+    int64_t addcont_info(uint64_t label, uint64_t info);
+    int64_t addcont_mount(uint64_t label, uint64_t mount_point);
+    int64_t addcont_unmount(uint64_t mount_point);
     int64_t rtc(PS4KernelService service, const PS4KernelCall& call);
     int64_t memory_service(PS4KernelService service, const PS4KernelCall& call);
     int64_t posix_result(int64_t result, uint64_t thread);
@@ -197,8 +210,8 @@ private:
     int64_t extended(PS4KernelService service, const PS4KernelCall& call, uint64_t thread, bool& handled);
     std::mutex lock_;
     struct Mount { const char* prefix; bool writable; int root; int overlay = -1; };
-    std::array<Mount, 4> mounts_{{{"/app0", false, -1}, {"/savedata0", true, -1},
-                                  {"/download0", true, -1}, {"/temp0", true, -1}}};
+    std::array<Mount, 5> mounts_{{{"/app0", false, -1}, {"/savedata0", true, -1},
+                                  {"/download0", true, -1}, {"/temp0", true, -1}, {"/addcont0", false, -1}}};
     // A guest descriptor: its host descriptor, access, and for a directory
     // the FreeBSD dirent records (512-byte blocks) read by getdirentries.
     struct File {

@@ -245,7 +245,8 @@ struct MaxPS4GameView: View {
                             touch = 0; hasLaunched = true
                             MaxPS4GameFolders.shared.remember(directory)
                             let update = MaxPS4GameFolders.useUpdate(for: directory) ? MaxPS4GameFolders.shared.update(for: directory)?.url : nil
-                            session.start(url: directory, update: update, device: device, nativeTextures: nativeTextures, tso: tso,
+                            let addons = MaxPS4GameFolders.shared.addons(for: directory)
+                            session.start(url: directory, update: update, addons: addons, device: device, nativeTextures: nativeTextures, tso: tso,
                                           outputHeight: outputHeight, profiling: developer && profiling)
                         }.buttonStyle(.borderedProminent).tint(.cyan)
                         Picker("Affichage", selection: $scaling) {

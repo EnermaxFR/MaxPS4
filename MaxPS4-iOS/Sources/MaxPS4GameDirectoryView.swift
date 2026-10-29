@@ -71,6 +71,14 @@ struct MaxPS4GameDirectoryView: View {
         // An extracted update found for it (shadPS4 layout: "<game>-UPDATE").
         var update: URL? = nil
         var updateVersion: String? = nil
+        var addons: [Addon] = []
+    }
+    // An extracted add-on content (param.sfo category "ac") of a game: its
+    // entitlement label is the last 16 characters of its CONTENT_ID.
+    struct Addon: Equatable {
+        let url: URL
+        let label: String
+        let name: String
     }
     static let shared = MaxPS4GameFolders()
     @Published private(set) var folders: [Folder] = []
@@ -104,6 +112,7 @@ struct MaxPS4GameDirectoryView: View {
         var games: [LocalGame] = [], walked: [URL] = []
         // Updates by TITLE_ID and by the game folder name they are named after.
         var updates: [(url: URL, titleID: String?, base: String, version: String?)] = []
+        var addons: [(titleID: String, addon: Addon)] = []
         func named(_ name: String, in entries: [URL]) -> URL? {
             entries.first { $0.lastPathComponent.lowercased() == name }
         }
@@ -112,6 +121,17 @@ struct MaxPS4GameDirectoryView: View {
             let entries = ((try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey],
                                                              options: [.skipsHiddenFiles])) ?? [])
                 .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            // An add-on content folder (no eboot.bin): attached to its game below.
+            if depth > 0, let system = named("sce_sys", in: entries),
+               let sfo = named("param.sfo", in: (try? manager.contentsOfDirectory(at: system, includingPropertiesForKeys: nil)) ?? []),
+               Self.sfoString(sfo, key: "CATEGORY")?.lowercased() == "ac",
+               let content = Self.sfoString(sfo, key: "CONTENT_ID"), content.count >= 16 {
+                let titleID = Self.sfoString(sfo, key: "TITLE_ID")
+                    ?? String(content.dropFirst(7).prefix(9)) // UP0177-CUSA07010_00-…
+                addons.append((titleID, Addon(url: folder, label: String(content.suffix(16)),
+                                              name: Self.title(sfo) ?? folder.lastPathComponent)))
+                return
+            }
             if depth > 0, named("eboot.bin", in: entries) != nil {
                 let system = named("sce_sys", in: entries)
                 let files = system.flatMap { try? manager.contentsOfDirectory(at: $0, includingPropertiesForKeys: nil) } ?? []
@@ -145,6 +165,7 @@ struct MaxPS4GameDirectoryView: View {
             let match = updates.first { ($0.titleID != nil && $0.titleID == id) || $0.base == game.url.lastPathComponent.uppercased() }
             games[index].update = match?.url
             games[index].updateVersion = match?.version
+            games[index].addons = addons.filter { $0.titleID == id }.map(\.addon)
         }
         if games != local { local = games }
         if walked.count != searched { searched = walked.count }
@@ -226,6 +247,10 @@ struct MaxPS4GameDirectoryView: View {
         guard let found = local.first(where: { $0.url.standardizedFileURL == game.standardizedFileURL }),
               let update = found.update else { return nil }
         return (update, found.updateVersion)
+    }
+    // The add-on contents found for a game folder (from the last scan).
+    func addons(for game: URL) -> [Addon] {
+        local.first(where: { $0.url.standardizedFileURL == game.standardizedFileURL })?.addons ?? []
     }
     // Whether a game launches with its update ("Utiliser la mise à jour", on by default).
     static func useUpdate(for game: URL) -> Bool {

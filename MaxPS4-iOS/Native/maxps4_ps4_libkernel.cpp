@@ -302,9 +302,12 @@ constexpr Binding bindings[] = {
     {"sceNpCheckPlus", "r6MyYJkryz8", PS4KernelService::np_signed_out, "libSceNpManager"},
     {"sceNpCreateRequest", "GpLQDNKICac", PS4KernelService::np_create_request, "libSceNpManager"},
     {"sceNpDeleteRequest", "S7QTn72PrDw", PS4KernelService::succeed, "libSceNpManager"},
-    // Application content: no add-on content, a full (not trial) game, /temp0.
+    // Application content: the add-ons the host lists, a full (not trial) game, /temp0.
     {"sceAppContentInitialize", "R9lA82OraNs", PS4KernelService::app_init, "libSceAppContent", false, false, 0, nullptr, 0, "libSceAppContentUtil"},
     {"sceAppContentGetAddcontInfoList", "xnd8BJzAxmk", PS4KernelService::app_addcont_list, "libSceAppContent", false, false, 0, nullptr, 0, "libSceAppContentUtil"},
+    {"sceAppContentGetAddcontInfo", "m47juOmH0VE", PS4KernelService::app_addcont_info, "libSceAppContent", false, false, 0, nullptr, 0, "libSceAppContentUtil"},
+    {"sceAppContentAddcontMount", "VANhIWcqYak", PS4KernelService::app_addcont_mount, "libSceAppContent", false, false, 0, nullptr, 0, "libSceAppContentUtil"},
+    {"sceAppContentAddcontUnmount", "3rHWaV-1KC4", PS4KernelService::app_addcont_unmount, "libSceAppContent", false, false, 0, nullptr, 0, "libSceAppContentUtil"},
     {"sceAppContentAppParamGetInt", "99b82IKXpH4", PS4KernelService::app_param_int, "libSceAppContent", false, false, 0, nullptr, 0, "libSceAppContentUtil"},
     {"sceAppContentTemporaryDataMount2", "buYbeLOGWmA", PS4KernelService::app_temp_mount, "libSceAppContent", false, false, 0, nullptr, 0, "libSceAppContentUtil"},
     {"sceAppContentTemporaryDataUnmount", "bcolXMmp6qQ", PS4KernelService::succeed, "libSceAppContent", false, false, 0, nullptr, 0, "libSceAppContentUtil"},
@@ -402,7 +405,7 @@ void PS4Libkernel::reset() {
     if (dynamic_) dynamic_->reset();
     threads_.reset();
     errno_table_ = errno_table_size_ = process_param_ = heap_trace_ = 0;
-    save_root_.clear(); save_dialog_status_ = 0; system_language_ = 1;
+    save_root_.clear(); save_dialog_status_ = 0; system_language_ = 1; addcont_.clear();
     direct_.clear();
     started_us_ = monotonic_us();
 }
@@ -502,6 +505,76 @@ int64_t PS4Libkernel::temp_mount(uint64_t mount_point) {
     auto& temp = *std::find_if(mounts_.begin(), mounts_.end(), [](const Mount& m) { return !std::strcmp(m.prefix, "/temp0"); });
     if (temp.root >= 0) ::close(temp.root);
     temp.root = fd;
+    return 0;
+}
+int64_t PS4Libkernel::add_addcont(const char* label, const char* directory) {
+    if (!label || std::strlen(label) != 16 || !directory || !*directory) return kernel_error(inval);
+    std::lock_guard<std::mutex> guard(lock_);
+    addcont_.push_back({label, directory});
+    return 0;
+}
+const PS4Libkernel::Addcont* PS4Libkernel::find_addcont(uint64_t label) const {
+    char text[17]{};
+    if (!label || !memory_.read(label, text, 16)) return nullptr;
+    for (const auto& add : addcont_) if (add.label == text) return &add;
+    return nullptr;
+}
+// OrbisAppContentAddcontInfo: entitlement label char[17] + 3 padding, u32
+// status (4: installed). GetAddcontInfoList(serviceLabel, list, listNum, hitNum*).
+int64_t PS4Libkernel::addcont_list(uint64_t list, uint32_t count, uint64_t hit) {
+    constexpr int64_t parameter = int32_t(0x80D90002U);
+    std::lock_guard<std::mutex> guard(lock_);
+    if (!hit) return parameter;
+    uint32_t written = 0;
+    if (list) for (const auto& add : addcont_) {
+        if (written == count) break;
+        uint8_t entry[24]{};
+        std::memcpy(entry, add.label.data(), 16);
+        put_le(entry, 20, 4, 4);
+        if (!memory_.write(list + uint64_t(written) * 24, entry, sizeof(entry))) return parameter;
+        ++written;
+    }
+    uint8_t total[4]; put_le(total, 0, list ? written : uint32_t(addcont_.size()), 4);
+    return memory_.write(hit, total, 4) ? 0 : parameter;
+}
+int64_t PS4Libkernel::addcont_info(uint64_t label, uint64_t info) {
+    std::lock_guard<std::mutex> guard(lock_);
+    const Addcont* add = find_addcont(label);
+    if (!add) return int32_t(0x80D90005U); // Not found.
+    uint8_t entry[24]{};
+    std::memcpy(entry, add->label.data(), 16);
+    put_le(entry, 20, 4, 4);
+    return info && memory_.write(info, entry, sizeof(entry)) ? 0 : int32_t(0x80D90002U);
+}
+// AddcontMount(serviceLabel, label*, mountPoint*): the add-on's directory at
+// /addcont0 (a later mount replaces it), opened without closing other files.
+int64_t PS4Libkernel::addcont_mount(uint64_t label, uint64_t mount_point) {
+    std::string path;
+    {
+        std::lock_guard<std::mutex> guard(lock_);
+        const Addcont* add = find_addcont(label);
+        if (!add) return int32_t(0x80D90005U);
+        path = add->path;
+    }
+    if (!mount_point) return int32_t(0x80D90002U);
+    const int fd = ::open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) return kernel_error(host_error(errno));
+    uint8_t point[16]{};
+    std::memcpy(point, "/addcont0", 9);
+    if (!memory_.write(mount_point, point, sizeof(point))) { ::close(fd); return int32_t(0x80D90002U); }
+    std::lock_guard<std::mutex> guard(lock_);
+    auto& mount = *std::find_if(mounts_.begin(), mounts_.end(), [](const Mount& m) { return !std::strcmp(m.prefix, "/addcont0"); });
+    if (mount.root >= 0) ::close(mount.root);
+    mount.root = fd;
+    return 0;
+}
+int64_t PS4Libkernel::addcont_unmount(uint64_t mount_point) {
+    char point[16]{};
+    if (!mount_point || !memory_.read_cstring(mount_point, point, sizeof(point))) return int32_t(0x80D90002U);
+    std::lock_guard<std::mutex> guard(lock_);
+    auto& mount = *std::find_if(mounts_.begin(), mounts_.end(), [](const Mount& m) { return !std::strcmp(m.prefix, "/addcont0"); });
+    if (std::strcmp(point, "/addcont0") || mount.root < 0) return int32_t(0x80D90002U);
+    ::close(mount.root); mount.root = -1;
     return 0;
 }
 namespace {
@@ -1111,8 +1184,10 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     case S::np_create_request: return next_np_request_++;
     // sceAppContentInitialize(initParam, bootParam*): bootParam.attr 0 (normal boot).
     case S::app_init: return !c.rsi || write(c.rsi, 0, 4) ? 0 : signed32(0x80D90002U);
-    // GetAddcontInfoList(serviceLabel, list, listNum, hitNum*): none.
-    case S::app_addcont_list: return c.rcx && write(c.rcx, 0, 4) ? 0 : signed32(0x80D90002U);
+    case S::app_addcont_list: return addcont_list(c.rsi, uint32_t(c.rdx), c.rcx);
+    case S::app_addcont_info: return addcont_info(c.rsi, c.rdx);
+    case S::app_addcont_mount: return addcont_mount(c.rsi, c.rdx);
+    case S::app_addcont_unmount: return addcont_unmount(c.rdi);
     // AppParamGetInt(paramId, value*): SKU flag (0) 3 = full game, user params 0.
     case S::app_param_int:
         if (c.rdi > 4 || !c.rsi) return signed32(0x80D90002U);

@@ -14,6 +14,7 @@ struct MaxPS4GameDetailsView: View {
     @State private var savesSize: Int64 = 0
     @State private var update: (url: URL, version: String?)?
     @State private var useUpdate = true
+    @State private var addons: [MaxPS4GameFolders.Addon] = []
 
     var body: some View {
         NavigationStack {
@@ -52,6 +53,16 @@ struct MaxPS4GameDetailsView: View {
                                     .onChange(of: useUpdate) { _, on in
                                         UserDefaults.standard.set(on, forKey: "maxps4.update." + MaxPS4Saves.gameID(for: url))
                                     }
+                            }
+                            .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+                        }
+                        if !addons.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Label("Contenus additionnels", systemImage: "puzzlepiece.extension").font(.headline)
+                                ForEach(addons.indices, id: \.self) { index in
+                                    Text(verbatim: addons[index].name).font(.subheadline)
+                                }
                             }
                             .padding(14).frame(maxWidth: .infinity, alignment: .leading)
                             .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
@@ -101,6 +112,7 @@ struct MaxPS4GameDetailsView: View {
         info = rows
         update = MaxPS4GameFolders.shared.update(for: url)
         useUpdate = MaxPS4GameFolders.useUpdate(for: url)
+        addons = MaxPS4GameFolders.shared.addons(for: url)
         saves = MaxPS4Saves.root(for: url)
         savesSize = saves.map { Self.size(of: $0) } ?? 0
     }

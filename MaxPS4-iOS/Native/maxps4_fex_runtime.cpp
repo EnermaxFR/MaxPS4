@@ -1791,6 +1791,11 @@ extern "C" int32_t maxps4_fex_engine_missing_imports(maxps4_fex_engine* engine, 
     if (capacity) { std::memcpy(text, out.data(), out.size()); text[out.size()] = 0; }
     return int32_t(order.size());
 }
+extern "C" int64_t maxps4_fex_engine_add_addcont(maxps4_fex_engine* engine, const char* label, const char* directory) {
+    if (!engine) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
+    std::lock_guard lock(runtime_lock);
+    return engine->libkernel.add_addcont(label, directory);
+}
 extern "C" int32_t maxps4_fex_engine_set_system_language(maxps4_fex_engine* engine, int32_t language) {
     if (!engine || language < 0 || language > 30) return -EINVAL;
     std::lock_guard lock(runtime_lock);

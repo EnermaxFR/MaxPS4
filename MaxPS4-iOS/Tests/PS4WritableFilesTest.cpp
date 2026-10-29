@@ -240,6 +240,28 @@ int main() {
     assert(call(S::np_signed_out, 1, 0x11900) == signed32(0x80550006U));
     assert(call(S::app_param_int, 0, 0x11900) == 0 && value32(0x11900) == 3);
     assert(call(S::app_addcont_list, 0, 0, 0, 0x11900) == 0 && value32(0x11900) == 0);
+    // Add-on content: listed as installed, found by its label, mounted at /addcont0.
+    char dlc_dir[] = "/tmp/maxps4-dlc-XXXXXX";
+    assert(::mkdtemp(dlc_dir));
+    host_file(std::string(dlc_dir) + "/extra", "dlc!");
+    assert(call(S::app_addcont_list, 0, 0, 0, 0x11900) == 0 && value32(0x11900) == 0);
+    assert(kernel.add_addcont("SHORT", dlc_dir) == kernel_error(inval));
+    assert(kernel.add_addcont("SONICMANIAPLUS00", dlc_dir) == 0);
+    assert(call(S::app_addcont_list, 0, 0, 0, 0x11900) == 0 && value32(0x11900) == 1);
+    assert(call(S::app_addcont_list, 0, 0x11b00, 4, 0x11900) == 0 && value32(0x11900) == 1);
+    char label[17]{}; assert(memory.read(0x11b00, label, 16) && !std::strcmp(label, "SONICMANIAPLUS00"));
+    assert(value32(0x11b00 + 20) == 4); // Installed.
+    assert(memory.write(0x11c00, "SONICMANIAPLUS00", 17) && memory.write(0x11c20, "SOMETHINGELSE000", 17));
+    assert(call(S::app_addcont_info, 0, 0x11c20, 0x11d00) == signed32(0x80d90005U));
+    assert(call(S::app_addcont_info, 0, 0x11c00, 0x11d00) == 0 && value32(0x11d00 + 20) == 4);
+    assert(call(S::app_addcont_mount, 0, 0x11c00, 0x11d40) == 0);
+    char where[16]{}; assert(memory.read(0x11d40, where, 16) && !std::strcmp(where, "/addcont0"));
+    const auto extra = call(S::open, path("/addcont0/extra"), 0);
+    assert(extra >= 0 && call(S::read, extra, 0x11000, 4) == 4 && call(S::close, extra) == 0);
+    char dlc_text[5]{}; assert(memory.read(0x11000, dlc_text, 4) && !std::strcmp(dlc_text, "dlc!"));
+    assert(call(S::app_addcont_unmount, 0x11d40) == 0 && call(S::app_addcont_unmount, 0x11d40) == signed32(0x80d90002U));
+    assert(call(S::open, path("/addcont0/extra"), 0) == kernel_error(noent));
+    assert(::unlink((std::string(dlc_dir) + "/extra").c_str()) == 0 && ::rmdir(dlc_dir) == 0);
     assert(resolve_libkernel("18B2NS1y9UU", "libSceRtc", "libSceRtc", 1) == S::rtc_current_tick);
     kernel.reset();
     assert(call(S::system_param_int, 1, 0x11900) == 0 && value32(0x11900) == 1);
