@@ -53,12 +53,18 @@ int main() {
     // Output paces the thread at one buffer per 256/48000 s (5.33 ms): the
     // first returns at once, then each waits for the previous buffer.
     assert(audio.close(stereo) == 0 && audio.close(stereo) == PS4AudioOut::error(0x03));
-    const int32_t paced = int32_t(audio.open(1,0,0,256,48000,1));
+    // The upper bound is measured against 19 plain waits of the same length on
+    // this host, so a loaded CI runner that wakes late does not fail the test;
+    // waiting two periods per buffer still would.
     auto start = Clock::now();
+    for (int i = 0; i < 19; ++i) assert(threads.sleep(5333) == 0);
+    const double reference = milliseconds(start);
+    const int32_t paced = int32_t(audio.open(1,0,0,256,48000,1));
+    start = Clock::now();
     for (int i = 0; i < 20; ++i) assert(audio.output(paced, 0) == 0);
     const double elapsed = milliseconds(start);
     assert(elapsed > 19 * 5.33 * 0.9);
-    assert(elapsed < 20 * 5.33 * 3);
+    assert(elapsed < reference * 1.5 + 20);
     // An interrupted run (stop request) does not wait.
     threads.interrupt();
     start = Clock::now();
