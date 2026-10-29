@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <filesystem>
 #include <set>
 #include <string>
 #include <sys/stat.h>
@@ -298,6 +299,46 @@ int main() {
     uint8_t zero[32]{}; assert(memory.write(0x11cc0, zero, 32) && call(S::random_number, 0x11cc0, 32) == 0);
     uint8_t random[32]{}; assert(memory.read(0x11cc0, random, 32) && std::memcmp(random, zero, 32) != 0);
     assert(call(S::sandbox_word) == 0);
+    // Save data 2: Mount (v1), params, DirNameSearch, delete, save data memory.
+    char saves2[] = "/tmp/maxps4-saves2-XXXXXX";
+    assert(::mkdtemp(saves2) && kernel.set_savedata_root(saves2) == 0);
+    {
+        uint8_t request[48]{};
+        put_le(request, 16, path("SLOT01", 0x11500), 8); put_le(request, 40, 0x22, 4); // RDWR | CREATE2.
+        assert(memory.write(0x11400, request, sizeof(request)) && call(S::save_mount1, 0x11400, 0x11600) == 0);
+        assert(memory.write(0x11700, "/savedata0", 11));
+        assert(memory.write(0x10400, "Green Hill", 11) && call(S::save_set_param, 0x11700, 1, 0x10400, 128) == 0);
+        uint8_t title[16]{};
+        assert(call(S::save_get_param, 0x11700, 1, 0x10500, 128, 0x11900) == 0 && value32(0x11900) == 128);
+        assert(memory.read(0x10500, title, 11) && !std::strcmp(reinterpret_cast<char*>(title), "Green Hill"));
+        assert(call(S::save_mount_info, 0x11700, 0x11a00) == 0);
+        assert(call(S::save_umount2, 0, 0x11700) == 0);
+        put_le(request, 16, path("SLOT02", 0x11500), 8);
+        assert(memory.write(0x11400, request, sizeof(request)) && call(S::save_mount1, 0x11400, 0x11600) == 0);
+        assert(call(S::save_umount, 0x11700) == 0);
+        // Search "SLOT%": both, by name, the first's title in its param.
+        uint8_t cond[32]{}, result[40]{};
+        put_le(cond, 16, path("SLOT%", 0x11500), 8);
+        put_le(result, 8, 0x10a00, 8); put_le(result, 16, 4, 4); put_le(result, 24, 0x10b00, 8);
+        assert(memory.write(0x11400, cond, sizeof(cond)) && memory.write(0x11440, result, sizeof(result)));
+        assert(call(S::save_search, 0x11400, 0x11440) == 0 && value32(0x11440) == 2 && value32(0x11440 + 20) == 2);
+        char found[8]{};
+        assert(memory.read(0x10a00, found, 7) && !std::strcmp(found, "SLOT01") && memory.read(0x10a20, found, 7) && !std::strcmp(found, "SLOT02"));
+        assert(memory.read(0x10b00, title, 11) && !std::strcmp(reinterpret_cast<char*>(title), "Green Hill"));
+        // Delete SLOT02, then only SLOT01 is found.
+        uint8_t del[24]{};
+        put_le(del, 16, path("SLOT02", 0x11500), 8);
+        assert(memory.write(0x11480, del, sizeof(del)) && call(S::save_delete, 0x11480) == 0);
+        assert(call(S::save_search, 0x11400, 0x11440) == 0 && value32(0x11440) == 1);
+        // Save data memory: setup, write, read back.
+        assert(call(S::save_memory_setup, 1, 64, 0x11900) == 0);
+        uint8_t existed[8]{}; assert(memory.read(0x11900, existed, 8) && get_le(existed, 8) == 0);
+        assert(memory.write(0x10400, "memory!", 8) && call(S::save_memory_set, 1, 0x10400, 8, 16) == 0);
+        assert(call(S::save_memory_get, 1, 0x10500, 8, 16) == 0);
+        char back_text[8]{}; assert(memory.read(0x10500, back_text, 8) && !std::strcmp(back_text, "memory!"));
+    }
+    kernel.reset();
+    std::filesystem::remove_all(saves2);
     // POSIX pthread_* reuse the scePthread services and return errno numbers.
     assert(resolve_libkernel("7H0iTOciTLo", "libkernel", "libkernel", 1) == S::mutex_lock);
     assert(resolve_libkernel("OxhIB8LB-PQ", "libkernel", "libkernel", 1) == S::thread_create);

@@ -74,6 +74,8 @@ enum class PS4KernelService : uint32_t {
     video_add_flip, video_add_vblank, video_delete_flip, video_delete_vblank,
     video_event_id, video_event_data, video_event_count, video_resolution, video_flip_rate,
     save_init, save_term, save_mount2, save_umount,
+    save_mount1, save_umount2, save_search, save_set_param, save_get_param, save_save_icon, save_load_icon,
+    save_delete, save_mount_info, save_event, save_progress, save_memory_setup, save_memory_get, save_memory_set,
     sema_create, sema_delete, sema_wait, sema_poll, sema_signal, sema_cancel,
     flag_create, flag_delete, flag_set, flag_clear, flag_wait, flag_poll, flag_cancel,
     process_counter, counter_frequency, kernel_sleep,
@@ -221,7 +223,11 @@ private:
     uint32_t save_dialog_status_ = 0; // OrbisCommonDialogStatus: none, initialized, running, finished.
     uint32_t msg_dialog_status_ = 0, error_dialog_status_ = 0; // The same, for sceMsgDialog / sceErrorDialog.
     uint64_t sandbox_word_ = 0; // Guest address of the sandbox word (mapped on first use).
-    int64_t save_mount(uint64_t request, uint64_t result);
+    // `v1`: sceSaveDataMount's layout (dirName pointer at 16, mode at 40)
+    // instead of sceSaveDataMount2's (8 and 24).
+    int64_t save_mount(uint64_t request, uint64_t result, bool v1 = false);
+    int64_t save_service(PS4KernelService service, const PS4KernelCall& call);
+    std::string save_dir_; // Host directory mounted at /savedata0, empty when none.
     int64_t save_umount(uint64_t mount_point);
     int64_t temp_mount(uint64_t mount_point);
     std::vector<LoadedModule> modules_;

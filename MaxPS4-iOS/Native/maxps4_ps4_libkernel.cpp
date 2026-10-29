@@ -8,6 +8,9 @@
 #include <dirent.h>
 #include <cstring>
 #include <fcntl.h>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <new>
 #include <random>
 #include <thread>
@@ -347,6 +350,24 @@ constexpr Binding bindings[] = {
     {"sceSaveDataTerminate", "yKDy8S5yLA0", PS4KernelService::save_term, "libSceSaveData"},
     {"sceSaveDataMount2", "0z45PIH+SNI", PS4KernelService::save_mount2, "libSceSaveData"},
     {"sceSaveDataUmount", "BMR4F-Uek3E", PS4KernelService::save_umount, "libSceSaveData"},
+    {"sceSaveDataMount", "32HQAQdwM2o", PS4KernelService::save_mount1, "libSceSaveData"},
+    {"sceSaveDataUmount2", "uW4vfTwMQVo", PS4KernelService::save_umount2, "libSceSaveData"},
+    {"sceSaveDataDirNameSearch", "dyIhnXq-0SM", PS4KernelService::save_search, "libSceSaveData"},
+    {"sceSaveDataSetParam", "85zul--eGXs", PS4KernelService::save_set_param, "libSceSaveData"},
+    {"sceSaveDataGetParam", "XgvSuIdnMlw", PS4KernelService::save_get_param, "libSceSaveData"},
+    {"sceSaveDataSaveIcon", "c88Yy54Mx0w", PS4KernelService::save_save_icon, "libSceSaveData"},
+    {"sceSaveDataLoadIcon", "cGjO3wM3V28", PS4KernelService::save_load_icon, "libSceSaveData"},
+    {"sceSaveDataDelete", "S1GkePI17zQ", PS4KernelService::save_delete, "libSceSaveData"},
+    {"sceSaveDataGetMountInfo", "65VH0Qaaz6s", PS4KernelService::save_mount_info, "libSceSaveData"},
+    {"sceSaveDataSetupSaveDataMemory", "v7AAAMo0Lz4", PS4KernelService::save_memory_setup, "libSceSaveData"},
+    {"sceSaveDataGetSaveDataMemory", "7Bt5pBC-Aco", PS4KernelService::save_memory_get, "libSceSaveData"},
+    {"sceSaveDataSetSaveDataMemory", "h3YURzXGSVQ", PS4KernelService::save_memory_set, "libSceSaveData"},
+    {"sceSaveDataInitialize", "ZkZhskCPXFw", PS4KernelService::save_init, "libSceSaveData"},
+    {"sceSaveDataInitialize2", "l1NmDeDpNGU", PS4KernelService::save_init, "libSceSaveData"},
+    {"sceSaveDataGetEventResult", "j8xKtiFj0SY", PS4KernelService::save_event, "libSceSaveData"},
+    {"sceSaveDataRegisterEventCallback", "hsKd5c21sQc", PS4KernelService::succeed, "libSceSaveData"},
+    {"sceSaveDataGetProgress", "ANmSWUiyyGQ", PS4KernelService::save_progress, "libSceSaveData"},
+    {"sceSaveDataClearProgress", "Wz-4JZfeO9g", PS4KernelService::succeed, "libSceSaveData"},
     // The save dialog has no screen: it finishes at once, answered OK/Yes.
     {"sceSaveDataDialogInitialize", "s9e3+YpRnzw", PS4KernelService::save_dialog_init, "libSceSaveDataDialog"},
     {"sceSaveDataDialogOpen", "4tPhsP6FpDI", PS4KernelService::save_dialog_open, "libSceSaveDataDialog"},
@@ -509,7 +530,7 @@ void PS4Libkernel::reset() {
     if (dynamic_) dynamic_->reset();
     threads_.reset();
     errno_table_ = errno_table_size_ = process_param_ = heap_trace_ = 0;
-    save_root_.clear(); save_dialog_status_ = msg_dialog_status_ = error_dialog_status_ = 0; sandbox_word_ = 0; system_language_ = 1; addcont_.clear(); modules_.clear();
+    save_root_.clear(); save_dir_.clear(); save_dialog_status_ = msg_dialog_status_ = error_dialog_status_ = 0; sandbox_word_ = 0; system_language_ = 1; addcont_.clear(); modules_.clear();
     direct_.clear();
     started_us_ = monotonic_us();
 }
@@ -551,13 +572,13 @@ constexpr uint32_t save_parameter = 0, save_busy = 3, save_not_mounted = 4, save
 // is mountPoint char[16]@0, requiredBlocks@16, mountStatus@28 (1 = created).
 // Only /savedata0 exists; its directory is opened without closing the game's
 // other descriptors (a remount through mount() would close them all).
-int64_t PS4Libkernel::save_mount(uint64_t request, uint64_t result) {
+int64_t PS4Libkernel::save_mount(uint64_t request, uint64_t result, bool v1) {
     constexpr uint32_t read_only = 1, read_write = 2, create = 4, create2 = 32;
-    uint8_t wire[32];
-    if (!request || !result || !memory_.read(request, wire, sizeof(wire))) return save_error(save_parameter);
-    const uint32_t mode = uint32_t(get_le(wire + 24, 4));
+    uint8_t wire[48];
+    if (!request || !result || !memory_.read(request, wire, v1 ? 48 : 32)) return save_error(save_parameter);
+    const uint32_t mode = uint32_t(get_le(wire + (v1 ? 40 : 24), 4));
     char name[33];
-    if (!memory_.read_cstring(get_le(wire + 8, 8), name, sizeof(name)) || !name[0]) return save_error(save_parameter);
+    if (!memory_.read_cstring(get_le(wire + (v1 ? 16 : 8), 8), name, sizeof(name)) || !name[0]) return save_error(save_parameter);
     for (const char* c = name; *c; ++c)
         if (!std::isalnum(static_cast<unsigned char>(*c)) && *c != '-' && *c != '_') return save_error(save_parameter);
     std::lock_guard<std::mutex> guard(lock_);
@@ -580,6 +601,7 @@ int64_t PS4Libkernel::save_mount(uint64_t request, uint64_t result) {
     if (!memory_.write(result, out, sizeof(out))) { ::close(fd); return save_error(save_parameter); }
     save.root = fd;
     save.writable = (mode & (read_write | create | create2)) != 0 || !(mode & read_only);
+    save_dir_ = path;
     return 0;
 }
 int64_t PS4Libkernel::save_umount(uint64_t mount_point) {
@@ -590,7 +612,195 @@ int64_t PS4Libkernel::save_umount(uint64_t mount_point) {
     auto& save = *std::find_if(mounts_.begin(), mounts_.end(), [](const Mount& m) { return !std::strcmp(m.prefix, "/savedata0"); });
     if (std::strcmp(point, "/savedata0") || save.root < 0) return save_error(save_not_mounted);
     ::close(save.root); save.root = -1;
+    save_dir_.clear();
     return 0;
+}
+namespace {
+// OrbisSaveDataParam: title[128], subTitle[128], detail[1024], u32 userParam,
+// 4 reserved, time_t mtime, 32 reserved. Kept as these bytes in the save's
+// sce_sys/maxps4-param.bin.
+constexpr size_t save_param_size = 1328;
+bool read_host(const std::string& path, std::vector<uint8_t>& bytes) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return false;
+    bytes.assign(std::istreambuf_iterator<char>(in), {});
+    return true;
+}
+bool write_host(const std::string& path, const uint8_t* data, size_t size) {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    return out && out.write(reinterpret_cast<const char*>(data), std::streamsize(size)).good();
+}
+// A DirNameSearch pattern: '%' matches any run of characters.
+bool save_matches(const char* pattern, const char* name) {
+    if (!*pattern) return !*name;
+    if (*pattern == '%') return save_matches(pattern + 1, name) || (*name && save_matches(pattern, name + 1));
+    return *name == *pattern && save_matches(pattern + 1, name + 1);
+}
+}
+int64_t PS4Libkernel::save_service(PS4KernelService service, const PS4KernelCall& c) {
+    using S = PS4KernelService;
+    auto put = [&](uint64_t address, uint64_t value, size_t width) {
+        uint8_t wire[8]; put_le(wire, 0, value, width); return address && memory_.write(address, wire, width);
+    };
+    auto mounted = [&](uint64_t point) {
+        char text[16]{};
+        return point && memory_.read_cstring(point, text, sizeof(text)) && !std::strcmp(text, "/savedata0") && !save_dir_.empty();
+    };
+    auto load_param = [&](std::vector<uint8_t>& param) {
+        param.assign(save_param_size, 0);
+        std::vector<uint8_t> stored;
+        if (read_host(save_dir_ + "/sce_sys/maxps4-param.bin", stored) && stored.size() == save_param_size) param = stored;
+    };
+    switch (service) {
+    case S::save_mount1: return save_mount(c.rdi, c.rsi, true);
+    case S::save_umount2: return save_umount(c.rsi); // Umount2(mode, mountPoint*).
+    case S::save_event: return save_error(save_not_found); // No event pending.
+    case S::save_progress: return c.rdi && put(c.rdi, 0x3f800000, 4) ? 0 : save_error(save_parameter); // 1.0f.
+    // GetMountInfo(mountPoint*, {u64 blocks, u64 freeBlocks}*): 32 KiB blocks, plenty free.
+    case S::save_mount_info: {
+        std::lock_guard<std::mutex> guard(lock_);
+        if (!mounted(c.rdi)) return save_error(save_not_mounted);
+        return put(c.rsi, 0x8000, 8) && put(c.rsi + 8, 0x8000, 8) ? 0 : save_error(save_parameter);
+    }
+    // SetParam(mountPoint*, type, buffer, size): 0 all, 1 title, 2 subtitle,
+    // 3 detail, 4 user parameter; the mtime is the time of the change.
+    case S::save_set_param: case S::save_get_param: {
+        std::lock_guard<std::mutex> guard(lock_);
+        if (!mounted(c.rdi)) return save_error(save_not_mounted);
+        static const size_t offsets[] = {0, 0, 128, 256, 1280}, sizes[] = {save_param_size, 128, 128, 1024, 4};
+        if (c.rsi > 4 || !c.rdx) return save_error(save_parameter);
+        const size_t offset = offsets[c.rsi], size = sizes[c.rsi];
+        std::vector<uint8_t> param;
+        load_param(param);
+        if (service == S::save_get_param) {
+            const size_t count = std::min<size_t>(size, size_t(c.rcx));
+            if (!memory_.write(c.rdx, param.data() + offset, count)) return save_error(save_parameter);
+            return !c.r8 || put(c.r8, count, 4) ? 0 : save_error(save_parameter);
+        }
+        if (c.rcx < size || !memory_.read(c.rdx, param.data() + offset, size)) return save_error(save_parameter);
+        put_le(param.data(), 1288, uint64_t(::time(nullptr)), 8);
+        ::mkdir((save_dir_ + "/sce_sys").c_str(), 0755);
+        return write_host(save_dir_ + "/sce_sys/maxps4-param.bin", param.data(), param.size()) ? 0 : kernel_error(io);
+    }
+    // Save/LoadIcon(mountPoint*, {void* buffer, size_t bufferSize, size_t dataSize}*): sce_sys/icon0.png.
+    case S::save_save_icon: case S::save_load_icon: {
+        std::lock_guard<std::mutex> guard(lock_);
+        if (!mounted(c.rdi)) return save_error(save_not_mounted);
+        uint8_t icon[24];
+        if (!c.rsi || !memory_.read(c.rsi, icon, sizeof(icon))) return save_error(save_parameter);
+        const uint64_t buffer = get_le(icon, 8), capacity = get_le(icon + 8, 8), data = get_le(icon + 16, 8);
+        const std::string path = save_dir_ + "/sce_sys/icon0.png";
+        if (service == S::save_save_icon) {
+            if (!buffer || !data || data > capacity || data > 4 * 1024 * 1024) return save_error(save_parameter);
+            std::vector<uint8_t> bytes(size_t(data));
+            if (!memory_.read(buffer, bytes.data(), bytes.size())) return save_error(save_parameter);
+            ::mkdir((save_dir_ + "/sce_sys").c_str(), 0755);
+            return write_host(path, bytes.data(), bytes.size()) ? 0 : kernel_error(io);
+        }
+        std::vector<uint8_t> bytes;
+        if (!read_host(path, bytes)) return save_error(save_not_found);
+        if (!buffer || bytes.size() > capacity) return save_error(save_parameter);
+        if (!memory_.write(buffer, bytes.data(), bytes.size())) return save_error(save_parameter);
+        return put(c.rsi + 16, bytes.size(), 8) ? 0 : save_error(save_parameter);
+    }
+    // DirNameSearch(cond {userId, titleId*, dirName* pattern@16, key@24, order@28},
+    // result {u32 hitNum@0, dirNames*@8, u32 dirNamesNum@16, u32 setNum@20,
+    // params*@24, infos*@32}): the save directories, by name.
+    case S::save_search: {
+        uint8_t cond[32], result[40];
+        if (!c.rdi || !c.rsi || !memory_.read(c.rdi, cond, sizeof(cond)) || !memory_.read(c.rsi, result, sizeof(result)))
+            return save_error(save_parameter);
+        char pattern[33] = "%";
+        if (get_le(cond + 16, 8) && !memory_.read_cstring(get_le(cond + 16, 8), pattern, sizeof(pattern))) return save_error(save_parameter);
+        std::lock_guard<std::mutex> guard(lock_);
+        std::vector<std::string> names;
+        if (!save_root_.empty()) if (DIR* dir = ::opendir(save_root_.c_str())) {
+            while (const dirent* entry = ::readdir(dir)) {
+                const std::string name = entry->d_name;
+                if (name.empty() || name[0] == '.' || name.size() > 31 || !save_matches(pattern, name.c_str())) continue;
+                struct stat info{};
+                if (::stat((save_root_ + "/" + name).c_str(), &info) == 0 && S_ISDIR(info.st_mode)) names.push_back(name);
+            }
+            ::closedir(dir);
+        }
+        std::sort(names.begin(), names.end());
+        if (get_le(cond + 28, 4) == 1) std::reverse(names.begin(), names.end()); // Descending.
+        const uint64_t dir_names = get_le(result + 8, 8), params = get_le(result + 24, 8), infos = get_le(result + 32, 8);
+        const uint32_t capacity = uint32_t(get_le(result + 16, 4));
+        uint32_t set = 0;
+        for (; set < names.size() && set < capacity && dir_names; ++set) {
+            uint8_t name[32]{};
+            std::memcpy(name, names[set].data(), names[set].size());
+            if (!memory_.write(dir_names + 32ULL * set, name, sizeof(name))) return save_error(save_parameter);
+            if (params) {
+                std::vector<uint8_t> param(save_param_size, 0), stored;
+                if (read_host(save_root_ + "/" + names[set] + "/sce_sys/maxps4-param.bin", stored) && stored.size() == save_param_size) param = stored;
+                if (!memory_.write(params + uint64_t(save_param_size) * set, param.data(), param.size())) return save_error(save_parameter);
+            }
+            if (infos) {
+                uint8_t info[48]{};
+                put_le(info, 0, 0x8000, 8); put_le(info, 8, 0x8000, 8);
+                if (!memory_.write(infos + 48ULL * set, info, sizeof(info))) return save_error(save_parameter);
+            }
+        }
+        return put(c.rsi, names.size(), 4) && put(c.rsi + 20, set, 4) ? 0 : save_error(save_parameter);
+    }
+    // Delete({userId, titleId*, dirName*@16}*): the directory and what it holds.
+    case S::save_delete: {
+        uint8_t request[24];
+        char name[33];
+        if (!c.rdi || !memory_.read(c.rdi, request, sizeof(request)) ||
+            !memory_.read_cstring(get_le(request + 16, 8), name, sizeof(name)) || !name[0]) return save_error(save_parameter);
+        for (const char* ch = name; *ch; ++ch)
+            if (!std::isalnum(static_cast<unsigned char>(*ch)) && *ch != '-' && *ch != '_') return save_error(save_parameter);
+        std::lock_guard<std::mutex> guard(lock_);
+        if (save_root_.empty()) return save_error(save_not_found);
+        const std::string path = save_root_ + "/" + name;
+        if (path == save_dir_) return save_error(save_busy);
+        std::error_code error;
+        if (!std::filesystem::is_directory(path, error)) return save_error(save_not_found);
+        std::filesystem::remove_all(path, error);
+        return error ? kernel_error(io) : 0;
+    }
+    // Save data memory (v1): SetupSaveDataMemory(userId, size, size_t* existed),
+    // Get/SetSaveDataMemory(userId, buffer, size, offset): one file per game.
+    case S::save_memory_setup: case S::save_memory_get: case S::save_memory_set: {
+        std::lock_guard<std::mutex> guard(lock_);
+        if (save_root_.empty()) return save_error(save_not_found);
+        const std::string path = save_root_ + "/sdmemory.bin";
+        if (service == S::save_memory_setup) {
+            if (!c.rsi || c.rsi > 16 * 1024 * 1024) return save_error(save_parameter);
+            struct stat info{};
+            const uint64_t existed = ::stat(path.c_str(), &info) == 0 ? uint64_t(info.st_size) : 0;
+            if (c.rdx && !put(c.rdx, existed, 8)) return save_error(save_parameter);
+            if (existed < c.rsi) {
+                const int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
+                if (fd < 0) return kernel_error(host_error(errno));
+                const int resized = ::ftruncate(fd, off_t(c.rsi));
+                ::close(fd);
+                if (resized) return kernel_error(io);
+            }
+            return 0;
+        }
+        if (!c.rsi || !c.rdx || c.rdx > 16 * 1024 * 1024 || c.rcx > 16 * 1024 * 1024) return save_error(save_parameter);
+        std::vector<uint8_t> bytes(size_t(c.rdx));
+        const int fd = ::open(path.c_str(), (service == S::save_memory_set ? O_RDWR : O_RDONLY) | O_CLOEXEC);
+        if (fd < 0) return save_error(save_not_found);
+        ssize_t done;
+        if (service == S::save_memory_get) {
+            done = ::pread(fd, bytes.data(), bytes.size(), off_t(c.rcx));
+            ::close(fd);
+            if (done < 0) return kernel_error(io);
+            // A short read past the end leaves the rest zeroed.
+            return memory_.write(c.rsi, bytes.data(), bytes.size()) ? 0 : save_error(save_parameter);
+        }
+        if (!memory_.read(c.rsi, bytes.data(), bytes.size())) { ::close(fd); return save_error(save_parameter); }
+        done = ::pwrite(fd, bytes.data(), bytes.size(), off_t(c.rcx));
+        ::close(fd);
+        return done == ssize_t(bytes.size()) ? 0 : kernel_error(io);
+    }
+    default: return kernel_error(nosys);
+    }
 }
 // sceAppContentTemporaryDataMount2(option, OrbisAppContentMountPoint*):
 // /temp0 on a fresh directory under the host's temporary directory, opened
@@ -1448,6 +1658,10 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     // UnlockTrophy(context, handle, trophyId, platinumId*): no platinum unlocked.
     case S::trophy_unlock: return !c.rcx || write(c.rcx, uint32_t(-1), 4) ? 0 : signed32(0x80551604U);
     case S::save_init: return 0;
+    case S::save_mount1: case S::save_umount2: case S::save_search: case S::save_set_param: case S::save_get_param:
+    case S::save_save_icon: case S::save_load_icon: case S::save_delete: case S::save_mount_info: case S::save_event:
+    case S::save_progress: case S::save_memory_setup: case S::save_memory_get: case S::save_memory_set:
+        return save_service(service, c);
     case S::save_term: save_umount(0); return 0;
     case S::save_mount2: return save_mount(c.rdi, c.rsi);
     case S::save_umount: return save_umount(c.rdi);
