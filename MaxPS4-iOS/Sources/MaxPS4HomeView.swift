@@ -261,15 +261,15 @@ struct MaxPS4HomeView: View {
                 }
                 .padding(18).frame(maxWidth: .infinity, alignment: .leading)
                 .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 22))
-                VStack(alignment: .leading, spacing: 8) {
-                    Toggle("Mode développeur", isOn: $developer).font(.headline).tint(.cyan)
-                    Text("Affiche les options de test et les rapports techniques, utiles pour le développement de MaxPS4.")
-                        .font(.footnote).foregroundStyle(.white.opacity(0.55))
-                }
-                .padding(18).frame(maxWidth: .infinity, alignment: .leading)
-                .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 22))
                 Text("MaxPS4 · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") · build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "")")
                     .font(.footnote).foregroundStyle(.white.opacity(0.55))
+                    // Hidden from players: five taps on the version line turn the
+                    // test options and technical reports on or off (for support).
+                    .onTapGesture(count: 5) {
+                        developer.toggle()
+                        message = developer ? String(localized: "Mode développeur activé.", bundle: .maxps4)
+                            : String(localized: "Mode développeur désactivé.", bundle: .maxps4)
+                    }
                 Text("Aucun jeu ni firmware n’est inclus. Utilise uniquement tes fichiers autorisés.")
                     .font(.caption).foregroundStyle(.white.opacity(0.45))
             }.padding(20)
