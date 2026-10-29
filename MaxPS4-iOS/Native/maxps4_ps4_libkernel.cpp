@@ -692,7 +692,7 @@ int64_t PS4Libkernel::save_service(PS4KernelService service, const PS4KernelCall
         const std::string path = save_dir_ + "/sce_sys/icon0.png";
         if (service == S::save_save_icon) {
             if (!buffer || !data || data > capacity || data > 4 * 1024 * 1024) return save_error(save_parameter);
-            std::vector<uint8_t> bytes(size_t(data));
+            std::vector<uint8_t> bytes(static_cast<size_t>(data));
             if (!memory_.read(buffer, bytes.data(), bytes.size())) return save_error(save_parameter);
             ::mkdir((save_dir_ + "/sce_sys").c_str(), 0755);
             return write_host(path, bytes.data(), bytes.size()) ? 0 : kernel_error(io);
@@ -783,7 +783,7 @@ int64_t PS4Libkernel::save_service(PS4KernelService service, const PS4KernelCall
             return 0;
         }
         if (!c.rsi || !c.rdx || c.rdx > 16 * 1024 * 1024 || c.rcx > 16 * 1024 * 1024) return save_error(save_parameter);
-        std::vector<uint8_t> bytes(size_t(c.rdx));
+        std::vector<uint8_t> bytes(static_cast<size_t>(c.rdx));
         const int fd = ::open(path.c_str(), (service == S::save_memory_set ? O_RDWR : O_RDONLY) | O_CLOEXEC);
         if (fd < 0) return save_error(save_not_found);
         ssize_t done;
