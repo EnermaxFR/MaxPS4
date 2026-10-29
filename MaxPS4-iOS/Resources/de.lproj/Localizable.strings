@@ -168,7 +168,8 @@
 "Le jeu s’est arrêté sur une erreur." = "Das Spiel wurde wegen eines Fehlers beendet.";
 "Partager le rapport de compatibilité" = "Kompatibilitätsbericht teilen";
 "Rapport enregistré dans Fichiers › MaxPS4 › Rapports." = "Bericht gespeichert unter Dateien › MaxPS4 › Rapports.";
-"Mode développeur" = "Entwicklermodus";
-"Affiche les options de test et les rapports techniques, utiles pour le développement de MaxPS4." = "Zeigt Testoptionen und technische Berichte, nützlich für die Entwicklung von MaxPS4.";
 "Mise à jour" = "Update";
 "Utiliser la mise à jour" = "Update verwenden";
+"Mode développeur activé." = "Entwicklermodus aktiviert.";
+"Mode développeur désactivé." = "Entwicklermodus deaktiviert.";
+"Contenus additionnels" = "Zusatzinhalte";
