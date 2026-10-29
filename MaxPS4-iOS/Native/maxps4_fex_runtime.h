@@ -40,6 +40,9 @@ int64_t maxps4_fex_engine_mount(maxps4_fex_engine *engine, const char *guest, co
 // The directory holding this game's save data directories (sceSaveDataMount2
 // mounts <directory>/<dirName> at /savedata0). Also after staging.
 int64_t maxps4_fex_engine_set_savedata_root(maxps4_fex_engine *engine, const char *directory);
+// The PS4 language ID games are told (0 Japanese, 1 English US, 2 French,
+// 3 Spanish, 4 German, 5 Italian, 17 Portuguese (Brazil), ...). After staging.
+int32_t maxps4_fex_engine_set_system_language(maxps4_fex_engine *engine, int32_t language);
 // Explicit service dispatch, serialized against staging and engine accesses.
 // Returns a guest ABI result, including signed Orbis errors. Default bootstrap
 // guest thread identity is 1. No guest CPU import trampoline is installed.

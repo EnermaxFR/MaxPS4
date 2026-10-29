@@ -220,5 +220,28 @@ int main() {
     for (const auto& name : {std::string(base_dir) + "/data", std::string(base_dir) + "/only", std::string(update_dir) + "/data"})
         assert(::unlink(name.c_str()) == 0);
     assert(::rmdir(base_dir) == 0 && ::rmdir(update_dir) == 0);
+    // System services games query at start: language, clock, PSN, content.
+    auto value32 = [&](uint64_t address) { uint8_t w[4]{}; assert(memory.read(address, w, 4)); return get_le(w, 4); };
+    kernel.set_system_language(2);
+    assert(call(S::system_param_int, 1, 0x11900) == 0 && value32(0x11900) == 2);
+    uint8_t date[16]{}; // 2026-10-29 12:34:56.000789
+    put_le(date, 0, 2026, 2); put_le(date, 2, 10, 2); put_le(date, 4, 29, 2);
+    put_le(date, 6, 12, 2); put_le(date, 8, 34, 2); put_le(date, 10, 56, 2); put_le(date, 12, 789, 4);
+    assert(memory.write(0x11a00, date, sizeof(date)));
+    assert(call(S::rtc_get_tick, 0x11a00, 0x11a20) == 0);
+    uint8_t tick[8]{}; assert(memory.read(0x11a20, tick, 8));
+    assert(get_le(tick, 8) == 62135596800000000ULL + (20755ULL * 86400 + 12 * 3600 + 34 * 60 + 56) * 1000000 + 789);
+    assert(call(S::rtc_set_tick, 0x11a40, 0x11a20) == 0);
+    uint8_t back[16]{}; assert(memory.read(0x11a40, back, 16) && !std::memcmp(back, date, 16));
+    put_le(date, 2, 13, 2); assert(memory.write(0x11a00, date, sizeof(date)));
+    assert(call(S::rtc_get_tick, 0x11a00, 0x11a20) == signed32(0x80b50002U)); // Month 13.
+    assert(call(S::rtc_current_tick, 0x11a20) == 0 && call(S::rtc_resolution) == 1000000);
+    assert(call(S::np_state, 1, 0x11900) == 0 && value32(0x11900) == 1);
+    assert(call(S::np_signed_out, 1, 0x11900) == signed32(0x80550006U));
+    assert(call(S::app_param_int, 0, 0x11900) == 0 && value32(0x11900) == 3);
+    assert(call(S::app_addcont_list, 0, 0, 0, 0x11900) == 0 && value32(0x11900) == 0);
+    assert(resolve_libkernel("18B2NS1y9UU", "libSceRtc", "libSceRtc", 1) == S::rtc_current_tick);
+    kernel.reset();
+    assert(call(S::system_param_int, 1, 0x11900) == 0 && value32(0x11900) == 1);
     std::puts("PS4 writable files, positioned I/O and directory checks passed");
 }

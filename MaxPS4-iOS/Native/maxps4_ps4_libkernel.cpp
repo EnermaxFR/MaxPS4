@@ -14,6 +14,7 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <time.h>
+#include <cstdlib>
 #include <unistd.h>
 #include <vector>
 
@@ -290,6 +291,38 @@ constexpr Binding bindings[] = {
     {"sceSaveDataDialogUpdateStatus", "KK3Bdg1RWK0", PS4KernelService::save_dialog_update, "libSceSaveDataDialog"},
     {"sceSaveDataDialogGetResult", "yEiJ-qqr6Cg", PS4KernelService::save_dialog_result, "libSceSaveDataDialog"},
     {"sceSaveDataDialogTerminate", "YuH2FA7azqQ", PS4KernelService::save_dialog_term, "libSceSaveDataDialog"},
+    // PSN: always signed out, so games take their offline path (shadPS4 np_manager).
+    {"sceNpGetState", "eQH7nWPcAgc", PS4KernelService::np_state, "libSceNpManager"},
+    {"sceNpGetOnlineId", "XDncXQIJUSk", PS4KernelService::np_signed_out, "libSceNpManager"},
+    {"sceNpGetNpId", "p-o74CnoNzY", PS4KernelService::np_signed_out, "libSceNpManager"},
+    {"sceNpGetAccountId", "a8R9-75u4iM", PS4KernelService::np_signed_out, "libSceNpManager"},
+    {"sceNpGetAccountIdA", "rbknaUjpqWo", PS4KernelService::np_signed_out, "libSceNpManager"},
+    {"sceNpCheckNpAvailability", "2rsFmlGWleQ", PS4KernelService::np_signed_out, "libSceNpManager"},
+    {"sceNpCheckNpAvailabilityA", "8Z2Jc5GvGDI", PS4KernelService::np_signed_out, "libSceNpManager"},
+    {"sceNpCheckPlus", "r6MyYJkryz8", PS4KernelService::np_signed_out, "libSceNpManager"},
+    {"sceNpCreateRequest", "GpLQDNKICac", PS4KernelService::np_create_request, "libSceNpManager"},
+    {"sceNpDeleteRequest", "S7QTn72PrDw", PS4KernelService::succeed, "libSceNpManager"},
+    // Application content: no add-on content, a full (not trial) game, /temp0.
+    {"sceAppContentInitialize", "R9lA82OraNs", PS4KernelService::app_init, "libSceAppContent", false, false, 0, nullptr, 0, "libSceAppContentUtil"},
+    {"sceAppContentGetAddcontInfoList", "xnd8BJzAxmk", PS4KernelService::app_addcont_list, "libSceAppContent", false, false, 0, nullptr, 0, "libSceAppContentUtil"},
+    {"sceAppContentAppParamGetInt", "99b82IKXpH4", PS4KernelService::app_param_int, "libSceAppContent", false, false, 0, nullptr, 0, "libSceAppContentUtil"},
+    {"sceAppContentTemporaryDataMount2", "buYbeLOGWmA", PS4KernelService::app_temp_mount, "libSceAppContent", false, false, 0, nullptr, 0, "libSceAppContentUtil"},
+    {"sceAppContentTemporaryDataUnmount", "bcolXMmp6qQ", PS4KernelService::succeed, "libSceAppContent", false, false, 0, nullptr, 0, "libSceAppContentUtil"},
+    // Real-time clock: ticks are microseconds since 0001-01-01 00:00 UTC.
+    {"sceRtcGetCurrentTick", "18B2NS1y9UU", PS4KernelService::rtc_current_tick, "libSceRtc"},
+    {"sceRtcGetCurrentNetworkTick", "zO9UL3qIINQ", PS4KernelService::rtc_current_tick, "libSceRtc"},
+    {"sceRtcGetCurrentClock", "8lfvnRMqwEM", PS4KernelService::rtc_current_clock, "libSceRtc"},
+    {"sceRtcGetCurrentClockLocalTime", "ZPD1YOKI+Kw", PS4KernelService::rtc_current_local, "libSceRtc"},
+    {"sceRtcGetTick", "8w-H19ip48I", PS4KernelService::rtc_get_tick, "libSceRtc"},
+    {"sceRtcSetTick", "ueega6v3GUw", PS4KernelService::rtc_set_tick, "libSceRtc"},
+    {"sceRtcGetTickResolution", "jMNwqYr4R-k", PS4KernelService::rtc_resolution, "libSceRtc"},
+    {"sceRtcConvertUtcToLocalTime", "M1TvFst-jrM", PS4KernelService::rtc_utc_to_local, "libSceRtc"},
+    {"sceSystemServiceGetDisplaySafeAreaInfo", "1n37q1Bvc5Y", PS4KernelService::safe_area, "libSceSystemService"},
+    // Trophies: valid context and handle IDs, unlocks accepted (nothing shown).
+    {"sceNpTrophyCreateContext", "XbkjbobZlCY", PS4KernelService::trophy_create_context, "libSceNpTrophy"},
+    {"sceNpTrophyCreateHandle", "q7U6tEAQf7c", PS4KernelService::trophy_create_handle, "libSceNpTrophy"},
+    {"sceNpTrophyRegisterContext", "TJCAxto9SEU", PS4KernelService::succeed, "libSceNpTrophy"},
+    {"sceNpTrophyUnlockTrophy", "28xmRUFao68", PS4KernelService::trophy_unlock, "libSceNpTrophy"},
     // System modules are part of the HLE: loading one has nothing to do.
     {"sceSysmoduleLoadModule", "g8cM39EUZ6o", PS4KernelService::succeed, "libSceSysmodule"},
     // Audio (shadPS4 libraries/audio/audioout.cpp).
@@ -369,7 +402,7 @@ void PS4Libkernel::reset() {
     if (dynamic_) dynamic_->reset();
     threads_.reset();
     errno_table_ = errno_table_size_ = process_param_ = heap_trace_ = 0;
-    save_root_.clear(); save_dialog_status_ = 0;
+    save_root_.clear(); save_dialog_status_ = 0; system_language_ = 1;
     direct_.clear();
     started_us_ = monotonic_us();
 }
@@ -451,6 +484,117 @@ int64_t PS4Libkernel::save_umount(uint64_t mount_point) {
     if (std::strcmp(point, "/savedata0") || save.root < 0) return save_error(save_not_mounted);
     ::close(save.root); save.root = -1;
     return 0;
+}
+// sceAppContentTemporaryDataMount2(option, OrbisAppContentMountPoint*):
+// /temp0 on a fresh directory under the host's temporary directory, opened
+// without closing the game's files; the mount point string is written back.
+int64_t PS4Libkernel::temp_mount(uint64_t mount_point) {
+    if (!mount_point) return signed32(0x80D90002U);
+    const char* tmp = std::getenv("TMPDIR");
+    const std::string path = std::string(tmp && *tmp ? tmp : "/tmp") + "/maxps4-temp0";
+    if (::mkdir(path.c_str(), 0755) != 0 && errno != EEXIST) return kernel_error(host_error(errno));
+    const int fd = ::open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) return kernel_error(host_error(errno));
+    uint8_t point[16]{};
+    std::memcpy(point, "/temp0", 6);
+    if (!memory_.write(mount_point, point, sizeof(point))) { ::close(fd); return signed32(0x80D90002U); }
+    std::lock_guard<std::mutex> guard(lock_);
+    auto& temp = *std::find_if(mounts_.begin(), mounts_.end(), [](const Mount& m) { return !std::strcmp(m.prefix, "/temp0"); });
+    if (temp.root >= 0) ::close(temp.root);
+    temp.root = fd;
+    return 0;
+}
+namespace {
+// Days from 1970-01-01 to a civil date and back (H. Hinnant's algorithms).
+int64_t days_from_civil(int64_t y, unsigned m, unsigned d) {
+    y -= m <= 2;
+    const int64_t era = (y >= 0 ? y : y - 399) / 400;
+    const unsigned yoe = unsigned(y - era * 400);
+    const unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + int64_t(doe) - 719468;
+}
+void civil_from_days(int64_t z, int64_t& y, unsigned& m, unsigned& d) {
+    z += 719468;
+    const int64_t era = (z >= 0 ? z : z - 146096) / 146097;
+    const unsigned doe = unsigned(z - era * 146097);
+    const unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    const unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    const unsigned mp = (5 * doy + 2) / 153;
+    d = doy - (153 * mp + 2) / 5 + 1;
+    m = mp + (mp < 10 ? 3 : -9);
+    y = int64_t(yoe) + era * 400 + (m <= 2);
+}
+constexpr uint64_t unix_epoch_tick = 62135596800ULL * 1000000ULL; // 0001-01-01 to 1970-01-01.
+int64_t local_offset_us() {
+    const time_t now = ::time(nullptr);
+    tm local{};
+    return ::localtime_r(&now, &local) ? int64_t(local.tm_gmtoff) * 1000000 : 0;
+}
+}
+// OrbisRtcDateTime: u16 year, month, day, hour, minute, second; u32 microsecond.
+int64_t PS4Libkernel::rtc(PS4KernelService service, const PS4KernelCall& c) {
+    using S = PS4KernelService;
+    constexpr int64_t invalid = int32_t(0x80B50002U), bad_pointer = int32_t(0x80B50001U);
+    auto now_tick = [] {
+        timespec t{};
+        ::clock_gettime(CLOCK_REALTIME, &t);
+        return unix_epoch_tick + uint64_t(t.tv_sec) * 1000000 + uint64_t(t.tv_nsec) / 1000;
+    };
+    auto put_tick = [&](uint64_t address, uint64_t tick) {
+        uint8_t wire[8]; put_le(wire, 0, tick, 8); return address && memory_.write(address, wire, 8);
+    };
+    auto get_tick = [&](uint64_t address, uint64_t& tick) {
+        uint8_t wire[8]; if (!address || !memory_.read(address, wire, 8)) return false;
+        tick = get_le(wire, 8); return true;
+    };
+    auto put_date = [&](uint64_t address, uint64_t tick) {
+        if (!address) return false;
+        const int64_t micros = int64_t(tick) - int64_t(unix_epoch_tick);
+        int64_t days = micros / 86400000000LL, rest = micros % 86400000000LL;
+        if (rest < 0) { rest += 86400000000LL; --days; }
+        int64_t y; unsigned m, d;
+        civil_from_days(days, y, m, d);
+        uint8_t wire[16]{};
+        const uint64_t seconds = uint64_t(rest) / 1000000;
+        put_le(wire, 0, uint64_t(y), 2); put_le(wire, 2, m, 2); put_le(wire, 4, d, 2);
+        put_le(wire, 6, seconds / 3600, 2); put_le(wire, 8, seconds / 60 % 60, 2); put_le(wire, 10, seconds % 60, 2);
+        put_le(wire, 12, uint64_t(rest) % 1000000, 4);
+        return memory_.write(address, wire, sizeof(wire));
+    };
+    switch (service) {
+    case S::rtc_current_tick: return put_tick(c.rdi, now_tick()) ? 0 : bad_pointer;
+    // GetCurrentClock(dateTime*, timeZone minutes).
+    case S::rtc_current_clock:
+        return put_date(c.rdi, now_tick() + uint64_t(int64_t(signed32(c.rsi)) * 60000000)) ? 0 : bad_pointer;
+    case S::rtc_current_local: return put_date(c.rdi, now_tick() + uint64_t(local_offset_us())) ? 0 : bad_pointer;
+    // GetTick(const dateTime*, tick*).
+    case S::rtc_get_tick: {
+        uint8_t wire[16];
+        if (!c.rdi || !c.rsi || !memory_.read(c.rdi, wire, sizeof(wire))) return bad_pointer;
+        const unsigned year = unsigned(get_le(wire, 2)), month = unsigned(get_le(wire + 2, 2)), day = unsigned(get_le(wire + 4, 2));
+        const uint64_t hour = get_le(wire + 6, 2), minute = get_le(wire + 8, 2), second = get_le(wire + 10, 2), micro = get_le(wire + 12, 4);
+        if (!year || year > 9999 || !month || month > 12 || !day || day > 31 || hour > 23 || minute > 59 || second > 59 || micro > 999999)
+            return invalid;
+        const int64_t days = days_from_civil(year, month, day);
+        const uint64_t tick = uint64_t(int64_t(unix_epoch_tick) + days * 86400000000LL) + ((hour * 60 + minute) * 60 + second) * 1000000 + micro;
+        return put_tick(c.rsi, tick) ? 0 : bad_pointer;
+    }
+    // SetTick(dateTime*, const tick*).
+    case S::rtc_set_tick: {
+        uint64_t tick = 0;
+        if (!get_tick(c.rsi, tick)) return bad_pointer;
+        return put_date(c.rdi, tick) ? 0 : bad_pointer;
+    }
+    case S::rtc_resolution: return 1000000;
+    // ConvertUtcToLocalTime(const utc tick*, local tick*).
+    case S::rtc_utc_to_local: {
+        uint64_t tick = 0;
+        if (!get_tick(c.rdi, tick)) return bad_pointer;
+        return put_tick(c.rsi, tick + uint64_t(local_offset_us())) ? 0 : bad_pointer;
+    }
+    default: return kernel_error(nosys);
+    }
 }
 Error PS4Libkernel::resolve(uint64_t address, size_t& mount, char* relative) const {
     char path[PS4KernelPath::max_path];
@@ -962,6 +1106,27 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     }
     case S::counter_frequency: return 1000000000;
     case S::kernel_sleep: return kernel_error(threads_.sleep(uint64_t(uint32_t(c.rdi)) * 1000000));
+    case S::np_state: return c.rsi && write(c.rsi, 1, 4) ? 0 : signed32(0x80550003U); // 1: signed out.
+    case S::np_signed_out: return signed32(0x80550006U);
+    case S::np_create_request: return next_np_request_++;
+    // sceAppContentInitialize(initParam, bootParam*): bootParam.attr 0 (normal boot).
+    case S::app_init: return !c.rsi || write(c.rsi, 0, 4) ? 0 : signed32(0x80D90002U);
+    // GetAddcontInfoList(serviceLabel, list, listNum, hitNum*): none.
+    case S::app_addcont_list: return c.rcx && write(c.rcx, 0, 4) ? 0 : signed32(0x80D90002U);
+    // AppParamGetInt(paramId, value*): SKU flag (0) 3 = full game, user params 0.
+    case S::app_param_int:
+        if (c.rdi > 4 || !c.rsi) return signed32(0x80D90002U);
+        return write(c.rsi, c.rdi == 0 ? 3 : 0, 4) ? 0 : signed32(0x80D90002U);
+    case S::app_temp_mount: return temp_mount(c.rsi);
+    case S::rtc_current_tick: case S::rtc_current_clock: case S::rtc_current_local:
+    case S::rtc_get_tick: case S::rtc_set_tick: case S::rtc_resolution: case S::rtc_utc_to_local:
+        return rtc(service, c);
+    // GetDisplaySafeAreaInfo(info*): float ratio 1.0 (the whole screen).
+    case S::safe_area: return c.rdi && write(c.rdi, 0x3f800000, 4) ? 0 : signed32(0x80A10003U);
+    case S::trophy_create_context: case S::trophy_create_handle:
+        return c.rdi && write(c.rdi, 1, 4) ? 0 : signed32(0x80551604U);
+    // UnlockTrophy(context, handle, trophyId, platinumId*): no platinum unlocked.
+    case S::trophy_unlock: return !c.rcx || write(c.rcx, uint32_t(-1), 4) ? 0 : signed32(0x80551604U);
     case S::save_init: return 0;
     case S::save_term: save_umount(0); return 0;
     case S::save_mount2: return save_mount(c.rdi, c.rsi);
@@ -1093,7 +1258,7 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
         constexpr int64_t parameter_error = int32_t(0x80A10003);
         int32_t value = 0;
         switch (c.rdi) {
-        case 1: value = 1; break;
+        case 1: value = system_language_; break;
         case 2: case 3: case 4: case 5: case 7: value = 0; break;
         case 1000: value = 1; break;
         default: return parameter_error;

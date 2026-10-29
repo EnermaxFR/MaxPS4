@@ -76,6 +76,9 @@ enum class PS4KernelService : uint32_t {
     sema_create, sema_delete, sema_wait, sema_poll, sema_signal, sema_cancel,
     flag_create, flag_delete, flag_set, flag_clear, flag_wait, flag_poll, flag_cancel,
     process_counter, counter_frequency, kernel_sleep,
+    np_state, np_signed_out, np_create_request, app_init, app_addcont_list, app_param_int,
+    app_temp_mount, rtc_current_tick, rtc_current_clock, rtc_current_local, rtc_get_tick, rtc_set_tick,
+    rtc_resolution, rtc_utc_to_local, safe_area, trophy_create_context, trophy_create_handle, trophy_unlock,
     save_dialog_init, save_dialog_open, save_dialog_update, save_dialog_result, save_dialog_term,
     user_initialize, user_terminate, user_initial, user_login_list, user_event, user_name,
     pad_init, pad_open, pad_close, pad_read, pad_read_state, pad_information, pad_handle,
@@ -149,6 +152,9 @@ public:
     // Host directory holding this game's save directories: sceSaveDataMount2
     // mounts <root>/<dirName> at /savedata0. Cleared by reset().
     int64_t set_savedata_root(const char* host_directory);
+    // The console language games read (sceSystemServiceParamGetInt 1): a PS4
+    // language ID, 1 (English US) until set. Cleared by reset().
+    void set_system_language(int32_t language) { system_language_ = language; }
     void reset();
     // `posix`: the trampoline's token had posix_token; an Orbis error result
     // becomes -1 with that error in the thread's errno cell.
@@ -178,9 +184,13 @@ private:
     uint64_t heap_trace_ = 0; // sceLibcHeapGetTraceInfo's zeroed tables, mapped on first use.
     std::map<uint64_t, uint64_t> direct_; // Allocated physical ranges: start -> length.
     std::string save_root_;
+    int32_t system_language_ = 1;
+    uint32_t next_np_request_ = 0x10000001;
     uint32_t save_dialog_status_ = 0; // OrbisCommonDialogStatus: none, initialized, running, finished.
     int64_t save_mount(uint64_t request, uint64_t result);
     int64_t save_umount(uint64_t mount_point);
+    int64_t temp_mount(uint64_t mount_point);
+    int64_t rtc(PS4KernelService service, const PS4KernelCall& call);
     int64_t memory_service(PS4KernelService service, const PS4KernelCall& call);
     int64_t posix_result(int64_t result, uint64_t thread);
     int64_t invoke_service(PS4KernelService service, const PS4KernelCall& call, uint64_t thread);
