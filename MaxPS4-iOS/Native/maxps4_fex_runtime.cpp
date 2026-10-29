@@ -3,7 +3,10 @@
 #include "maxps4_guest_stack.h"
 #include "maxps4_orbis_v4_execution_gate.h"
 #include <algorithm>
+#include <map>
 #include <iterator>
+#include <filesystem>
+#include <fstream>
 #include "maxps4_jit_memory.h"
 #include "maxps4_guest_elf.h"
 #include "SelfImage.hpp"
@@ -26,6 +29,8 @@
 #include <FEXCore/Core/X86Enums.h>
 #include <FEXCore/Debug/InternalThreadState.h>
 #include <FEXCore/HLE/SyscallHandler.h>
+#include <FEXCore/Utils/AllocatorHooks.h>
+#include <FEXCore/Utils/ArchHelpers/Arm64.h>
 #include <array>
 #include <cstring>
 #include <cstdio>
@@ -42,10 +47,17 @@
 #include <optional>
 #include <system_error>
 #include <thread>
+#include <unordered_map>
+#include <dlfcn.h>
 #include <pthread.h>
 #include <signal.h>
 #if defined(__APPLE__)
 #include <sys/ucontext.h>
+#include <libkern/OSCacheControl.h>
+#include <mach/mach.h>
+#if __has_feature(ptrauth_calls)
+#include <ptrauth.h>
+#endif
 #else
 #include <ucontext.h>
 #endif
@@ -53,6 +65,12 @@
 extern "C" int maxps4_native_guest_x86_run(const uint8_t*, size_t, uint32_t,
                                            uint64_t*) noexcept;
 namespace {
+// Unaligned TSO/atomic accesses repaired in the SIGBUS handler (signal-safe
+// lock-free counters), reported with the thread activity.
+std::atomic<uint64_t> alignment_repairs {0};
+std::atomic<uint64_t> last_repair_pc {0};
+// maxps4_fex_set_tso_emulation: applies to engines opened afterwards.
+std::atomic<bool> tso_emulation {true};
 class GuestThreads;
 // scePthreadCreate/Join/Exit and the entry's exit function for a general run
 // (see GuestThreads), defined once GuestThreads is complete.
@@ -76,9 +94,12 @@ public:
     maxps4::PS4GuestMemory* memory = nullptr;
     GuestThreads* threads = nullptr; // General runs only.
     // Boot probe stubs: "<library> <NID>" per missing_import_token index, and
-    // whether each was already reported.
+    // how many times each was called (the first call is also reported).
     const std::vector<std::string>* missing_imports = nullptr;
-    std::vector<std::atomic<bool>>* missing_reported = nullptr;
+    std::vector<std::atomic<uint32_t>>* missing_reported = nullptr;
+    // One stderr line per HLE call (boot probe only): thousands per second,
+    // which a game on the iPhone paid on its own thread, through the debugger.
+    bool trace = false;
     uint64_t private_stack = 0;
     size_t private_stack_size = 0;
     // Guest threads of a general run call in concurrently.
@@ -86,6 +107,27 @@ public:
     std::atomic<int> callback_error {0};
     std::atomic<bool> exited {false};
     std::atomic<int32_t> exit_status {0};
+    // Per guest thread: the HLE call in progress, or the last one and when it
+    // returned, so a stalled game shows where each of its threads waits.
+    struct Activity {
+        std::atomic<uint64_t> thread {0}, since {0}, returned {0};
+        std::atomic<uint32_t> service {0};
+        std::atomic<bool> inside {false};
+    };
+    std::array<Activity, 32> activity;
+    static uint64_t now_ns() {
+        return uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+    }
+    // This guest thread's slot; null once all slots are taken.
+    Activity* activity_slot() {
+        for (auto& a : activity) if (a.thread.load(std::memory_order_relaxed) == guest_thread) return &a;
+        for (auto& a : activity) {
+            uint64_t free = 0;
+            if (a.thread.compare_exchange_strong(free, guest_thread)) return &a;
+        }
+        return nullptr;
+    }
     // PS4 identity (PS4Threads) of the guest thread on this host thread.
     static inline thread_local uint64_t guest_thread = 1;
     // Static TLS thread pointer of a child guest thread (0: the image's own).
@@ -119,10 +161,12 @@ public:
                 // seventh, at RSP+8 past the trampoline's return address) are
                 // readable. Bounded images keep 0, which makes them fault.
                 image->general() ? r[x86::REG_RSP] : 0};
+            Activity* slot = activity_slot();
+            if (slot) { slot->service = static_cast<uint32_t>(orbis); slot->since = now_ns(); slot->inside = true; }
             const uint32_t stub = static_cast<uint32_t>(orbis) - maxps4::missing_import_token;
             if (static_cast<uint32_t>(orbis) >= maxps4::missing_import_token) {
                 if (missing_imports && stub < missing_imports->size()) {
-                    if (!(*missing_reported)[stub].exchange(true))
+                    if ((*missing_reported)[stub].fetch_add(1, std::memory_order_relaxed) == 0)
                         std::fprintf(stderr, "missing import %s\n", (*missing_imports)[stub].c_str());
                     result = 0;
                 } else {
@@ -164,12 +208,13 @@ public:
             } else {
                 result = kernel->invoke(orbis,call,guest_thread,posix);
             }
+            if (slot) { slot->since = now_ns(); slot->inside = false; ++slot->returned; }
             ++calls;
             char path[256] = {};
-            if (missing_imports && (orbis == maxps4::PS4KernelService::open || orbis == maxps4::PS4KernelService::stat) &&
+            if (trace && (orbis == maxps4::PS4KernelService::open || orbis == maxps4::PS4KernelService::stat) &&
                 memory->read_cstring(call.rdi, path, sizeof(path)))
                 std::fprintf(stderr, "hle path \"%s\"\n", path);
-            if (missing_imports && static_cast<uint32_t>(orbis) < maxps4::missing_import_token)
+            if (trace && static_cast<uint32_t>(orbis) < maxps4::missing_import_token)
                 std::fprintf(stderr, "hle %s(0x%llx, 0x%llx, 0x%llx, 0x%llx) = 0x%llx rsp 0x%llx -> 0x%llx\n",
                     service_name(orbis), (unsigned long long)call.rdi, (unsigned long long)call.rsi,
                     (unsigned long long)call.rdx, (unsigned long long)call.rcx, (unsigned long long)result,
@@ -282,8 +327,10 @@ public:
 #endif
     GuestFaultGuard(FEXCore::Context::Context* context, FEXCore::Core::InternalThreadState* thread,
                     const FEXCore::SignalDelegatorConfig& config, uint32_t limit_ms,
-                    bool install = true, std::function<void()> expire = {})
-        : context(context), thread(thread), config(config) {
+                    bool install = true, std::function<void()> expire = {},
+                    const std::atomic<bool>* cancelled = nullptr,
+                    std::function<bool(uint64_t,size_t,uint32_t)> memory_access = {})
+        : context(context), thread(thread), config(config), memory_access(std::move(memory_access)) {
         if (!available) return;
         active = this;
         if (!install) return;
@@ -293,11 +340,15 @@ public:
         sigemptyset(&action.sa_mask);
         for (; installed < signals.size(); ++installed)
             if (::sigaction(signals[installed], &action, &previous[installed]) != 0) break;
-        if (limit_ms && installed == signals.size()) {
+        if ((limit_ms || cancelled) && installed == signals.size()) {
             const pthread_t target = ::pthread_self();
-            watchdog = std::thread([this, target, limit_ms, expire = std::move(expire)] {
+            watchdog = std::thread([this, target, limit_ms, cancelled, expire = std::move(expire)] {
                 std::unique_lock lock(watch_lock);
-                if (watch.wait_for(lock, std::chrono::milliseconds(limit_ms), [this] { return finished; })) return;
+                const auto start = std::chrono::steady_clock::now();
+                while (!finished && !(cancelled && cancelled->load()) &&
+                       (!limit_ms || std::chrono::steady_clock::now() - start < std::chrono::milliseconds(limit_ms)))
+                    watch.wait_for(lock, std::chrono::milliseconds(10), [this] { return finished; });
+                if (finished) return;
                 if (expire) expire();
                 while (!finished && !signal.load()) {
                     ::pthread_kill(target, SIGURG);
@@ -321,8 +372,44 @@ public:
     GuestFaultGuard(const GuestFaultGuard&) = delete;
     GuestFaultGuard& operator=(const GuestFaultGuard&) = delete;
     std::atomic<int> signal {0};
+    int32_t code = 0;
     uint64_t address = 0;
+    // maxps4_fex_engine_sample_main_thread: the next SIGURG seen while
+    // `sample_request` is set records where the guarded thread is, then
+    // lets it run on. `where`: 1 JIT code, 2 FEX dispatcher, 3 other host code.
+    struct Sample { uint64_t pc = 0, lr = 0, rip = 0; uint32_t where = 0; };
+    std::atomic<bool> sample_request {false};
+    std::atomic<uint32_t> sample_sequence {0};
+    Sample sample {};
+    const pthread_t host = ::pthread_self();
+    // For a sample taken from outside the thread. The signal handler uses the
+    // same FEX lookups, so they take no lock the sampled thread could hold.
+    uint64_t stored_rip() const { return thread->CurrentFrame->State.rip; }
+    bool in_dispatcher(uint64_t pc) const { return pc >= config.DispatcherBegin && pc < config.DispatcherEnd; }
+    bool in_jit(uint64_t pc) const { return context->IsAddressInCodeBuffer(thread, pc); }
+    uint64_t guest_rip(uint64_t pc) const { return context->RestoreRIPFromHostPC(thread, pc); }
 private:
+    struct AlignmentAccess { uint64_t address; size_t bytes; uint32_t permissions; };
+    // Operand forms recognized by the pinned FEX unaligned handler. Include
+    // its ordinary-load/store backpatch forms for concurrent repair races.
+    static std::optional<AlignmentAccess> alignment_access(uint32_t i,const std::array<uint64_t,32>& gprs) {
+        size_t bytes=size_t{1}<<(i>>30);
+        uint32_t permissions=6; int64_t offset=0;
+        const auto is=[i](uint32_t mask,uint32_t opcode) { return (i&mask)==opcode; };
+        if (is(0xbfe0fc00,0x0860fc00) || is(0xbfff8000,0x887f8000) || is(0xbfe08000,0x88208000))
+            bytes=(i&(1u<<30)) ? 16 : 8; // CASPAL / exclusive pair (read-modify-write)
+        else if (is(0x3ffffc00,0x08dffc00) || is(0x3ffffc00,0x38bfc000)) permissions=4; // LDAR / LDAPR
+        else if (is(0x3ffffc00,0x089ffc00)) permissions=2; // STLR
+        else if (is(0x3fe00c00,0x19400000) || is(0x3fe00c00,0x19000000) ||
+                 is(0x3be00c00,0x38400000) || is(0x3be00c00,0x38000000)) {
+            permissions=(i&(1u<<22)) ? 4 : 2; // LDAPUR / STLUR / patched LDUR / STUR
+            offset=(i>>12)&0x1ff; if (offset&0x100) offset-=512;
+        } else if (is(0x3ffffc00,0x387f6800) || is(0x3ffffc00,0x383f6800))
+            permissions=(i&(1u<<22)) ? 4 : 2; // patched LDR / STR, register offset XZR
+        else if (!(is(0x3fe0fc00,0x08e0fc00) || is(0x3b200c00,0x38200000) ||
+                   is(0x3ffffc00,0x085ffc00) || is(0x3fe0fc00,0x0800fc00))) return std::nullopt;
+        return AlignmentAccess{gprs[(i>>5)&31]+offset,bytes,permissions};
+    }
     static constexpr std::array<int, 5> signals {SIGSEGV, SIGBUS, SIGILL, SIGTRAP, SIGURG};
     static inline std::array<struct sigaction, 5> previous {};
     static inline thread_local GuestFaultGuard* active = nullptr;
@@ -337,15 +424,86 @@ private:
         auto& sp = machine->uc_mcontext.sp;
 #endif
         auto* guard = active;
+        if (number == SIGURG && guard && guard->sample_request.exchange(false)) {
+            const bool jit = guard->context->IsAddressInCodeBuffer(guard->thread, pc);
+            const bool dispatcher = pc >= guard->config.DispatcherBegin && pc < guard->config.DispatcherEnd;
+#if defined(__APPLE__)
+            guard->sample.lr = machine->uc_mcontext->__ss.__lr;
+#else
+            guard->sample.lr = machine->uc_mcontext.regs[30];
+#endif
+            guard->sample.pc = pc;
+            guard->sample.where = jit ? 1 : dispatcher ? 2 : 3;
+            // Outside JIT code, the guest position FEX last stored (block granularity).
+            guard->sample.rip = jit ? guard->context->RestoreRIPFromHostPC(guard->thread, pc) :
+                guard->thread->CurrentFrame->State.rip;
+            guard->sample_sequence.fetch_add(1, std::memory_order_release);
+            return;
+        }
         if (guard && !guard->signal.load()) {
+            const bool in_jit = guard->context->IsAddressInCodeBuffer(guard->thread, pc);
+            // x86 permits unaligned accesses. ARM64 TSO loads/stores and locked
+            // operations can raise BUS_ADRALN for otherwise valid guest memory.
+            // This frontend must route those faults to FEX before containing
+            // actual guest faults, as the upstream Linux signal frontend does.
+            if (number == SIGBUS && info->si_code == BUS_ADRALN && in_jit) {
+                std::array<uint64_t,32> gprs{};
+#if defined(__APPLE__)
+                auto& saved = machine->uc_mcontext->__ss;
+                std::copy(std::begin(saved.__x),std::end(saved.__x),gprs.begin());
+                gprs[29]=saved.__fp; gprs[30]=saved.__lr; gprs[31]=saved.__sp;
+#else
+                auto& saved = machine->uc_mcontext;
+                std::copy(std::begin(saved.regs),std::end(saved.regs),gprs.begin());
+                gprs[31]=saved.sp;
+#endif
+                // FEX may backpatch a TSO access with ordered loads/stores.
+                // iOS uses distinct RW/RX aliases: patch RW, resume RX, and
+                // invalidate the executable alias as well as FEX's RW flush.
+                auto* writable=FEXCore::Allocator::GetWritableAddress(reinterpret_cast<void*>(pc));
+                const auto access=alignment_access(*static_cast<const uint32_t*>(writable),gprs);
+                std::optional<int32_t> repaired;
+                // Darwin may report BUS_ADRALN for protected memory too. Never
+                // emulate an atomic access or retry a patched store unless the
+                // entire guest operand has the required read/write permission.
+                if (access && guard->memory_access && guard->memory_access(access->address,access->bytes,access->permissions)) {
+#if defined(__APPLE__)
+                    FEXCore::Allocator::ScopedJITWriteProtect jit_write;
+#endif
+                    repaired=FEXCore::ArchHelpers::Arm64::HandleUnalignedAccess(guard->thread,
+                        FEXCore::ArchHelpers::Arm64::UnalignedHandlerType::HalfBarrier,
+                        reinterpret_cast<uintptr_t>(writable),gprs.data());
+                }
+                if (repaired) {
+#if defined(__APPLE__)
+                    std::copy_n(gprs.begin(),29,std::begin(saved.__x));
+                    saved.__fp=gprs[29]; saved.__lr=gprs[30]; saved.__sp=gprs[31];
+#else
+                    std::copy_n(gprs.begin(),31,std::begin(saved.regs));
+                    saved.sp=gprs[31];
+#endif
+                    if (reinterpret_cast<uintptr_t>(writable)!=pc) {
+#if defined(__APPLE__)
+                        sys_icache_invalidate(reinterpret_cast<void*>(pc-4),12);
+#else
+                        __builtin___clear_cache(reinterpret_cast<char*>(pc)-4,reinterpret_cast<char*>(pc)+8);
+#endif
+                    }
+                    pc+=*repaired;
+                    alignment_repairs.fetch_add(1, std::memory_order_relaxed);
+                    last_repair_pc.store(pc, std::memory_order_relaxed);
+                    return;
+                }
+            }
             // JIT code keeps guest registers in host registers: spill them first.
             // The dispatcher's guest-signal stubs have already spilled.
             uint64_t stop = 0;
-            if (guard->context->IsAddressInCodeBuffer(guard->thread, pc))
+            if (in_jit)
                 stop = guard->config.ThreadStopHandlerAddressSpillSRA;
             else if (pc >= guard->config.DispatcherBegin && pc < guard->config.DispatcherEnd)
                 stop = guard->config.ThreadStopHandlerAddress;
             if (stop) {
+                guard->code = number == SIGURG ? 0 : info->si_code;
                 guard->address = number == SIGURG ? 0 : reinterpret_cast<uintptr_t>(info->si_addr);
                 guard->signal.store(number);
                 sp = guard->thread->CurrentFrame->ReturningStackLocation;
@@ -370,6 +528,7 @@ private:
     FEXCore::Context::Context* context;
     FEXCore::Core::InternalThreadState* thread;
     FEXCore::SignalDelegatorConfig config;
+    std::function<bool(uint64_t,size_t,uint32_t)> memory_access;
     size_t installed = 0;
     std::thread watchdog;
     std::mutex watch_lock;
@@ -616,12 +775,13 @@ private:
             if (auto* fex = context->CreateThread(thread.entry, thread.rsp)) {
                 if (setup.prepare(fex, thread.entry, thread.rsp, thread.fs) == 0) {
                     fex->CurrentFrame->State.gregs[FEXCore::X86State::REG_RDI] = thread.arg;
-                    GuestFaultGuard guard(context, fex, config, 0, false);
+                    GuestFaultGuard guard(context, fex, config, 0, false, {}, nullptr,
+                        [this](uint64_t a,size_t n,uint32_t p) { return memory.permitted(a,n,p); });
                     context->ExecuteThread(fex);
                     const int signal = guard.signal.load();
                     // SIGURG only comes from finish(): a stop, not a fault.
                     if (signal && signal != SIGURG)
-                        fault = {signal, 0, guard.address, fex->CurrentFrame->State.rip};
+                        fault = {signal, guard.code, guard.address, fex->CurrentFrame->State.rip};
                 }
                 context->DestroyThread(fex);
             }
@@ -671,6 +831,53 @@ int64_t guest_thread_service(GuestThreads& threads, maxps4::PS4KernelService ser
     }
 }
 }
+// CPU profile of the main guest thread (maxps4_fex_engine_set_profiling):
+// a host thread suspends it through Mach every 5 ms and records where it
+// is: a guest RIP (JIT code, 64-byte buckets), the FEX dispatcher, or a host
+// function (HLE services, FEX helpers). The FEX lookups run while the thread
+// is suspended, as in the signal handler; nothing allocates until it resumes.
+struct CPUProfile {
+    std::mutex lock;
+    uint64_t jit = 0, dispatcher = 0, host = 0;
+    std::unordered_map<uint64_t, uint64_t> guest;   // RIP bucket -> samples
+    std::unordered_map<uint64_t, uint64_t> symbols; // host symbol start -> samples
+    void clear() { std::lock_guard g(lock); jit = dispatcher = host = 0; guest.clear(); symbols.clear(); }
+#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__)) && !defined(VIXL_SIMULATOR)
+    void run(const GuestFaultGuard& guard, const std::atomic<bool>& done) {
+        const thread_act_t port = ::pthread_mach_thread_np(guard.host);
+        while (!done.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            if (done.load()) break;
+            arm_thread_state64_t state {};
+            mach_msg_type_number_t count = ARM_THREAD_STATE64_COUNT;
+            if (::thread_suspend(port) != KERN_SUCCESS) break;
+            const bool read = ::thread_get_state(port, ARM_THREAD_STATE64,
+                reinterpret_cast<thread_state_t>(&state), &count) == KERN_SUCCESS;
+            uint64_t pc = 0, rip = 0; uint32_t where = 0;
+            if (read) {
+                pc = arm_thread_state64_get_pc(state);
+#if __has_feature(ptrauth_calls)
+                pc = uint64_t(reinterpret_cast<uintptr_t>(ptrauth_strip(reinterpret_cast<void*>(pc), ptrauth_key_return_address)));
+#endif
+                if (guard.in_jit(pc)) { where = 1; rip = guard.guest_rip(pc); }
+                else where = guard.in_dispatcher(pc) ? 2 : 3;
+            }
+            ::thread_resume(port);
+            if (!read) continue;
+            uint64_t symbol = 0;
+            if (where == 3) {
+                Dl_info info {};
+                if (::dladdr(reinterpret_cast<void*>(pc), &info) && info.dli_saddr)
+                    symbol = reinterpret_cast<uintptr_t>(info.dli_saddr);
+            }
+            std::lock_guard g(lock);
+            if (where == 1) { ++jit; ++guest[rip & ~uint64_t{0x3f}]; }
+            else if (where == 2) ++dispatcher;
+            else { ++host; ++symbols[symbol]; }
+        }
+    }
+#endif
+};
 struct maxps4_fex_engine {
     // This real FEX configuration holder installs no process signal handlers.
     // It outlives the context. Only admitted no-fault straight-line code executes.
@@ -684,6 +891,14 @@ struct maxps4_fex_engine {
     maxps4_fex_cpu_report cpu_report{};
     maxps4_fex_guest_fault last_fault{};
     uint32_t time_limit_ms = 0; // 0: no limit.
+    std::atomic<bool> stop_requested{false};
+    // The running main thread's guard, for sampling; guarded by sample_lock.
+    std::mutex sample_lock;
+    GuestFaultGuard* main_guard = nullptr;
+    CPUProfile profile;
+    std::atomic<bool> profiling{false};
+    uint64_t relocation = 0; // Of the loaded game, for relative profile RIPs.
+    std::string update_directory; // For load_game (set_update); empty: none.
     maxps4::GuestFrame frame;
     uint64_t frame_sequence = 0;
     bool frame_code_cached = false;
@@ -691,9 +906,9 @@ struct maxps4_fex_engine {
     maxps4::PS4GuestMemory system_memory{staged_ps4, &dynamic_ps4};
     maxps4::PS4Libkernel libkernel{system_memory, &dynamic_ps4};
     maxps4::PS4DynamicLinker linker;
-    bool import_probe = false;
+    bool import_probe = false, import_trace = false;
     std::vector<std::string> missing_imports;
-    std::vector<std::atomic<bool>> missing_reported;
+    std::vector<std::atomic<uint32_t>> missing_reported;
     fextl::unique_ptr<FEXCore::Context::Context> context;
     int32_t stage = MAXPS4_FEX_CONTEXT_CREATED;
 };
@@ -737,6 +952,10 @@ extern "C" int32_t maxps4_fex_engine_open(maxps4_fex_engine **out) {
             std::to_string(static_cast<uint64_t>(FEXCore::Config::HostFeatures::DISABLESVE)));
 #endif
     }
+#if !defined(VIXL_SIMULATOR)
+    // Read by the context created below; the simulator always runs without it.
+    FEXCore::Config::Set(FEXCore::Config::CONFIG_TSOENABLED, tso_emulation.load() ? "1" : "0");
+#endif
     // Real Darwin sysctl-based feature discovery; never fabricated features.
     const auto features = FEX::FetchHostFeatures();
     engine->context = FEXCore::Context::Context::CreateNewContext(features);
@@ -820,6 +1039,12 @@ extern "C" int32_t maxps4_fex_engine_set_time_limit(maxps4_fex_engine* engine,
     engine->time_limit_ms = milliseconds;
     return 0;
 }
+extern "C" int32_t maxps4_fex_engine_request_stop(maxps4_fex_engine* engine) {
+    if (!engine) return -EINVAL;
+    engine->stop_requested=true;
+    engine->libkernel.videoout().interrupt(); // Flip waits end at once.
+    return 0;
+}
 extern "C" int32_t maxps4_fex_engine_cpuid(maxps4_fex_engine *engine,
                                           uint32_t leaf, uint32_t subleaf,
                                           uint32_t out[4]) {
@@ -875,6 +1100,7 @@ struct PM4Request {
 };
 int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     uint64_t* result, uint32_t* backend, const PM4Request* submission, bool linked = false, bool persistent_frame = false) {
+    if (engine->stop_requested.load()) return -ECANCELED;
     if (engine->stage != MAXPS4_FEX_DISPATCHER_INITIALIZED) return -EAGAIN;
     // FEX still uses rebased host addresses for the admitted instruction set.
     // Check the logical PS4 entry via the shared guest-memory contract before
@@ -904,13 +1130,15 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     // Orbis images with synthesized HLE trampolines also reach libkernel.
     engine->probe.kernel = linked || image.has_hle() ? &engine->libkernel : nullptr;
     engine->probe.memory = linked || image.has_hle() ? &engine->system_memory : nullptr;
-    // Probe mode only: stubs report themselves and every HLE call is traced.
+    // Probe mode only: stubs report themselves; mode 1 also traces every HLE call.
     engine->probe.missing_imports = engine->import_probe ? &engine->missing_imports : nullptr;
     engine->probe.missing_reported = engine->import_probe ? &engine->missing_reported : nullptr;
+    engine->probe.trace = engine->import_trace;
     engine->probe.private_stack = reinterpret_cast<uintptr_t>(stack_base);
     engine->probe.private_stack_size = page;
     engine->probe.calls = 0;
     engine->probe.callback_error = 0;
+    for (auto& a : engine->probe.activity) { a.thread = 0; a.inside = false; a.returned = 0; }
     struct ClearRange {
         ProbeAddressSpace& space;
         ~ClearRange() {
@@ -986,8 +1214,33 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
                             engine->system_memory, engine->libkernel.threads(), page);
         engine->probe.threads = threads ? &*threads : nullptr;
         GuestFaultGuard guard(engine->context.get(), thread, engine->signals.GetConfig(), engine->time_limit_ms,
-                              true, [&threads] { if (threads) threads->interrupt(); });
+                              true, [&threads] { if (threads) threads->interrupt(); }, &engine->stop_requested,
+                              [engine,stack_base,page](uint64_t a,size_t n,uint32_t p) {
+                                  if (engine->system_memory.permitted(a,n,p)) return true;
+                                  const auto low=reinterpret_cast<uintptr_t>(stack_base);
+                                  return a>=low && a-low<=page && n<=page-(a-low) && !(p&~6u);
+                              });
+        { std::lock_guard sampling(engine->sample_lock); engine->main_guard = &guard; }
+        std::atomic<bool> profiled {false};
+        std::thread profiler;
+#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__)) && !defined(VIXL_SIMULATOR)
+        if (engine->profiling.load()) {
+            engine->profile.clear();
+            profiler = std::thread([engine, &guard, &profiled] { engine->profile.run(guard, profiled); });
+        }
+#endif
+        // The app runs this on a libdispatch worker thread, which blocks SIGURG:
+        // the stop (and sampling) signal then never lands in this thread's JIT
+        // code, and a game spinning there without HLE calls never stopped.
+        sigset_t urgent, saved;
+        sigemptyset(&urgent); sigaddset(&urgent, SIGURG);
+        ::pthread_sigmask(SIG_UNBLOCK, &urgent, &saved);
         engine->context->ExecuteThread(thread);
+        ::pthread_sigmask(SIG_SETMASK, &saved, nullptr);
+        // Stopped while this thread (the sampled one) still exists.
+        profiled = true;
+        if (profiler.joinable()) profiler.join();
+        { std::lock_guard sampling(engine->sample_lock); engine->main_guard = nullptr; }
         int signal = guard.signal.load();
         // scePthreadExit on the main thread: the other threads carry on.
         const bool main_exit = threads && !signal && threads->main_thread_exited();
@@ -1000,10 +1253,10 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
         if (signal == SIGURG && engine->probe.exited) signal = 0;
         // RIP is the guest position FEX last stored (block granularity).
         if (threads && threads->faulted(child)) { engine->last_fault = child; signal = child.signal; }
-        else if (signal) engine->last_fault = {signal, 0, guard.address, state.rip};
+        else if (signal) engine->last_fault = {signal, guard.code, guard.address, state.rip};
         if (signal) {
             engine->frame_code_cached = false;
-            return signal == SIGURG ? -ETIMEDOUT :
+            return signal == SIGURG ? (engine->stop_requested.load() ? -ECANCELED : -ETIMEDOUT) :
                 signal == SIGSEGV || signal == SIGBUS ? -EFAULT : -EILSEQ;
         }
         // The last thread ended after the main thread's scePthreadExit: exit(0).
@@ -1211,7 +1464,7 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine* en
             engine->import_probe ? &missing : nullptr);
         if (collected) { message(why); return collected; }
         engine->missing_imports = std::move(missing);
-        engine->missing_reported = std::vector<std::atomic<bool>>(engine->missing_imports.size());
+        engine->missing_reported = std::vector<std::atomic<uint32_t>>(engine->missing_imports.size());
         std::string reason;
         uint64_t moved = 0;
         int status = engine->staged_ps4.prepare_orbis_general(inputs,hle,root,reason,moved);
@@ -1241,14 +1494,15 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine* en
         }
         message(status ? reason : "SCE image linked and identity-mapped; execution not attempted");
         engine->orbis_admitted = status == 0;
-        if (!status) *relocation = moved;
+        if (!status) *relocation = engine->relocation = moved;
         return status;
     } catch (const std::bad_alloc&) { message("Orbis allocation failed"); return -ENOMEM; }
 }
 extern "C" int32_t maxps4_fex_engine_set_import_probe(maxps4_fex_engine* engine, uint32_t enabled) {
-    if (!engine || enabled > 1) return -EINVAL;
+    if (!engine || enabled > 2) return -EINVAL;
     std::lock_guard lock(runtime_lock);
     engine->import_probe = enabled != 0;
+    engine->import_trace = enabled == 1;
     return 0;
 }
 extern "C" int32_t maxps4_fex_engine_prepare_orbis(maxps4_fex_engine* engine,
@@ -1446,11 +1700,102 @@ extern "C" int64_t maxps4_fex_engine_mount_app0(maxps4_fex_engine* engine, const
     if (engine->staged_ps4.segments().empty()) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
     return engine->libkernel.mount_app0(directory);
 }
+extern "C" int32_t maxps4_fex_engine_set_update(maxps4_fex_engine* engine, const char* directory) {
+    if (!engine) return -EINVAL;
+    std::lock_guard lock(runtime_lock);
+    engine->update_directory = directory ? directory : "";
+    return 0;
+}
+extern "C" int32_t maxps4_fex_engine_load_game(maxps4_fex_engine* engine, const char* directory,
+    uint64_t* relocation, char* diagnostic, size_t capacity) {
+    if (relocation) *relocation = 0;
+    if (diagnostic && capacity) diagnostic[0] = 0;
+    if (!engine || !directory) return -EINVAL;
+    auto report = [&](const std::string& text) {
+        if (diagnostic && capacity) { const size_t n = std::min(capacity - 1, text.size()); std::memcpy(diagnostic, text.data(), n); diagnostic[n] = 0; }
+    };
+    struct Module { std::string name; std::vector<uint8_t> bytes; maxps4::OrbisMetadata metadata;
+                    std::vector<std::string> dependencies; std::vector<const char*> pointers; };
+    try {
+        const std::filesystem::path root(directory), update(engine->update_directory);
+        std::vector<std::filesystem::path> files;
+        std::error_code error;
+        // The update's modules replace the game's of the same name and add its own.
+        std::map<std::string, std::filesystem::path> prx;
+        for (const auto& folder : {root, update}) {
+            if (folder.empty()) continue;
+            std::error_code missing;
+            for (const auto& entry : std::filesystem::directory_iterator(folder / "sce_module", missing))
+                if (entry.path().extension() == ".prx") prx[entry.path().filename().string()] = entry.path();
+        }
+        for (const auto& [name, path] : prx) files.push_back(path);
+        files.push_back(!update.empty() && std::filesystem::exists(update / "eboot.bin", error) ? update / "eboot.bin" : root / "eboot.bin");
+        // Providers first (the linker wants a module's dependencies before it).
+        std::vector<Module> modules(files.size());
+        for (size_t i = 0; i < files.size(); ++i) {
+            std::ifstream in(files[i], std::ios::binary);
+            if (!in) { report(files[i].filename().string() + ": unreadable"); return -ENOENT; }
+            modules[i].bytes.assign(std::istreambuf_iterator<char>(in), {});
+            modules[i].name = files[i].filename().string();
+            if (!modules[i].metadata.parse(modules[i].bytes.data(), modules[i].bytes.size())) {
+                report(modules[i].name + ": " + modules[i].metadata.error);
+                return -ENOEXEC;
+            }
+        }
+        // 1 MiB aligned, 1 MiB apart, as ps4-orbis-analyze places them.
+        std::vector<maxps4_orbis_module> table;
+        uint64_t bias = 0x400000;
+        for (auto& m : modules) {
+            for (const auto& needed : m.metadata.needed)
+                for (const auto& other : modules)
+                    if (&other != &m && other.name == needed) m.dependencies.push_back(needed);
+            for (const auto& d : m.dependencies) m.pointers.push_back(d.c_str());
+            table.push_back({m.name.c_str(), m.bytes.data(), m.bytes.size(), bias, m.pointers.data(), m.pointers.size()});
+            uint64_t end = 0;
+            for (const auto& s : m.metadata.segments)
+                if (s.type == 1 || s.type == 0x61000010) end = std::max(end, s.address + s.memsz);
+            bias += ((end + 0xfffff) & ~uint64_t{0xfffff}) + 0x100000;
+        }
+        const int32_t prepared = maxps4_fex_engine_prepare_orbis_general(engine, table.data(), table.size(),
+                                                                         "eboot.bin", relocation, diagnostic, capacity);
+        if (prepared) return prepared;
+        const int64_t mounted = maxps4_fex_engine_mount_app0(engine, root.string().c_str());
+        if (mounted) return int32_t(mounted);
+        if (!update.empty()) {
+            const int64_t overlaid = engine->libkernel.mount_app0_update(update.string().c_str());
+            if (overlaid) { report("update: not readable"); return int32_t(overlaid); }
+        }
+        return 0;
+    } catch (const std::bad_alloc&) { return -ENOMEM; }
+    catch (const std::filesystem::filesystem_error&) { report("directory not readable"); return -ENOENT; }
+}
 extern "C" int64_t maxps4_fex_engine_mount(maxps4_fex_engine* engine, const char* guest, const char* directory) {
     if (!engine) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
     std::lock_guard lock(runtime_lock);
     if (engine->staged_ps4.segments().empty()) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
     return engine->libkernel.mount(guest, directory);
+}
+extern "C" int32_t maxps4_fex_engine_missing_imports(maxps4_fex_engine* engine, char* text, size_t capacity) {
+    if (!engine || (!text && capacity)) return -EINVAL;
+    // Immutable once loaded; the counts are atomics the running game bumps.
+    std::vector<std::pair<uint32_t, size_t>> order;
+    for (size_t i = 0; i < engine->missing_imports.size(); ++i)
+        order.push_back({engine->missing_reported[i].load(std::memory_order_relaxed), i});
+    std::stable_sort(order.begin(), order.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+    std::string out;
+    for (const auto& [calls, i] : order) {
+        const std::string line = engine->missing_imports[i] + " " + std::to_string(calls) + "\n";
+        if (out.size() + line.size() >= capacity) break;
+        out += line;
+    }
+    if (capacity) { std::memcpy(text, out.data(), out.size()); text[out.size()] = 0; }
+    return int32_t(order.size());
+}
+extern "C" int64_t maxps4_fex_engine_set_savedata_root(maxps4_fex_engine* engine, const char* directory) {
+    if (!engine) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
+    std::lock_guard lock(runtime_lock);
+    if (engine->staged_ps4.segments().empty()) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
+    return engine->libkernel.set_savedata_root(directory);
 }
 extern "C" int64_t maxps4_fex_engine_call_libkernel(maxps4_fex_engine* engine, uint32_t service,
     const maxps4_ps4_kernel_call* call, uint64_t guest_thread) {
@@ -1485,6 +1830,23 @@ extern "C" int32_t maxps4_fex_engine_gnm_backend(maxps4_fex_engine* engine, uint
     if (!engine) return -EINVAL;
     return engine->libkernel.graphics().backend(enabled);
 }
+extern "C" int32_t maxps4_fex_engine_gnm_host_consumer(maxps4_fex_engine* engine,
+    void* context, maxps4_gnm_host_consumer consumer) {
+    if (!engine) return -EINVAL;
+    return engine->libkernel.graphics().host_consumer(context,consumer);
+}
+extern "C" int32_t maxps4_fex_engine_read_memory(maxps4_fex_engine* engine,
+    uint64_t address, void* destination, size_t bytes) {
+    if (!engine || !destination || !bytes || bytes > (256ull << 20)) return -EINVAL;
+    return engine->system_memory.read(address,destination,bytes) ? 0 : -EFAULT;
+}
+extern "C" int32_t maxps4_fex_engine_videoout_target(maxps4_fex_engine* engine,
+    maxps4_videoout_frame* frame, uint64_t* address) {
+    if (frame) *frame={};
+    if (address) *address=0;
+    if (!engine || !frame || !address) return -EINVAL;
+    return engine->libkernel.videoout().target(*frame,*address);
+}
 extern "C" int32_t maxps4_fex_engine_gnm_snapshot(maxps4_fex_engine* engine,
     maxps4_gnm_submission* submission, uint32_t* words, size_t capacity) {
     if (submission) *submission={};
@@ -1495,19 +1857,255 @@ extern "C" int32_t maxps4_fex_engine_gnm_complete(maxps4_fex_engine* engine, uin
     if (!engine || success>1) return -EINVAL;
     return engine->libkernel.graphics().complete(ticket,success!=0);
 }
+extern "C" int32_t maxps4_fex_engine_gnm_software_status(maxps4_fex_engine* engine, uint32_t* draws,
+    uint32_t* rendered, uint32_t* failed, char* error, size_t capacity) {
+    if (!engine) return -EINVAL;
+    const auto stats = engine->libkernel.graphics().software_stats();
+    if (draws) *draws = stats.draws;
+    if (rendered) *rendered = stats.rendered;
+    if (failed) *failed = stats.failed;
+    if (error && capacity) {
+        const size_t n = std::min(capacity - 1, stats.error.size());
+        std::memcpy(error, stats.error.data(), n);
+        error[n] = 0;
+    }
+    return 0;
+}
 extern "C" int32_t maxps4_fex_engine_pad_update(maxps4_fex_engine* engine, uint32_t buttons,
     uint8_t lx, uint8_t ly, uint8_t rx, uint8_t ry, uint8_t l2, uint8_t r2, uint32_t connected) {
     if (!engine || connected > 1) return -EINVAL;
     return engine->libkernel.pad().update(buttons, {{lx, ly, rx, ry}}, l2, r2, connected != 0);
+}
+extern "C" int32_t maxps4_fex_engine_audio_read(maxps4_fex_engine* engine, float* samples, uint32_t frames) {
+    if (!engine || !samples || frames > 16384) return -EINVAL;
+    return int32_t(engine->libkernel.audio().read(samples, frames));
+}
+extern "C" int32_t maxps4_fex_engine_audio_status(maxps4_fex_engine* engine, uint64_t* outputs,
+    uint64_t* written, uint64_t* dropped, uint64_t* silent, uint32_t* ports, uint64_t* audible) {
+    if (!engine) return -EINVAL;
+    const auto stats = engine->libkernel.audio().stats();
+    if (audible) *audible = stats.audible;
+    if (outputs) *outputs = stats.outputs;
+    if (written) *written = stats.written;
+    if (dropped) *dropped = stats.dropped;
+    if (silent) *silent = stats.silent;
+    if (ports) *ports = stats.ports;
+    return 0;
 }
 extern "C" int64_t maxps4_fex_engine_videoout_complete(maxps4_fex_engine* engine,
     uint64_t ticket, uint32_t presented) {
     if (!engine || presented > 1) return maxps4::PS4VideoOut::error(1);
     return engine->libkernel.videoout().complete(ticket, presented != 0);
 }
+extern "C" uint64_t maxps4_fex_engine_videoout_dropped(maxps4_fex_engine* engine) {
+    return engine ? engine->libkernel.videoout().dropped() : 0;
+}
+extern "C" int32_t maxps4_fex_engine_videoout_output(maxps4_fex_engine* engine, uint32_t width, uint32_t height) {
+    if (!engine) return -EINVAL;
+    return engine->libkernel.videoout().set_output(width, height) ? 0 : -EINVAL;
+}
+extern "C" uint64_t maxps4_fex_engine_videoout_requested(maxps4_fex_engine* engine) {
+    return engine ? engine->libkernel.videoout().requested() : 0;
+}
+extern "C" void maxps4_fex_engine_videoout_pause(maxps4_fex_engine* engine, uint32_t paused) {
+    if (engine) engine->libkernel.videoout().set_paused(paused != 0);
+}
 extern "C" int64_t maxps4_fex_engine_videoout_vblank(maxps4_fex_engine* engine, uint64_t port) {
     if (!engine) return maxps4::PS4VideoOut::error(11);
     return engine->libkernel.videoout().vblank(port);
+}
+extern "C" int32_t maxps4_fex_engine_sample_main_thread(maxps4_fex_engine* engine, maxps4_fex_thread_sample* out) {
+    if (!engine || !out) return -EINVAL;
+    *out = {};
+    if (!GuestFaultGuard::available) return -ENOTSUP;
+    // SIGURG would interrupt the host syscalls of an HLE call: sample only
+    // while the main guest thread runs outside HLE. A sample costs the game
+    // up to ~70 ms (signal retries, then 16 suspensions) and the caller holds
+    // its session lock meanwhile: only when no HLE call returned for 2 s,
+    // never while the game runs normally.
+    const uint64_t now = ProbeAddressSpace::now_ns();
+    for (const auto& a : engine->probe.activity)
+        if (a.thread.load() == 1 && (a.inside.load() || now - std::min(now, a.since.load()) < 2000000000ULL))
+            return -EBUSY;
+    std::lock_guard lock(engine->sample_lock);
+    auto* guard = engine->main_guard;
+    if (!guard) return -ESRCH;
+    // The run's own thread (the main guest thread's host thread, once
+    // run_orbis returned) would suspend itself and never resume.
+    if (::pthread_equal(guard->host, ::pthread_self())) return -EDEADLK;
+    const uint32_t before = guard->sample_sequence.load(std::memory_order_acquire);
+    guard->sample_request = true;
+    for (int i = 0; i < 50 && guard->sample_sequence.load(std::memory_order_acquire) == before; ++i) {
+        ::pthread_kill(guard->host, SIGURG);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    auto name = [](uint64_t address, char* text, size_t capacity) {
+        Dl_info info {};
+        if (!::dladdr(reinterpret_cast<void*>(address), &info) || !info.dli_sname) return false;
+        std::snprintf(text, capacity, "%s+0x%llx", info.dli_sname,
+            (unsigned long long)(address - reinterpret_cast<uintptr_t>(info.dli_saddr)));
+        return true;
+    };
+    if (guard->sample_sequence.load(std::memory_order_acquire) == before) {
+        guard->sample_request = false;
+#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__)) && !defined(VIXL_SIMULATOR)
+        // The signal was not taken: read the suspended thread instead. Nothing
+        // that may lock (allocation, FEX lookups, dladdr) runs while it is
+        // suspended, since it may hold that lock.
+        const thread_act_t port = ::pthread_mach_thread_np(guard->host);
+        const auto top = reinterpret_cast<uintptr_t>(::pthread_get_stackaddr_np(guard->host));
+        const uintptr_t low = top - ::pthread_get_stacksize_np(guard->host);
+        auto strip = [](uint64_t address) {
+#if __has_feature(ptrauth_calls)
+            return uint64_t(reinterpret_cast<uintptr_t>(ptrauth_strip(reinterpret_cast<void*>(address), ptrauth_key_return_address)));
+#else
+            return address;
+#endif
+        };
+        std::array<uint64_t, 16> frames {};
+        size_t depth = 0;
+        // Several reads 1 ms apart: a waiting loop shows up as a few guest
+        // addresses. FEX's stored RIP only moves when a block leaves JIT code,
+        // so JIT positions are translated back from the host PC (after resume).
+        constexpr int reads = 16;
+        for (int k = 0; k < reads; ++k) {
+            if (k) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            arm_thread_state64_t state {};
+            mach_msg_type_number_t count = ARM_THREAD_STATE64_COUNT;
+            if (::thread_suspend(port) != KERN_SUCCESS) break;
+            const kern_return_t read = ::thread_get_state(port, ARM_THREAD_STATE64,
+                reinterpret_cast<thread_state_t>(&state), &count);
+            if (read == KERN_SUCCESS && !k) {
+                out->host_pc = strip(arm_thread_state64_get_pc(state));
+                out->host_lr = strip(arm_thread_state64_get_lr(state));
+                for (size_t r = 0; r < 29; ++r) out->registers[r] = state.__x[r];
+                // JIT code may use x29 as a scratch register: only follow frames
+                // that stay inside this thread's stack and move up it.
+                uintptr_t fp = arm_thread_state64_get_fp(state);
+                while (depth < frames.size() && fp >= low && fp % 16 == 0 && fp <= top - 16) {
+                    const auto* frame = reinterpret_cast<const uint64_t*>(fp);
+                    if (frame[1]) frames[depth++] = strip(frame[1]);
+                    if (frame[0] <= fp) break;
+                    fp = frame[0];
+                }
+                out->guest_rip = guard->stored_rip();
+            }
+            ::thread_resume(port);
+            if (read != KERN_SUCCESS) break;
+            if (!k) out->method = 1;
+            const uint64_t pc = strip(arm_thread_state64_get_pc(state));
+            if (!guard->in_jit(pc)) continue;
+            const uint64_t rip = guard->guest_rip(pc);
+            if (!k) out->guest_rip = rip;
+            bool seen = false;
+            for (uint32_t i = 0; i < out->rip_count; ++i) seen = seen || out->rips[i] == rip;
+            if (!seen && out->rip_count < 8) out->rips[out->rip_count++] = rip;
+        }
+        if (out->method != 1) return -ETIMEDOUT;
+        const uint64_t pc = out->host_pc;
+        const bool dispatcher = guard->in_dispatcher(pc);
+        const bool named = name(pc, out->symbol, sizeof out->symbol);
+        out->location = guard->in_jit(pc) ? 1 : dispatcher ? 2 : named ? 3 : 1;
+        name(out->host_lr, out->caller, sizeof out->caller);
+        size_t used = 0;
+        for (size_t i = 0; i < depth && used + 1 < sizeof out->backtrace; ++i) {
+            char symbol[128] {};
+            if (!name(frames[i], symbol, sizeof symbol))
+                std::snprintf(symbol, sizeof symbol, "0x%llx", (unsigned long long)frames[i]);
+            const int n = std::snprintf(out->backtrace + used, sizeof out->backtrace - used, "%s%s", i ? " < " : "", symbol);
+            if (n < 0) break;
+            used = std::min(sizeof out->backtrace - 1, used + size_t(n));
+        }
+        return 0;
+#else
+        return -ETIMEDOUT;
+#endif
+    }
+    const auto sample = guard->sample;
+    out->host_pc = sample.pc; out->host_lr = sample.lr; out->guest_rip = sample.rip; out->location = sample.where;
+    name(sample.pc, out->symbol, sizeof out->symbol);
+    name(sample.lr, out->caller, sizeof out->caller);
+    return 0;
+}
+extern "C" int32_t maxps4_fex_engine_set_profiling(maxps4_fex_engine* engine, uint32_t enabled) {
+    if (!engine || enabled > 1) return -EINVAL;
+    engine->profiling = enabled != 0; return 0;
+}
+extern "C" int32_t maxps4_fex_engine_profile_report(maxps4_fex_engine* engine, char* text, size_t capacity) {
+    if (!engine || !text || !capacity) return -EINVAL;
+    text[0] = 0;
+    auto& p = engine->profile;
+    std::vector<std::pair<uint64_t, uint64_t>> guest, symbols;
+    uint64_t jit, dispatcher, host;
+    {
+        std::lock_guard g(p.lock);
+        jit = p.jit; dispatcher = p.dispatcher; host = p.host;
+        guest.assign(p.guest.begin(), p.guest.end());
+        symbols.assign(p.symbols.begin(), p.symbols.end());
+    }
+    const uint64_t total = jit + dispatcher + host;
+    if (!total) return 0;
+    auto by_count = [](const auto& a, const auto& b) { return a.second > b.second; };
+    std::sort(guest.begin(), guest.end(), by_count);
+    std::sort(symbols.begin(), symbols.end(), by_count);
+    auto percent = [total](uint64_t n) { return 100.0 * double(n) / double(total); };
+    char line[256];
+    std::snprintf(line, sizeof line, "Profil thread 1 (%llu échantillons) : code du jeu %.0f %% · répartiteur FEX %.0f %% · émulateur %.0f %%\n",
+        (unsigned long long)total, percent(jit), percent(dispatcher), percent(host));
+    std::string out = line;
+    out += "Code du jeu (RIP relatif) :";
+    for (size_t i = 0; i < std::min<size_t>(10, guest.size()); ++i) {
+        const uint64_t rip = guest[i].first >= engine->relocation ? guest[i].first - engine->relocation : guest[i].first;
+        std::snprintf(line, sizeof line, " 0x%llx %.1f %%", (unsigned long long)rip, percent(guest[i].second));
+        out += line;
+    }
+    out += "\nÉmulateur :";
+    for (size_t i = 0; i < std::min<size_t>(8, symbols.size()); ++i) {
+        Dl_info info {};
+        const char* name = symbols[i].first && ::dladdr(reinterpret_cast<void*>(symbols[i].first), &info) && info.dli_sname
+            ? info.dli_sname : "?";
+        std::snprintf(line, sizeof line, " %.60s %.1f %%", name, percent(symbols[i].second));
+        out += line;
+    }
+    out += "\n";
+    const size_t n = std::min(capacity - 1, out.size());
+    std::memcpy(text, out.data(), n);
+    text[n] = 0;
+    return 0;
+}
+extern "C" int32_t maxps4_fex_set_tso_emulation(uint32_t enabled) {
+    if (enabled > 1) return -EINVAL;
+    tso_emulation = enabled != 0; return 0;
+}
+extern "C" int32_t maxps4_fex_engine_thread_activity(maxps4_fex_engine* engine, char* text, size_t capacity) {
+    if (!engine || !text || !capacity) return -EINVAL;
+    char header[160];
+    std::snprintf(header, sizeof header, "TSO %s · réparations d'alignement %llu (dernier PC hôte 0x%llx)\n",
+        tso_emulation.load() ? "émulé" : "désactivé", (unsigned long long)alignment_repairs.load(),
+        (unsigned long long)last_repair_pc.load());
+    std::string out = header;
+    const uint64_t now = ProbeAddressSpace::now_ns();
+    for (const auto& a : engine->probe.activity) {
+        const uint64_t thread = a.thread.load();
+        if (!thread) continue;
+        const uint32_t raw = a.service.load();
+        const char* name = raw >= maxps4::missing_import_token ? "import manquant" :
+            service_name(static_cast<maxps4::PS4KernelService>(raw));
+        const double seconds = double(now - std::min(now, a.since.load())) / 1e9;
+        const auto returned = (unsigned long long)a.returned.load();
+        char line[192];
+        if (a.inside.load())
+            std::snprintf(line, sizeof line, "thread %llu : dans %s depuis %.1f s (%llu appels)\n",
+                (unsigned long long)thread, name, seconds, returned);
+        else
+            std::snprintf(line, sizeof line, "thread %llu : code du jeu depuis %.1f s, dernier %s (%llu appels)\n",
+                (unsigned long long)thread, seconds, name, returned);
+        out += line;
+    }
+    const size_t n = std::min(capacity - 1, out.size());
+    std::memcpy(text, out.data(), n);
+    text[n] = 0;
+    return 0;
 }
 extern "C" int32_t maxps4_fex_engine_read_ps4(maxps4_fex_engine* engine,
     uint64_t address, uint8_t* output, size_t length) {

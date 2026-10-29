@@ -37,6 +37,9 @@ uint32_t maxps4_ps4_resolve_libkernel(const char *symbol, const char *library,
 int64_t maxps4_fex_engine_mount_app0(maxps4_fex_engine *engine, const char *directory);
 // The same for "/app0" (read-only), "/savedata0", "/download0" or "/temp0".
 int64_t maxps4_fex_engine_mount(maxps4_fex_engine *engine, const char *guest, const char *directory);
+// The directory holding this game's save data directories (sceSaveDataMount2
+// mounts <directory>/<dirName> at /savedata0). Also after staging.
+int64_t maxps4_fex_engine_set_savedata_root(maxps4_fex_engine *engine, const char *directory);
 // Explicit service dispatch, serialized against staging and engine accesses.
 // Returns a guest ABI result, including signed Orbis errors. Default bootstrap
 // guest thread identity is 1. No guest CPU import trampoline is installed.
@@ -58,6 +61,8 @@ int64_t maxps4_fex_engine_complete_graphics_event(maxps4_fex_engine *engine,
 // 2 attaches the null backend instead (boot probe): it draws nothing and
 // queues no ticket; submissions apply their label writes and EOP interrupts,
 // and sceGnmSubmitAndFlipCommandBuffers then requests the VideoOut flip.
+// 3 attaches the software backend: the null backend plus a CPU execution of
+// every submission (GCN interpreter), slow but drawing what the game drew.
 // Default/restaged state is detached; detach cancels all outstanding tickets.
 // All three calls avoid the FEX runtime lock; caller retains engine and
 // serializes close. Snapshot capacity is in dwords; null/0 queries metadata.
@@ -65,14 +70,41 @@ int64_t maxps4_fex_engine_complete_graphics_event(maxps4_fex_engine *engine,
 // cancels remaining work and latches failure until reattachment/reset. This
 // never confirms presentation or emits GNM events without a command requesting it.
 int32_t maxps4_fex_engine_gnm_backend(maxps4_fex_engine* engine, uint32_t enabled);
+// Backend 4: synchronous app consumer. Attach after load_game, before run.
+// Return zero only after GPU completion. No GNM reentry from the callback.
+// Caller owns context until run returns and the backend is detached.
+typedef int32_t (*maxps4_gnm_host_consumer)(void*, const uint32_t*, size_t);
+int32_t maxps4_fex_engine_gnm_host_consumer(maxps4_fex_engine* engine,
+    void* context, maxps4_gnm_host_consumer consumer);
+// Checked guest-memory copy. Safe from a synchronous host-consumer callback;
+// caller serializes against engine close and guest memory mutation.
+int32_t maxps4_fex_engine_read_memory(maxps4_fex_engine* engine,
+    uint64_t address, void* destination, size_t bytes);
+// Pending flip metadata and its registered colour-target address, no CPU copy.
+int32_t maxps4_fex_engine_videoout_target(maxps4_fex_engine* engine,
+    maxps4_videoout_frame* frame, uint64_t* address);
 int32_t maxps4_fex_engine_gnm_snapshot(maxps4_fex_engine* engine,
     maxps4_gnm_submission* submission, uint32_t* words, size_t capacity);
 int32_t maxps4_fex_engine_gnm_complete(maxps4_fex_engine* engine, uint64_t ticket, uint32_t success);
+// Software backend counters (any pointer may be null) and its first error,
+// NUL-terminated and truncated to `capacity`. No FEX runtime lock.
+int32_t maxps4_fex_engine_gnm_software_status(maxps4_fex_engine* engine, uint32_t* draws,
+    uint32_t* rendered, uint32_t* failed, char* error, size_t capacity);
 // Concurrent host input. Values use PS4 button bits and 0..255 stick/trigger
 // samples (sticks centered at 128). No global execution lock is acquired.
 // Caller retains the engine and serializes against close; connected is 0 or 1.
 int32_t maxps4_fex_engine_pad_update(maxps4_fex_engine* engine, uint32_t buttons,
     uint8_t lx, uint8_t ly, uint8_t rx, uint8_t ry, uint8_t l2, uint8_t r2, uint32_t connected);
+// Concurrent host audio: mixes up to `frames` 48 kHz interleaved stereo float
+// frames of the game's AudioOut ports into `samples` (zeros where none).
+// Returns the frames that had data, or -EINVAL. Same ownership rule as
+// pad_update; no FEX runtime lock.
+int32_t maxps4_fex_engine_audio_read(maxps4_fex_engine* engine, float* samples, uint32_t frames);
+// AudioOut counters (any pointer may be null): Output calls, frames written,
+// frames dropped (ring full, no reader), silent frames read, open ports,
+// written frames with a non-zero sample.
+int32_t maxps4_fex_engine_audio_status(maxps4_fex_engine* engine, uint64_t* outputs,
+    uint64_t* written, uint64_t* dropped, uint64_t* silent, uint32_t* ports, uint64_t* audible);
 // Owned linear VideoOut frame (raw RGBA/BGRA bytes, including row padding).
 // With pixels=NULL/capacity=0, query metadata only. Otherwise capacity must
 // cover byte_count. Returns 0, -EAGAIN if no frame, or -EINVAL for bad outputs;
@@ -86,6 +118,51 @@ int32_t maxps4_fex_engine_videoout_snapshot(maxps4_fex_engine *engine,
 int64_t maxps4_fex_engine_videoout_complete(maxps4_fex_engine *engine,
     uint64_t ticket, uint32_t presented);
 int64_t maxps4_fex_engine_videoout_vblank(maxps4_fex_engine *engine, uint64_t port);
+// Host pause (game menu): vblanks are ignored and flips waiting for one keep
+// waiting, which holds a vblank-paced game. Resume before stopping the run.
+void maxps4_fex_engine_videoout_pause(maxps4_fex_engine *engine, uint32_t paused);
+// Flips of sceGnmSubmitAndFlipCommandBuffers skipped because the previous one
+// was still pending (their prepareFlip label is still written).
+uint64_t maxps4_fex_engine_videoout_dropped(maxps4_fex_engine *engine);
+// Output resolution reported to the game: 1920x1080 (default) or 1280x720.
+// Set after loading, before running; kept across reloads. -EINVAL otherwise.
+int32_t maxps4_fex_engine_videoout_output(maxps4_fex_engine *engine, uint32_t width, uint32_t height);
+// Flips the game asked for so far: accepted plus skipped.
+uint64_t maxps4_fex_engine_videoout_requested(maxps4_fex_engine *engine);
+// One line per guest thread of the current run: the HLE call it is in and for
+// how long, or how long it has run guest code since its last call. Diagnostic
+// only, lock-free, NUL-terminated and truncated to `capacity`.
+int32_t maxps4_fex_engine_thread_activity(maxps4_fex_engine *engine, char *text, size_t capacity);
+// Where the main guest thread of the running image is right now, sampled by
+// a signal that lets it continue. Refused (-EBUSY) while it is inside an HLE
+// call or returned from one less than 2 s ago, -ESRCH when nothing runs. Diagnostic only. On Apple devices a thread
+// that never takes the signal (signals masked, e.g. inside a FEX lock) is
+// suspended briefly through Mach instead (`method` 1), 16 times 1 ms apart:
+// the first read gives its registers and frame-pointer chain, every read in
+// JIT code a guest RIP translated back from the host PC.
+typedef struct maxps4_fex_thread_sample {
+    uint64_t host_pc, host_lr;
+    uint64_t guest_rip; // JIT: reconstructed; otherwise FEX's last stored RIP.
+    uint32_t location;  // 1: JIT code, 2: FEX dispatcher, 3: other host code.
+    uint32_t method;    // 0: signal, 1: Mach suspension (the signal was not taken).
+    char symbol[128];   // Host symbol of host_pc, "" when unknown.
+    char caller[128];   // Host symbol of host_lr.
+    char backtrace[768]; // Method 1: return addresses up the frame chain, " < " separated.
+    uint64_t registers[29]; // Method 1: host x0..x28 at the first read.
+    uint64_t rips[8];       // Method 1: distinct guest RIPs of the reads in JIT code.
+    uint32_t rip_count;
+} maxps4_fex_thread_sample;
+int32_t maxps4_fex_engine_sample_main_thread(maxps4_fex_engine *engine, maxps4_fex_thread_sample *sample);
+// CPU profile of the main guest thread for the next run (diagnostic, off by
+// default; Apple devices only): sampled every 5 ms through Mach suspension.
+int32_t maxps4_fex_engine_set_profiling(maxps4_fex_engine *engine, uint32_t enabled);
+// Since the run started: JIT code / FEX dispatcher / host shares, the hottest
+// guest RIPs (64-byte buckets, relative to the game's relocation) and host
+// functions. NUL-terminated, truncated to `capacity`; empty without samples.
+int32_t maxps4_fex_engine_profile_report(maxps4_fex_engine *engine, char *text, size_t capacity);
+// Experimental: x86 memory-order (TSO) emulation for engines opened after
+// this call (default 1). The VIXL simulator always runs with it off.
+int32_t maxps4_fex_set_tso_emulation(uint32_t enabled);
 enum { MAXPS4_CPU_RESTRICTED_INTERPRETER = 1, MAXPS4_CPU_FEX_ARM64_JIT = 2,
        MAXPS4_CPU_FEX_ARM64_SIMULATOR = 3 };
 enum { MAXPS4_FEX_CONTEXT_CREATED = 1, MAXPS4_FEX_DISPATCHER_INITIALIZED = 2 };
@@ -117,7 +194,7 @@ int32_t maxps4_fex_engine_last_cpu_report(const maxps4_fex_engine *engine,
 // when the last execution did not fault.
 typedef struct maxps4_fex_guest_fault {
     int32_t signal;
-    uint32_t reserved;
+    int32_t code; // host si_code (previously a reserved 32-bit slot)
     uint64_t address, rip;
 } maxps4_fex_guest_fault;
 int32_t maxps4_fex_engine_last_guest_fault(const maxps4_fex_engine *engine,
@@ -129,6 +206,11 @@ int32_t maxps4_fex_engine_last_guest_fault(const maxps4_fex_engine *engine,
 // guest instruction is. -ENOTSUP for a nonzero limit where faults cannot be
 // contained (non-ARM64 host or VIXL simulator).
 int32_t maxps4_fex_engine_set_time_limit(maxps4_fex_engine *engine, uint32_t milliseconds);
+// Concurrent sticky cancellation, including a request before run starts.
+// Runs return -ECANCELED. Interruption during execution requires native ARM64
+// fault containment, as for set_time_limit; HLE waits are woken before stopping.
+// Engine remains owned by the worker until run returns; close is not concurrent.
+int32_t maxps4_fex_engine_request_stop(maxps4_fex_engine* engine);
 int32_t maxps4_fex_engine_cpuid(maxps4_fex_engine *engine, uint32_t leaf,
                               uint32_t subleaf, uint32_t out[4]);
 // Compatibility synthetic ELF fixture routed through run_elf; no host syscalls.
@@ -211,9 +293,24 @@ int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine *engine,
 // default). When on, every import that neither a given module nor the HLE
 // provides gets a stub: a function writes "missing import <library> <NID>"
 // to stderr on its first call and returns 0, a data object is 64 zero bytes.
-// Every HLE call of a run is also traced to stderr with its result.
+// With 1, every HLE call of a run is also traced to stderr with its result;
+// 2 keeps the stubs without that trace (thousands of lines per second).
 // It shows how far a game gets; it never makes it correct.
 int32_t maxps4_fex_engine_set_import_probe(maxps4_fex_engine *engine, uint32_t enabled);
+// The loaded game's imports that neither its modules nor the HLE provide
+// (stubbed, returning 0): one "<library> <NID> <calls>" line each, most
+// called first, as many whole lines as fit. Returns how many there are.
+int32_t maxps4_fex_engine_missing_imports(maxps4_fex_engine *engine, char *text, size_t capacity);
+// A game directory as the boot probe loads it: <directory>/sce_module/*.prx
+// (sorted) then <directory>/eboot.bin, each module's DT_NEEDED resolved among
+// them, placed 1 MiB aligned and apart from 0x400000, linked with
+// prepare_orbis_general, then <directory> mounted as /app0. Files are only
+// read. Returns 0, a negative errno, or the failing call's status.
+// A game update for the next load_game (NULL or "" for none): its eboot.bin
+// and sce_module/*.prx replace the game's, and it overlays /app0.
+int32_t maxps4_fex_engine_set_update(maxps4_fex_engine *engine, const char *directory);
+int32_t maxps4_fex_engine_load_game(maxps4_fex_engine *engine, const char *directory,
+    uint64_t *relocation, char *diagnostic, size_t capacity);
 // Optional bounded RGBA8 output/input contract for an admitted SCE process.
 // buttons: left=1, right=2, up=4, down=8, action=16. No host pointer returned.
 // Invalid configuration clears previous output. Dimensions <=320x240; disjoint RW/non-X.

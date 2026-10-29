@@ -2,6 +2,7 @@
 #include "maxps4_fex_runtime.h"
 #include "maxps4_ps4_kernel_path.h"
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <cstdio>
 #include <dirent.h>
@@ -82,6 +83,29 @@ constexpr Binding bindings[] = {
     {"sceKernelClockGetres", "wRYVA5Zolso", PS4KernelService::clock_getres},
     {"sceKernelGettimeofday", "ejekcaNQNq0", PS4KernelService::gettimeofday},
     {"sceKernelGetProcessTime", "4J2sUJmuHZQ", PS4KernelService::process_time},
+    // One nanosecond counter stands for both the process time counter and the TSC.
+    {"sceKernelGetProcessTimeCounter", "fgxnMeTNUtY", PS4KernelService::process_counter},
+    {"sceKernelGetProcessTimeCounterFrequency", "BNowx2l588E", PS4KernelService::counter_frequency},
+    {"sceKernelReadTsc", "-2IRUCO--PM", PS4KernelService::process_counter},
+    {"sceKernelGetTscFrequency", "1j3S3n-tTW4", PS4KernelService::counter_frequency},
+    {"sceKernelSleep", "-ZR+hG7aDHw", PS4KernelService::kernel_sleep},
+    {"sceKernelNanosleep", "QvsZxomvUHs", PS4KernelService::nanosleep},
+    {"sceKernelGetCpumode", "VOx8NGmHXTs", PS4KernelService::succeed},
+    {"sceKernelGetCurrentCpu", "g0VTBxfJyu0", PS4KernelService::succeed},
+    // Semaphores and event flags (shadPS4 kernel/threads/semaphore.cpp, event_flag.cpp).
+    {"sceKernelCreateSema", "188x57JYp0g", PS4KernelService::sema_create},
+    {"sceKernelDeleteSema", "R1Jvn8bSCW8", PS4KernelService::sema_delete},
+    {"sceKernelWaitSema", "Zxa0VhQVTsk", PS4KernelService::sema_wait},
+    {"sceKernelPollSema", "12wOHk8ywb0", PS4KernelService::sema_poll},
+    {"sceKernelSignalSema", "4czppHBiriw", PS4KernelService::sema_signal},
+    {"sceKernelCancelSema", "4DM06U2BNEY", PS4KernelService::sema_cancel},
+    {"sceKernelCreateEventFlag", "BpFoboUJoZU", PS4KernelService::flag_create},
+    {"sceKernelDeleteEventFlag", "8mql9OcQnd4", PS4KernelService::flag_delete},
+    {"sceKernelSetEventFlag", "IOnSvHzqu6A", PS4KernelService::flag_set},
+    {"sceKernelClearEventFlag", "7uhBFWRAS60", PS4KernelService::flag_clear},
+    {"sceKernelWaitEventFlag", "JTvBflhYazQ", PS4KernelService::flag_wait},
+    {"sceKernelPollEventFlag", "9lvj5DjHZiA", PS4KernelService::flag_poll},
+    {"sceKernelCancelEventFlag", "PZku4ZrXJqg", PS4KernelService::flag_cancel},
     {"scePthreadSelf", "aI+OeCz8xrQ", PS4KernelService::thread_self},
     {"scePthreadMutexInit", "cmo1RIYva9o", PS4KernelService::mutex_init},
     {"scePthreadMutexTrylock", "upoVrzMHFeE", PS4KernelService::mutex_trylock},
@@ -241,7 +265,7 @@ constexpr Binding bindings[] = {
     {"sceVideoOutGetEventCount", "Mt4QHHkxkOc", PS4KernelService::video_event_count, "libSceVideoOut"},
     {"sceVideoOutGetResolutionStatus", "6kPnj51T62Y", PS4KernelService::video_resolution, "libSceVideoOut"},
     // Flips follow the host display; a requested rate changes nothing.
-    {"sceVideoOutSetFlipRate", "CBiu4mCE1DA", PS4KernelService::succeed, "libSceVideoOut"},
+    {"sceVideoOutSetFlipRate", "CBiu4mCE1DA", PS4KernelService::video_flip_rate, "libSceVideoOut"},
     // Memory (shadPS4 kernel/memory.cpp).
     {"sceKernelGetDirectMemorySize", "pO96TwzOm5E", PS4KernelService::direct_size},
     {"sceKernelAllocateDirectMemory", "rTXw65xmLIA", PS4KernelService::direct_allocate},
@@ -255,8 +279,24 @@ constexpr Binding bindings[] = {
     {"sceSystemServiceGetStatus", "rPo6tV8D9bM", PS4KernelService::system_status, "libSceSystemService"},
     {"sceSystemServiceReceiveEvent", "656LMQSrg6U", PS4KernelService::system_event, "libSceSystemService"},
     {"sceSystemServiceHideSplashScreen", "Vo5V8KAwCmk", PS4KernelService::succeed, "libSceSystemService"},
+    // Save data (shadPS4 libraries/save_data): one directory at a time.
+    {"sceSaveDataInitialize3", "TywrFKCoLGY", PS4KernelService::save_init, "libSceSaveData"},
+    {"sceSaveDataTerminate", "yKDy8S5yLA0", PS4KernelService::save_term, "libSceSaveData"},
+    {"sceSaveDataMount2", "0z45PIH+SNI", PS4KernelService::save_mount2, "libSceSaveData"},
+    {"sceSaveDataUmount", "BMR4F-Uek3E", PS4KernelService::save_umount, "libSceSaveData"},
+    // The save dialog has no screen: it finishes at once, answered OK/Yes.
+    {"sceSaveDataDialogInitialize", "s9e3+YpRnzw", PS4KernelService::save_dialog_init, "libSceSaveDataDialog"},
+    {"sceSaveDataDialogOpen", "4tPhsP6FpDI", PS4KernelService::save_dialog_open, "libSceSaveDataDialog"},
+    {"sceSaveDataDialogUpdateStatus", "KK3Bdg1RWK0", PS4KernelService::save_dialog_update, "libSceSaveDataDialog"},
+    {"sceSaveDataDialogGetResult", "yEiJ-qqr6Cg", PS4KernelService::save_dialog_result, "libSceSaveDataDialog"},
+    {"sceSaveDataDialogTerminate", "YuH2FA7azqQ", PS4KernelService::save_dialog_term, "libSceSaveDataDialog"},
     // System modules are part of the HLE: loading one has nothing to do.
     {"sceSysmoduleLoadModule", "g8cM39EUZ6o", PS4KernelService::succeed, "libSceSysmodule"},
+    // Audio (shadPS4 libraries/audio/audioout.cpp).
+    {"sceAudioOutInit", "JfEPXVxhFqA", PS4KernelService::audio_init, "libSceAudioOut"},
+    {"sceAudioOutOpen", "ekNvsT22rsY", PS4KernelService::audio_open, "libSceAudioOut"},
+    {"sceAudioOutClose", "s1--uE9mBFw", PS4KernelService::audio_close, "libSceAudioOut"},
+    {"sceAudioOutOutput", "QOQtbeDqsT4", PS4KernelService::audio_output, "libSceAudioOut"},
     {"msync", "tZY4+SZNFhA", PS4KernelService::succeed, "libkernel", true},
     {"sceKernelMlock", "3k6kx-zOOSQ", PS4KernelService::succeed},
     // Files (shadPS4 kernel/file_system.cpp).
@@ -307,7 +347,7 @@ PS4KernelService resolve_libkernel(std::string_view symbol, std::string_view lib
     return PS4KernelService::unresolved;
 }
 PS4Libkernel::PS4Libkernel(PS4GuestMemory& memory, PS4VirtualMemory* dynamic)
-    : memory_(memory), dynamic_(dynamic), threads_(memory), videoout_(memory, threads_), user_service_(memory), pad_(memory), gnm_(memory), graphics_(memory), started_us_(monotonic_us()) {}
+    : memory_(memory), dynamic_(dynamic), threads_(memory), videoout_(memory, threads_), user_service_(memory), pad_(memory), audio_(memory, threads_), gnm_(memory), graphics_(memory), started_us_(monotonic_us()) {}
 PS4Libkernel::~PS4Libkernel() {
     reset();
 }
@@ -317,14 +357,19 @@ void PS4Libkernel::close_files() {
 void PS4Libkernel::reset() {
     std::lock_guard<std::mutex> guard(lock_);
     close_files();
-    for (auto& mount : mounts_) if (mount.root >= 0) { ::close(mount.root); mount.root = -1; }
+    for (auto& mount : mounts_) {
+        if (mount.root >= 0) { ::close(mount.root); mount.root = -1; }
+        if (mount.overlay >= 0) { ::close(mount.overlay); mount.overlay = -1; }
+    }
     videoout_.reset();
     user_service_.reset();
     pad_.reset();
+    audio_.reset();
     graphics_.reset();
     if (dynamic_) dynamic_->reset();
     threads_.reset();
     errno_table_ = errno_table_size_ = process_param_ = heap_trace_ = 0;
+    save_root_.clear(); save_dialog_status_ = 0;
     direct_.clear();
     started_us_ = monotonic_us();
 }
@@ -338,7 +383,73 @@ int64_t PS4Libkernel::mount(const char* guest, const char* directory) {
     if (fd < 0) return kernel_error(host_error(errno));
     close_files();
     if (target->root >= 0) ::close(target->root);
+    if (target->overlay >= 0) { ::close(target->overlay); target->overlay = -1; }
     target->root = fd;
+    return 0;
+}
+int64_t PS4Libkernel::mount_app0_update(const char* directory) {
+    std::lock_guard<std::mutex> guard(lock_);
+    if (!directory || !*directory || mounts_[0].root < 0) return kernel_error(inval);
+    const int fd = ::open(directory, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) return kernel_error(host_error(errno));
+    if (mounts_[0].overlay >= 0) ::close(mounts_[0].overlay);
+    mounts_[0].overlay = fd;
+    return 0;
+}
+int64_t PS4Libkernel::set_savedata_root(const char* directory) {
+    std::lock_guard<std::mutex> guard(lock_);
+    if (!directory || !*directory) return kernel_error(inval);
+    save_root_ = directory;
+    return 0;
+}
+namespace {
+int64_t save_error(uint32_t code) { return signed32(0x809f0000U | code); }
+constexpr uint32_t save_parameter = 0, save_busy = 3, save_not_mounted = 4, save_exists = 7, save_not_found = 8;
+}
+// sceSaveDataMount2(const OrbisSaveDataMount2*, OrbisSaveDataMountResult*):
+// userId@0, dirName pointer@8 (char[32]), blocks@16, mountMode@24; the result
+// is mountPoint char[16]@0, requiredBlocks@16, mountStatus@28 (1 = created).
+// Only /savedata0 exists; its directory is opened without closing the game's
+// other descriptors (a remount through mount() would close them all).
+int64_t PS4Libkernel::save_mount(uint64_t request, uint64_t result) {
+    constexpr uint32_t read_only = 1, read_write = 2, create = 4, create2 = 32;
+    uint8_t wire[32];
+    if (!request || !result || !memory_.read(request, wire, sizeof(wire))) return save_error(save_parameter);
+    const uint32_t mode = uint32_t(get_le(wire + 24, 4));
+    char name[33];
+    if (!memory_.read_cstring(get_le(wire + 8, 8), name, sizeof(name)) || !name[0]) return save_error(save_parameter);
+    for (const char* c = name; *c; ++c)
+        if (!std::isalnum(static_cast<unsigned char>(*c)) && *c != '-' && *c != '_') return save_error(save_parameter);
+    std::lock_guard<std::mutex> guard(lock_);
+    auto& save = *std::find_if(mounts_.begin(), mounts_.end(), [](const Mount& m) { return !std::strcmp(m.prefix, "/savedata0"); });
+    if (save_root_.empty()) return save_error(save_not_found);
+    if (save.root >= 0) return save_error(save_busy);
+    const std::string path = save_root_ + "/" + name;
+    bool created = false;
+    struct stat info{};
+    if (::stat(path.c_str(), &info) != 0) {
+        if (!(mode & (create | create2))) return save_error(save_not_found);
+        if (::mkdir(path.c_str(), 0755) != 0) return kernel_error(host_error(errno));
+        created = true;
+    } else if ((mode & create) && !(mode & create2)) return save_error(save_exists);
+    const int fd = ::open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) return kernel_error(host_error(errno));
+    uint8_t out[64]{};
+    std::memcpy(out, "/savedata0", 10);
+    put_le(out, 28, created ? 1 : 0, 4);
+    if (!memory_.write(result, out, sizeof(out))) { ::close(fd); return save_error(save_parameter); }
+    save.root = fd;
+    save.writable = (mode & (read_write | create | create2)) != 0 || !(mode & read_only);
+    return 0;
+}
+int64_t PS4Libkernel::save_umount(uint64_t mount_point) {
+    // 0 (sceSaveDataTerminate): whatever is mounted.
+    char point[16] = "/savedata0";
+    if (mount_point && !memory_.read_cstring(mount_point, point, sizeof(point))) return save_error(save_parameter);
+    std::lock_guard<std::mutex> guard(lock_);
+    auto& save = *std::find_if(mounts_.begin(), mounts_.end(), [](const Mount& m) { return !std::strcmp(m.prefix, "/savedata0"); });
+    if (std::strcmp(point, "/savedata0") || save.root < 0) return save_error(save_not_mounted);
+    ::close(save.root); save.root = -1;
     return 0;
 }
 Error PS4Libkernel::resolve(uint64_t address, size_t& mount, char* relative) const {
@@ -368,9 +479,23 @@ Error PS4Libkernel::resolve(uint64_t address, size_t& mount, char* relative) con
     return length > 1 && path[length - 1] == '/' ? inval : noent;
 }
 int PS4Libkernel::parent(size_t mount, const char* relative, char* leaf, Error& error) const {
+    // An update overlay answers for the paths it holds (not the mount root).
+    if (mounts_[mount].overlay >= 0 && *relative) {
+        Error missing = ok;
+        HostFD over(parent_from(mounts_[mount].overlay, relative, leaf, missing));
+        struct stat info{};
+        if (over.fd >= 0 && ::fstatat(over.fd, leaf, &info, AT_SYMLINK_NOFOLLOW) == 0) {
+            error = ok;
+            const int result = over.fd; over.fd = -1;
+            return result;
+        }
+    }
+    return parent_from(mounts_[mount].root, relative, leaf, error);
+}
+int PS4Libkernel::parent_from(int root, const char* relative, char* leaf, Error& error) const {
     // Walk from a held directory descriptor; reject symlinks at EVERY component.
     // Do not canonicalize then reopen a host path (a race can escape the mount).
-    HostFD directory(::fcntl(mounts_[mount].root, F_DUPFD_CLOEXEC, 0));
+    HostFD directory(::fcntl(root, F_DUPFD_CLOEXEC, 0));
     if (directory.fd < 0) { error = host_error(errno); return -1; }
     char path[PS4KernelPath::max_path];
     std::strcpy(path, *relative ? relative : ".");
@@ -759,13 +884,19 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
         if (result) return result;
         if (interrupts) threads_.graphics_interrupt();
         if (!flip) return 0;
-        if (const int64_t e = videoout_.submit(c.r9, signed32(get_le(stack, 4)), signed32(get_le(stack + 8, 4)),
-                                               get_le(stack + 16, 8))) return e;
-        // The work is already retired: what prepareFlip asks for happens now.
-        uint8_t value[4];
-        put_le(value, 0, prepared.value, 4);
-        if (prepared.label && !memory_.write(prepared.address, value, sizeof(value))) return PS4GnmQueue::error(0x1000);
-        if (prepared.interrupt) threads_.graphics_interrupt();
+        // The host backend presents the GPU-rendered target: no CPU copy.
+        const int64_t shown = videoout_.submit(c.r9, signed32(get_le(stack, 4)), signed32(get_le(stack + 8, 4)),
+                                               get_le(stack + 16, 8), !graphics_.host_backend(), true);
+        // The host presents asynchronously, so the previous flip may still be
+        // pending. Skip this image rather than fail: the game ignores the error
+        // and spins forever on the prepareFlip label (Sonic Mania after its
+        // first flip on the iPhone).
+        if (shown == PS4VideoOut::error(0x12)) videoout_.count_dropped();
+        else if (shown) return shown;
+        // The work is already retired: what prepareFlip asks for happens at
+        // the flip's vblank.
+        if (!videoout_.flip_at_vblank(prepared.label, prepared.address, prepared.value, prepared.interrupt))
+            return PS4GnmQueue::error(0x1000);
         return 0;
     }
     case S::gnm_allowed: return graphics_.allowed();
@@ -787,6 +918,11 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     case S::pad_read: return pad_.read(signed32(c.rdi), c.rsi, signed32(c.rdx), false);
     case S::pad_read_state: return pad_.read(signed32(c.rdi), c.rsi, 1, true);
     case S::pad_information: return pad_.information(signed32(c.rdi), c.rsi);
+    case S::audio_init: return audio_.initialize();
+    case S::audio_open:
+        return audio_.open(signed32(c.rdi), signed32(c.rsi), signed32(c.rdx), uint32_t(c.rcx), uint32_t(c.r8), uint32_t(c.r9));
+    case S::audio_close: return audio_.close(signed32(c.rdi));
+    case S::audio_output: return audio_.output(signed32(c.rdi), c.rsi);
     case S::user_terminate: return user_service_.terminate();
     case S::user_initial: return user_service_.initial_user(c.rdi);
     case S::user_login_list: return user_service_.login_users(c.rdi);
@@ -801,9 +937,43 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     }
     case S::video_register: return videoout_.register_buffers(c.rdi, signed32(c.rsi), c.rdx, signed32(c.rcx), c.r8);
     case S::video_unregister: return videoout_.unregister_buffers(c.rdi, signed32(c.rsi));
-    case S::video_submit: return videoout_.submit(c.rdi, signed32(c.rsi), signed32(c.rdx), c.rcx);
+    case S::video_submit: videoout_.pace(); return videoout_.submit(c.rdi, signed32(c.rsi), signed32(c.rdx), c.rcx);
     case S::video_pending: return videoout_.pending(c.rdi);
     case S::video_resolution: return videoout_.resolution(c.rdi, c.rsi);
+    case S::video_flip_rate: return videoout_.set_flip_rate(c.rdi, signed32(c.rsi));
+    case S::sema_create: return kernel_error(threads_.sema_create(c.rdi, c.rsi, signed32(c.rcx), signed32(c.r8)));
+    case S::sema_delete: return kernel_error(threads_.sema_delete(c.rdi));
+    case S::sema_wait: case S::sema_poll:
+        return kernel_error(threads_.sema_wait(c.rdi, signed32(c.rsi), service == S::sema_wait ? c.rdx : 0, service == S::sema_poll));
+    case S::sema_signal: return kernel_error(threads_.sema_signal(c.rdi, signed32(c.rsi)));
+    case S::sema_cancel: return kernel_error(threads_.sema_cancel(c.rdi, signed32(c.rsi), c.rdx));
+    case S::flag_create: return kernel_error(threads_.flag_create(c.rdi, c.rsi, uint32_t(c.rdx), c.rcx));
+    case S::flag_delete: return kernel_error(threads_.flag_delete(c.rdi));
+    case S::flag_set: case S::flag_clear: return kernel_error(threads_.flag_set(c.rdi, c.rsi, service == S::flag_clear));
+    case S::flag_wait: case S::flag_poll:
+        return kernel_error(threads_.flag_wait(c.rdi, c.rsi, uint32_t(c.rdx), c.rcx,
+                                               service == S::flag_wait ? c.r8 : 0, service == S::flag_poll));
+    case S::flag_cancel: return kernel_error(threads_.flag_cancel(c.rdi, c.rsi, c.rdx));
+    case S::process_counter: {
+        timespec t{};
+        if (::clock_gettime(CLOCK_MONOTONIC, &t) != 0) return 0;
+        const uint64_t now = uint64_t(t.tv_sec) * 1000000000ULL + uint64_t(t.tv_nsec);
+        return int64_t(now - std::min(now, started_us_ * 1000));
+    }
+    case S::counter_frequency: return 1000000000;
+    case S::kernel_sleep: return kernel_error(threads_.sleep(uint64_t(uint32_t(c.rdi)) * 1000000));
+    case S::save_init: return 0;
+    case S::save_term: save_umount(0); return 0;
+    case S::save_mount2: return save_mount(c.rdi, c.rsi);
+    case S::save_umount: return save_umount(c.rdi);
+    case S::save_dialog_init: save_dialog_status_ = 1; return 0;
+    case S::save_dialog_open: save_dialog_status_ = 3; return 0;
+    case S::save_dialog_update: return save_dialog_status_;
+    // OrbisSaveDataDialogResult: mode@0 (kept), result@4, buttonId@8 (1 = OK/Yes).
+    case S::save_dialog_result:
+        if (save_dialog_status_ != 3) return signed32(0x80b80008U); // Not finished.
+        return write(c.rdi + 4, 0, 4) && write(c.rdi + 8, 1, 4) ? 0 : signed32(0x80b80004U);
+    case S::save_dialog_term: save_dialog_status_ = 0; return 0;
     case S::video_flip_status: return videoout_.flip_status(c.rdi, c.rsi);
     case S::video_vblank_status: return videoout_.vblank_status(c.rdi, c.rsi);
     case S::video_add_flip: case S::video_add_vblank:

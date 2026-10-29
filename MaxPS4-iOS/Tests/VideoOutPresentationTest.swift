@@ -2,6 +2,28 @@ import Foundation
 
 @main struct VideoOutPresentationTest {
     static func main() {
+        for hz in [60, 120] {
+            var clock = MaxPS4VideoOutClock()
+            var ticks = 0
+            for index in 0..<hz {
+                let time = Double(index) / Double(hz)
+                if clock.due(at: time) { ticks += 1 }
+                precondition(!clock.due(at: time), "A manual redraw cannot add another vblank")
+            }
+            precondition(ticks == 60, "60/120 Hz hosts must produce 60 guest vblanks")
+            precondition(clock.due(at: 2), "Clock resumes after a GPU stall")
+            precondition(!clock.due(at: 2), "Missed intervals must not create an event burst")
+            precondition(!clock.due(at: .nan))
+        }
+        var jittered = MaxPS4VideoOutClock()
+        var jitterTicks = 0
+        for index in 0..<120 {
+            let offset = index == 0 ? 0.002 : Double((index * 7) % 5) * 0.0005
+            let time = Double(index) / 60 + offset
+            if jittered.due(at: time) { jitterTicks += 1 }
+            precondition(!jittered.due(at: time))
+        }
+        precondition(jitterTicks == 120, "Normal timer jitter cannot halve the guest refresh rate")
         for reversed in [false, true] {
             var results: [Bool] = []
             let gate = MaxPS4VideoOutPresentation { results.append($0) }
@@ -33,7 +55,7 @@ import Foundation
         for _ in 0..<100 {
             let lock = NSLock()
             var count = 0
-            let concurrent = MaxPS4VideoOutPresentation { _ in lock.lock(); count += 1; lock.unlock() }
+            let concurrent = MaxPS4VideoOutPresentation { (_: Bool) in lock.lock(); count += 1; lock.unlock() }
             let group = DispatchGroup()
             for action in [0, 1, 2] {
                 group.enter()
@@ -46,6 +68,25 @@ import Foundation
             }
             group.wait(); precondition(count == 1)
         }
-        print("PASS presentation gate: both callbacks, both orders, dropped frames, errors, cancellation and concurrent completion")
+        // A dropped attempt must not retire the guest flip; late callbacks from
+        // that attempt cannot confirm it during a second drawable's retry.
+        var attempts: [MaxPS4VideoOutPresentation.Outcome] = []
+        let first = MaxPS4VideoOutPresentation(outcome: { attempts.append($0) })
+        first.gpuFinished(true); first.drawablePresented(at: 0)
+        precondition(attempts == [.notDisplayed])
+        let retry = MaxPS4VideoOutPresentation(outcome: { attempts.append($0) })
+        first.drawablePresented(at: 5); first.expire()
+        retry.drawablePresented(at: 6)
+        precondition(attempts == [.notDisplayed], "Retry still requires its own GPU completion")
+        retry.gpuFinished(true); retry.expire()
+        precondition(attempts == [.notDisplayed, .presented])
+        for gpuCompleted in [false, true] {
+            var outcomes: [MaxPS4VideoOutPresentation.Outcome] = []
+            let timeout = MaxPS4VideoOutPresentation(outcome: { outcomes.append($0) })
+            if gpuCompleted { timeout.gpuFinished(true) }
+            timeout.expire(); timeout.gpuFinished(true); timeout.drawablePresented(at: 7)
+            precondition(outcomes == [.timedOut], "A timed out attempt cannot later confirm a flip")
+        }
+        print("PASS presentation gate: callback ordering, dropped retry, timeout, stale callbacks, GPU failure and cancellation")
     }
 }

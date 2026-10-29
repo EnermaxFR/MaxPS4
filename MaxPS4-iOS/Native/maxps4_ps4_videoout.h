@@ -1,9 +1,11 @@
 #pragma once
 #include "maxps4_ps4_threads.h"
 #include "maxps4_ps4_videoout_abi.h"
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <mutex>
 #include <new>
@@ -88,29 +90,106 @@ public:
         const auto result = remove ? events_.video_event_delete(queue, port, id) : events_.video_event_add(queue, port, id, user_data);
         return result == ps4::ok ? 0 : result == ps4::badf ? error(12) : error(0x100c);
     }
-    int64_t submit(uint64_t port, int32_t index, int32_t mode, uint64_t argument) {
+    // `copy`: keep a CPU copy of the buffer for snapshot(). A host that
+    // presents the GPU-rendered target through target() passes false: the
+    // copy (8 MB at 1080p) would only cost the game thread, under the lock
+    // that the host's target(), complete() and vblank() wait on.
+    // `replace`: a pending flip the host has not taken yet (target/snapshot)
+    // gives way to this newer one, counted as dropped, instead of refusing
+    // it. The host polls on its own refresh, which is not the game's vblank,
+    // so keeping the older flip lost every other image.
+    int64_t submit(uint64_t port, int32_t index, int32_t mode, uint64_t argument, bool copy = true, bool replace = false) {
         std::lock_guard<std::mutex> lock(guard_);
         if (!valid(port)) return error(11);
         if (index < 0 || size_t(index) >= buffers_.size() || !buffers_[size_t(index)].used) return error(10);
         if (mode != 1) return error(6);
-        if (frame_.ticket) return error(0x12);
+        if (frame_.ticket && (!replace || taken_)) return error(0x12);
         if (next_frame_ == UINT64_MAX) return error(0x17);
         const auto& buffer = buffers_[size_t(index)]; const auto& attr = groups_[buffer.group].attribute;
         try {
-            std::vector<uint8_t> pixels(attr.bytes());
-            if (!memory_.read(buffer.address, pixels.data(), pixels.size())) return error(0x13);
-            frame_ = {next_frame_++, port_, argument, attr.width, attr.height, attr.pitch, attr.format, uint32_t(index), attr.tiled ? 1U : 0U, pixels.size()};
-            pixels_.swap(pixels);
+            std::vector<uint8_t> pixels(copy ? attr.bytes() : 0);
+            if (copy && !memory_.read(buffer.address, pixels.data(), pixels.size())) return error(0x13);
+            if (frame_.ticket) { ++dropped_; ++replaced_; }
+            frame_ = {next_frame_++, port_, argument, attr.width, attr.height, attr.pitch, attr.format, uint32_t(index), attr.tiled ? 1U : 0U, attr.bytes()};
+            pixels_.swap(pixels); taken_ = false;
         } catch (const std::bad_alloc&) { return error(0x100c); }
         return 0;
+    }
+    // sceVideoOutSetFlipRate: 0, 1 or 2 for 60, 30 or 20 flips per second.
+    int64_t set_flip_rate(uint64_t port, int32_t rate) {
+        std::lock_guard<std::mutex> lock(guard_);
+        if (!valid(port)) return error(11);
+        if (rate < 0 || rate > 2) return error(0x14);
+        flip_rate_ = uint32_t(rate); return 0;
+    }
+    // A vsync flip happens at a vblank, at most one per 1 + flip rate vblanks:
+    // the caller (the game's flip) waits for that vblank, which is what holds
+    // a game to 60 images per second when the emulated CPU runs faster. A host
+    // that never sent a vblank (tests) is not paced; the wait is bounded so a
+    // stopping run is never held for long.
+    void pace() {
+        std::unique_lock<std::mutex> lock(guard_);
+        if (!port_ || !vblank_count_) return;
+        const uint64_t due = paced_vblank_ + flip_rate_ + 1;
+        wait_paced(lock, [&] { return vblank_count_ >= due; });
+        paced_vblank_ = vblank_count_;
+    }
+    // sceGnmSubmitAndFlipCommandBuffers: the prepareFlip label write and
+    // interrupt happen at the vblank the flip is due on, as on the hardware,
+    // while the game goes on preparing its next frame (holding the game until
+    // that vblank would halve its rate whenever a frame takes over 16 ms).
+    // Only a flip whose predecessor still waits holds the caller, bounded,
+    // then retires that one at once. False if an immediate label write fails.
+    // A game that took under sleep_below_us since its previous flip was
+    // retired (or returned, whichever is later: not the time it spent spinning
+    // on that flip's label) would only spin on this one's label until the
+    // vblank (Sonic Mania: 93 % of its main thread): it sleeps here instead
+    // until that vblank retires the flip.
+    bool flip_at_vblank(bool label, uint64_t address, uint32_t value, bool interrupt) {
+        std::unique_lock<std::mutex> lock(guard_);
+        const uint64_t worked = now() - std::max(flip_returned_, retired_at_);
+        bool written = true;
+        if (port_ && vblank_count_) {
+            wait_paced(lock, [&] { return !deferred_.pending; });
+            if (deferred_.pending) retire();
+            deferred_ = {true, label, interrupt, address, value};
+            if (port_ && vblank_count_ < paced_vblank_ + flip_rate_ + 1) {
+                if (worked < sleep_below_us) {
+                    wait_paced(lock, [&] { return !deferred_.pending; });
+                    if (deferred_.pending) written = retire(); // Bounded wait over.
+                }
+                flip_returned_ = now(); return written;
+            }
+        } else deferred_ = {true, label, interrupt, address, value};
+        written = retire(); flip_returned_ = now(); return written;
+    }
+    // What sceVideoOutGetResolutionStatus reports (1920x1080 by default);
+    // kept across reset, set by the host before the game runs.
+    bool set_output(uint32_t width, uint32_t height) {
+        if (!((width == 1920 && height == 1080) || (width == 1280 && height == 720))) return false;
+        std::lock_guard<std::mutex> lock(guard_); output_width_ = width; output_height_ = height; return true;
+    }
+    // A flip refused because another is still pending (error 0x12) and skipped
+    // by sceGnmSubmitAndFlipCommandBuffers instead of failing the submission.
+    void count_dropped() { std::lock_guard<std::mutex> lock(guard_); ++dropped_; }
+    uint64_t dropped() { std::lock_guard<std::mutex> lock(guard_); return dropped_; }
+    // Flips the game asked for: accepted (tickets issued) plus skipped.
+    uint64_t requested() { std::lock_guard<std::mutex> lock(guard_); return next_frame_ - 1 + dropped_ - replaced_; }
+    // Metadata of the pending flip, without copying CPU surface pixels.
+    int32_t target(maxps4_videoout_frame& info, uint64_t& address) {
+        info={}; address=0;
+        std::lock_guard<std::mutex> lock(guard_);
+        if (!frame_.ticket) return -EAGAIN;
+        info=frame_; address=buffers_[frame_.buffer_index].address; taken_ = true; return 0;
     }
     int32_t snapshot(maxps4_videoout_frame& info, uint8_t* pixels, size_t capacity) {
         info = {};
         std::lock_guard<std::mutex> lock(guard_);
         if (!frame_.ticket) return -EAGAIN;
+        if (pixels_.size() != frame_.byte_count) return -ENODATA; // Submitted without a CPU copy.
         if ((!pixels && capacity) || (pixels && capacity < pixels_.size())) return -EINVAL;
         if (pixels) std::memcpy(pixels, pixels_.data(), pixels_.size());
-        info = frame_; return 0;
+        info = frame_; taken_ = true; return 0;
     }
     int64_t complete(uint64_t ticket, bool presented) {
         std::lock_guard<std::mutex> lock(guard_);
@@ -119,12 +198,27 @@ public:
             ++flip_count_; last_argument_ = frame_.flip_argument; current_buffer_ = int32_t(frame_.buffer_index);
             flip_time_ = now(); events_.video_event_notify(port_, 6, last_argument_, flip_time_);
         }
-        frame_ = {}; pixels_.clear(); return 0;
+        frame_ = {}; pixels_.clear(); taken_ = false; return 0;
+    }
+    // The host's pause: vblanks stop counting and flips waiting for one keep
+    // waiting past the usual bound, so a game paced on them stops where it is.
+    // The host must resume before stopping a run.
+    void set_paused(bool paused) {
+        std::lock_guard<std::mutex> lock(guard_); paused_ = paused; paced_.notify_all();
+    }
+    // A stop was requested: no flip waits any more, so the game's thread goes
+    // back to guest code where the stop signal lands (a thread kept waiting
+    // for vblanks that no longer come would almost never take it).
+    void interrupt() {
+        std::lock_guard<std::mutex> lock(guard_); stopping_ = true; paced_.notify_all();
     }
     int64_t vblank(uint64_t port) {
         std::lock_guard<std::mutex> lock(guard_);
         if (!valid(port)) return error(11);
-        ++vblank_count_; vblank_time_ = now(); events_.video_event_notify(port_, 7, 0, vblank_time_); return 0;
+        if (paused_) return 0;
+        ++vblank_count_; vblank_time_ = now(); events_.video_event_notify(port_, 7, 0, vblank_time_);
+        if (deferred_.pending && vblank_count_ >= paced_vblank_ + flip_rate_ + 1) retire();
+        paced_.notify_all(); return 0;
     }
     // sceVideoOutGetResolutionStatus: a 1080p 59.94 Hz television (shadPS4
     // layout: four s32 sizes, u64 refresh rate 3, float inches, flags, zeroes).
@@ -132,7 +226,7 @@ public:
         std::lock_guard<std::mutex> lock(guard_);
         if (!valid(port)) return error(11);
         uint8_t wire[44]{};
-        const uint32_t sizes[] = {1920, 1080, 1920, 1080};
+        const uint32_t sizes[] = {output_width_, output_height_, output_width_, output_height_};
         for (size_t i = 0; i < 4; ++i) ps4::put_le(wire, i * 4, sizes[i], 4);
         ps4::put_le(wire, 16, 3, 8);
         const float inches = 50.0f;
@@ -174,20 +268,45 @@ private:
     struct Attribute { uint32_t format = 0, width = 0, height = 0, pitch = 0; bool tiled = false; size_t bytes() const { return size_t(pitch) * height * 4; } };
     struct Group { bool used = false; Attribute attribute; };
     struct Buffer { bool used = false; size_t group = 0; uint64_t address = 0; };
-    PS4GuestMemory& memory_; PS4Threads& events_; std::mutex guard_;
+    struct Deferred { bool pending = false, label = false, interrupt = false; uint64_t address = 0; uint32_t value = 0; };
+    static constexpr int pace_timeout_ms = 50;
+    static constexpr uint64_t sleep_below_us = 8000; // Half a 60 Hz frame.
+    PS4GuestMemory& memory_; PS4Threads& events_; std::mutex guard_; std::condition_variable paced_;
     std::array<Group, group_limit> groups_{}; std::array<Buffer, buffer_limit> buffers_{};
-    uint64_t port_ = 0, next_port_ = 1, next_frame_ = 1, flip_count_ = 0, vblank_count_ = 0;
-    uint64_t last_argument_ = UINT64_MAX, flip_time_ = 0, vblank_time_ = 0;
+    uint64_t port_ = 0, next_port_ = 1, next_frame_ = 1, flip_count_ = 0, vblank_count_ = 0, dropped_ = 0;
+    uint64_t last_argument_ = UINT64_MAX, flip_time_ = 0, vblank_time_ = 0, paced_vblank_ = 0;
+    uint32_t flip_rate_ = 0;
     int32_t current_buffer_ = -1;
-    maxps4_videoout_frame frame_{}; std::vector<uint8_t> pixels_;
+    uint32_t output_width_ = 1920, output_height_ = 1080;
+    maxps4_videoout_frame frame_{}; std::vector<uint8_t> pixels_; Deferred deferred_{};
+    bool taken_ = false; // The host holds frame_'s ticket: it may complete it.
+    bool paused_ = false; // Kept across reset: the host's state, not the game's.
+    bool stopping_ = false; // Until reset: the run is ending.
+    uint64_t replaced_ = 0; // Dropped flips that had a ticket (requested() counts them once).
+    uint64_t flip_returned_ = 0, retired_at_ = 0; // When the last flip returned / was retired (now()).
     bool valid(uint64_t port) const { return port && port == port_; }
+    // Bounded wait for `done`, extended while the host has paused the game.
+    template <class Done> void wait_paced(std::unique_lock<std::mutex>& lock, Done done) {
+        if (stopping_) return;
+        do paced_.wait_for(lock, std::chrono::milliseconds(pace_timeout_ms), [&] { return !port_ || stopping_ || done(); });
+        while (paused_ && !stopping_ && port_ && !done());
+    }
+    bool retire() {
+        const Deferred flip = deferred_; deferred_ = {}; paced_vblank_ = vblank_count_; paced_.notify_all();
+        retired_at_ = now();
+        uint8_t value[4]; ps4::put_le(value, 0, flip.value, 4);
+        const bool written = !flip.label || memory_.write(flip.address, value, sizeof(value));
+        if (flip.interrupt) events_.graphics_interrupt();
+        return written;
+    }
     static uint64_t now() {
         return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
     }
     void clear() {
         if (port_) events_.video_event_remove_source(port_);
-        port_ = 0; frame_ = {}; pixels_.clear(); groups_.fill({}); buffers_.fill({});
-        flip_count_ = vblank_count_ = flip_time_ = vblank_time_ = 0; last_argument_ = UINT64_MAX; current_buffer_ = -1;
+        port_ = 0; frame_ = {}; pixels_.clear(); groups_.fill({}); buffers_.fill({}); deferred_ = {}; taken_ = false;
+        flip_count_ = vblank_count_ = flip_time_ = vblank_time_ = dropped_ = paced_vblank_ = replaced_ = flip_returned_ = retired_at_ = 0; stopping_ = false; flip_rate_ = 0;
+        last_argument_ = UINT64_MAX; current_buffer_ = -1; paced_.notify_all();
     }
 };
 }

@@ -5,10 +5,12 @@
 #include "maxps4_ps4_videoout.h"
 #include "maxps4_ps4_user_service.h"
 #include "maxps4_ps4_pad.h"
+#include "maxps4_ps4_audio_out.h"
 #include "maxps4_ps4_gnm.h"
 #include "maxps4_ps4_gnm_queue.h"
 #include <array>
 #include <map>
+#include <string>
 #include <mutex>
 #include <string_view>
 
@@ -69,7 +71,12 @@ enum class PS4KernelService : uint32_t {
     video_open, video_close, video_attribute, video_register, video_unregister,
     video_submit, video_pending, video_flip_status, video_vblank_status,
     video_add_flip, video_add_vblank, video_delete_flip, video_delete_vblank,
-    video_event_id, video_event_data, video_event_count, video_resolution,
+    video_event_id, video_event_data, video_event_count, video_resolution, video_flip_rate,
+    save_init, save_term, save_mount2, save_umount,
+    sema_create, sema_delete, sema_wait, sema_poll, sema_signal, sema_cancel,
+    flag_create, flag_delete, flag_set, flag_clear, flag_wait, flag_poll, flag_cancel,
+    process_counter, counter_frequency, kernel_sleep,
+    save_dialog_init, save_dialog_open, save_dialog_update, save_dialog_result, save_dialog_term,
     user_initialize, user_terminate, user_initial, user_login_list, user_event, user_name,
     pad_init, pad_open, pad_close, pad_read, pad_read_state, pad_information, pad_handle,
     gnm_draw_auto, gnm_draw_index, gnm_vgt, gnm_vs, gnm_ps350,
@@ -82,7 +89,9 @@ enum class PS4KernelService : uint32_t {
     heap_trace_info,
     // libSceSystemService (shadPS4 system_service.cpp): settings of an
     // English console, a foreground application status, no system events.
-    system_param_int, system_status, system_event
+    system_param_int, system_status, system_event,
+    // libSceAudioOut (PS4AudioOut). Output blocks for one buffer's duration.
+    audio_init, audio_open, audio_close, audio_output
 };
 // Token bit of a trampoline whose function follows the POSIX convention: -1
 // with the error in the calling thread's errno (__Error) instead of an Orbis
@@ -98,7 +107,8 @@ constexpr bool general_only(PS4KernelService service) {
     return service == PS4KernelService::thread_create || service == PS4KernelService::thread_join ||
            service == PS4KernelService::thread_exit || service == PS4KernelService::thread_detach ||
            service == PS4KernelService::cond_wait || service == PS4KernelService::cond_timedwait ||
-           service == PS4KernelService::equeue_wait || service == PS4KernelService::video_attribute;
+           service == PS4KernelService::equeue_wait || service == PS4KernelService::video_attribute ||
+           service == PS4KernelService::sema_wait || service == PS4KernelService::flag_wait;
 }
 // Implemented libkernel functions (name, NID, service), e.g. for an HLE registry.
 // `posix`: POSIX convention (see posix_token). `noreturn`: the trampoline ends
@@ -133,6 +143,12 @@ public:
     // the previous one. A successful remount closes guest descriptors.
     int64_t mount(const char* guest, const char* host_directory);
     int64_t mount_app0(const char* host_directory) { return mount("/app0", host_directory); }
+    // A game update over /app0: a path the update holds is read from it, any
+    // other from the game. Read-only, like /app0; cleared by reset() or a remount.
+    int64_t mount_app0_update(const char* host_directory);
+    // Host directory holding this game's save directories: sceSaveDataMount2
+    // mounts <root>/<dirName> at /savedata0. Cleared by reset().
+    int64_t set_savedata_root(const char* host_directory);
     void reset();
     // `posix`: the trampoline's token had posix_token; an Orbis error result
     // becomes -1 with that error in the thread's errno cell.
@@ -145,6 +161,7 @@ public:
     PS4Threads& threads() { return threads_; }
     PS4VideoOut& videoout() { return videoout_; }
     PS4Pad& pad() { return pad_; }
+    PS4AudioOut& audio() { return audio_; }
     PS4GnmQueue& graphics() { return graphics_; }
     static constexpr int32_t abort_status = 134; // As a process killed by SIGABRT.
 private:
@@ -154,17 +171,22 @@ private:
     PS4VideoOut videoout_;
     PS4UserService user_service_;
     PS4Pad pad_;
+    PS4AudioOut audio_;
     PS4Gnm gnm_;
     PS4GnmQueue graphics_;
     uint64_t errno_table_ = 0, errno_table_size_ = 0, process_param_ = 0;
     uint64_t heap_trace_ = 0; // sceLibcHeapGetTraceInfo's zeroed tables, mapped on first use.
     std::map<uint64_t, uint64_t> direct_; // Allocated physical ranges: start -> length.
+    std::string save_root_;
+    uint32_t save_dialog_status_ = 0; // OrbisCommonDialogStatus: none, initialized, running, finished.
+    int64_t save_mount(uint64_t request, uint64_t result);
+    int64_t save_umount(uint64_t mount_point);
     int64_t memory_service(PS4KernelService service, const PS4KernelCall& call);
     int64_t posix_result(int64_t result, uint64_t thread);
     int64_t invoke_service(PS4KernelService service, const PS4KernelCall& call, uint64_t thread);
     int64_t extended(PS4KernelService service, const PS4KernelCall& call, uint64_t thread, bool& handled);
     std::mutex lock_;
-    struct Mount { const char* prefix; bool writable; int root; };
+    struct Mount { const char* prefix; bool writable; int root; int overlay = -1; };
     std::array<Mount, 4> mounts_{{{"/app0", false, -1}, {"/savedata0", true, -1},
                                   {"/download0", true, -1}, {"/temp0", true, -1}}};
     // A guest descriptor: its host descriptor, access, and for a directory
@@ -184,6 +206,7 @@ private:
     // descriptor) and that component ("." for the mount root). Every
     // component is opened without following symbolic links.
     int parent(size_t mount, const char* relative, char* leaf, ps4::Error& error) const;
+    int parent_from(int root, const char* relative, char* leaf, ps4::Error& error) const;
     int64_t file_service(PS4KernelService service, const PS4KernelCall& call);
     int64_t open(const PS4KernelCall& call);
     int64_t read(const PS4KernelCall& call);

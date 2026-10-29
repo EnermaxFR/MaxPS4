@@ -212,6 +212,42 @@ inline std::string gcnMnemonic(const GCNInstruction& i) {
     return name ? name : "";
 }
 
+// Decode the one instruction at words[at]; `available` dwords follow it.
+inline GCNError decodeGCNInstruction(const std::uint32_t* words, std::size_t available, std::size_t at,
+                                     GCNInstruction& i) {
+    if (!words || !available) return GCNError::null_input;
+    const std::uint32_t w = words[0];
+    i = GCNInstruction{GCNEncoding::sop2, 0, at, 1, w, 0, false, 0};
+    bool wide = false;
+    auto src9 = [](std::uint32_t v) { return (v & 0x1ff) == 255; };
+    if ((w >> 23) == 0x17d) { i.encoding = GCNEncoding::sop1; i.opcode = (w >> 8) & 0xff; i.hasLiteral = (w & 0xff) == 255; }
+    else if ((w >> 23) == 0x17e) { i.encoding = GCNEncoding::sopc; i.opcode = (w >> 16) & 0x7f; i.hasLiteral = (w & 0xff) == 255 || ((w >> 8) & 0xff) == 255; }
+    else if ((w >> 23) == 0x17f) { i.encoding = GCNEncoding::sopp; i.opcode = (w >> 16) & 0x7f; }
+    else if ((w >> 28) == 0xb) { i.encoding = GCNEncoding::sopk; i.opcode = (w >> 23) & 0x1f; i.hasLiteral = i.opcode == 21; }
+    else if ((w >> 30) == 2) { i.encoding = GCNEncoding::sop2; i.opcode = (w >> 23) & 0x7f; i.hasLiteral = (w & 0xff) == 255 || ((w >> 8) & 0xff) == 255; }
+    // SMRD: IMM=0 with OFFSET=255 takes a 32-bit literal offset (Sea Islands).
+    else if ((w >> 27) == 0x18) { i.encoding = GCNEncoding::smrd; i.opcode = (w >> 22) & 0x1f; i.hasLiteral = !(w & 0x100) && (w & 0xff) == 255; }
+    else if ((w >> 25) == 0x3f) { i.encoding = GCNEncoding::vop1; i.opcode = (w >> 9) & 0xff; i.hasLiteral = src9(w); }
+    else if ((w >> 25) == 0x3e) { i.encoding = GCNEncoding::vopc; i.opcode = (w >> 17) & 0xff; i.hasLiteral = src9(w); }
+    else if ((w >> 31) == 0) {
+        i.encoding = GCNEncoding::vop2; i.opcode = (w >> 25) & 0x3f;
+        i.hasLiteral = src9(w) || i.opcode == 32 || i.opcode == 33; // v_madmk/v_madak
+    }
+    else if ((w >> 26) == 0x34) { i.encoding = GCNEncoding::vop3; i.opcode = (w >> 17) & 0x1ff; wide = true; }
+    else if ((w >> 26) == 0x32) { i.encoding = GCNEncoding::vintrp; i.opcode = (w >> 16) & 3; }
+    else if ((w >> 26) == 0x36) { i.encoding = GCNEncoding::ds; i.opcode = (w >> 18) & 0xff; wide = true; }
+    else if ((w >> 26) == 0x38) { i.encoding = GCNEncoding::mubuf; i.opcode = (w >> 18) & 0x7f; wide = true; }
+    else if ((w >> 26) == 0x3a) { i.encoding = GCNEncoding::mtbuf; i.opcode = (w >> 16) & 7; wide = true; }
+    else if ((w >> 26) == 0x3c) { i.encoding = GCNEncoding::mimg; i.opcode = (w >> 18) & 0x7f; wide = true; }
+    else if ((w >> 26) == 0x3e) { i.encoding = GCNEncoding::exp; wide = true; }
+    else return GCNError::unknown_encoding;
+    i.size = std::uint8_t(1 + (wide ? 1 : 0) + (i.hasLiteral ? 1 : 0));
+    if (i.size > available) return GCNError::truncated_instruction;
+    if (wide) i.word1 = words[1];
+    if (i.hasLiteral) i.literal = words[wide ? 2 : 1];
+    return GCNError::none;
+}
+
 // Frame instructions from `words` up to and including the first s_endpgm.
 inline GCNDecodeResult decodeGCN(const std::uint32_t* words, std::size_t wordCount,
                                  std::size_t maxInstructions = 16384) {
@@ -220,35 +256,9 @@ inline GCNDecodeResult decodeGCN(const std::uint32_t* words, std::size_t wordCou
     auto fail = [&](GCNError error) { result.error = error; result.instructions.clear(); return result; };
     for (std::size_t at = 0; at < wordCount;) {
         if (result.instructions.size() >= maxInstructions) return fail(GCNError::too_many_instructions);
-        const std::uint32_t w = words[at];
-        GCNInstruction i{GCNEncoding::sop2, 0, at, 1, w, 0, false, 0};
-        bool wide = false;
-        auto src9 = [](std::uint32_t v) { return (v & 0x1ff) == 255; };
-        if ((w >> 23) == 0x17d) { i.encoding = GCNEncoding::sop1; i.opcode = (w >> 8) & 0xff; i.hasLiteral = (w & 0xff) == 255; }
-        else if ((w >> 23) == 0x17e) { i.encoding = GCNEncoding::sopc; i.opcode = (w >> 16) & 0x7f; i.hasLiteral = (w & 0xff) == 255 || ((w >> 8) & 0xff) == 255; }
-        else if ((w >> 23) == 0x17f) { i.encoding = GCNEncoding::sopp; i.opcode = (w >> 16) & 0x7f; }
-        else if ((w >> 28) == 0xb) { i.encoding = GCNEncoding::sopk; i.opcode = (w >> 23) & 0x1f; i.hasLiteral = i.opcode == 21; }
-        else if ((w >> 30) == 2) { i.encoding = GCNEncoding::sop2; i.opcode = (w >> 23) & 0x7f; i.hasLiteral = (w & 0xff) == 255 || ((w >> 8) & 0xff) == 255; }
-        // SMRD: IMM=0 with OFFSET=255 takes a 32-bit literal offset (Sea Islands).
-        else if ((w >> 27) == 0x18) { i.encoding = GCNEncoding::smrd; i.opcode = (w >> 22) & 0x1f; i.hasLiteral = !(w & 0x100) && (w & 0xff) == 255; }
-        else if ((w >> 25) == 0x3f) { i.encoding = GCNEncoding::vop1; i.opcode = (w >> 9) & 0xff; i.hasLiteral = src9(w); }
-        else if ((w >> 25) == 0x3e) { i.encoding = GCNEncoding::vopc; i.opcode = (w >> 17) & 0xff; i.hasLiteral = src9(w); }
-        else if ((w >> 31) == 0) {
-            i.encoding = GCNEncoding::vop2; i.opcode = (w >> 25) & 0x3f;
-            i.hasLiteral = src9(w) || i.opcode == 32 || i.opcode == 33; // v_madmk/v_madak
-        }
-        else if ((w >> 26) == 0x34) { i.encoding = GCNEncoding::vop3; i.opcode = (w >> 17) & 0x1ff; wide = true; }
-        else if ((w >> 26) == 0x32) { i.encoding = GCNEncoding::vintrp; i.opcode = (w >> 16) & 3; }
-        else if ((w >> 26) == 0x36) { i.encoding = GCNEncoding::ds; i.opcode = (w >> 18) & 0xff; wide = true; }
-        else if ((w >> 26) == 0x38) { i.encoding = GCNEncoding::mubuf; i.opcode = (w >> 18) & 0x7f; wide = true; }
-        else if ((w >> 26) == 0x3a) { i.encoding = GCNEncoding::mtbuf; i.opcode = (w >> 16) & 7; wide = true; }
-        else if ((w >> 26) == 0x3c) { i.encoding = GCNEncoding::mimg; i.opcode = (w >> 18) & 0x7f; wide = true; }
-        else if ((w >> 26) == 0x3e) { i.encoding = GCNEncoding::exp; wide = true; }
-        else return fail(GCNError::unknown_encoding);
-        i.size = std::uint8_t(1 + (wide ? 1 : 0) + (i.hasLiteral ? 1 : 0));
-        if (i.size > wordCount - at) return fail(GCNError::truncated_instruction);
-        if (wide) i.word1 = words[at + 1];
-        if (i.hasLiteral) i.literal = words[at + (wide ? 2 : 1)];
+        GCNInstruction i;
+        if (const auto error = decodeGCNInstruction(words + at, wordCount - at, at, i); error != GCNError::none)
+            return fail(error);
         result.instructions.push_back(i);
         at += i.size;
         if (i.encoding == GCNEncoding::sopp && i.opcode == 1) return result;

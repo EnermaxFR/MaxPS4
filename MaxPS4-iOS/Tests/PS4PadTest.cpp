@@ -28,6 +28,7 @@ int main() {
     assert(bytes[4] == 128 && bytes[7] == 128 && bytes[76] == 0);
     assert(ps4::get_le(bytes+24,4) == 0x3f800000);
     assert(pad.update(0x4080,{{0,255,127,129}},12,244,true) == 0);
+    assert(pad.update(0x4000,{{0,255,127,129}},12,244,true) == 0); // 0x80 tapped before any read.
     assert(pad.update(1,{{128,128,128,128}},0,0,true) == -22);
     assert(pad.read(handle,0,1,true) == PS4Pad::error(1));
     assert(pad.read(handle,output,0,false) == PS4Pad::error(1));
@@ -39,6 +40,7 @@ int main() {
     assert(ps4::get_le(bytes,4) == 0x4080 && bytes[4] == 0 && bytes[5] == 255);
     assert(bytes[8] == 12 && bytes[9] == 244 && bytes[76] == 1 && bytes[104] == 1);
     assert(ps4::get_le(bytes+80,8) > 0 && ps4::get_le(bytes+120,8) == 0);
+    assert(pad.read(handle,output,1,true) == 0 && memory.read(output,bytes,4) && ps4::get_le(bytes,4) == 0x4000);
     assert(other.read(handle,output,1,true) == PS4Pad::error(3));
     assert(pad.information(handle,output) == 0 && memory.read(output,bytes,28));
     assert(ps4::get_le(bytes+4,2) == 1920 && ps4::get_le(bytes+6,2) == 950);

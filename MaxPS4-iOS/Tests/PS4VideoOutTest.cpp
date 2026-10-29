@@ -37,6 +37,11 @@ int main() {
     assert(opened > 0);
     const uint64_t port = uint64_t(opened);
     assert(video.open(0, 0, 0) == PS4VideoOut::error(9));
+    // Reported output resolution: 1080p by default, 720p on request, nothing else.
+    assert(video.resolution(port, status) == 0 && read(status, 4) == 1920 && read(status + 4, 4) == 1080);
+    assert(!video.set_output(1280, 1080) && video.set_output(1280, 720));
+    assert(video.resolution(port, status) == 0 && read(status, 4) == 1280 && read(status + 4, 4) == 720);
+    assert(video.set_output(1920, 1080));
     assert(video.close(port + 1) == PS4VideoOut::error(11));
     assert(video.add_event(queue + 1, port, 6, 55) == PS4VideoOut::error(12));
     assert(video.add_event(queue, port, 6, 55) == 0 && video.add_event(queue, port, 7, 66) == 0);
@@ -75,9 +80,21 @@ int main() {
     assert(video.pending(port) == 1 && video.flip_status(port, status) == 0);
     assert(read(status) == 0 && read(status + 52, 4) == 1 && read(status + 56, 4) == UINT32_MAX);
     assert(video.submit(port, 1, 1, 0) == PS4VideoOut::error(0x12));
+    assert(video.dropped() == 0); video.count_dropped(); assert(video.dropped() == 1);
+    // A GNM flip replaces a pending one the host has not taken, once taken not.
+    maxps4_videoout_frame replaced{}; uint64_t replaced_address = 0;
+    const uint64_t first = (video.target(replaced, replaced_address), replaced.ticket);
+    assert(video.complete(first, false) == 0 && video.submit(port, 0, 1, uint64_t(int64_t(-123))) == 0);
+    assert(video.submit(port, 1, 1, 0, true, true) == 0 && video.dropped() == 2);
+    assert(video.target(replaced, replaced_address) == 0 && replaced.buffer_index == 1);
+    assert(video.submit(port, 0, 1, 0, true, true) == PS4VideoOut::error(0x12) && video.dropped() == 2);
+    assert(video.complete(replaced.ticket, false) == 0);
+    assert(video.submit(port, 0, 1, uint64_t(int64_t(-123))) == 0);
     assert(video.unregister_buffers(port, 0) == PS4VideoOut::error(9));
     maxps4_videoout_frame frame{};
     assert(video.snapshot(frame, nullptr, 0) == 0 && frame.ticket && frame.port == port);
+    maxps4_videoout_frame target{}; uint64_t target_address=0;
+    assert(video.target(target,target_address)==0 && target.ticket==frame.ticket && target_address==pixels);
     assert(frame.width == 3 && frame.height == 2 && frame.pitch_in_pixels == 4 && frame.byte_count == 32 && frame.pixel_format == PS4VideoOut::rgba);
     const uint64_t cancelled = frame.ticket;
     uint8_t snapshot[32]; std::memset(snapshot, 0xa5, sizeof(snapshot));
@@ -87,6 +104,11 @@ int main() {
     assert(poll() == timedout); // Neither registration, submission nor snapshot means presented.
     assert(video.complete(cancelled, false) == 0 && video.pending(port) == 0 && poll() == timedout);
     assert(video.complete(cancelled, true) == PS4VideoOut::error(1));
+    // Without a CPU copy: the target is known, a snapshot has no pixels.
+    assert(video.submit(port, 0, 1, 0, false) == 0);
+    assert(video.target(target, target_address) == 0 && target.byte_count == 32 && target_address == pixels);
+    assert(video.snapshot(frame, nullptr, 0) == -ENODATA);
+    assert(video.complete(target.ticket, false) == 0 && poll() == timedout);
     assert(video.submit(port, 0, 1, uint64_t(int64_t(-123))) == 0);
     assert(video.snapshot(frame, snapshot, sizeof(snapshot)) == 0 && snapshot[0] == 0xff);
     const uint64_t presented = frame.ticket;
@@ -109,6 +131,47 @@ int main() {
     assert(poll() == ok && read(count, 4) == 1 && read(events) == 7 && read(events + 24) == 66);
     assert(video.event_field(events, 0, 0) == 1 && video.event_field(events, 0, 2) == 15);
     assert(video.vblank_status(port, status) == 0 && read(status) == 20 && poll() == timedout);
+    // Flips wait for 1 + flip rate vblanks since the previous one: 20 have
+    // passed, so this one does not wait; the next needs two more.
+    assert(video.set_flip_rate(port, 3) == PS4VideoOut::error(0x14) && video.set_flip_rate(port, 1) == 0);
+    video.pace();
+    std::atomic<bool> paced{false};
+    std::thread pacer([&] { video.pace(); paced = true; });
+    assert(video.vblank(port) == 0 && video.vblank(port) == 0);
+    pacer.join();
+    assert(paced && video.vblank_status(port, status) == 0 && read(status) == 22);
+    // A GNM flip's label is written at its vblank, without holding the caller.
+    assert(video.set_flip_rate(port, 0) == 0 && video.flip_at_vblank(true, status, 7, false));
+    assert(read(status, 4) == 22);
+    assert(video.vblank(port) == 0 && read(status, 4) == 7);
+    // The second comes right after the first returned: it sleeps until its
+    // vblank and returns with its label written (no spin for the game).
+    std::atomic<bool> flipped{false};
+    std::thread flipper([&] { assert(video.flip_at_vblank(true, status, 8, false)); flipped = true; });
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    assert(!flipped && read(status, 4) == 7);
+    assert(video.vblank(port) == 0);
+    flipper.join();
+    assert(flipped && read(status, 4) == 8);
+    // Paused: vblanks do not count and a waiting flip outlasts the 50 ms bound.
+    video.set_paused(true);
+    assert(video.vblank(port) == 0 && video.vblank_status(port, status) == 0 && read(status) == 24);
+    std::atomic<bool> resumed{false};
+    std::thread held([&] { assert(video.flip_at_vblank(true, status, 9, false)); resumed = true; });
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    assert(!resumed && read(status, 4) == 24);
+    video.set_paused(false);
+    assert(video.vblank(port) == 0);
+    held.join();
+    assert(resumed && read(status, 4) == 9);
+    // A requested stop: even paused, a flip neither sleeps nor waits for a vblank.
+    video.set_paused(true); video.interrupt();
+    const auto stop_started = std::chrono::steady_clock::now();
+    assert(video.flip_at_vblank(true, status, 10, false) && read(status, 4) == 10);
+    assert(video.flip_at_vblank(true, status, 11, false) && read(status, 4) == 11);
+    assert(std::chrono::steady_clock::now() - stop_started < std::chrono::milliseconds(40));
+    video.set_paused(false);
+    while (poll() == ok) {}
     // Closing removes only VideoOut subscriptions, not user or GNM events.
     assert(queues.user_event_add(queue, 6, true) == ok && queues.user_event_trigger(queue, 6, 77) == ok);
     assert(queues.graphics_event_add(queue, 6, 88) == ok);
@@ -118,6 +181,7 @@ int main() {
     const uint64_t stale = frame.ticket;
     assert(video.close(port) == 0);
     assert(video.snapshot(frame, nullptr, 0) == -EAGAIN && frame.ticket == 0);
+    assert(video.target(target,target_address)==-EAGAIN && !target.ticket && !target_address);
     assert(video.complete(stale, true) == PS4VideoOut::error(1));
     assert(poll() == ok && read(count, 4) == 2);
     assert(read(events + 8, 2) != 0xfff3 && read(events + 32 + 8, 2) != 0xfff3);

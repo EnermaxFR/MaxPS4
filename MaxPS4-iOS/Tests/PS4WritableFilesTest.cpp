@@ -150,5 +150,75 @@ int main() {
     for (const auto& name : expected)
         if (name != "." && name != "..") assert(::rmdir((base + "/" + name).c_str()) == 0);
     assert(::rmdir(root) == 0);
+    // sceSaveDataMount2 mounts <save root>/<dirName> at /savedata0, keeping
+    // the game's other descriptors open.
+    char saves[] = "/tmp/maxps4-saves-XXXXXX";
+    assert(::mkdtemp(saves));
+    const std::string game = std::string(saves) + "/game";
+    { const int host = ::open(game.c_str(), O_CREAT | O_WRONLY, 0644); assert(host >= 0); ::close(host); }
+    assert(kernel.mount_app0(saves) == 0);
+    const auto app = call(S::open, path("/app0/game"), 0);
+    assert(app >= 0);
+    auto put = [&](uint64_t address, uint64_t value, size_t width) {
+        uint8_t wire[8]; put_le(wire, 0, value, width); assert(memory.write(address, wire, width));
+    };
+    auto mount = [&](uint32_t mode) {
+        uint8_t zero[96]{}; assert(memory.write(0x11400, zero, sizeof(zero)));
+        put(0x11400, 1, 4); put(0x11408, path("SAVEDATA00", 0x11500), 8); put(0x11418, mode, 4);
+        return call(S::save_mount2, 0x11400, 0x11600);
+    };
+    const int64_t not_found = signed32(0x809f0008U);
+    assert(call(S::save_init) == 0 && mount(0x22) == not_found); // No save root yet.
+    assert(kernel.set_savedata_root(saves) == 0);
+    assert(mount(0x2) == not_found);
+    assert(mount(0x22) == 0); // RDWR | CREATE2: created.
+    char point[16]{};
+    assert(memory.read(0x11600, point, sizeof(point)) && !std::strcmp(point, "/savedata0"));
+    uint8_t status[4]{}; assert(memory.read(0x11600 + 28, status, 4) && get_le(status, 4) == 1);
+    assert(mount(0x22) == signed32(0x809f0003U)); // Already mounted.
+    const auto file = call(S::open, path("/savedata0/data"), 0x202);
+    assert(file >= 0 && call(S::close, file) == 0);
+    assert(::access((std::string(saves) + "/SAVEDATA00/data").c_str(), F_OK) == 0);
+    assert(call(S::save_umount, path("/savedata0", 0x11700)) == 0);
+    assert(call(S::save_umount, 0x11700) == signed32(0x809f0004U));
+    assert(call(S::open, path("/savedata0/data")) == kernel_error(noent));
+    assert(mount(0x2) == 0 && memory.read(0x11600 + 28, status, 4) && get_le(status, 4) == 0);
+    assert(mount(0x4) != 0 && call(S::save_term) == 0 && mount(0x4) == signed32(0x809f0007U));
+    assert(call(S::close, app) == 0); // Untouched by the save mounts.
+    assert(call(S::save_dialog_init) == 0 && call(S::save_dialog_update) == 1);
+    assert(call(S::save_dialog_result, 0x11800) == signed32(0x80b80008U));
+    assert(call(S::save_dialog_open, 0x11800) == 0 && call(S::save_dialog_update) == 3);
+    assert(call(S::save_dialog_result, 0x11800) == 0 && memory.read(0x11808, status, 4) && get_le(status, 4) == 1);
+    assert(call(S::save_dialog_term) == 0);
+    assert(resolve_libkernel("0z45PIH+SNI", "libSceSaveData", "libSceSaveData", 1) == S::save_mount2);
+    kernel.reset();
+    assert(::unlink((std::string(saves) + "/SAVEDATA00/data").c_str()) == 0);
+    assert(::unlink(game.c_str()) == 0);
+    assert(::rmdir((std::string(saves) + "/SAVEDATA00").c_str()) == 0 && ::rmdir(saves) == 0);
+    // A game update over /app0: its files first, the game's for the rest.
+    char base_dir[] = "/tmp/maxps4-base-XXXXXX", update_dir[] = "/tmp/maxps4-update-XXXXXX";
+    assert(::mkdtemp(base_dir) && ::mkdtemp(update_dir));
+    auto host_file = [](const std::string& name, const char* text) {
+        const int host = ::open(name.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
+        assert(host >= 0 && ::write(host, text, std::strlen(text)) == ssize_t(std::strlen(text))); ::close(host);
+    };
+    host_file(std::string(base_dir) + "/data", "base"); host_file(std::string(base_dir) + "/only", "game");
+    host_file(std::string(update_dir) + "/data", "upd!");
+    assert(kernel.mount_app0_update(update_dir) == kernel_error(inval)); // No /app0 yet (reset above).
+    assert(kernel.mount_app0(base_dir) == 0 && kernel.mount_app0_update(update_dir) == 0);
+    auto app0 = [&](const char* name) {
+        const auto fd = call(S::open, path(name), 0);
+        assert(fd >= 0);
+        char text[8]{};
+        assert(call(S::read, fd, 0x11000, 4) == 4 && memory.read(0x11000, text, 4) && call(S::close, fd) == 0);
+        return std::string(text);
+    };
+    assert(app0("/app0/data") == "upd!" && app0("/app0/only") == "game");
+    assert(call(S::open, path("/app0/data"), 0x202) == kernel_error(rofs));
+    assert(kernel.mount_app0(base_dir) == 0 && app0("/app0/data") == "base"); // A remount drops the update.
+    kernel.reset();
+    for (const auto& name : {std::string(base_dir) + "/data", std::string(base_dir) + "/only", std::string(update_dir) + "/data"})
+        assert(::unlink(name.c_str()) == 0);
+    assert(::rmdir(base_dir) == 0 && ::rmdir(update_dir) == 0);
     std::puts("PS4 writable files, positioned I/O and directory checks passed");
 }

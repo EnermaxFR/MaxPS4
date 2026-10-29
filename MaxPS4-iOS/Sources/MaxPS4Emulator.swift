@@ -138,7 +138,7 @@ final class MaxPS4Emulator: ObservableObject {
 
         let name = url.lastPathComponent.lowercased()
         guard name == "eboot.bin" || name.hasSuffix(".self") || name.hasSuffix(".elf") || name.hasSuffix(".pkg") else {
-            status = "Format non pris en charge : sélectionnez PKG, eboot.bin, SELF ou ELF"
+            status = String(localized: "Format non pris en charge : sélectionnez PKG, eboot.bin, SELF ou ELF", bundle: .maxps4)
             return
         }
 
@@ -146,37 +146,37 @@ final class MaxPS4Emulator: ObservableObject {
         // Prevent importing the same filename twice (case-insensitive), including in-flight copies.
         if games.contains(where: { $0.fileName.caseInsensitiveCompare(url.lastPathComponent) == .orderedSame }) ||
             pendingImports.contains(name) {
-            status = "Fichier déjà présent dans la bibliothèque : \(url.lastPathComponent)"
+            status = String(localized: "Fichier déjà présent dans la bibliothèque : \(url.lastPathComponent)", bundle: .maxps4)
             return
         }
         // Identification only: PKG packages are not decrypted, extracted or launched.
         // ELF magic is a useful preliminary check, not proof of PS4 compatibility.
         guard let header = try? FileHandle(forReadingFrom: url) else {
-            status = "Impossible de lire le fichier importé"
+            status = String(localized: "Impossible de lire le fichier importé", bundle: .maxps4)
             return
         }
         defer { try? header.close() }
         guard let bytes = try? header.read(upToCount: 32), bytes.count >= 20 else {
-            status = "Fichier invalide : en-tête incomplet"
+            status = String(localized: "Fichier invalide : en-tête incomplet", bundle: .maxps4)
             return
         }
         if isPKG {
             guard Array(bytes.prefix(4)) == [0x7F, 0x43, 0x4E, 0x54] else {
-                status = "PKG invalide : signature PS4 absente"
+                status = String(localized: "PKG invalide : signature PS4 absente", bundle: .maxps4)
                 return
             }
         } else {
         guard Array(bytes.prefix(4)) == [0x7F, 0x45, 0x4C, 0x46] else {
-            status = "Fichier invalide : en-tête ELF absent"
+            status = String(localized: "Fichier invalide : en-tête ELF absent", bundle: .maxps4)
             return
         }
         guard bytes[4] == 2, bytes[5] == 1 else {
-            status = "Format ELF incompatible : 64 bits little-endian requis"
+            status = String(localized: "Format ELF incompatible : 64 bits little-endian requis", bundle: .maxps4)
             return
         }
         let machine = UInt16(bytes[18]) | (UInt16(bytes[19]) << 8)
         guard machine == 0x3E else {
-            status = "Architecture incompatible : exécutable x86-64 attendu"
+            status = String(localized: "Architecture incompatible : exécutable x86-64 attendu", bundle: .maxps4)
             return
         }
         }
@@ -193,7 +193,7 @@ final class MaxPS4Emulator: ObservableObject {
             try fileManager.copyItem(at: url, to: destination)
             try addImportedGame(at: destination, isPKG: false)
         } catch {
-            status = "Import impossible : \(error.localizedDescription)"
+            status = String(localized: "Import impossible : \(error.localizedDescription)", bundle: .maxps4)
         }
     }
 
@@ -225,11 +225,11 @@ final class MaxPS4Emulator: ObservableObject {
             switch result {
             case .success:
                 do { try addImportedGame(at: destination, isPKG: true) }
-                catch { status = "Import impossible : \(error.localizedDescription)" }
+                catch { status = String(localized: "Import impossible : \(error.localizedDescription)", bundle: .maxps4) }
             case .failure(let error):
                 // Only our own fresh, partial destination is removed; the source is never touched.
                 try? fileManager.removeItem(at: destination)
-                status = "Import impossible : \(error.localizedDescription)"
+                status = String(localized: "Import impossible : \(error.localizedDescription)", bundle: .maxps4)
             }
         }
     }
@@ -261,7 +261,7 @@ final class MaxPS4Emulator: ObservableObject {
 
         games.insert(game, at: 0)
         try saveLibrary()
-        status = isPKG ? "PKG PS4 importé (non exécutable) : \(destination.lastPathComponent)" : "Importé : \(destination.lastPathComponent)"
+        status = isPKG ? String(localized: "PKG PS4 importé (non exécutable) : \(destination.lastPathComponent)", bundle: .maxps4) : String(localized: "Importé : \(destination.lastPathComponent)", bundle: .maxps4)
     }
 
     /// Report possible duplicate imports without deleting any user files.
@@ -347,7 +347,7 @@ final class MaxPS4Emulator: ObservableObject {
     func rename(_ game: MaxPS4Game, to proposedName: String) {
         let name = proposedName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
-            status = "Le nom du jeu ne peut pas être vide"
+            status = String(localized: "Le nom du jeu ne peut pas être vide", bundle: .maxps4)
             return
         }
         guard let index = games.firstIndex(where: { $0.id == game.id }) else { return }
@@ -358,10 +358,10 @@ final class MaxPS4Emulator: ObservableObject {
         )
         do {
             try saveLibrary()
-            status = "Jeu renommé : \(name)"
+            status = String(localized: "Jeu renommé : \(name)", bundle: .maxps4)
         } catch {
             games[index] = previous
-            status = "Renommage impossible : \(error.localizedDescription)"
+            status = String(localized: "Renommage impossible : \(error.localizedDescription)", bundle: .maxps4)
         }
     }
 
@@ -372,9 +372,9 @@ final class MaxPS4Emulator: ObservableObject {
             }
             games.removeAll { $0.id == game.id }
             try saveLibrary()
-            status = "Jeu supprimé"
+            status = String(localized: "Jeu supprimé", bundle: .maxps4)
         } catch {
-            status = "Suppression impossible : \(error.localizedDescription)"
+            status = String(localized: "Suppression impossible : \(error.localizedDescription)", bundle: .maxps4)
         }
     }
 
@@ -384,7 +384,7 @@ final class MaxPS4Emulator: ObservableObject {
         }
         games.removeAll()
         try? saveLibrary()
-        status = "Bibliothèque vidée"
+        status = String(localized: "Bibliothèque vidée", bundle: .maxps4)
     }
 
     var deviceDiagnostic: String {
@@ -693,8 +693,13 @@ final class MaxPS4Emulator: ObservableObject {
     }
 
     private func importFolder() throws -> URL {
-        let url = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("MaxPS4Games", isDirectory: true)
+        let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let url = documents.appendingPathComponent("Fichiers importés", isDirectory: true)
+        // Named MaxPS4Games before: keep the copies already imported there.
+        let previous = documents.appendingPathComponent("MaxPS4Games", isDirectory: true)
+        if !fileManager.fileExists(atPath: url.path), fileManager.fileExists(atPath: previous.path) {
+            try? fileManager.moveItem(at: previous, to: url)
+        }
         try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
@@ -738,7 +743,7 @@ final class MaxPS4Emulator: ObservableObject {
             let decoded = try JSONDecoder().decode([MaxPS4Game].self, from: data)
             // Container UUIDs may change after an iOS app update. Never trust
             // a persisted absolute sandbox path; resolve the saved filename
-            // relative to our current Documents/MaxPS4Games directory instead.
+            // relative to our current import folder instead.
             let folder = try importFolder()
             let recovered = decoded.compactMap { game -> MaxPS4Game? in
                 let fileName = URL(fileURLWithPath: game.fileName).lastPathComponent

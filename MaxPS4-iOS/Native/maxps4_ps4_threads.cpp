@@ -755,11 +755,175 @@ void PS4Threads::reset() {
         threads_.fill(0); threads_[0] = 1;
         // Keep counters monotonic: stale handles never reactivate.
         mutexes_.fill({}); conds_.fill({}); attrs_.fill({}); mutexattrs_.fill({});
-        rwlocks_.fill({}); keys_.fill({}); equeues_.fill({});
+        rwlocks_.fill({}); keys_.fill({}); equeues_.fill({}); semas_.fill({}); flags_.fill({});
         for (auto& values : values_) values.fill(0);
         interrupted_ = false;
         arena_next_ = arena_end_ = 0; // Its pages went with the dynamic memory.
     }
     changed_.notify_all();
+}
+
+Error PS4Threads::check_name(uint64_t name) const {
+    for (size_t i = 0; name; ++i) {
+        uint8_t byte = 0;
+        if (name > UINT64_MAX - i || !memory_.read(name + i, &byte, 1)) return fault;
+        if (!byte) break;
+        if (i == 32) return nametoolong;
+    }
+    return ok;
+}
+template <typename Ready>
+bool PS4Threads::wait_timeout(std::unique_lock<std::mutex>& lock, uint64_t timeout, uint64_t micros, Ready ready) {
+    if (!timeout) { changed_.wait(lock, ready); return false; }
+    const auto start = std::chrono::steady_clock::now();
+    const bool done = changed_.wait_for(lock, std::chrono::microseconds(micros), ready);
+    const auto spent = uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count());
+    write_output(timeout, done && spent < micros ? micros - spent : 0, 4);
+    return !done;
+}
+Error PS4Threads::sema_create(uint64_t output, uint64_t name, int32_t initial, int32_t max) {
+    std::lock_guard<std::mutex> lock(guard_);
+    if (!output || !memory_.permitted(output, 8, 2) || memory_.permitted(output, 8, 1)) return fault;
+    if (initial < 0 || max <= 0 || initial > max) return inval;
+    if (const Error named = check_name(name)) return named;
+    if (next_mutex_ == UINT64_MAX) return again;
+    for (auto& sema : semas_) if (!sema.token) {
+        if (!write_output(output, next_mutex_, 8)) return fault;
+        sema = {}; sema.token = next_mutex_++; sema.count = initial; sema.max = max;
+        return ok;
+    }
+    return again;
+}
+Error PS4Threads::sema_delete(uint64_t handle) {
+    {
+        std::lock_guard<std::mutex> lock(guard_);
+        auto found = std::find_if(semas_.begin(), semas_.end(), [&](const Sema& s) { return s.token && s.token == handle; });
+        if (found == semas_.end()) return srch;
+        *found = {};
+    }
+    changed_.notify_all();
+    return ok;
+}
+Error PS4Threads::sema_wait(uint64_t handle, int32_t count, uint64_t timeout, bool poll) {
+    std::unique_lock<std::mutex> lock(guard_);
+    auto found = std::find_if(semas_.begin(), semas_.end(), [&](const Sema& s) { return s.token && s.token == handle; });
+    if (found == semas_.end()) return srch;
+    Sema& sema = *found;
+    if (count <= 0 || count > sema.max) return inval;
+    if (sema.count >= count) { sema.count -= count; return ok; }
+    if (poll) return busy;
+    uint8_t wire[4]{};
+    if (timeout && !memory_.read(timeout, wire, 4)) return fault;
+    const uint64_t generation = sema.generation;
+    ++sema.waiters;
+    auto ready = [&] { return interrupted_ || sema.token != handle || sema.generation != generation || sema.count >= count; };
+    const bool timed_out = wait_timeout(lock, timeout, get_le(wire, 4), ready);
+    if (sema.token == handle) --sema.waiters;
+    if (interrupted_) return intr;
+    if (sema.token != handle || sema.generation != generation) return canceled;
+    if (sema.count < count) return timed_out ? timedout : intr;
+    sema.count -= count;
+    return ok;
+}
+Error PS4Threads::sema_signal(uint64_t handle, int32_t count) {
+    {
+        std::lock_guard<std::mutex> lock(guard_);
+        auto found = std::find_if(semas_.begin(), semas_.end(), [&](const Sema& s) { return s.token && s.token == handle; });
+        if (found == semas_.end()) return srch;
+        if (count <= 0 || count > found->max - found->count) return inval;
+        found->count += count;
+    }
+    changed_.notify_all();
+    return ok;
+}
+Error PS4Threads::sema_cancel(uint64_t handle, int32_t count, uint64_t waiters) {
+    {
+        std::lock_guard<std::mutex> lock(guard_);
+        auto found = std::find_if(semas_.begin(), semas_.end(), [&](const Sema& s) { return s.token && s.token == handle; });
+        if (found == semas_.end()) return srch;
+        if (count > found->max) return inval;
+        if (waiters && !write_output(waiters, found->waiters, 4)) return fault;
+        ++found->generation;
+        if (count >= 0) found->count = count;
+    }
+    changed_.notify_all();
+    return ok;
+}
+Error PS4Threads::flag_create(uint64_t output, uint64_t name, uint32_t attributes, uint64_t pattern) {
+    std::lock_guard<std::mutex> lock(guard_);
+    if (!output || !memory_.permitted(output, 8, 2) || memory_.permitted(output, 8, 1)) return fault;
+    if (attributes & ~0x33U) return inval;
+    if (const Error named = check_name(name)) return named;
+    if (next_mutex_ == UINT64_MAX) return again;
+    for (auto& flag : flags_) if (!flag.token) {
+        if (!write_output(output, next_mutex_, 8)) return fault;
+        flag = {}; flag.token = next_mutex_++; flag.pattern = pattern; flag.attributes = attributes;
+        return ok;
+    }
+    return again;
+}
+Error PS4Threads::flag_delete(uint64_t handle) {
+    {
+        std::lock_guard<std::mutex> lock(guard_);
+        auto found = std::find_if(flags_.begin(), flags_.end(), [&](const Flag& f) { return f.token && f.token == handle; });
+        if (found == flags_.end()) return srch;
+        *found = {};
+    }
+    changed_.notify_all();
+    return ok;
+}
+Error PS4Threads::flag_set(uint64_t handle, uint64_t bits, bool clear) {
+    {
+        std::lock_guard<std::mutex> lock(guard_);
+        auto found = std::find_if(flags_.begin(), flags_.end(), [&](const Flag& f) { return f.token && f.token == handle; });
+        if (found == flags_.end()) return srch;
+        if (clear) found->pattern &= bits; else found->pattern |= bits;
+    }
+    if (!clear) changed_.notify_all();
+    return ok;
+}
+Error PS4Threads::flag_wait(uint64_t handle, uint64_t bits, uint32_t mode, uint64_t result, uint64_t timeout, bool poll) {
+    constexpr uint32_t all = 1, any = 2, clear_all = 0x10, clear_bits = 0x20, single = 0x10;
+    std::unique_lock<std::mutex> lock(guard_);
+    auto found = std::find_if(flags_.begin(), flags_.end(), [&](const Flag& f) { return f.token && f.token == handle; });
+    if (found == flags_.end()) return srch;
+    Flag& flag = *found;
+    const uint32_t kind = mode & 3, clearing = mode & 0x30;
+    if (!bits || (kind != all && kind != any) || clearing == 0x30 || (mode & ~0x33U)) return inval;
+    auto met = [&] { return kind == all ? (flag.pattern & bits) == bits : (flag.pattern & bits) != 0; };
+    auto take = [&] {
+        if (result) write_output(result, flag.pattern, 8);
+        if (clearing == clear_all) flag.pattern = 0;
+        else if (clearing == clear_bits) flag.pattern &= ~bits;
+        return ok;
+    };
+    if (met()) return take();
+    if (poll) { if (result) write_output(result, flag.pattern, 8); return busy; }
+    if ((flag.attributes & single) && flag.waiters) return perm;
+    uint8_t wire[4]{};
+    if (timeout && !memory_.read(timeout, wire, 4)) return fault;
+    const uint64_t generation = flag.generation;
+    ++flag.waiters;
+    auto ready = [&] { return interrupted_ || flag.token != handle || flag.generation != generation || met(); };
+    const bool timed_out = wait_timeout(lock, timeout, get_le(wire, 4), ready);
+    if (flag.token == handle) --flag.waiters;
+    if (interrupted_) return intr;
+    if (flag.token != handle || flag.generation != generation) {
+        if (result && flag.token == handle) write_output(result, flag.pattern, 8);
+        return canceled;
+    }
+    if (!met()) { if (result) write_output(result, flag.pattern, 8); return timed_out ? timedout : intr; }
+    return take();
+}
+Error PS4Threads::flag_cancel(uint64_t handle, uint64_t pattern, uint64_t waiters) {
+    {
+        std::lock_guard<std::mutex> lock(guard_);
+        auto found = std::find_if(flags_.begin(), flags_.end(), [&](const Flag& f) { return f.token && f.token == handle; });
+        if (found == flags_.end()) return srch;
+        if (waiters && !write_output(waiters, found->waiters, 4)) return fault;
+        ++found->generation; found->pattern = pattern;
+    }
+    changed_.notify_all();
+    return ok;
 }
 } // namespace maxps4

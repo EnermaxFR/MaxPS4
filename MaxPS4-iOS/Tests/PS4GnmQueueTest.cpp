@@ -118,6 +118,39 @@ int main() {
     put(addresses,base,8); put(sizes,28+sizeof(sync),4);
     put(base+28+8,UINT64_MAX-3,4); put(base+28+12,(1U<<29)|0xffff,4);
     assert(queue.submit(1,addresses,sizes,0,0,&interrupts)==PS4GnmQueue::error(0x1000));
-    assert(queue.backend(PS4GnmQueue::diagnostic)==0 && !queue.null_backend());
+    // Software backend: same retirement, and the draw reaches the renderer
+    // (skipped here: no colour target is bound).
+    put(addresses,base,8); put(sizes,28+sizeof(sync),4); put(base+28+8,uint32_t(labels),4); put(base+28+12,(1U<<29)|(2U<<24),4);
+    assert(queue.backend(4)==-EINVAL && queue.backend(PS4GnmQueue::software)==0 && queue.null_backend());
+    assert(queue.software_stats().draws==0);
+    assert(queue.submit(1,addresses,sizes,0,0,&interrupts)==0 && interrupts==1);
+    const auto stats=queue.software_stats();
+    assert(stats.draws==1 && stats.skipped==1 && stats.failed==0 && stats.error.empty());
+    assert(queue.backend(PS4GnmQueue::diagnostic)==0 && !queue.null_backend() && queue.software_stats().draws==0);
+    // Host completion precedes synchronization retirement, and a failed GPU
+    // submission must not publish labels/events or accept further work.
+    struct HostState { PS4GuestMemory* memory; uint64_t label; unsigned calls=0; bool fail=false; } host{&memory,labels};
+    auto consume=+[](void* context,const uint32_t* words,size_t count)->int32_t {
+        auto& h=*static_cast<HostState*>(context);
+        assert(words && count>7 && words[0]==0xc0012d00);
+        uint8_t wire[8]{}; assert(h.memory->read(h.label,wire,sizeof wire));
+        assert(ps4::get_le(wire,8)==0); // EOP has not retired yet.
+        ++h.calls; return h.fail ? -EIO : 0;
+    };
+    assert(queue.host_consumer(&host,consume)==0 && queue.backend(PS4GnmQueue::host)==0);
+    assert(queue.null_backend() && queue.host_consumer(nullptr,nullptr)==-EBUSY);
+    put(labels,0,8);
+    uint8_t label_bytes[8]{};
+    assert(queue.submit(1,addresses,sizes,0,0,&interrupts)==0 && interrupts==1 && host.calls==1);
+    assert(memory.read(labels,label_bytes,sizeof label_bytes) && ps4::get_le(label_bytes,8)!=0);
+    put(labels,0,8); host.fail=true;
+    assert(queue.submit(1,addresses,sizes,0,0,&interrupts)==PS4GnmQueue::error(0x10ff));
+    assert(interrupts==0 && host.calls==2 && queue.allowed()==0);
+    assert(memory.read(labels,label_bytes,sizeof label_bytes) && ps4::get_le(label_bytes,8)==0);
+    assert(queue.submit(1,addresses,sizes,0,0)==PS4GnmQueue::error(0x10ff) && host.calls==2);
+    assert(queue.backend(PS4GnmQueue::none)==0 && queue.backend(PS4GnmQueue::host)==-EINVAL);
+    assert(queue.host_consumer(&host,consume)==0 && queue.backend(PS4GnmQueue::host)==0);
+    queue.reset(); assert(queue.backend(PS4GnmQueue::host)==-EINVAL);
+    std::puts("PASS GNM host backend: synchronous consumer, GPU-before-label ordering, failure latch, detach and reset");
     std::puts("PASS GNM null backend: label writes, EOP interrupt count, no ticket, CCB ignored, prepareFlip label/interrupt, bad address refused");
 }

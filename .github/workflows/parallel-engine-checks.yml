@@ -136,7 +136,7 @@ jobs:
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           mkdir -p build/parallel/frontend
           xcrun --sdk iphoneos swiftc \
-            -target arm64-apple-ios16.0 \
+            -target arm64-apple-ios18.0 \
             -sdk "$SDK" -parse-as-library -typecheck \
             -import-objc-header MaxPS4-iOS/Native/MaxPS4Inspection-Bridging-Header.h \
             MaxPS4-iOS/Sources/*.swift \

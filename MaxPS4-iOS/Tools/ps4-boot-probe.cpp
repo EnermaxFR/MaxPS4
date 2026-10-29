@@ -3,12 +3,12 @@
 // Loads <dir>/sce_module/*.prx then <dir>/eboot.bin, links them with the
 // engine's HLE (prepare_orbis_general) in import probe mode, so that every
 // missing import is a stub reported on stderr at its first call, mounts <dir> as /app0 and runs the
-// entry point through FEX with the null GPU backend (nothing is drawn: frames
-// hold only what the CPU wrote). Prints the link diagnostic, the run status and
+// entry point through FEX with the software GPU backend (each submission is
+// executed on the CPU by the GCN interpreter, render targets written linearly).
+// Prints the link diagnostic, the run status and
 // the guest fault. A display thread sends 60 Hz vblanks and completes every
-// flip; with a frame directory, it saves one presented frame in 30 there as
+// flip; with a frame directory, it saves the first 30 frames, then one in 30 as
 // frame-NNNN.png (at most 100). Game files are only read.
-#include "../Native/OrbisMetadata.hpp"
 #include "../Native/maxps4_fex_runtime.h"
 #include <algorithm>
 #include <atomic>
@@ -25,24 +25,6 @@
 #include <vector>
 
 namespace {
-struct Module {
-    std::string name;
-    std::vector<uint8_t> bytes;
-    maxps4::OrbisMetadata metadata;
-    std::vector<std::string> dependencies;
-    std::vector<const char*> pointers;
-};
-bool read(const std::filesystem::path& path, Module& module) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in) { std::fprintf(stderr, "%s : lecture impossible\n", path.c_str()); return false; }
-    module.bytes.assign(std::istreambuf_iterator<char>(in), {});
-    module.name = path.filename().string();
-    if (!module.metadata.parse(module.bytes.data(), module.bytes.size())) {
-        std::fprintf(stderr, "%s : %s\n", module.name.c_str(), module.metadata.error.c_str());
-        return false;
-    }
-    return true;
-}
 // PNG with stored (uncompressed) deflate blocks: RGBA8, no dependency.
 uint32_t crc(const uint8_t* p, size_t n, uint32_t c = 0xffffffffU) {
     for (size_t i = 0; i < n; ++i) {
@@ -117,12 +99,17 @@ void display(maxps4_fex_engine* engine, const std::string& directory, std::atomi
         if (maxps4_fex_engine_videoout_snapshot(engine, &frame, nullptr, 0)) continue;
         pixels.resize(frame.byte_count);
         if (maxps4_fex_engine_videoout_snapshot(engine, &frame, pixels.data(), pixels.size())) continue;
-        if (flips % 30 == 0 && !directory.empty() && saved < 100) {
+        if ((flips < 30 || flips % 30 == 0) && !directory.empty() && saved < 100) {
             char name[32];
             std::snprintf(name, sizeof name, "/frame-%04u.png", saved++);
             const bool ok = write_png(directory + name, frame, pixels);
             std::fprintf(stderr, "flip %llu : %ux%u format 0x%x%s -> %s%s\n", (unsigned long long)flips,
                 frame.width, frame.height, frame.pixel_format, frame.tiled ? " tiled" : "", name + 1, ok ? "" : " (échec)");
+            uint32_t draws = 0, rendered = 0, failed = 0;
+            char error[160] = {};
+            maxps4_fex_engine_gnm_software_status(engine, &draws, &rendered, &failed, error, sizeof error);
+            std::fprintf(stderr, "GPU logiciel : %u dessins, %u rendus, %u échecs%s%s\n", draws, rendered, failed,
+                error[0] ? " ; premier : " : "", error);
         }
         ++flips;
         maxps4_fex_engine_videoout_complete(engine, frame.ticket, 1);
@@ -132,50 +119,21 @@ void display(maxps4_fex_engine* engine, const std::string& directory, std::atomi
 }
 
 int main(int argc, char** argv) {
-    if (argc < 2) { std::fputs("usage: ps4-boot-probe <dossier du jeu> [millisecondes]\n", stderr); return 2; }
+    if (argc < 2) { std::fputs("usage: ps4-boot-probe <dossier du jeu> [dossier des images]\n", stderr); return 2; }
     const std::filesystem::path root = std::filesystem::absolute(argv[1]);
     const std::string frames = argc > 2 ? argv[2] : "";
     if (!frames.empty()) std::filesystem::create_directories(frames);
-    // Providers first: the linker requires a module's dependencies before it.
-    std::vector<Module> modules;
-    std::vector<std::filesystem::path> prx;
-    if (std::filesystem::is_directory(root / "sce_module"))
-        for (const auto& entry : std::filesystem::directory_iterator(root / "sce_module"))
-            if (entry.path().extension() == ".prx") prx.push_back(entry.path());
-    std::sort(prx.begin(), prx.end());
-    for (const auto& path : prx) { modules.emplace_back(); if (!read(path, modules.back())) return 1; }
-    modules.emplace_back();
-    if (!read(root / "eboot.bin", modules.back())) return 1;
-    // Same placement as ps4-orbis-analyze: 1 MiB aligned, 1 MiB apart.
-    std::vector<maxps4_orbis_module> table;
-    uint64_t bias = 0x400000;
-    for (auto& m : modules) {
-        for (const auto& needed : m.metadata.needed)
-            for (const auto& other : modules)
-                if (&other != &m && other.name == needed) m.dependencies.push_back(needed);
-        for (const auto& d : m.dependencies) m.pointers.push_back(d.c_str());
-        table.push_back({m.name.c_str(), m.bytes.data(), m.bytes.size(), bias,
-                         m.pointers.data(), m.pointers.size()});
-        uint64_t end = 0;
-        for (const auto& s : m.metadata.segments)
-            if (s.type == 1 || s.type == 0x61000010) end = std::max(end, s.address + s.memsz);
-        std::printf("module %-24s base 0x%llx, %zu dépendance(s)\n", m.name.c_str(),
-                    (unsigned long long)bias, m.dependencies.size());
-        bias += ((end + 0xfffff) & ~uint64_t{0xfffff}) + 0x100000;
-    }
     maxps4_fex_engine* engine = nullptr;
     if (int e = maxps4_fex_engine_open(&engine)) { std::printf("ouverture FEX refusée (%d)\n", e); return 1; }
     maxps4_fex_engine_set_import_probe(engine, 1);
     char diagnostic[1024] = {};
     uint64_t relocation = 0;
-    const int prepared = maxps4_fex_engine_prepare_orbis_general(engine, table.data(), table.size(),
-        "eboot.bin", &relocation, diagnostic, sizeof diagnostic);
-    std::printf("\nliaison : %d (%s)\n%s\n", prepared, prepared ? std::strerror(-prepared) : "ok", diagnostic);
-    if (prepared) { maxps4_fex_engine_close(engine); return 1; }
+    const int loaded = maxps4_fex_engine_load_game(engine, root.c_str(), &relocation, diagnostic, sizeof diagnostic);
+    std::printf("\nchargement : %d (%s)\n%s\n", loaded, loaded ? std::strerror(-loaded) : "ok", diagnostic);
+    if (loaded) { maxps4_fex_engine_close(engine); return 1; }
     std::printf("relocation 0x%llx\n", (unsigned long long)relocation);
-    if (int64_t e = maxps4_fex_engine_mount_app0(engine, root.c_str())) std::printf("montage /app0 : %lld\n", (long long)e);
-    // Null GPU: submissions draw nothing but signal their labels, EOP events and flips.
-    if (int e = maxps4_fex_engine_gnm_backend(engine, 2)) std::printf("GPU nul refusé (%d)\n", e);
+    // Software GPU: submissions are drawn on the CPU, then signal their labels, EOP events and flips.
+    if (int e = maxps4_fex_engine_gnm_backend(engine, 3)) std::printf("GPU logiciel refusé (%d)\n", e);
     if (int e = maxps4_fex_engine_initialize(engine)) { std::printf("JIT FEX indisponible (%d)\n", e); return 1; }
     uint64_t value = 0, entry = 0;
     uint32_t backend = 0;

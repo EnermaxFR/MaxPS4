@@ -163,3 +163,109 @@ VALU float math, `v_interp_p1/p2`, `image_sample`, `exp` (with
 `v_cvt_pkrtz_f16_f32` compressed colour exports), scalar buffer loads and
 fetch-shader calls (`s_swappc_b64`). That set bounds the first translator.
 Nothing is translated or executed yet.
+
+## Software GPU backend (first real frames)
+
+`GCNInterpreter.hpp` executes one GCN wave (up to 64 lanes) on the CPU with
+real EXEC/VCC masks: scalar and vector ALU, scalar and buffer loads (bounds
+from NUM_RECORDS, in STRIDE units when the V# has a stride), linear image
+sampling with bilinear filtering, quad swizzles for derivatives,
+interpolation from attribute planes, and exports. Code is fetched from
+guest memory as it runs, so a fetch shader reached with `s_swappc_b64`
+needs no special case. Each sampled texture is copied once per draw.
+
+`PM4SoftwareRenderer.hpp` keeps PM4 register state across submissions and
+executes indexed and automatic draws (triangle list/strip, rect list)
+through the real vertex and pixel programs: viewport, screen scissor,
+rasterization in 8x8 tiles of 2x2 quads with the top-left rule, PS input
+VGPRs from SPI_PS_INPUT_ADDR, colour target 0 in 8_8_8_8 UNORM with
+COMP_SWAP, target mask and basic blending. Limits: no clipping, depth,
+culling or PS4 tiling (targets are written linearly; only the display reads
+them), instance 0 only, compute dispatches counted but not run.
+
+GNM backend 3 (software) is the null backend plus this renderer. With it
+the boot probe saves Sonic Mania's SEGA logo at 1920x1080: the game's own
+CPU-drawn 424x240 screen, scaled by its real `none_vv`/fetch/`none_p`
+shaders. It takes about five seconds per frame under the VIXL simulator;
+it is a correctness reference for the Metal path, not a playable renderer.
+
+## Metal path status and next steps (handoff, 2026-10-24)
+
+Done and validated on CI (PR #250): `GCNTranslator.hpp` (GCN -> one portable
+function, C++ via `GCNShaderRuntime.hpp`, MSL via `gcnMetalPrelude()`),
+`PM4DrawCollector.hpp` (PM4Draw plans), `PM4MetalRenderer.mm` (translated
+pipelines, one texture per colour target, rect lists, per-draw copies of the
+memory ranges `PM4ResourceScan.hpp` finds). `GCNMetalTest` and
+`PM4MetalRendererTest` match the software renderer on a real GPU (worst
+channel difference 0).
+
+Validated in WSL: `maxps4_fex_engine_load_game` (shared game-directory
+loader, `maxps4_fex_runtime.cpp/.h`) and the boot probe switched to it.
+After synchronizing the WSL source copy with this branch, the
+`maxps4-boot-probe` target in `~/maxps4/ps4-linked-rel` builds and the probe
+renders Sonic Mania's SEGA logo at 1920x1080 with the software backend.
+The capture at flip 60 reports 122 draws, 61 rendered and zero failures.
+The initial frames are black; this validation took about seven minutes
+under the simulator, so a short run with a black first frame does not
+establish a renderer failure. The probe now captures the first 30 frames
+before sampling one in 30, and its usage names the frame-directory argument
+correctly. Keep captures and logs outside `/tmp` to retain them across WSL
+restarts. This validates the loader and software path, not iPhone Metal.
+
+The app path is now wired for device testing:
+1. GNM backend 4 ("host") calls an attached synchronous consumer with owned
+   DCB copies. It retires label writes and EOP events only after successful
+   GPU completion. A consumer error latches submission failure until reset.
+2. `PM4GameMetalBridge.mm` owns a persistent PM4DrawCollector and
+   PM4MetalRenderer. Guest reads use the checked runtime memory-copy API.
+   Display snapshots are immutable GPU texture copies, cropped to VideoOut
+   dimensions, so later rendering cannot modify an in-flight drawable.
+3. `MaxPS4GameSession.swift` loads a selected game directory on the serial
+   FEX queue, attaches backend 4, initializes FEX and runs the game. Its
+   concurrent host APIs provide vblanks, pad updates and explicit flip
+   confirmation only after both Metal completion and drawable presentation.
+   Closing/backgrounding requests cancellation; engine close happens only
+   after execution returns. Both app targets include the Metal .mm files.
+
+The host consumer deliberately waits for GPU completion per submission. It
+is a first correctness path, not a performance claim. Existing renderer
+limits still apply (no depth/clipping/tiling/compute, instance 0). The game
+session uses the same unresolved-import probe mode as the Linux diagnostic;
+missing services may still prevent further gameplay. No audio output is
+implemented by this path. A device run is required before claiming Sonic is
+playable.
+
+To test: install the CI `MaxPS4-FEXCore-SideStore` IPA, activate JIT with
+StikDebug from **Accueil → Activer le JIT**, open **Accueil → Jouer**, select
+the directory containing `eboot.bin`, `sce_module` and the game data,
+choose **Continuer**, then **Jouer**. Session reports remain available under
+**Détails de la session**. This path does not require
+`maxps4.json` (the separate bounded CPU diagnostic still does). Use the
+on-screen directions/face buttons/Options or an iOS controller. Share the
+session report if startup, rendering or presentation fails. The live report
+updates once per second with confirmed displayed frames/s, average image
+preparation time and Metal draw/pass counts. Display copies run on a dedicated
+worker with at most one pending request; only a confirmed presentation retires
+the flip. Consecutive same-target draws within a submission share a Metal render
+pass; submission retirement still waits for GPU completion. Game files and
+captures remain local; none are embedded in the IPA.
+
+### Device SIGBUS before the first submission
+
+The first device report returned `-EFAULT`, signal 10 (`SIGBUS` on Darwin),
+with zero Metal draws. The native frontend had been treating alignment
+exceptions from FEX-generated TSO/atomic instructions as fatal guest faults.
+The VIXL probe disables TSO lowering because its x86 host already supplies
+that ordering, so the Linux simulator does not exercise this hardware path.
+
+Native ARM64 `BUS_ADRALN` exceptions inside the JIT are now offered to
+FEX's unaligned-access handler before fault containment. Backpatching uses
+the writable code alias with half-barriers, invalidates the executable
+alias too, and resumes the original executable PC with the repaired host
+registers. Other signal codes and unhandled instructions still use the
+existing contained-fault path. A native regression covers eight-byte loads,
+stores, LOCK ADD and LOCK CMPXCHG crossing cache-line boundaries, including
+a second run of the same image. Build 1000176 also reports `si_code`, the
+memory fault address, relocation and relative RIP for further device triage.
+This fixes a missing frontend mechanism; another device run is still needed
+to determine whether it resolves the reported game startup fault.
