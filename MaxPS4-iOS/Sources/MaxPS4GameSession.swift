@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import Combine
 import Metal
 #if MAXPS4_FEX_APP
@@ -133,8 +134,12 @@ final class MaxPS4GameSource: @unchecked Sendable {
         vblanksSent += 1
     }
     // Refreshing at least 60 times a second (with jitter) and lately.
+    // While the screen is recorded or mirrored, iOS refreshes it irregularly:
+    // the steady timer paces the game instead, so it does not stutter.
+    private var captured = false // Under inputLock.
+    func setCaptured(_ value: Bool) { inputLock.lock(); captured = value; inputLock.unlock() }
     private func screenPaced(at time: TimeInterval) -> Bool {
-        guard let lastRefresh else { return false }
+        guard !captured, let lastRefresh else { return false }
         return refreshInterval < 1.0 / 50 && time - lastRefresh < 1.0 / 20
     }
 
@@ -460,6 +465,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
     func start(url: URL, update: URL? = nil, addons: [MaxPS4GameFolders.Addon] = [], device: MTLDevice, nativeTextures: Bool = false, tso: Bool = true, outputHeight: Int = 1080, profiling: Bool = false) {
         stop()
         let source = MaxPS4GameSource(), id = UUID()
+        source.setCaptured(UIScreen.main.isCaptured)
         generation = id; self.source = source; worker = source; running = true
         hasPresented = false; heartbeat = ""; outcome = .init()
         report = String(localized: "Chargement du jeu et préparation Metal…", bundle: .maxps4)
@@ -513,6 +519,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
     // The game menu's pause: no vblank and no audio read, so a game paced on
     // them (Sonic Mania) waits where it is.
     func setPaused(_ paused: Bool) { worker?.setPaused(paused) }
+    func setCaptured(_ captured: Bool) { worker?.setCaptured(captured) }
     func stop() {
         stopping = worker == nil ? nil : generation
         if let worker { Self.draining = worker }
