@@ -85,6 +85,8 @@ enum class PS4KernelService : uint32_t {
     msg_init, msg_open, msg_status, msg_result, msg_close, msg_term,
     error_init, error_open, error_status, error_close, error_term,
     netctl_state, netctl_info, netctl_callback, net_pool, audio_outputs, audio_port_state,
+    playgo_open, playgo_locus, playgo_progress, playgo_todo, playgo_eta, playgo_speed, playgo_language,
+    playgo_chunks, random_number, sandbox_word,
     app_temp_mount, rtc_current_tick, rtc_current_clock, rtc_current_local, rtc_get_tick, rtc_set_tick,
     rtc_resolution, rtc_utc_to_local, safe_area, trophy_create_context, trophy_create_handle, trophy_unlock,
     save_dialog_init, save_dialog_open, save_dialog_update, save_dialog_result, save_dialog_term,
@@ -218,6 +220,7 @@ private:
     uint32_t next_np_request_ = 0x10000001;
     uint32_t save_dialog_status_ = 0; // OrbisCommonDialogStatus: none, initialized, running, finished.
     uint32_t msg_dialog_status_ = 0, error_dialog_status_ = 0; // The same, for sceMsgDialog / sceErrorDialog.
+    uint64_t sandbox_word_ = 0; // Guest address of the sandbox word (mapped on first use).
     int64_t save_mount(uint64_t request, uint64_t result);
     int64_t save_umount(uint64_t mount_point);
     int64_t temp_mount(uint64_t mount_point);

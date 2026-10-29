@@ -288,6 +288,16 @@ int main() {
     assert(call(S::netctl_info, 1, 0x11c80) == signed32(0x80412108U));
     assert(call(S::netctl_callback, 0, 0, 0x11900) == 0 && value32(0x11900) == 1);
     assert(call(S::audio_port_state, 1, 0x11c80) == 0 && value32(0x11c80) == (1 | 2 << 16));
+    // PlayGo: installed and local; sceRandom fills; no sandbox word without dynamic memory.
+    assert(call(S::playgo_open, 0x11900, 0) == 0 && value32(0x11900) == 1);
+    uint8_t chunks[4] = {0, 0, 1, 0}; assert(memory.write(0x11c80, chunks, 4));
+    assert(call(S::playgo_locus, 1, 0x11c80, 2, 0x11ca0) == 0);
+    uint8_t loci[2]{}; assert(memory.read(0x11ca0, loci, 2) && loci[0] == 3 && loci[1] == 3);
+    assert(call(S::playgo_todo, 1, 0x11cc0, 4, 0x11900) == 0 && value32(0x11900) == 0);
+    assert(call(S::random_number, 0x11cc0, 65) == signed32(0x817c0016U));
+    uint8_t zero[32]{}; assert(memory.write(0x11cc0, zero, 32) && call(S::random_number, 0x11cc0, 32) == 0);
+    uint8_t random[32]{}; assert(memory.read(0x11cc0, random, 32) && std::memcmp(random, zero, 32) != 0);
+    assert(call(S::sandbox_word) == 0);
     // POSIX pthread_* reuse the scePthread services and return errno numbers.
     assert(resolve_libkernel("7H0iTOciTLo", "libkernel", "libkernel", 1) == S::mutex_lock);
     assert(resolve_libkernel("OxhIB8LB-PQ", "libkernel", "libkernel", 1) == S::thread_create);

@@ -411,6 +411,22 @@ constexpr Binding bindings[] = {
     {"sceNetCtlCheckCallback", "iQw3iQPhvUQ", PS4KernelService::succeed, "libSceNetCtl"},
     {"sceNetInit", "Nlev7Lg8k3A", PS4KernelService::succeed, "libSceNet"},
     {"sceNetPoolCreate", "dgJBaeJnGpo", PS4KernelService::net_pool, "libSceNet"},
+    // PlayGo: every chunk is installed and local, nothing is left to download.
+    {"scePlayGoInitialize", "ts6GlZOKRrE", PS4KernelService::succeed, "libScePlayGo"},
+    {"scePlayGoOpen", "M1Gma1ocrGE", PS4KernelService::playgo_open, "libScePlayGo"},
+    {"scePlayGoClose", "Uco1I0dlDi8", PS4KernelService::succeed, "libScePlayGo"},
+    {"scePlayGoTerminate", "MPe0EeBGM-E", PS4KernelService::succeed, "libScePlayGo"},
+    {"scePlayGoGetLocus", "uWIYLFkkwqk", PS4KernelService::playgo_locus, "libScePlayGo"},
+    {"scePlayGoGetProgress", "-RJWNMK3fC8", PS4KernelService::playgo_progress, "libScePlayGo"},
+    {"scePlayGoGetToDoList", "Nn7zKwnA5q0", PS4KernelService::playgo_todo, "libScePlayGo"},
+    {"scePlayGoGetEta", "v6EZ-YWRdMs", PS4KernelService::playgo_eta, "libScePlayGo"},
+    {"scePlayGoGetInstallSpeed", "rvBSfTimejE", PS4KernelService::playgo_speed, "libScePlayGo"},
+    {"scePlayGoSetInstallSpeed", "4AAcTU9R3XM", PS4KernelService::succeed, "libScePlayGo"},
+    {"scePlayGoGetLanguageMask", "3OMbYZBaa50", PS4KernelService::playgo_language, "libScePlayGo"},
+    {"scePlayGoSetLanguageMask", "LosLlHOpNqQ", PS4KernelService::succeed, "libScePlayGo"},
+    {"scePlayGoGetChunkId", "73fF1MFU8hA", PS4KernelService::playgo_chunks, "libScePlayGo"},
+    {"sceRandomGetRandomNumber", "PI7jIZj4pcE", PS4KernelService::random_number, "libSceRandom"},
+    {"sceKernelGetFsSandboxRandomWord", "JGfTMBOdUJo", PS4KernelService::sandbox_word},
     // System modules are part of the HLE: loading one has nothing to do.
     {"sceSysmoduleLoadModule", "g8cM39EUZ6o", PS4KernelService::succeed, "libSceSysmodule"},
     // Audio (shadPS4 libraries/audio/audioout.cpp).
@@ -493,7 +509,7 @@ void PS4Libkernel::reset() {
     if (dynamic_) dynamic_->reset();
     threads_.reset();
     errno_table_ = errno_table_size_ = process_param_ = heap_trace_ = 0;
-    save_root_.clear(); save_dialog_status_ = msg_dialog_status_ = error_dialog_status_ = 0; system_language_ = 1; addcont_.clear(); modules_.clear();
+    save_root_.clear(); save_dialog_status_ = msg_dialog_status_ = error_dialog_status_ = 0; sandbox_word_ = 0; system_language_ = 1; addcont_.clear(); modules_.clear();
     direct_.clear();
     started_us_ = monotonic_us();
 }
@@ -1464,6 +1480,49 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     // RegisterCallback(func, arg, s32* id): never called back.
     case S::netctl_callback: return !c.rdx || write(c.rdx, 1, 4) ? 0 : signed32(0x80412101U);
     case S::net_pool: return 1;
+    case S::playgo_open: return c.rdi && write(c.rdi, 1, 4) ? 0 : signed32(0x80B20002U);
+    // GetLocus(handle, u16* chunks, count, s8* loci): 3, local and fast.
+    case S::playgo_locus:
+        if (!c.rsi || !c.rcx || c.rdx > 0xffff) return signed32(0x80B20002U);
+        for (uint64_t i = 0; i < c.rdx; ++i) if (!write(c.rcx + i, 3, 1)) return signed32(0x80B20002U);
+        return 0;
+    // GetProgress(handle, chunks, count, {u64 progress, total}*): complete.
+    case S::playgo_progress: return c.rcx && write(c.rcx, 1, 8) && write(c.rcx + 8, 1, 8) ? 0 : signed32(0x80B20002U);
+    // GetToDoList(handle, list, count, u32* entries): nothing to do.
+    case S::playgo_todo: return c.rcx && write(c.rcx, 0, 4) ? 0 : signed32(0x80B20002U);
+    case S::playgo_eta: return c.rcx && write(c.rcx, 0, 8) ? 0 : signed32(0x80B20002U);
+    case S::playgo_speed: return c.rsi && write(c.rsi, 2, 4) ? 0 : signed32(0x80B20002U); // Full speed.
+    case S::playgo_language: return c.rsi && write(c.rsi, UINT64_MAX, 8) ? 0 : signed32(0x80B20002U);
+    // GetChunkId(handle, u16* list, count, u32* entries): one chunk, 0.
+    case S::playgo_chunks:
+        if (!c.rcx) return signed32(0x80B20002U);
+        if (c.rsi && c.rdx && !write(c.rsi, 0, 2)) return signed32(0x80B20002U);
+        return write(c.rcx, 1, 4) ? 0 : signed32(0x80B20002U);
+    // GetRandomNumber(void* buffer, size): at most 64 bytes.
+    case S::random_number: {
+        if (!c.rdi || c.rsi > 64) return signed32(0x817C0016U);
+        std::random_device device;
+        uint8_t bytes[64];
+        for (uint64_t i = 0; i < c.rsi; ++i) bytes[i] = uint8_t(device());
+        return memory_.write(c.rdi, bytes, size_t(c.rsi)) ? 0 : signed32(0x817C0016U);
+    }
+    // GetFsSandboxRandomWord(): a const char* to 10 random letters, kept in
+    // one read-only page mapped on first use.
+    case S::sandbox_word: {
+        std::lock_guard<std::mutex> guard(lock_);
+        if (sandbox_word_) return int64_t(sandbox_word_);
+        if (!dynamic_) return 0;
+        uint64_t page = 0;
+        if (dynamic_->place(0, PS4VirtualMemory::page_size, 0, 3, false, page) != ok) return 0;
+        static const char letters[] = "abcdefghijklmnopqrstuvwxyz";
+        std::random_device device;
+        char word[11]{};
+        for (int i = 0; i < 10; ++i) word[i] = letters[device() % 26];
+        if (!memory_.write(page, word, sizeof(word))) return 0;
+        (void)dynamic_->protect(page, PS4VirtualMemory::page_size, 1);
+        sandbox_word_ = page;
+        return int64_t(page);
+    }
     // Outputs(OrbisAudioOutOutputParam* {s32 handle; u32; const void* samples}, count).
     case S::audio_outputs: {
         if (!c.rdi || !c.rsi || c.rsi > 25) return signed32(0x8026000AU);
