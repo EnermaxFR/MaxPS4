@@ -117,6 +117,7 @@ int main() {
     assert(gnm.reset_vgt(out,3)==0); words=load(3); assert(words[0]==0xc0016900 && words[1]==0x2aa && words[2]==0xff);
     assert(gnm.ps(out,40,0)==0); words=load(40);
     assert(words[0]==0xc0027600 && words[4]==0xc0016900 && words[5]==0x203 && gpu::decodePM4Type3(words.data(),40));
+    assert(memory.write(regs,marker,sizeof(marker))); // The default states above overwrote it.
     assert(gnm.set_marker(out,9,regs)==0); words=load(9); assert(words[1]==0x68750003);
     std::puts("PASS GNM indirect and offset draws, indirect dispatch, compute/context defaults, VGT reset, PS and set markers");
 }
