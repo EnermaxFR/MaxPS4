@@ -536,7 +536,9 @@ struct MaxPS4PadState: Equatable {
     static func touch(_ buttons: UInt32) -> Self {
         Self(buttons: buttons, l2: buttons & l2 != 0 ? 255 : 0, r2: buttons & r2 != 0 ? 255 : 0)
     }
+#if MAXPS4_FEX_APP
     func send(to engine: OpaquePointer) {
         _ = maxps4_fex_engine_pad_update(engine, buttons, lx, ly, rx, ry, l2, r2, 1)
     }
+#endif
 }
