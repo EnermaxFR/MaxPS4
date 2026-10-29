@@ -99,4 +99,24 @@ int main() {
     assert(words[0]==0xc0012800 && words[3]==0xc0001200 && words[5]==0xc0055800 && words[11]==10);
     assert(words[12]==0xc0f21000 && gpu::decodePM4Type3(words.data(),256));
     std::puts("PASS GNM compute shader/dispatch, embedded VS, flip-done wait, markers and default state streams");
+    // More writers: each fills exactly the size the game passes, as decodable PM4.
+    assert(gnm.draw_index_offset(out,9,12,6,0)==0); words=load(9);
+    assert(words[0]==0xc0033500 && words[1]==6 && words[2]==12 && words[3]==6 && words[5]==0xc0021000);
+    assert(gpu::decodePM4Type3(words.data(),9) && gnm.draw_index_offset(out,8,12,6,0)==-1);
+    assert(gnm.draw_indirect(out,9,0x40,2,3,4,1,false)==0); words=load(9);
+    assert(words[0]==0xc0032401 && words[1]==0x40 && words[2]==0x4f && words[3]==0x50 && words[4]==2);
+    assert(gnm.draw_indirect(out,9,0x40,2,0,0,0,true)==0); words=load(9);
+    assert(words[0]==0xc0032500 && words[2]==0 && words[3]==0 && words[4]==0 && gpu::decodePM4Type3(words.data(),9));
+    assert(gnm.draw_indirect(out,9,0,7,0,0,0,false)==-1 && gnm.draw_indirect(out,9,0,2,16,0,0,false)==-1);
+    assert(gnm.dispatch_indirect(out,7,0x80,0)==0); words=load(7);
+    assert(words[0]==0xc0011602 && words[1]==0x80 && words[2]==1 && gpu::decodePM4Type3(words.data(),7));
+    assert(gnm.dispatch_init_default_state(out,255)==0 && gnm.dispatch_init_default_state(out,256)==256);
+    words=load(256); assert(words[0]==0xc0017602 && words[1]==0x216 && gpu::decodePM4Type3(words.data(),256));
+    assert(gnm.init_context_state(out,0x20,0x20)==0x20 && gnm.init_context_state(out,0x21,0x20)==0);
+    words=load(0x20); assert(words[0]==0xc01e1000 && gpu::decodePM4Type3(words.data(),0x20));
+    assert(gnm.reset_vgt(out,3)==0); words=load(3); assert(words[0]==0xc0016900 && words[1]==0x2aa && words[2]==0xff);
+    assert(gnm.ps(out,40,0)==0); words=load(40);
+    assert(words[0]==0xc0027600 && words[4]==0xc0016900 && words[5]==0x203 && gpu::decodePM4Type3(words.data(),40));
+    assert(gnm.set_marker(out,9,regs)==0); words=load(9); assert(words[1]==0x68750003);
+    std::puts("PASS GNM indirect and offset draws, indirect dispatch, compute/context defaults, VGT reset, PS and set markers");
 }

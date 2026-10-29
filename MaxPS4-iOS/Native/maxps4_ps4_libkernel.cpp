@@ -294,6 +294,26 @@ constexpr Binding bindings[] = {
     {"sceGnmInsertPushMarker", "W1Etj-jlW7Y", PS4KernelService::gnm_push_marker, "libSceGnmDriver"},
     {"sceGnmInsertPopMarker", "7qZVNgEu+SY", PS4KernelService::gnm_pop_marker, "libSceGnmDriver"},
     {"sceGnmDrawInitDefaultHardwareState350", "yb2cRhagD1I", PS4KernelService::gnm_init350, "libSceGnmDriver"},
+    // More command writers (shadPS4 gnmdriver.cpp): the Update* calls write the
+    // same registers as their Set* counterparts, as plain register packets.
+    {"sceGnmSetPsShader", "bQVd5YzCal0", PS4KernelService::gnm_ps, "libSceGnmDriver"},
+    {"sceGnmUpdatePsShader", "4MgRw-bVNQU", PS4KernelService::gnm_ps, "libSceGnmDriver"},
+    {"sceGnmUpdatePsShader350", "mLVL7N7BVBg", PS4KernelService::gnm_ps350, "libSceGnmDriver"},
+    {"sceGnmUpdateVsShader", "V31V01UiScY", PS4KernelService::gnm_vs, "libSceGnmDriver"},
+    {"sceGnmSetCsShader", "KXltnCwEJHQ", PS4KernelService::gnm_cs_plain, "libSceGnmDriver"},
+    {"sceGnmDrawIndexOffset", "oYM+YzfCm2Y", PS4KernelService::gnm_draw_index_offset, "libSceGnmDriver"},
+    {"sceGnmDrawIndirect", "4v+otIIdjqg", PS4KernelService::gnm_draw_indirect, "libSceGnmDriver"},
+    {"sceGnmDrawIndexIndirect", "ED9-Fjr8Ta4", PS4KernelService::gnm_draw_index_indirect, "libSceGnmDriver"},
+    {"sceGnmDispatchIndirect", "Z43vKp5k7r0", PS4KernelService::gnm_dispatch_indirect, "libSceGnmDriver"},
+    {"sceGnmDispatchInitDefaultHardwareState", "nF6bFRUBRAU", PS4KernelService::gnm_dispatch_init, "libSceGnmDriver"},
+    {"sceGnmDrawInitDefaultHardwareState", "Idffwf3yh8s", PS4KernelService::gnm_init350, "libSceGnmDriver"},
+    {"sceGnmDrawInitDefaultHardwareState175", "QhnyReteJ1M", PS4KernelService::gnm_init350, "libSceGnmDriver"},
+    {"sceGnmDrawInitDefaultHardwareState200", "0H2vBYbTLHI", PS4KernelService::gnm_init350, "libSceGnmDriver"},
+    {"sceGnmDrawInitToDefaultContextState", "8lH54sfjfmU", PS4KernelService::gnm_context_init, "libSceGnmDriver"},
+    {"sceGnmDrawInitToDefaultContextState400", "im2ZuItabu4", PS4KernelService::gnm_context_init400, "libSceGnmDriver"},
+    {"sceGnmResetVgtControl", "MYRtYhojKdA", PS4KernelService::gnm_reset_vgt, "libSceGnmDriver"},
+    {"sceGnmInsertSetMarker", "jiItzS6+22g", PS4KernelService::gnm_set_marker, "libSceGnmDriver"},
+    {"sceGnmGetGpuCoreClockFrequency", "Fwvh++m9IQI", PS4KernelService::gnm_clock, "libSceGnmDriver"},
     {"scePadOpen", "xk0AcarP3V4", PS4KernelService::pad_open, "libScePad"},
     {"scePadClose", "6ncge5+l5Qs", PS4KernelService::pad_close, "libScePad"},
     {"scePadRead", "q1cHNfGycLI", PS4KernelService::pad_read, "libScePad"},
@@ -1634,6 +1654,24 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     case S::gnm_push_marker: return gnm_.push_marker(c.rdi,uint32_t(c.rsi),c.rdx);
     case S::gnm_pop_marker: return gnm_.pop_marker(c.rdi,uint32_t(c.rsi));
     case S::gnm_init350: return gnm_.init_default_state350(c.rdi,uint32_t(c.rsi));
+    case S::gnm_ps: return gnm_.ps(c.rdi,uint32_t(c.rsi),c.rdx);
+    case S::gnm_cs_plain: return gnm_.cs(c.rdi,uint32_t(c.rsi),c.rdx,0);
+    case S::gnm_draw_index_offset: return gnm_.draw_index_offset(c.rdi,uint32_t(c.rsi),uint32_t(c.rdx),uint32_t(c.rcx),uint32_t(c.r8));
+    // Draw(Index)Indirect(cmdbuf, size, data_offset, stage, vertex_sgpr, instance_sgpr, flags):
+    // flags is the seventh argument, on the stack.
+    case S::gnm_draw_indirect: case S::gnm_draw_index_indirect: {
+        uint8_t stack[8]{};
+        const uint32_t flags = c.rsp && memory_.read(c.rsp + 8, stack, 4) ? uint32_t(get_le(stack, 4)) : 0;
+        return gnm_.draw_indirect(c.rdi,uint32_t(c.rsi),uint32_t(c.rdx),uint32_t(c.rcx),uint32_t(c.r8),uint32_t(c.r9),
+                                  flags, service == S::gnm_draw_index_indirect);
+    }
+    case S::gnm_dispatch_indirect: return gnm_.dispatch_indirect(c.rdi,uint32_t(c.rsi),uint32_t(c.rdx),uint32_t(c.rcx));
+    case S::gnm_dispatch_init: return gnm_.dispatch_init_default_state(c.rdi,uint32_t(c.rsi));
+    case S::gnm_context_init: return gnm_.init_context_state(c.rdi,uint32_t(c.rsi),0x20);
+    case S::gnm_context_init400: return gnm_.init_context_state(c.rdi,uint32_t(c.rsi),0x100);
+    case S::gnm_reset_vgt: return gnm_.reset_vgt(c.rdi,uint32_t(c.rsi));
+    case S::gnm_set_marker: return gnm_.set_marker(c.rdi,uint32_t(c.rsi),c.rdx);
+    case S::gnm_clock: return 800000000; // Base PS4 GPU clock.
     case S::pad_open: return pad_.open(signed32(c.rdi), signed32(c.rsi), signed32(c.rdx), c.rcx);
     case S::pad_close: return pad_.close(signed32(c.rdi));
     case S::pad_handle: return pad_.get_handle(signed32(c.rdi), signed32(c.rsi), signed32(c.rdx));

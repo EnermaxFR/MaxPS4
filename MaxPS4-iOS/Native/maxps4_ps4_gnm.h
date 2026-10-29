@@ -48,6 +48,67 @@ public:
         }
         return store(output,p);
     }
+    // sceGnmSetPsShader (and Update*): as 3.50 but without registers it only
+    // clears DB_SHADER_CONTROL, not CB_SHADER_MASK.
+    int64_t ps(uint64_t output, uint32_t size, uint64_t registers) {
+        if (registers) return ps350(output, size, registers);
+        if (size < 40) return -1;
+        Packet p; p.add(0x76,{8,0,0}); p.add(0x69,{0x203,0}); p.nop(32); return store(output,p);
+    }
+    // DRAW_INDEX_OFFSET_2 (0x35): count, offset into the index buffer, count.
+    int64_t draw_index_offset(uint64_t output, uint32_t size, uint32_t offset, uint32_t count, uint32_t flags) {
+        if (size != 9) return -1;
+        Packet p; p.add(0x35,{count,offset,count,0},flags & 1); p.nop(3); return store(output,p);
+    }
+    // DRAW_INDIRECT (0x24) / DRAW_INDEX_INDIRECT (0x25): arguments at
+    // `data_offset` in the indirect buffer; the vertex/instance offsets go to
+    // user SGPRs of the stage (VS 0x4c, ES 0xcc, LS 0x14c past the SH base).
+    int64_t draw_indirect(uint64_t output, uint32_t size, uint32_t data_offset, uint32_t stage,
+                          uint32_t vertex_sgpr, uint32_t instance_sgpr, uint32_t flags, bool indexed) {
+        static constexpr uint32_t sgpr_base[] = {0, 0, 0x4c, 0, 0xcc, 0, 0x14c};
+        if (size != 9 || stage > 6 || vertex_sgpr >= 16 || instance_sgpr >= 16) return -1;
+        const uint32_t base = sgpr_base[stage];
+        Packet p;
+        p.add(indexed ? 0x25 : 0x24, {data_offset, vertex_sgpr ? vertex_sgpr + base : 0,
+              instance_sgpr ? instance_sgpr + base : 0, indexed ? 0U : 2U}, flags & 1);
+        p.nop(3); return store(output,p);
+    }
+    // DISPATCH_INDIRECT (0x16), compute.
+    int64_t dispatch_indirect(uint64_t output, uint32_t size, uint32_t data_offset, uint32_t flags) {
+        if (size != 7) return -1;
+        Packet p; p.add(0x16,{data_offset,(flags & 0x18) + 1},compute | (flags & 1)); p.nop(3); return store(output,p);
+    }
+    // The compute queue's defaults: thread management of both shader engines,
+    // resource limits, an ACQUIRE_MEM cache flush, then NOP to 256 dwords.
+    int64_t dispatch_init_default_state(uint64_t output, uint32_t size) {
+        if (size < words_limit) return 0;
+        Packet p;
+        p.add(0x76,{0x216,0xffffffffU},compute); p.add(0x76,{0x217,0xffffffffU},compute);
+        p.add(0x76,{0x215,0x170},compute);
+        p.add(0x58,{0x28000000U,0,0,0,0,10});
+        p.nop(words_limit-p.used-1);
+        return store(output,p) ? -1 : int64_t(words_limit);
+    }
+    // DrawInitToDefaultContextState (0x20 dwords) / 400 (0x100): the context
+    // defaults are not written yet (like init_default_state350): only NOPs of
+    // the size the caller expects, so the command buffer has no gap.
+    int64_t init_context_state(uint64_t output, uint32_t size, uint32_t expected) {
+        if (size != expected) return 0;
+        Packet p; p.nop(expected-1);
+        return store(output,p) ? -1 : int64_t(expected);
+    }
+    // IA_MULTI_VGT_PARAM back to its default.
+    int64_t reset_vgt(uint64_t output, uint32_t size) {
+        if (size != 3) return -1;
+        Packet p; p.add(0x69,{0x2aa,0xff}); return store(output,p);
+    }
+    // A debug marker NOP (0x68750003), sized like push_marker's.
+    int64_t set_marker(uint64_t output, uint32_t size, uint64_t marker) {
+        const int64_t result = push_marker(output, size, marker);
+        if (result) return result;
+        uint8_t code[4]; ps4::put_le(code, 0, 0x68750003U, 4);
+        return memory_.write(output + 4, code, 4) ? 0 : -1;
+    }
     int64_t cs(uint64_t output, uint32_t size, uint64_t registers, uint32_t modifier) {
         if (size < 25 || !registers || (modifier & 0xfffffc3fU)) return -1;
         std::array<uint32_t,7> r{};

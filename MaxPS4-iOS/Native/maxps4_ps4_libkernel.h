@@ -95,6 +95,9 @@ enum class PS4KernelService : uint32_t {
     user_initialize, user_terminate, user_initial, user_login_list, user_event, user_name,
     pad_init, pad_open, pad_close, pad_read, pad_read_state, pad_information, pad_handle,
     gnm_draw_auto, gnm_draw_index, gnm_vgt, gnm_vs, gnm_ps350,
+    gnm_ps, gnm_cs_plain, gnm_draw_index_offset, gnm_draw_indirect, gnm_draw_index_indirect,
+    gnm_dispatch_indirect, gnm_dispatch_init, gnm_context_init, gnm_context_init400,
+    gnm_reset_vgt, gnm_set_marker, gnm_clock,
     gnm_submit, gnm_allowed, gnm_done,
     // sceGnmSubmitAndFlipCommandBuffers: null GPU backend only (the flip is
     // requested once the work is retired, at submission).
