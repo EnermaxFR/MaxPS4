@@ -266,7 +266,7 @@ int main() {
     assert(resolve_libkernel("18B2NS1y9UU", "libSceRtc", "libSceRtc", 1) == S::rtc_current_tick);
     // Loaded modules: LoadStartModule by file name, Dlsym by NID, unwind info.
     assert(ps4_nid("sceGnmSetPsShader350") == "5uFKckiJYRM" && ps4_nid("sceKernelDlsym") == "LwG8g3niqwA");
-    kernel.set_modules({{"libfoo.prx", 0x10000, 0x20000, 0, 0, {{ps4_nid("fooFunction"), 0x12345}}}});
+    kernel.set_modules({{"libfoo.prx", 0x10000, 0x20000, 0, 0, {{ps4_nid("fooFunction"), 0x12345}}, {}}});
     assert(call(S::module_load_start, path("/app0/sce_module/LIBFOO.prx"), 0, 0, 0) == 1);
     assert(call(S::module_load_start, path("/app0/sce_module/libbar.prx"), 0, 0, 0) == kernel_error(noent));
     assert(memory.write(0x11c40, "fooFunction", 12) && memory.write(0x11c60, "barFunction", 12));
