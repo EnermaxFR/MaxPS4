@@ -121,20 +121,20 @@ L'hôte Linux n'a pas Xcode : les builds macOS/iOS et l'exécution réelle de
 `InitCore` sont demandés à la matrice CI existante, sans retirer de tests.
 Premier commit `c279af781c825f7f95d3f0f280baffb75582859d` : initialisation réelle
 macOS validée (3 cycles / 2 contextes) et liaison iOS réussie dans
-[38130371641](https://github.com/EnermaxFR/MaxPS4/actions/runs/38130371641).
-Smoke [38130371582](https://github.com/EnermaxFR/MaxPS4/actions/runs/38130371582)
-et heavy [38130371557](https://github.com/EnermaxFR/MaxPS4/actions/runs/38130371557)
+[38130371641](https://github.com/MaxFRdev/MaxPS4/actions/runs/38130371641).
+Smoke [38130371582](https://github.com/MaxFRdev/MaxPS4/actions/runs/38130371582)
+et heavy [38130371557](https://github.com/MaxFRdev/MaxPS4/actions/runs/38130371557)
 réussis. Ce premier commit n'exécutait pas encore de bloc invité.
 
 Commit sonde `5e246ae8890be097982f38e281fcf9a3d9fa9205` :
-[38130688595](https://github.com/EnermaxFR/MaxPS4/actions/runs/38130688595)
+[38130688595](https://github.com/MaxFRdev/MaxPS4/actions/runs/38130688595)
 réussi dans les deux jobs macOS/iOS. Le log macOS contient six lignes
 `PASS real FEX ARM64 JIT guest RAX=42 backend=2`, entre 10:07:06.795 et
 10:07:06.799 UTC le 11 octobre 2026. Trois cycles de création/destruction,
 CPUID GenuineIntel leaf=22, repli interprété, arguments invalides et erreurs
 avant initialisation réussis. Smoke
-[38130688435](https://github.com/EnermaxFR/MaxPS4/actions/runs/38130688435)
-et heavy [38130688432](https://github.com/EnermaxFR/MaxPS4/actions/runs/38130688432)
+[38130688435](https://github.com/MaxFRdev/MaxPS4/actions/runs/38130688435)
+et heavy [38130688432](https://github.com/MaxFRdev/MaxPS4/actions/runs/38130688432)
 réussis. Les nouveaux tests de préservation des quatre handlers OS et du masque
 courant, après exécution et fermeture, sont ajoutés dans le commit suivant.
 Le chemin réel d'échec mmap de la fabrique n'a pas été forcé par injection :
@@ -153,16 +153,16 @@ Commit de code final : `d7a1eb946b967b6d4c6185f264f07422e2ef5495`.
 
 | Validation | Résultat | Exécution |
 |---|---|---|
-| Darwin macOS ARM64, strict linkage + InitCore + six blocs x86 via JIT | Réussi | [38131040384](https://github.com/EnermaxFR/MaxPS4/actions/runs/38131040384) |
+| Darwin macOS ARM64, strict linkage + InitCore + six blocs x86 via JIT | Réussi | [38131040384](https://github.com/MaxFRdev/MaxPS4/actions/runs/38131040384) |
 | Préservation SIGILL/SIGSEGV/SIGBUS/SIGTRAP et masques après trois fermetures | Réussi | même job host-runtime |
 | iOS ARM64, compilation et liaison runtime/harness | Réussi, exécution non effectuée | même run, job ios-runtime |
-| Smoke existant | Réussi | [38131040377](https://github.com/EnermaxFR/MaxPS4/actions/runs/38131040377) |
-| Heavy existant | Réussi | [38131040429](https://github.com/EnermaxFR/MaxPS4/actions/runs/38131040429) |
+| Smoke existant | Réussi | [38131040377](https://github.com/MaxFRdev/MaxPS4/actions/runs/38131040377) |
+| Heavy existant | Réussi | [38131040429](https://github.com/MaxFRdev/MaxPS4/actions/runs/38131040429) |
 | iPhone, allocation JIT/exécution/signaux | Non exécuté ; ENOTSUP explicite dans le code | Aucun appareil |
 | Refus OS réel de l'allocation du dispatcher / OOM FEX | Non provoqué | Limite de validation |
 
 Échec intermédiaire : le commit `c9bb40a` n'a pas compilé le nouveau test des
-masques dans [38130871449](https://github.com/EnermaxFR/MaxPS4/actions/runs/38130871449).
+masques dans [38130871449](https://github.com/MaxFRdev/MaxPS4/actions/runs/38130871449).
 Darwin définit sigismember comme macro ; le préfixe `::` rendait son expansion
 invalide. `d7a1eb9` corrige les appels sans retirer ni désactiver le test.
 Le log final comporte six `PASS real FEX ARM64 JIT guest RAX=42 backend=2`
@@ -216,6 +216,6 @@ Le nombre de fichiers .ipa dans /workspace et dans l'archive iOS est zéro.
 Huit fichiers changés : ABI/implémentation native, test d'intégration existant,
 nouveau test de patch, nouveau patch de fabrique, invocation build, filtre CI,
 présent rapport. Travail sur branche dédiée uniquement ; aucun commit de fusion.
-PR [#129](https://github.com/EnermaxFR/MaxPS4/pull/129), sans fusion automatique.
+PR [#129](https://github.com/MaxFRdev/MaxPS4/pull/129), sans fusion automatique.
 Le dernier commit documentaire complète ce rapport ; les résultats CI de son
 SHA seront également consignés dans la description de la PR.

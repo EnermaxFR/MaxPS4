@@ -20,8 +20,8 @@ Audit statique au 13 octobre 2026, fixé à :
 
 - [AetherPS4 `3347fc13f19860855ce91b66356940989ea6b6a6`](https://github.com/Leviidev/AetherPS4/tree/3347fc13f19860855ce91b66356940989ea6b6a6).
   Dernier changement de `tools/pkg-extract` : `7f9cb7934020b89f8cdfd33aa8110c8397e294b3`.
-- [MaxPS4 main / #185 `4ceedf4ecbed2fdd17fcff68689b53a37121765d`](https://github.com/EnermaxFR/MaxPS4/tree/4ceedf4ecbed2fdd17fcff68689b53a37121765d).
-- [#187 `c063141c47c391f3f1457b36111b90553424e842`](https://github.com/EnermaxFR/MaxPS4/tree/c063141c47c391f3f1457b36111b90553424e842),
+- [MaxPS4 main / #185 `4ceedf4ecbed2fdd17fcff68689b53a37121765d`](https://github.com/MaxFRdev/MaxPS4/tree/4ceedf4ecbed2fdd17fcff68689b53a37121765d).
+- [#187 `c063141c47c391f3f1457b36111b90553424e842`](https://github.com/MaxFRdev/MaxPS4/tree/c063141c47c391f3f1457b36111b90553424e842),
   consultée via ref locale de lecture, aucun push vers sa branche.
 - Référence de champs, indépendante d'AetherPS4 :
   [LibOrbisPkg `643477263b2644e0803e0f58b8726ea4e3f3b7d4`, `LibOrbisPkg/PFS/PfsStructs.cs`](https://github.com/maxton/LibOrbisPkg/blob/643477263b2644e0803e0f58b8726ea4e3f3b7d4/LibOrbisPkg/PFS/PfsStructs.cs).

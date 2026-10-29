@@ -22,7 +22,7 @@ Les corrections validées de #126 sont reprises dans un commit sur cette nouvell
 | `4f168823a0b7e574861cbe3ba7b334d151ecfc45` | Cross-compilation sans autodétection CPU Linux /proc/cpuinfo |
 | `6f062c623f97b6d7fe20512e8724cc706e867d9d` | Manifest des sources réelles et vérification de toutes les formes d'import FEXCore |
 
-PR de travail : https://github.com/EnermaxFR/MaxPS4/pull/127 (brouillon ; aucune fusion automatique).
+PR de travail : https://github.com/MaxFRdev/MaxPS4/pull/127 (brouillon ; aucune fusion automatique).
 Le commit documentaire suivant ne change pas le code validé.
 
 ## Sources et cible de liaison
@@ -67,7 +67,7 @@ FEXCore de liaison ; 208 imports SDK normaux. Inventaires exhaustifs, objets
 demandeurs et journal linker dans `fexcore-ios-unresolved-symbols.txt`.
 
 Artefact CI vérifié :
-https://github.com/EnermaxFR/MaxPS4/actions/runs/38127386275/artifacts/11697593593
+https://github.com/MaxFRdev/MaxPS4/actions/runs/38127386275/artifacts/11697593593
 Contient dylib, build-link.log/configure.log, compile_commands.json, nm -u/-gU,
 otool -L/-Iv, file, architecture et statut. L'objet partiellement lié générique
 est désormais également conservé dans son artefact heavy.
@@ -194,8 +194,8 @@ FEXCore/Source/Utils/AllocatorHooks.cpp
 ## Environnement Git relevé
 
 ```text
-origin	https://github.com/EnermaxFR/MaxPS4.git (fetch)
-origin	https://github.com/EnermaxFR/MaxPS4.git (push)
+origin	https://github.com/MaxFRdev/MaxPS4.git (fetch)
+origin	https://github.com/MaxFRdev/MaxPS4.git (push)
 branche : codex/fexcore-ios-linkage
 base : 73ed0f021e051e2ef11f98da18de8800ff01d492
 ```
@@ -203,8 +203,8 @@ base : 73ed0f021e051e2ef11f98da18de8800ff01d492
 ## Validation du dernier commit de code
 
 Commit `6f062c623f97b6d7fe20512e8724cc706e867d9d` : les trois workflows
-ont terminé avec succès : [liaison complète 38127613795](https://github.com/EnermaxFR/MaxPS4/actions/runs/38127613795),
-[heavy 38127613792](https://github.com/EnermaxFR/MaxPS4/actions/runs/38127613792),
-[smoke 38127613774](https://github.com/EnermaxFR/MaxPS4/actions/runs/38127613774).
+ont terminé avec succès : [liaison complète 38127613795](https://github.com/MaxFRdev/MaxPS4/actions/runs/38127613795),
+[heavy 38127613792](https://github.com/MaxFRdev/MaxPS4/actions/runs/38127613792),
+[smoke 38127613774](https://github.com/MaxFRdev/MaxPS4/actions/runs/38127613774).
 Les journaux locaux sont conservés dans `fexcore-ios-local-validation.txt`.
 Le commit documentaire final conserve exactement ce code validé.

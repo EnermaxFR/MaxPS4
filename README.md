@@ -1,7 +1,7 @@
 # MaxPS4 — émulateur PS4 expérimental pour iPhone
 
-[![Plateforme](https://img.shields.io/badge/Plateforme-iOS%20ARM64-222222)](https://github.com/EnermaxFR/MaxPS4)
-[![Statut](https://img.shields.io/badge/Statut-exp%C3%A9rimental-orange)](https://github.com/EnermaxFR/MaxPS4/actions)
+[![Plateforme](https://img.shields.io/badge/Plateforme-iOS%20ARM64-222222)](https://github.com/MaxFRdev/MaxPS4)
+[![Statut](https://img.shields.io/badge/Statut-exp%C3%A9rimental-orange)](https://github.com/MaxFRdev/MaxPS4/actions)
 [![Licence](https://img.shields.io/badge/Licence-GPL--2.0-blue)](LICENSE)
 [![Premier jeu](https://img.shields.io/badge/Premier%20jeu-Sonic%20Mania%20%C3%A0%2060%20i%2Fs-brightgreen)](#ce-qui-marche-aujourdhui)
 
@@ -52,11 +52,11 @@
 | Autres jeux 2D légers et homebrews | ❓ Non testés : à essayer, avec le rapport de compatibilité |
 | Gros jeux 3D (God of War, Assassin's Creed…) | ❌ Hors de portée pour l'instant (processeur, GPU et mémoire) |
 
-Un jeu qui bloque laisse un rapport dans **MaxPS4 › Rapports** : partage-le sur le [Discord](https://discord.gg/G7BaXN4fd) ou dans une [Issue](https://github.com/EnermaxFR/MaxPS4/issues) pour aider à ajouter ce qui manque.
+Un jeu qui bloque laisse un rapport dans **MaxPS4 › Rapports** : partage-le sur le [Discord](https://discord.gg/G7BaXN4fd) ou dans une [Issue](https://github.com/MaxFRdev/MaxPS4/issues) pour aider à ajouter ce qui manque.
 
 ## Installer et jouer
 
-1. Télécharger l'IPA produite par le workflow [MaxPS4 FEXCore SideStore IPA](https://github.com/EnermaxFR/MaxPS4/actions/workflows/fexcore-app.yml) (artefact **MaxPS4-FEXCore-SideStore**) et l'installer avec **SideStore**.
+1. Télécharger l'IPA produite par le workflow [MaxPS4 FEXCore SideStore IPA](https://github.com/MaxFRdev/MaxPS4/actions/workflows/fexcore-app.yml) (artefact **MaxPS4-FEXCore-SideStore**) et l'installer avec **SideStore**.
 2. Activer le JIT avec **StikDebug** depuis MaxPS4 (bouton **JIT**). Voir [le protocole SideStore + StikDebug](docs/fexcore-stikdebug-jit.md).
 3. Copier le dossier complet de ton jeu (`eboot.bin`, `sce_module`, `sce_sys` et ses données) dans **Sur mon iPhone › MaxPS4 › Jeux**, puis toucher **Jouer**.
 
@@ -74,7 +74,7 @@ Voir le document détaillé [Conformité, attribution et limites légales](docs/
 
 ## Contribuer et communauté
 
-Les contributions sont bienvenues via [Issues](https://github.com/EnermaxFR/MaxPS4/issues), [Pull Requests](https://github.com/EnermaxFR/MaxPS4/pulls) et [CONTRIBUTING.md](CONTRIBUTING.md). Les [GitHub Actions](https://github.com/EnermaxFR/MaxPS4/actions) compilent l'IPA et lancent les tests ; les builds de développement ne sont pas des versions stables.
+Les contributions sont bienvenues via [Issues](https://github.com/MaxFRdev/MaxPS4/issues), [Pull Requests](https://github.com/MaxFRdev/MaxPS4/pulls) et [CONTRIBUTING.md](CONTRIBUTING.md). Les [GitHub Actions](https://github.com/MaxFRdev/MaxPS4/actions) compilent l'IPA et lancent les tests ; les builds de développement ne sont pas des versions stables.
 
 [![Discord](https://img.shields.io/badge/Discord-Rejoindre%20MaxPS4-5865F2?logo=discord&logoColor=white)](https://discord.gg/G7BaXN4fd)
 

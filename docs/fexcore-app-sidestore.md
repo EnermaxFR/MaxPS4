@@ -92,13 +92,13 @@ Code final : `883781beace17cb1e0e3ce495a8a75dd9165eee4`.
 
 | Validation | Résultat | Exécution |
 | --- | --- | --- |
-| Application iOS entière via Xcode, framework embarqué, IPA | Réussi | [38133153640](https://github.com/EnermaxFR/MaxPS4/actions/runs/38133153640) |
+| Application iOS entière via Xcode, framework embarqué, IPA | Réussi | [38133153640](https://github.com/MaxFRdev/MaxPS4/actions/runs/38133153640) |
 | ABI Swift/C, contexte réel, CPUID et RAX=42 par FEX JIT macOS | Huit cycles réussis | même run |
 | Nettoyage heap via leaks --atExit | Huit cycles supplémentaires ; 0 fuite / 0 octet perdu | même run |
-| Tests natifs #129, cycles, signaux, repli interprété | Réussis | même run et [38133153657](https://github.com/EnermaxFR/MaxPS4/actions/runs/38133153657) |
+| Tests natifs #129, cycles, signaux, repli interprété | Réussis | même run et [38133153657](https://github.com/MaxFRdev/MaxPS4/actions/runs/38133153657) |
 | Liaison stricte FEX Darwin iOS et macOS | Réussie | 38133153657 |
-| Smoke existant, dont Swift frontend | Réussi | [38133153684](https://github.com/EnermaxFR/MaxPS4/actions/runs/38133153684) |
-| Heavy existant | Réussi | [38133153653](https://github.com/EnermaxFR/MaxPS4/actions/runs/38133153653) |
+| Smoke existant, dont Swift frontend | Réussi | [38133153684](https://github.com/MaxFRdev/MaxPS4/actions/runs/38133153684) |
+| Heavy existant | Réussi | [38133153653](https://github.com/MaxFRdev/MaxPS4/actions/runs/38133153653) |
 | Installation/signature SideStore sur iOS 27.2 | Non exécutée | appareil nécessaire |
 | Interface tactile et diagnostic sur iPhone | Non exécutés ; compilation vérifiée | appareil nécessaire |
 | JIT FEX sur iPhone | Non exécuté et volontairement indisponible | fournisseur conforme manquant |
@@ -118,7 +118,7 @@ compilations et exécutions Apple ont été réalisées par les runners CI.
 
 ## IPA livrée et inspection indépendante
 
-[Artefact IPA vérifié — MaxPS4-FEXCore-SideStore](https://github.com/EnermaxFR/MaxPS4/actions/runs/38133153640/artifacts/11699684286),
+[Artefact IPA vérifié — MaxPS4-FEXCore-SideStore](https://github.com/MaxFRdev/MaxPS4/actions/runs/38133153640/artifacts/11699684286),
 identifiant `11699684286`, conservation jusqu'au 25 octobre 2026.
 L'artefact `11699414712` du même run contient les logs de compilation,
 tests, leaks et inspection. Les premières versions des commits cd812d2 et
@@ -181,6 +181,6 @@ Les syscall/HLE PS4, GPU et exécution de jeux restent hors de cette sonde.
 | `883781beace17cb1e0e3ce495a8a75dd9165eee4` | Signature du framework après copie, modes exécutables et asset icon |
 
 Le commit documentaire suivant complète ce rapport et le README. Ses résultats
-CI sont consignés dans la description de la [PR #130](https://github.com/EnermaxFR/MaxPS4/pull/130).
+CI sont consignés dans la description de la [PR #130](https://github.com/MaxFRdev/MaxPS4/pull/130).
 Aucun test antérieur n'est retiré. Aucun commit de fusion ni modification
 directe de main ; la PR n'est pas fusionnée automatiquement.
