@@ -696,6 +696,9 @@ int GuestELF::prepare_linked(const OrbisLinker::Image& linked, const std::string
             for (const auto& segment : module.image.segments) {
                 record.base = std::min(record.base, module.bias + segment.header.address);
                 record.end = std::max(record.end, module.bias + segment.header.address + segment.header.memorySize);
+                const uint32_t f = segment.header.flags; // ELF R 4, W 2, X 1.
+                record.segments.push_back({module.bias + segment.header.address, segment.header.memorySize,
+                                           ((f & 4U) ? 1U : 0U) | (f & 2U) | ((f & 1U) ? 4U : 0U)});
             }
             if (record.base == UINT64_MAX) continue;
             for (const auto& h : module.image.headers) if (h.type == 0x6474e550) { // PT_GNU_EH_FRAME

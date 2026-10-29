@@ -242,7 +242,9 @@ constexpr Binding bindings[] = {
     {"sceKernelConvertLocaltimeToUtc", "0NTHN1NKONI", PS4KernelService::local_to_utc},
     {"sceKernelGetProcParam", "959qrazPIrg", PS4KernelService::proc_param},
     {"_sceKernelRtldSetApplicationHeapAPI", "p5EcQeEeJAE", PS4KernelService::succeed},
-    {"sceKernelGetModuleInfoFromAddr", "f7KBOafysXo", PS4KernelService::module_info_from_addr},
+    {"sceKernelGetModuleInfoFromAddr", "f7KBOafysXo", PS4KernelService::module_info_ex},
+    {"sceKernelGetModuleInfo", "kUpgrXIrz7Q", PS4KernelService::module_info},
+    {"sceKernelGetModuleInfoInternal", "HZO7xOos4xc", PS4KernelService::module_info_ex},
     {"sceKernelGetModuleInfoForUnwind", "RpQJJVKTiFM", PS4KernelService::module_info_unwind},
     // The game's own modules are all loaded at boot (load_game): loading one
     // again only gives its handle, unloading has nothing to do.
@@ -909,6 +911,48 @@ int64_t PS4Libkernel::module_service(PS4KernelService service, const PS4KernelCa
         for (size_t i = 0; i < n; ++i) if (!put(c.rdi + 4 * i, i + 1, 4)) return kernel_error(fault);
         return put(c.rdx, modules_.size(), 8) ? 0 : kernel_error(fault);
     }
+    // GetModuleInfoFromAddr(address, flags, OrbisKernelModuleInfoEx*) and
+    // GetModuleInfoInternal(handle, Ex*): 0x1a8 bytes; GetModuleInfo(handle,
+    // OrbisKernelModuleInfo*): 0x160 bytes. Name, handle, eh_frame, segments.
+    case S::module_info: case S::module_info_ex: {
+        const bool by_address = service == S::module_info_ex && c.rdi > modules_.size();
+        size_t index = SIZE_MAX;
+        if (by_address) { for (size_t i = 0; i < modules_.size(); ++i) if (c.rdi >= modules_[i].base && c.rdi < modules_[i].end) index = i; }
+        else if (c.rdi && c.rdi <= modules_.size()) index = size_t(c.rdi - 1);
+        const uint64_t out = by_address ? c.rdx : c.rsi;
+        if (index == SIZE_MAX || !out) return kernel_error(srch);
+        const LoadedModule& m = modules_[index];
+        uint64_t eh_frame = 0, eh_size = 0;
+        eh_frame_of(m, eh_frame, eh_size);
+        const char* tail = std::strrchr(m.name.c_str(), '/');
+        const char* name = tail ? tail + 1 : m.name.c_str();
+        const size_t segments = std::min<size_t>(m.segments.size(), 4);
+        if (service == S::module_info) {
+            uint8_t info[0x160]{};
+            put_le(info, 0, sizeof(info), 8);
+            std::memcpy(info + 8, name, std::min<size_t>(std::strlen(name), 255));
+            for (size_t s = 0; s < segments; ++s) {
+                put_le(info, 264 + 16 * s, m.segments[s].address, 8);
+                put_le(info, 272 + 16 * s, m.segments[s].size, 4);
+                put_le(info, 276 + 16 * s, m.segments[s].protection, 4);
+            }
+            put_le(info, 328, segments, 4);
+            return memory_.write(out, info, sizeof(info)) ? 0 : kernel_error(fault);
+        }
+        uint8_t info[0x1a8]{};
+        put_le(info, 0, sizeof(info), 8);
+        std::memcpy(info + 8, name, std::min<size_t>(std::strlen(name), 255));
+        put_le(info, 264, index + 1, 4);
+        put_le(info, 328, m.eh_frame_hdr, 8); put_le(info, 336, eh_frame, 8);
+        put_le(info, 344, m.eh_frame_hdr_size, 4); put_le(info, 348, eh_size, 4);
+        for (size_t s = 0; s < segments; ++s) {
+            put_le(info, 352 + 16 * s, m.segments[s].address, 8);
+            put_le(info, 360 + 16 * s, m.segments[s].size, 4);
+            put_le(info, 364 + 16 * s, m.segments[s].protection, 4);
+        }
+        put_le(info, 416, segments, 4); put_le(info, 420, 1, 4); // One reference.
+        return memory_.write(out, info, sizeof(info)) ? 0 : kernel_error(fault);
+    }
     // GetModuleInfoForUnwind(address, flags, info*): u64 size (0x130), name
     // char[256], eh_frame_hdr, eh_frame, eh_frame size, first segment and size.
     case S::module_info_unwind: {
@@ -916,6 +960,27 @@ int64_t PS4Libkernel::module_service(PS4KernelService service, const PS4KernelCa
         for (const auto& m : modules_) if (c.rdi >= m.base && c.rdi < m.end) found = &m;
         if (!found || !c.rdx) return kernel_error(srch);
         uint64_t eh_frame = 0, eh_size = 0;
+        eh_frame_of(*found, eh_frame, eh_size);
+        uint8_t info[0x130]{};
+        put_le(info, 0, sizeof(info), 8);
+        const char* tail = std::strrchr(found->name.c_str(), '/');
+        const char* name = tail ? tail + 1 : found->name.c_str();
+        std::memcpy(info + 8, name, std::min<size_t>(std::strlen(name), 255));
+        put_le(info, 264, found->eh_frame_hdr, 8);
+        put_le(info, 272, eh_frame, 8);
+        put_le(info, 280, eh_size, 8);
+        put_le(info, 288, found->base, 8);
+        put_le(info, 296, found->end - found->base, 8);
+        return memory_.write(c.rdx, info, sizeof(info)) ? 0 : kernel_error(fault);
+    }
+    default: return kernel_error(nosys);
+    }
+}
+// A module's eh_frame, from its PT_GNU_EH_FRAME header, and its size.
+void PS4Libkernel::eh_frame_of(const LoadedModule& module, uint64_t& eh_frame, uint64_t& eh_size) const {
+    const LoadedModule* found = &module;
+    eh_frame = eh_size = 0;
+    {
         uint8_t hdr[12]{};
         if (found->eh_frame_hdr && memory_.read(found->eh_frame_hdr, hdr, sizeof(hdr)) && hdr[0] == 1) {
             // eh_frame_ptr, encoded by hdr[1]: (pc-relative 0x10 |) udata4 3,
@@ -945,19 +1010,6 @@ int64_t PS4Libkernel::module_service(PS4KernelService service, const PS4KernelCa
                 at += header + length;
             }
         }
-        uint8_t info[0x130]{};
-        put_le(info, 0, sizeof(info), 8);
-        const char* tail = std::strrchr(found->name.c_str(), '/');
-        const char* name = tail ? tail + 1 : found->name.c_str();
-        std::memcpy(info + 8, name, std::min<size_t>(std::strlen(name), 255));
-        put_le(info, 264, found->eh_frame_hdr, 8);
-        put_le(info, 272, eh_frame, 8);
-        put_le(info, 280, eh_size, 8);
-        put_le(info, 288, found->base, 8);
-        put_le(info, 296, found->end - found->base, 8);
-        return memory_.write(c.rdx, info, sizeof(info)) ? 0 : kernel_error(fault);
-    }
-    default: return kernel_error(nosys);
     }
 }
 int64_t PS4Libkernel::add_addcont(const char* label, const char* directory) {
@@ -1638,6 +1690,7 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     // sceAppContentInitialize(initParam, bootParam*): bootParam.attr 0 (normal boot).
     case S::app_init: return !c.rsi || write(c.rsi, 0, 4) ? 0 : signed32(0x80D90002U);
     case S::module_load_start: case S::module_dlsym: case S::module_list: case S::module_info_unwind:
+    case S::module_info: case S::module_info_ex:
         return module_service(service, c);
     case S::app_addcont_list: return addcont_list(c.rsi, uint32_t(c.rdx), c.rcx);
     case S::app_addcont_info: return addcont_info(c.rsi, c.rdx);

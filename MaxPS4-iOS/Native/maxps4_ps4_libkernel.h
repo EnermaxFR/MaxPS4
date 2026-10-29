@@ -81,7 +81,7 @@ enum class PS4KernelService : uint32_t {
     process_counter, counter_frequency, kernel_sleep,
     np_state, np_signed_out, np_create_request, app_init, app_addcont_list, app_param_int,
     app_addcont_info, app_addcont_mount, app_addcont_unmount,
-    module_load_start, module_dlsym, module_list, module_info_unwind,
+    module_load_start, module_dlsym, module_list, module_info_unwind, module_info, module_info_ex,
     direct_available, direct_allocate_main, flexible_map_unnamed, flexible_release,
     virtual_query, query_protection, sdk_version, system_version,
     msg_init, msg_open, msg_status, msg_result, msg_close, msg_term,
@@ -187,6 +187,8 @@ public:
         std::string name;
         uint64_t base = 0, end = 0, eh_frame_hdr = 0, eh_frame_hdr_size = 0;
         std::map<std::string, uint64_t> exports;
+        struct Segment { uint64_t address, size; uint32_t protection; };
+        std::vector<Segment> segments;
     };
     void set_modules(std::vector<LoadedModule> modules) { std::lock_guard<std::mutex> guard(lock_); modules_ = std::move(modules); }
     void reset();
@@ -232,6 +234,7 @@ private:
     int64_t temp_mount(uint64_t mount_point);
     std::vector<LoadedModule> modules_;
     int64_t module_service(PS4KernelService service, const PS4KernelCall& call);
+    void eh_frame_of(const LoadedModule& module, uint64_t& eh_frame, uint64_t& eh_size) const;
     struct Addcont { std::string label, path; };
     std::vector<Addcont> addcont_;
     // The add-on content named by a guest OrbisNpUnifiedEntitlementLabel, or null.

@@ -278,6 +278,11 @@ int main() {
     char unwind_name[16]{}; assert(memory.read(0x11e08, unwind_name, 11) && !std::strcmp(unwind_name, "libfoo.prx"));
     uint8_t segment[8]{}; assert(memory.read(0x11e00 + 288, segment, 8) && get_le(segment, 8) == 0x10000);
     assert(call(S::module_info_unwind, 0x30000, 0, 0x11e00) == kernel_error(srch));
+    // Module info by address (Ex, 0x1a8 bytes: handle at 264) and by handle (0x160).
+    assert(call(S::module_info_ex, 0x10800, 0, 0x10400) == 0 && value32(0x10400 + 264) == 1);
+    char info_name[16]{}; assert(memory.read(0x10408, info_name, 11) && !std::strcmp(info_name, "libfoo.prx"));
+    assert(call(S::module_info, 1, 0x10600) == 0 && value32(0x10600) == 0x160);
+    assert(call(S::module_info, 2, 0x10600) == kernel_error(srch));
     // Dialogs finish at once answered OK; networking is never connected.
     assert(call(S::msg_init) == 0 && call(S::msg_status) == 1);
     assert(call(S::msg_result, 0x11c80) == signed32(0x80b80008U));

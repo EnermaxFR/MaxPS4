@@ -144,6 +144,8 @@ public:
         std::string name;
         uint64_t base = 0, end = 0, eh_frame_hdr = 0, eh_frame_hdr_size = 0;
         std::vector<std::pair<std::string, uint64_t>> exports;
+        struct Segment { uint64_t address, size; uint32_t protection; }; // PS4 READ 1, WRITE 2, EXEC 4.
+        std::vector<Segment> segments;
     };
     const std::vector<ModuleRecord>& module_records() const { return records; }
     const std::vector<Segment>& segments() const { return regions; }

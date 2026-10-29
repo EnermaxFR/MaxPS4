@@ -1509,6 +1509,7 @@ extern "C" int32_t maxps4_fex_engine_prepare_orbis_general(maxps4_fex_engine* en
                 maxps4::PS4Libkernel::LoadedModule module{record.name, record.base, record.end,
                     record.eh_frame_hdr, record.eh_frame_hdr_size, {}};
                 for (const auto& [nid, address] : record.exports) module.exports.emplace(nid, address);
+                for (const auto& s : record.segments) module.segments.push_back({s.address, s.size, s.protection});
                 loaded.push_back(std::move(module));
             }
             engine->libkernel.set_modules(std::move(loaded));
