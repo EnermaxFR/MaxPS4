@@ -18,7 +18,7 @@ tests passed 819,200 exact comparisons, including partial/split/missing memory.
 It nevertheless regressed on the Metal benchmark, so it was removed from the
 production shader helper. Existing image quality and shader behavior remain.
 
-GPU measurements from test run [40160368342](https://github.com/EnermaxFR/MaxPS4/actions/runs/40160368342):
+GPU measurements from test run [40160368342](https://github.com/MaxFRdev/MaxPS4/actions/runs/40160368342):
 
 | Texture | Existing resolved path | Interior prototype |
 | --- | ---: | ---: |
@@ -48,7 +48,7 @@ program comparisons passed. Only the PM4 CPU/GPU workflow is dispatched for
 validation; no application packaging workflow is invoked.
 
 Final validation of the retained change passed in
-[40160869887](https://github.com/EnermaxFR/MaxPS4/actions/runs/40160869887):
+[40160869887](https://github.com/MaxFRdev/MaxPS4/actions/runs/40160869887):
 CPU sanitizer regressions, 819,200 texture comparisons, actual Metal pixel
 comparisons (worst channel difference 0), iPhone bridge compilation and Swift
 frontend checks. No IPA was generated or replaced. The on-device CPU time and
@@ -70,10 +70,10 @@ work alone, not the full renderer or game frame rate. Sanitizers passed.
 The portrait display keeps the original aspect ratio without cropping. Only
 landscape uses centered aspect-fill cropping; native resolution is unchanged.
 The orientation change passed the targeted VideoOut Metal workflow
-[40161216429](https://github.com/EnermaxFR/MaxPS4/actions/runs/40161216429).
+[40161216429](https://github.com/MaxFRdev/MaxPS4/actions/runs/40161216429).
 
 Final CPU/GPU and iPhone frontend validation passed in
-[40161670043](https://github.com/EnermaxFR/MaxPS4/actions/runs/40161670043).
+[40161670043](https://github.com/MaxFRdev/MaxPS4/actions/runs/40161670043).
 The optimized fixture measured 3.082 to 2.155 us/draw on the Linux runner and
 6.449 to 4.063 us/draw with native Apple Clang on the Mac runner. GPU pixel
 comparisons remained identical. These are scanner timings, not full-frame
