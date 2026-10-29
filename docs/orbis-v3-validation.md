@@ -45,8 +45,8 @@ Le test d’intégration C++ passe aussi une vérification syntaxique locale.
 ## Preuves CI
 
 Première validation du changement :
-- Safety ASan/UBSan : https://github.com/EnermaxFR/MaxPS4/actions/runs/38565794304
-- FEX macOS, pont Swift, iOS et IPA : https://github.com/EnermaxFR/MaxPS4/actions/runs/38565794229
+- Safety ASan/UBSan : https://github.com/MaxFRdev/MaxPS4/actions/runs/38565794304
+- FEX macOS, pont Swift, iOS et IPA : https://github.com/MaxFRdev/MaxPS4/actions/runs/38565794229
 
 Au commit `5cc0ff105a533da6fcdabeff6f5a80f0b19cb82d` :
 
@@ -54,18 +54,18 @@ Au commit `5cc0ff105a533da6fcdabeff6f5a80f0b19cb82d` :
 - FEX Linux ARM64 natif : 48 observations CPU, alternant RAX=42 et RAX=9,
   backend=2, entry=0x1000, pile/registres vérifiés.
 - FEX VIXL sur x86 : 48 observations identiques, backend=3 (simulateur).
-- Jobs et preuves : https://github.com/EnermaxFR/MaxPS4/actions/runs/38565794272
+- Jobs et preuves : https://github.com/MaxFRdev/MaxPS4/actions/runs/38565794272
   (ARM64 job 115858003702, simulateur job 115858003611).
 - macOS ARM64 : 48 exécutions natives FEX et quatre exécutions via Swift
   (42/9/42/9, fixture_verified=true et cpu_state_verified=true).
 - Compilation complète iOS ARM64 et packaging SideStore : succès.
-- Workflow complet : https://github.com/EnermaxFR/MaxPS4/actions/runs/38565788460
-- IPA distincte : https://github.com/EnermaxFR/MaxPS4/actions/runs/38565788460/artifacts/11895596608
+- Workflow complet : https://github.com/MaxFRdev/MaxPS4/actions/runs/38565788460
+- IPA distincte : https://github.com/MaxFRdev/MaxPS4/actions/runs/38565788460/artifacts/11895596608
   Nom : MaxPS4-Orbis-V3-Test-SideStore, ZIP 12 649 854 octets.
   Digest ZIP : sha256:783462ea2a60b66f9f67465829a8c76066123fec796b68cfa478da617c447d3c.
   Rétention jusqu’au 28 octobre 2026 (GitHub peut appliquer ses règles de rétention).
-- Logs/rapports : https://github.com/EnermaxFR/MaxPS4/actions/runs/38565788460/artifacts/11895511900
-- Linkage FEX iOS et hôte strict : https://github.com/EnermaxFR/MaxPS4/actions/runs/38565794307
+- Logs/rapports : https://github.com/MaxFRdev/MaxPS4/actions/runs/38565788460/artifacts/11895511900
+- Linkage FEX iOS et hôte strict : https://github.com/MaxFRdev/MaxPS4/actions/runs/38565794307
   deux jobs passés. Aucun symbole de remplacement ni second moteur ajouté.
 
 Extraits ARM64 natif, relus dans le log du job :
