@@ -376,9 +376,6 @@ struct MaxPS4GameView: View {
         }
         // The game waits while its menu is open.
         .onChange(of: showingMenu) { _, open in session.setPaused(open) }
-        .onReceive(NotificationCenter.default.publisher(for: UIScreen.capturedDidChangeNotification)) { _ in
-            session.setCaptured(UIScreen.main.isCaptured)
-        }
         .onDisappear { touch = 0; session.stop(); UIApplication.shared.isIdleTimerDisabled = false }
         .onChange(of: scenePhase) { _, phase in if phase != .active { touch = 0; session.stop() } }
         // A running game keeps the screen awake: auto-lock would stop it.
