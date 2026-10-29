@@ -103,11 +103,11 @@ l'intégrer à GuestEngine ; la sonde ABI ne le fait pas.
 ## Résultat vérifié des corrections de liaison
 
 Sur le commit `45a9930bae918606dc967999a7b6dffbd5b65ae1`, le
-[run 38126286849](https://github.com/EnermaxFR/MaxPS4/actions/runs/38126286849)
+[run 38126286849](https://github.com/MaxFRdev/MaxPS4/actions/runs/38126286849)
 compile les **20 objets iOS ARM64** (12 initiaux + 8 dépendances). Les tests de
 #125, le nouveau test de l'allocateur Darwin et la sonde des six signatures
 Darwin réussissent. Le
-[run 38126286846](https://github.com/EnermaxFR/MaxPS4/actions/runs/38126286846)
+[run 38126286846](https://github.com/MaxFRdev/MaxPS4/actions/runs/38126286846)
 valide aussi ABI CPU, pont natif, frontend Swift et traduction/repli interpréteur.
 
 L'inventaire avant/après résout **43 références** et révèle **42 dépendances
@@ -137,13 +137,13 @@ La nouvelle cible `FEXCore_shared` utilise seulement le fork Darwin embarqué
 par AetherPS4 et les dépendances CMake correspondantes. Elle ne transforme pas
 les objets génériques en objets Darwin et n'intègre pas encore ce runtime à l'app.
 
-Au commit `4f16882`, le run [38127386275](https://github.com/EnermaxFR/MaxPS4/actions/runs/38127386275)
+Au commit `4f16882`, le run [38127386275](https://github.com/MaxFRdev/MaxPS4/actions/runs/38127386275)
 a produit une véritable bibliothèque `libFEXCore.dylib` iOS ARM64, liaison stricte
 réussie, aucun import FEXCore/LogMan manquant. Les 18 symboles bloquants du
 diagnostic générique sont définis dans ce binaire. Ses 208 imports SDK sont liés
 à libSystem et libc++. Les tests existants passent également : heavy
-[38127386265](https://github.com/EnermaxFR/MaxPS4/actions/runs/38127386265), smoke
-[38127386272](https://github.com/EnermaxFR/MaxPS4/actions/runs/38127386272).
+[38127386265](https://github.com/MaxFRdev/MaxPS4/actions/runs/38127386265), smoke
+[38127386272](https://github.com/MaxFRdev/MaxPS4/actions/runs/38127386272).
 
 Le rapport principal est `docs/fexcore-ios-linkage-report.md`. La cible complète
 est distincte du diagnostic générique `BLOCKED` décrit plus haut. Elle cible iOS

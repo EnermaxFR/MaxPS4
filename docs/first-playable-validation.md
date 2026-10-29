@@ -20,8 +20,8 @@ attaché à cet environnement Linux x86-64. Le critère final sur appareil reste
 ## Images du carré 2 × 2 exécutées sur ARM64 natif
 
 Le commit source `0b207769cfc22150cce5f0243987935cbd6e16df` a passé les
-[jobs FEX x86/VIXL et ARM64 Linux, services Linux/macOS et SDK iPhone](https://github.com/EnermaxFR/MaxPS4/actions/runs/38404311584).
-Le [job ARM64 natif](https://github.com/EnermaxFR/MaxPS4/actions/runs/38404311584/job/115319769753)
+[jobs FEX x86/VIXL et ARM64 Linux, services Linux/macOS et SDK iPhone](https://github.com/MaxFRdev/MaxPS4/actions/runs/38404311584).
+Le [job ARM64 natif](https://github.com/MaxFRdev/MaxPS4/actions/runs/38404311584/job/115319769753)
 a réellement donné :
 
 ```text
@@ -39,14 +39,14 @@ exécution des instructions ARM64 générées par FEX dans VIXL, sans preuve nat
 
 ## Pont Swift, application iPhone et IPA
 
-Le [workflow macOS](https://github.com/EnermaxFR/MaxPS4/actions/runs/38404311587)
+Le [workflow macOS](https://github.com/MaxFRdev/MaxPS4/actions/runs/38404311587)
 teste le même dossier via Swift et FEX natif : CGImage conserve les octets invités,
 le rendu CoreGraphics relu est identique, les entrées modifient les images et
 l'ouverture/fermeture du moteur est répétée. Il construit ensuite l'application
 avec le SDK iPhone ARM64 et produit l'artefact `MaxPS4-FEXCore-SideStore`.
 
 La première IPA et le pont Swift sont déjà validés sur `74e394b` dans
-[ce run](https://github.com/EnermaxFR/MaxPS4/actions/runs/38403223251) ; ce résultat
+[ce run](https://github.com/MaxFRdev/MaxPS4/actions/runs/38403223251) ; ce résultat
 intermédiaire précède le passage du bloc 2 × 3 au carré 2 × 2. Ne pas l'utiliser
 comme preuve du dernier binaire. La PR #182 fournit les liens et le SHA256 de
 l'IPA du dernier commit validé. Un correctif conserve la compatibilité du contrôle

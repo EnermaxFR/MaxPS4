@@ -136,7 +136,7 @@ en C, syntaxe Bash/YAML et git diff --check réussis. Les tests du vrai contexte
 FEX exigent le runner Apple ; aucun résultat iPhone n'est déclaré.
 
 Artefact natif iOS vérifié indépendamment du run initial :
-https://github.com/EnermaxFR/MaxPS4/actions/runs/38128560228/artifacts/11698195702
+https://github.com/MaxFRdev/MaxPS4/actions/runs/38128560228/artifacts/11698195702
 `libMaxPS4FEXRuntime.dylib`, Mach-O arm64 MH_NOUNDEFS, aucun import FEXCore
 ou maxps4 manquant. otool ne liste que libSystem/libc++ : le runtime FEX est
 bien intégré statiquement, sans seconde bibliothèque FEX chargée.
@@ -167,14 +167,14 @@ test ; elle est corrigée sans retirer le test ni changer ses vérifications.
 ## Validation du code corrigé
 
 Commit `7c13f285ad661e90adb5442c90ecc5c39f5e78ad` : test macOS ARM64
-réel réussi dans le run [38129274846](https://github.com/EnermaxFR/MaxPS4/actions/runs/38129274846).
+réel réussi dans le run [38129274846](https://github.com/MaxFRdev/MaxPS4/actions/runs/38129274846).
 L'allocateur corrigé permet trois cycles avec six contextes réels, CPUID
 `GenuineIntel`, feuille maximale 22, contexte restant valide après fermeture
 d'un autre, fermeture/réinitialisation globale, et repli interpréteur explicite.
 Le crash initial est résolu ; aucune erreur n'a été transformée en succès.
 
-Contrôles existants : [heavy 38129274859](https://github.com/EnermaxFR/MaxPS4/actions/runs/38129274859)
-et [smoke 38129274851](https://github.com/EnermaxFR/MaxPS4/actions/runs/38129274851) réussis.
+Contrôles existants : [heavy 38129274859](https://github.com/MaxFRdev/MaxPS4/actions/runs/38129274859)
+et [smoke 38129274851](https://github.com/MaxFRdev/MaxPS4/actions/runs/38129274851) réussis.
 
 Extrait du harness réellement exécuté :
 
@@ -198,11 +198,11 @@ Le frontend/packaging reste à intégrer ; l'exécution de code invité via FEX 
 iPhone demeure non validée.
 
 Artefact **corrigé** iOS :
-https://github.com/EnermaxFR/MaxPS4/actions/runs/38129274846/artifacts/11698457349
+https://github.com/MaxFRdev/MaxPS4/actions/runs/38129274846/artifacts/11698457349
 Téléchargé et vérifié : plateforme Mach-O iOS (2), arm64, minimum 18.0,
 MH_NOUNDEFS, aucun import FEXCore/LogMan/maxps4 manquant ; seulement libSystem
 et libc++ comme dépendances externes.
 SHA256 du dylib natif corrigé : `3fb3e2eb8f326246faebd5cfed876dea0b903efbc60eed61f5bf32ee2f348770`.
 Local : `/workspace/artifacts/pr128-validated/libMaxPS4FEXRuntime.dylib`.
 Artefact tests hôte :
-https://github.com/EnermaxFR/MaxPS4/actions/runs/38129274846/artifacts/11698956674
+https://github.com/MaxFRdev/MaxPS4/actions/runs/38129274846/artifacts/11698956674
