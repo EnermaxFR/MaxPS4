@@ -1229,7 +1229,14 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
             profiler = std::thread([engine, &guard, &profiled] { engine->profile.run(guard, profiled); });
         }
 #endif
+        // The app runs this on a libdispatch worker thread, which blocks SIGURG:
+        // the stop (and sampling) signal then never lands in this thread's JIT
+        // code, and a game spinning there without HLE calls never stopped.
+        sigset_t urgent, saved;
+        sigemptyset(&urgent); sigaddset(&urgent, SIGURG);
+        ::pthread_sigmask(SIG_UNBLOCK, &urgent, &saved);
         engine->context->ExecuteThread(thread);
+        ::pthread_sigmask(SIG_SETMASK, &saved, nullptr);
         // Stopped while this thread (the sampled one) still exists.
         profiled = true;
         if (profiler.joinable()) profiler.join();
