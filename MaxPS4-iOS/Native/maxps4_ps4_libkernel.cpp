@@ -518,6 +518,14 @@ constexpr Binding bindings[] = {
     {"sceKernelRename", "52NcYU9+lEo", PS4KernelService::rename},
     {"sceKernelUnlink", "AUXVxWeJU-A", PS4KernelService::unlink},
     {"sceKernelGetdirentries", "taRWhTJFTgE", PS4KernelService::getdirentries},
+    // libc start-up (Crash Bandicoot 4): thread exit handlers and sanitizer
+    // replacement tables, none here.
+    {"_sceKernelSetThreadAtexitCount", "pB-yGZ2nQ9o", PS4KernelService::succeed},
+    {"_sceKernelSetThreadAtexitReport", "WhCc1w3EhSI", PS4KernelService::succeed},
+    {"_sceKernelRtldThreadAtexitIncrement", "Tz4RNUCBbGI", PS4KernelService::succeed},
+    {"_sceKernelRtldThreadAtexitDecrement", "8OnWXlgQlvo", PS4KernelService::succeed},
+    {"sceKernelGetSanitizerMallocReplaceExternal", "py6L8jiVAN8", PS4KernelService::succeed},
+    {"sceKernelGetSanitizerNewReplaceExternal", "bnZxYgAFeA0", PS4KernelService::succeed},
     // Crash Bandicoot 4 (Unreal Engine 4), after shadPS4. A schedule
     // or timestamp change does nothing here; select only times out.
     {"getpid", "HoLVWNanBBc", PS4KernelService::process_id, "libkernel", true},

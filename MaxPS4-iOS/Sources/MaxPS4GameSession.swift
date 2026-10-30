@@ -156,6 +156,11 @@ final class MaxPS4GameSource: @unchecked Sendable {
         lastBeat = text
         return text
     }
+    // The run's last PS4 calls, oldest first: what a game did before it quit.
+    private func recentCalls(_ engine: OpaquePointer) -> String {
+        var text = [CChar](repeating: 0, count: 16384)
+        return maxps4_fex_engine_recent_calls(engine, &text, text.count) > 0 ? String(cString: text) : "aucun"
+    }
     // The game's imports MaxPS4 stubs: those it called ("<library> <NID> (n appels)"), and how many exist.
     private func missingImports(_ engine: OpaquePointer) -> (called: [String], total: Int) {
         var text = [CChar](repeating: 0, count: 16384)
@@ -419,7 +424,8 @@ final class MaxPS4GameSource: @unchecked Sendable {
             defer {
                 let text = [result(of: ran, backend: backend, wasStopped: wasStopped, frames: frames, metal: metal.report, fault: fault, relative: relativeRIP),
                             "Fonctions PS4 manquantes appelées (\(missing.called.count) sur \(missing.total) absentes) :",
-                            missing.called.isEmpty ? "aucune" : missing.called.joined(separator: "\n"), "", live].joined(separator: "\n")
+                            missing.called.isEmpty ? "aucune" : missing.called.joined(separator: "\n"), "",
+                            "Derniers appels PS4 :", recentCalls(opened), "", live].joined(separator: "\n")
                 outcome = Outcome(missing: missing.called, crashed: crashed, report: MaxPS4Reports.save(text, for: url))
             }
             return result(of: ran, backend: backend, wasStopped: wasStopped, frames: frames, metal: metal.report, fault: fault, relative: relativeRIP)

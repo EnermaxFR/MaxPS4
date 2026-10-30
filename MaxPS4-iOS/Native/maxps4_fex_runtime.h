@@ -307,6 +307,11 @@ int32_t maxps4_fex_engine_set_import_probe(maxps4_fex_engine *engine, uint32_t e
 // (stubbed, returning 0): one "<library> <NID> <calls>" line each, most
 // called first, as many whole lines as fit. Returns how many there are.
 int32_t maxps4_fex_engine_missing_imports(maxps4_fex_engine *engine, char *text, size_t capacity);
+// The last PS4 calls of the run (at most 64, oldest first; frequent lock, time
+// and thread-data calls left out): "t<thread> <name>(rdi, rsi, rdx, rcx) =
+// <result>" with the path of an open or stat, as many whole lines as fit.
+// Returns how many calls there are.
+int32_t maxps4_fex_engine_recent_calls(maxps4_fex_engine *engine, char *text, size_t capacity);
 // A game directory as the boot probe loads it: <directory>/sce_module/*.prx
 // (sorted) then <directory>/eboot.bin, each module's DT_NEEDED resolved among
 // them, placed 1 MiB aligned and apart from 0x400000, linked with

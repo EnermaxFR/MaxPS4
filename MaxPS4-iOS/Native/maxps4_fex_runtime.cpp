@@ -115,6 +115,27 @@ public:
         std::atomic<bool> inside {false};
     };
     std::array<Activity, 32> activity;
+    // The last HLE calls, for the stop report (why a game quit): locks, time
+    // and thread-specific data are left out, as they would push out the rest.
+    struct RecentCall {
+        uint32_t service = 0; uint64_t thread = 0, a0 = 0, a1 = 0, a2 = 0, a3 = 0; int64_t result = 0;
+        char path[64] = {};
+    };
+    std::mutex recent_lock;
+    std::array<RecentCall, 64> recent {};
+    uint64_t recent_next = 0;
+    static bool frequent(maxps4::PS4KernelService s) {
+        using S = maxps4::PS4KernelService;
+        switch (s) {
+        case S::mutex_lock: case S::mutex_unlock: case S::mutex_trylock: case S::cond_wait: case S::cond_timedwait:
+        case S::cond_signal: case S::cond_broadcast: case S::rwlock_rdlock: case S::rwlock_wrlock: case S::rwlock_unlock:
+        case S::rwlock_tryrdlock: case S::rwlock_trywrlock: case S::clock_gettime: case S::gettimeofday:
+        case S::process_counter: case S::process_time: case S::get_specific: case S::set_specific: case S::thread_self:
+        case S::yield: case S::errno_location: case S::tls_get_addr:
+            return true;
+        default: return false;
+        }
+    }
     static uint64_t now_ns() {
         return uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count());
@@ -231,6 +252,13 @@ public:
             }
             if (pthread) result = maxps4::pthread_result(result);
             if (slot) { slot->since = now_ns(); slot->inside = false; ++slot->returned; }
+            if (!frequent(orbis)) {
+                RecentCall entry{static_cast<uint32_t>(orbis), guest_thread, call.rdi, call.rsi, call.rdx, call.rcx, result, {}};
+                if (orbis == maxps4::PS4KernelService::open || orbis == maxps4::PS4KernelService::stat)
+                    (void)memory->read_cstring(call.rdi, entry.path, sizeof(entry.path));
+                std::lock_guard<std::mutex> guard(recent_lock);
+                recent[recent_next++ % recent.size()] = entry;
+            }
             ++calls;
             char path[256] = {};
             if (trace && (orbis == maxps4::PS4KernelService::open || orbis == maxps4::PS4KernelService::stat) &&
@@ -1161,6 +1189,7 @@ int32_t executeImage(maxps4_fex_engine* engine, maxps4::GuestELF& image,
     engine->probe.calls = 0;
     engine->probe.callback_error = 0;
     for (auto& a : engine->probe.activity) { a.thread = 0; a.inside = false; a.returned = 0; }
+    { std::lock_guard<std::mutex> guard(engine->probe.recent_lock); engine->probe.recent_next = 0; }
     struct ClearRange {
         ProbeAddressSpace& space;
         ~ClearRange() {
@@ -1806,6 +1835,34 @@ extern "C" int64_t maxps4_fex_engine_mount(maxps4_fex_engine* engine, const char
     std::lock_guard lock(runtime_lock);
     if (engine->staged_ps4.segments().empty()) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
     return engine->libkernel.mount(guest, directory);
+}
+extern "C" int32_t maxps4_fex_engine_recent_calls(maxps4_fex_engine* engine, char* text, size_t capacity) {
+    if (!engine || !text || !capacity) return -EINVAL;
+    auto& probe = engine->probe;
+    std::lock_guard<std::mutex> guard(probe.recent_lock);
+    const uint64_t count = std::min<uint64_t>(probe.recent_next, probe.recent.size());
+    std::string out;
+    char line[256];
+    for (uint64_t i = probe.recent_next - count; i < probe.recent_next; ++i) {
+        const auto& c = probe.recent[i % probe.recent.size()];
+        const auto service = static_cast<maxps4::PS4KernelService>(c.service);
+        std::string name;
+        if (c.service >= maxps4::missing_import_token) {
+            const uint32_t stub = c.service - maxps4::missing_import_token;
+            name = stub < engine->missing_imports.size() ? "(absente) " + engine->missing_imports[stub] : "(absente)";
+        } else {
+            const char* known = service_name(service);
+            name = known ? known : "service " + std::to_string(c.service);
+        }
+        std::snprintf(line, sizeof(line), "t%llu %s(0x%llx, 0x%llx, 0x%llx, 0x%llx) = 0x%llx%s%s%s\n",
+            (unsigned long long)c.thread, name.c_str(), (unsigned long long)c.a0, (unsigned long long)c.a1,
+            (unsigned long long)c.a2, (unsigned long long)c.a3, (unsigned long long)c.result,
+            c.path[0] ? " \"" : "", c.path, c.path[0] ? "\"" : "");
+        if (out.size() + std::strlen(line) >= capacity) break;
+        out += line;
+    }
+    std::memcpy(text, out.data(), out.size()); text[out.size()] = 0;
+    return int32_t(count);
 }
 extern "C" int32_t maxps4_fex_engine_missing_imports(maxps4_fex_engine* engine, char* text, size_t capacity) {
     if (!engine || (!text && capacity)) return -EINVAL;
