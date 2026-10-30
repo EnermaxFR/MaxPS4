@@ -727,6 +727,7 @@ void PS4Libkernel::reset() {
     if (dynamic_) dynamic_->reset();
     threads_.reset();
     errno_table_ = errno_table_size_ = process_param_ = heap_trace_ = 0;
+    console_.clear();
     compute_.fill({});
     save_root_.clear(); save_dir_.clear(); save_dialog_status_ = msg_dialog_status_ = error_dialog_status_ = 0; sandbox_word_ = 0; system_language_ = 1; addcont_.clear(); modules_.clear();
     direct_.clear();
@@ -1572,6 +1573,10 @@ int64_t PS4Libkernel::file_service(PS4KernelService service, const PS4KernelCall
         const int32_t fd = signed32(c.rdi);
         if ((fd == 1 || fd == 2) && service == S::write) {
             if (count) std::fwrite(buffer.data(), 1, count, stderr);
+            // The last bytes, for the session report: a game's own message
+            // usually says why it stops.
+            console_.insert(console_.end(), buffer.begin(), buffer.begin() + std::ptrdiff_t(count));
+            if (console_.size() > console_limit) console_.erase(console_.begin(), console_.end() - std::ptrdiff_t(console_limit));
             return int64_t(count);
         }
         File* f = file(fd);

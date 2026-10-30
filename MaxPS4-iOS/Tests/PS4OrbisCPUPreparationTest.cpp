@@ -276,9 +276,21 @@ int main() {
             CHECK(vm.place(0,0xc000,0,3,false,big)==ok && vm.unmap(big+0x4000,0x4000)==ok);
             CHECK(vm.translate(big,1,4) && !vm.translate(big+0x4000,1,4) && vm.translate(big+0x8000,1,4));
             CHECK(vm.place(big+0x4000,0x4000,0,3,true,fixed)==ok && fixed==big+0x4000 && vm.translate(fixed,1,2));
-            // A fixed address outside the window is placed inside it instead.
-            CHECK(vm.place(0x1000000,0x4000,0,3,true,unused)==ok && unused>=window && unused<window+windowBytes);
-            CHECK(vm.unmap(unused,0x4000)==ok);
+            // A fixed address outside the window: exactly there when the host
+            // grants that span (returned to the host when unmapped), else
+            // inside the window; never over a host mapping (the stack).
+            CHECK(vm.place(0x1000000,0x8000,0,3,true,unused)==ok);
+            CHECK(unused==0x1000000 || (unused>=window && unused<window+windowBytes));
+            if (unused==0x1000000) {
+                auto* outside=const_cast<uint8_t*>(vm.translate(unused,16,2));
+                CHECK(outside && reinterpret_cast<uintptr_t>(outside)==unused);
+                outside[0]=0x7e; CHECK(vm.unmap(unused+0x4000,0x4000)==ok && vm.translate(unused,1,4) && !vm.translate(unused+0x4000,1,4));
+            }
+            CHECK(vm.unmap(unused,0x4000)==ok && !vm.translate(unused,1,4));
+            uint64_t relocated=0;
+            const uint64_t stackPage=(low+0x3fff)&~uint64_t{0x3fff};
+            CHECK(vm.place(stackPage,0x4000,0,3,true,relocated)==ok && relocated>=window && relocated<window+windowBytes);
+            CHECK(image.translate(stackPage,1,6) && vm.unmap(relocated,0x4000)==ok);
             CHECK(vm.place(0,0x4000,0x3000,3,false,unused)==maxps4::ps4::inval);
             vm.reset();
             CHECK(!vm.translate(first,1,4) && !vm.allocated());

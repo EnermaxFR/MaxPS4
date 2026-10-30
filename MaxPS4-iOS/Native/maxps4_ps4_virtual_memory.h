@@ -22,8 +22,10 @@ public:
     // Byte-vector mappings (bounded images) and host pages of a general
     // image's mmap window: games map hundreds of MiB (heap, GPU memory).
     static constexpr size_t budget = 32 * 1024 * 1024;
-    // General images may fill their whole mmap window: the host only commits
-    // the pages a game touches, and iOS bounds those.
+    // General images may map up to host_budget, in their window or at fixed
+    // addresses outside it: the host only commits the pages a game touches,
+    // and iOS bounds those.
+    static constexpr uint64_t host_budget = uint64_t(64) << 30;
     static constexpr size_t region_limit = 4096;
     static constexpr uint64_t base = 0x1000000000ULL;
     explicit PS4VirtualMemory(const GuestELF& image) : image_(image) {}
@@ -52,6 +54,9 @@ private:
         std::vector<uint8_t> bytes; // Empty for host pages.
         // ELF-style permissions R=4/W=2/X=1; 0xff denotes an unmapped page.
         std::vector<uint8_t> pages;
+        // Host pages at their own address outside the window (a fixed PS4
+        // address the host granted): returned to the host when released.
+        bool outside = false;
     };
     const GuestELF& image_;
     std::vector<Region> regions_;

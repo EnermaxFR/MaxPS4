@@ -507,6 +507,7 @@ private:
         size_t synthesized = 0;
         uint64_t dataBytes = 0, codeBytes = 0;
         auto isData = [](const HLE& h) { return h.identity.type == 1; };
+        std::set<Identity> exportKeys; // Module version 0, filled on first use.
         for (const auto& h : hle) {
             if (!h.code.empty()) {
                 require(!h.guestAddress && !h.token && !isData(h) && h.code.size() <= codeLimit,
@@ -603,12 +604,14 @@ private:
             // libkernel 1.1, libSceScreenShot 0.9, ... for the same functions.
             auto key = h.identity;
             key.moduleVersion = 0;
-            for (const auto& [identity, unused] : exports) {
-                (void)unused;
-                auto exported = identity;
-                exported.moduleVersion = 0;
-                require(exported.key() != key.key(), "ambiguous HLE/export");
-            }
+            if (exportKeys.empty())
+                for (const auto& [identity, unused] : exports) {
+                    (void)unused;
+                    auto exported = identity;
+                    exported.moduleVersion = 0;
+                    exportKeys.insert(exported);
+                }
+            require(!exportKeys.count(key), "ambiguous HLE/export");
             require(hleExports.emplace(key, Export{address, SIZE_MAX}).second, "ambiguous HLE/export");
         }
         // The system's libSceLibcInternal exports libc's functions under their

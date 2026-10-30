@@ -407,6 +407,9 @@ int main() {
     assert(call(S::gnm_tessellation_offchip) == 0x800000);
     assert(memory.write(0x11900, "named", 6) && call(S::thread_getname, 1, 0x11900) == 0 && value32(0x11900) == 0);
     assert(call(S::thread_getname, 1, 0) == kernel_error(fault));
+    // The game's stdout/stderr text is kept for the session report.
+    assert(memory.write(0x11900, "Fatal error!", 12) && call(S::write, 1, 0x11900, 12) == 12 && call(S::write, 2, 0x11900, 5) == 5);
+    assert(kernel.console() == "Fatal error!Fatal");
     assert(resolve_libkernel("How7B8Oet6k", "libkernel", "libkernel", 1) == S::thread_getname);
     kernel.reset();
     assert(call(S::system_param_int, 1, 0x11900) == 0 && value32(0x11900) == 1);

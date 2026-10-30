@@ -219,6 +219,9 @@ public:
     PS4Pad& pad() { return pad_; }
     PS4AudioOut& audio() { return audio_; }
     PS4GnmQueue& graphics() { return graphics_; }
+    // The last console_limit bytes the game wrote to its stdout and stderr.
+    std::string console() { std::lock_guard<std::mutex> guard(lock_); return std::string(console_.begin(), console_.end()); }
+    static constexpr size_t console_limit = 4096;
     static constexpr int32_t abort_status = 134; // As a process killed by SIGABRT.
 private:
     PS4GuestMemory& memory_;
@@ -232,6 +235,7 @@ private:
     PS4GnmQueue graphics_;
     uint64_t errno_table_ = 0, errno_table_size_ = 0, process_param_ = 0;
     uint64_t heap_trace_ = 0; // sceLibcHeapGetTraceInfo's zeroed tables, mapped on first use.
+    std::vector<char> console_;
     // sceGnmMapComputeQueue rings (vqid = index + 1): base, size and read
     // pointer the game gave, and how far DingDong has consumed it (dwords).
     struct ComputeQueue { uint64_t ring = 0, read_pointer = 0; uint32_t size = 0, offset = 0; };

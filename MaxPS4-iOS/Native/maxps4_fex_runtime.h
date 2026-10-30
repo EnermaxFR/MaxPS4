@@ -312,6 +312,9 @@ int32_t maxps4_fex_engine_missing_imports(maxps4_fex_engine *engine, char *text,
 // <result>" with the path of an open or stat, as many whole lines as fit.
 // Returns how many calls there are.
 int32_t maxps4_fex_engine_recent_calls(maxps4_fex_engine *engine, char *text, size_t capacity);
+// The last bytes (at most 4096) the game wrote to its stdout and stderr, as
+// a C string truncated at the front to fit. Returns their length.
+int32_t maxps4_fex_engine_console(maxps4_fex_engine *engine, char *text, size_t capacity);
 // A game directory as the boot probe loads it: <directory>/sce_module/*.prx
 // (sorted) then <directory>/eboot.bin, each module's DT_NEEDED resolved among
 // them, placed 1 MiB aligned and apart from 0x400000, linked with

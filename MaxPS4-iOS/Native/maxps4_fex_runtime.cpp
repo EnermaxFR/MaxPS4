@@ -1460,10 +1460,22 @@ int orbisInputs(const maxps4_orbis_module* modules, size_t count, bool general,
         if (!general && (maxps4::general_only(e.service) || e.data || e.code)) continue;
         maxps4::OrbisLinker::Identity id{e.nid,e.library,e.module ? e.module : e.library,1,1,uint8_t(e.data ? 1 : 2)};
         if (e.data) { hle.push_back({id,0,e.data}); continue; }
-        if (e.code) { hle.push_back({id,0,0,false,std::vector<uint8_t>(e.code,e.code+e.code_size)}); continue; }
+        // libScePosix exports libkernel's functions under the same NIDs
+        // (Unreal Engine games import pthread_mutex_init and others there).
+        auto posix_alias = [&](maxps4::OrbisLinker::HLE h) {
+            if (std::strcmp(e.library, "libkernel")) return;
+            h.identity.library = h.identity.module = "libScePosix";
+            hle.push_back(std::move(h));
+        };
+        if (e.code) {
+            hle.push_back({id,0,0,false,std::vector<uint8_t>(e.code,e.code+e.code_size)});
+            posix_alias(hle.back());
+            continue;
+        }
         const uint32_t token = static_cast<uint32_t>(e.service) | (e.posix ? maxps4::posix_token : 0) |
             (!e.posix && !std::strncmp(e.name, "pthread_", 8) ? maxps4::pthread_token : 0);
         hle.push_back({id,0,token,e.noreturn || e.service == maxps4::PS4KernelService::thread_exit});
+        posix_alias(hle.back());
     }
     if (!missing) return 0;
     // Boot probe: stub what neither the given modules' libraries nor the HLE
@@ -1864,6 +1876,13 @@ extern "C" int64_t maxps4_fex_engine_mount(maxps4_fex_engine* engine, const char
     std::lock_guard lock(runtime_lock);
     if (engine->staged_ps4.segments().empty()) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
     return engine->libkernel.mount(guest, directory);
+}
+extern "C" int32_t maxps4_fex_engine_console(maxps4_fex_engine* engine, char* text, size_t capacity) {
+    if (!engine || !text || !capacity) return -EINVAL;
+    std::string out = engine->libkernel.console();
+    if (out.size() >= capacity) out.erase(0, out.size() - (capacity - 1));
+    std::memcpy(text, out.data(), out.size()); text[out.size()] = 0;
+    return int32_t(out.size());
 }
 extern "C" int32_t maxps4_fex_engine_recent_calls(maxps4_fex_engine* engine, char* text, size_t capacity) {
     if (!engine || !text || !capacity) return -EINVAL;

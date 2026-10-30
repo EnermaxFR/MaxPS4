@@ -43,6 +43,7 @@ bool PS4VirtualMemory::rounded(uint64_t length, uint64_t& out) {
 }
 bool PS4VirtualMemory::hosted(const Region& region) const {
     uint64_t window = 0, bytes = 0;
+    if (region.bytes.empty() && region.outside) return true;
     return region.bytes.empty() && image_.heap(window, bytes) &&
            region.address >= window && region.size <= bytes &&
            region.address - window <= bytes - region.size;
@@ -88,12 +89,32 @@ Error PS4VirtualMemory::place(uint64_t hint, uint64_t length, uint64_t alignment
     // host operation can clobber the app: the window belongs to the image.
     uint64_t window = 0, window_bytes = 0;
     const bool host = image_.heap(window, window_bytes);
-    const uint64_t limit = host ? window_bytes : budget;
+    const uint64_t limit = host ? host_budget : budget;
     if (size > limit - std::min<uint64_t>(used_, limit) || regions_.size() >= region_limit) return nomem;
-    // Guest and host addresses coincide, so a fixed PS4 address outside the
-    // window cannot be honoured: the span goes elsewhere in the window and the
-    // caller reads it back (Crash Bandicoot 4's libc maps its heap this way).
-    if (fixed && host && size <= window_bytes && (hint < window || hint - window > window_bytes - size)) {
+    // Guest and host addresses coincide: a fixed PS4 address outside the
+    // window is honoured when the host grants exactly that span (Unreal
+    // Engine pools at 0x1000000000), never by replacing a host mapping. Else
+    // the span goes elsewhere in the window and the caller reads it back
+    // (Crash Bandicoot 4's libc maps its heap this way).
+    if (fixed && host && (hint < window || size > window_bytes || hint - window > window_bytes - size)) {
+        if (hint % page_size == 0 && hint <= UINT64_MAX - size) {
+            release(hint, size); // What we mapped there before, as MAP_FIXED replaces it.
+            void* granted = ::mmap(reinterpret_cast<void*>(hint), size_t(size), PROT_NONE,
+                                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            if (granted == reinterpret_cast<void*>(hint)) {
+                try {
+                    regions_.push_back({hint, size, reinterpret_cast<uint8_t*>(hint), {},
+                                        std::vector<uint8_t>(size_t(size / page_size), permission), true});
+                } catch (const std::bad_alloc&) { ::munmap(granted, size_t(size)); return nomem; }
+                if (!host_protect(hint, size, permission)) {
+                    regions_.pop_back(); ::munmap(granted, size_t(size)); return nomem;
+                }
+                used_ += size_t(size); result = hint;
+                return ok;
+            }
+            if (granted != MAP_FAILED) ::munmap(granted, size_t(size));
+        }
+        if (size > window_bytes) return nomem;
         fixed = false;
         hint = 0;
     }
@@ -170,7 +191,8 @@ Error PS4VirtualMemory::unmap(uint64_t address, uint64_t length) {
     if (hosted(*region)) {
         // Host pages: the span leaves the region, which keeps what lies before
         // and after it, so the span can be mapped again (MAP_FIXED included).
-        if (!host_protect(address, size, 0xff)) return nomem;
+        if (region->outside ? ::munmap(reinterpret_cast<void*>(address), size_t(size)) != 0 :
+                              !host_protect(address, size, 0xff)) return nomem;
         Region old = std::move(*region);
         regions_.erase(regions_.begin() + (region - regions_.data()));
         const size_t last = first + size_t(size / page_size);
@@ -178,7 +200,7 @@ Error PS4VirtualMemory::unmap(uint64_t address, uint64_t length) {
             if (from == to) return;
             const uint64_t at = old.address + from * page_size;
             regions_.push_back({at, (to - from) * page_size, reinterpret_cast<uint8_t*>(at), {},
-                std::vector<uint8_t>(old.pages.begin() + long(from), old.pages.begin() + long(to))});
+                std::vector<uint8_t>(old.pages.begin() + long(from), old.pages.begin() + long(to)), old.outside});
         };
         keep(0, first);
         keep(last, old.pages.size());
@@ -212,8 +234,10 @@ Error PS4VirtualMemory::protect(uint64_t address, uint64_t length, uint32_t prot
 void PS4VirtualMemory::reset() {
     // Host pages go back to PROT_NONE (and zero) only while they still lie in
     // the current image's window; a cleared image already released them.
-    for (const auto& region : regions_)
-        if (hosted(region)) host_protect(region.address, region.size, 0xff);
+    for (const auto& region : regions_) {
+        if (region.outside) ::munmap(reinterpret_cast<void*>(region.address), size_t(region.size));
+        else if (hosted(region)) host_protect(region.address, region.size, 0xff);
+    }
     regions_.clear(); used_ = 0;
 }
 size_t PS4VirtualMemory::contiguous(uint64_t address, size_t limit, uint32_t permissions) const {

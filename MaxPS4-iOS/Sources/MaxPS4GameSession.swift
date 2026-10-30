@@ -156,6 +156,13 @@ final class MaxPS4GameSource: @unchecked Sendable {
         lastBeat = text
         return text
     }
+    // What the game printed last (its own error messages), invalid UTF-8 replaced.
+    private func console(_ engine: OpaquePointer) -> String {
+        var text = [CChar](repeating: 0, count: 4097)
+        guard maxps4_fex_engine_console(engine, &text, text.count) > 0 else { return "rien" }
+        let bytes = text.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+        return String(decoding: bytes, as: UTF8.self)
+    }
     // The run's last PS4 calls, oldest first: what a game did before it quit.
     private func recentCalls(_ engine: OpaquePointer) -> String {
         var text = [CChar](repeating: 0, count: 16384)
@@ -425,7 +432,8 @@ final class MaxPS4GameSource: @unchecked Sendable {
                 let text = [result(of: ran, backend: backend, wasStopped: wasStopped, frames: frames, metal: metal.report, fault: fault, relative: relativeRIP),
                             "Fonctions PS4 manquantes appelées (\(missing.called.count) sur \(missing.total) absentes) :",
                             missing.called.isEmpty ? "aucune" : missing.called.joined(separator: "\n"), "",
-                            "Derniers appels PS4 :", recentCalls(opened), "", live].joined(separator: "\n")
+                            "Derniers appels PS4 :", recentCalls(opened), "",
+                            "Sortie du jeu :", console(opened), "", live].joined(separator: "\n")
                 outcome = Outcome(missing: missing.called, crashed: crashed, report: MaxPS4Reports.save(text, for: url))
             }
             return result(of: ran, backend: backend, wasStopped: wasStopped, frames: frames, metal: metal.report, fault: fault, relative: relativeRIP)
