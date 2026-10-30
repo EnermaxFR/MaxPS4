@@ -128,11 +128,22 @@ GCN_FN float4 gcn_texel_at(GCNMemory M, GCNRes8 t, int x, int y, bool resolved, 
     if (gcn_native_texel(M, t, x, y, native)) return gcn_texture_swizzle(t, native);
     ulong base = (ulong(t.d[0]) | (ulong(t.d[1] & 0xffu) << 32)) << 8;
     uint dfmt = (t.d[1] >> 20) & 0x3fu; uint pitch = ((t.d[4] >> 13) & 0x3fffu) + 1u;
-    if (dfmt >= 35u && dfmt <= 37u) {
+    if (dfmt >= 35u && dfmt <= 39u) {
         if (((t.d[1] >> 26) & 15u) != 0u || pitch < (t.d[2] & 0x3fffu) + 1u)
             return float4(0.0f, 0.0f, 0.0f, 0.0f);
-        uint blockBytes = dfmt == 35u ? 8u : 16u;
+        uint blockBytes = (dfmt == 35u || dfmt == 38u) ? 8u : 16u;
         ulong relative = (ulong(uint(y) / 4u) * ((pitch + 3u) / 4u) + uint(x) / 4u) * blockBytes;
+        if (dfmt >= 38u) {
+            uint pixel = (uint(y) & 3u) * 4u + (uint(x) & 3u);
+            float4 colour = float4(0.0f, 0.0f, 0.0f, 1.0f);
+            for (uint c = 0u; c < (dfmt == 38u ? 1u : 2u); ++c) {
+                ulong at = relative + 8ul * c;
+                uint low = resolved ? gcn_packed32(M, offset + at) : gcn_ld32(M, base + at);
+                uint high = resolved ? gcn_packed32(M, offset + at + 4ul) : gcn_ld32(M, base + at + 4ul);
+                colour[c] = gcn_bc23_alpha(low, high, pixel, true);
+            }
+            return gcn_texture_swizzle(t, colour);
+        }
         uint alphaLow = 0u, alphaHigh = 0u;
         if (dfmt != 35u) {
             alphaLow = resolved ? gcn_packed32(M, offset + relative) : gcn_ld32(M, base + relative);
@@ -232,8 +243,8 @@ GCN_FN float4 gcn_sample(GCNMemory M, GCNRes8 t, GCNRes4 s, bool unorm, float u,
     // Address modes in gcn_fetch_at constrain every texel to [0,width)x[0,height).
     // Resolve that complete footprint once, not once per tap/channel. Sparse or
     // truncated resources retain the original checked-load path and zero reads.
-    if (dfmt >= 35u && dfmt <= 37u) {
-        ulong footprint = (ulong((height + 3u) / 4u - 1u) * ((pitch + 3u) / 4u) + (width + 3u) / 4u) * (dfmt == 35u ? 8ul : 16ul);
+    if (dfmt >= 35u && dfmt <= 39u) {
+        ulong footprint = (ulong((height + 3u) / 4u - 1u) * ((pitch + 3u) / 4u) + (width + 3u) / 4u) * ((dfmt == 35u || dfmt == 38u) ? 8ul : 16ul);
         if (gcn_locate(M, base, footprint, offset))
             return gcn_sample_at(M, t, s, unorm, u, v, true, offset);
         return gcn_sample_at(M, t, s, unorm, u, v, false, 0ul);

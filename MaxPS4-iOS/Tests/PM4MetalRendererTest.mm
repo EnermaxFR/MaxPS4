@@ -293,14 +293,23 @@ int main() {
             readPixels(device, queue, constantRenderer.target(pm4_blend_test::target), pixels);
             assert(compare("changed blend constants, cached pipeline and batched encoder", pixels, expected));
         }
-        // A real translated pixel shader samples BC1/BC2/BC3 through copied resource
+        // A real translated pixel shader samples BC1 through BC5 through copied resource
         // ranges. Native-texture mode must fall back to the same buffer decoder.
-        for (unsigned format : {35u,36u,37u}) {
-            const unsigned blockBytes = format == 35 ? 8 : 16;
+        for (unsigned format : {35u,36u,37u,38u,39u}) {
+            const unsigned blockBytes = (format == 35 || format == 38) ? 8 : 16;
             Arena compressed;
             compressed.bytes = arena.bytes;
             for (unsigned block = 0; block < width * height / 16; ++block) {
                 auto at = image + block * blockBytes;
+                if (format >= 38) {
+                    for (unsigned c = 0; c < (format == 38 ? 1u : 2u); ++c) {
+                        const std::uint64_t channel = ((c ? 0x053977053977ull : 0xfac688fac688ull) << 16) |
+                            ((block + c) % 2 ? 0xff00ull : 0x00ffull);
+                        compressed.put(at + c * 8, std::uint32_t(channel));
+                        compressed.put(at + c * 8 + 4, std::uint32_t(channel >> 32));
+                    }
+                    continue;
+                }
                 if (format != 35) {
                     const std::uint64_t alpha = format == 36 ? 0xfedcba9876543210ull :
                         (0xfac688fac688ull << 16) | (block % 2 ? 0xff00ull : 0x00ffull);

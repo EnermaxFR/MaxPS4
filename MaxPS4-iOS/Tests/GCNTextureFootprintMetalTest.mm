@@ -47,15 +47,23 @@ kernel void checked_texture(device const uchar* mem [[buffer(0)]], constant GCND
             pipelines[variant]=[device newComputePipelineStateWithFunction:function error:&error];
             assert(pipelines[variant]);
         }
-        for(const unsigned width : {16u,256u}) for(const unsigned format : {10u,16u,35u,36u,37u}) {
+        for(const unsigned width : {16u,256u}) for(const unsigned format : {10u,16u,35u,36u,37u,38u,39u}) {
         const unsigned height=width/2, bytes=format==10 ? 4 : 2;
-        const unsigned blockBytes=format==35 ? 8 : 16;
+        const unsigned blockBytes=(format==35 || format==38) ? 8 : 16;
         const unsigned span=format>=35 ? ((width+3)/4)*((height+3)/4)*blockBytes : width*height*bytes;
         id<MTLBuffer> memory=[device newBufferWithLength:256+span options:MTLResourceStorageModeShared];
         auto* pixels=static_cast<uint8_t*>(memory.contents)+256;
         if(format>=35) for(unsigned k=0;k<span/blockBytes;++k) {
             const uint32_t endpoints=k%2 ? 0xf80007e0u : 0x07e0f800u, selectors=0x934e39e4;
             auto* block=pixels+k*blockBytes;
+            if(format>=38) {
+                for(unsigned c=0;c<(format==38 ? 1u : 2u);++c) {
+                    const uint64_t channel=((c ? 0x053977053977ull : 0xfac688fac688ull)<<16) |
+                        ((k+c)%2 ? 0xff00ull : 0x00ffull);
+                    std::memcpy(block+c*8,&channel,8);
+                }
+                continue;
+            }
             if(format!=35) {
                 const uint64_t alpha=format==36 ? 0xfedcba9876543210ull :
                     (0xfac688fac688ull<<16) | (k%2 ? 0xff00ull : 0x00ffull);
@@ -109,7 +117,7 @@ kernel void checked_texture(device const uchar* mem [[buffer(0)]], constant GCND
                 }
                 for(unsigned c=0;c<4;++c) assert(std::fabs(checked[i*4+c]-expected[c])<0.0001f);
             }
-            std::printf("PASS BC%u CPU/Metal sampled colours and transparency\n",format-34);
+            std::printf("PASS BC%u CPU/Metal sampled channels\n",format-34);
         }
         std::printf("PASS texture footprint GPU: %ux%u format %u, checked %.3f ms, resolved %.3f ms; equal output (not iPhone FPS)\n",width,height,format,times[0],times[1]);
         }

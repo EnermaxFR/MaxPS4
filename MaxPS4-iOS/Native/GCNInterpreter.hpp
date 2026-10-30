@@ -743,18 +743,18 @@ private:
         switch (dfmt) {
         case 1: bytes = 1; return true; case 2: case 3: case 16: case 17: case 18: case 19: bytes = 2; return true;
         case 4: case 5: case 10: bytes = 4; return true; case 11: case 12: bytes = 8; return true;
-        case 14: bytes = 16; return true; case 35: bytes = 8; return true; case 36: case 37: bytes = 16; return true; default: return false;
+        case 14: bytes = 16; return true; case 35: case 38: bytes = 8; return true; case 36: case 37: case 39: bytes = 16; return true; default: return false;
         }
     }
     static std::uint64_t imageSize(const Image& t, unsigned bytes) {
-        return (t.dfmt >= 35 && t.dfmt <= 37) ? std::uint64_t((t.pitch + 3) / 4) * ((t.height + 3) / 4) * bytes :
+        return (t.dfmt >= 35 && t.dfmt <= 39) ? std::uint64_t((t.pitch + 3) / 4) * ((t.height + 3) / 4) * bytes :
                               std::uint64_t(t.pitch) * t.height * bytes;
     }
     bool texel(const Image& t, int x, int y, float out[4]) {
         unsigned bytes = 0;
         imageBytes(t.dfmt, bytes);
         std::uint8_t data[16] = {};
-        const std::uint64_t offset = (t.dfmt >= 35 && t.dfmt <= 37) ?
+        const std::uint64_t offset = (t.dfmt >= 35 && t.dfmt <= 39) ?
             (std::uint64_t(std::uint32_t(y) / 4) * ((t.pitch + 3) / 4) + std::uint32_t(x) / 4) * bytes :
             (std::uint64_t(std::uint32_t(y)) * t.pitch + std::uint32_t(x)) * bytes;
         const std::vector<std::uint8_t>* surface = nullptr;
@@ -789,6 +789,16 @@ private:
                 std::uint32_t alphaLow = 0;
                 std::memcpy(&alphaLow, data, 4);
                 c[3] = gcn_detail::gcn_bc23_alpha(alphaLow, alphaHigh, pixel, t.dfmt == 37);
+            }
+            break;
+        }
+        case 38: case 39: {
+            const unsigned pixel = (unsigned(y) & 3) * 4 + (unsigned(x) & 3);
+            for (unsigned n = 0; n < (t.dfmt == 38 ? 1u : 2u); ++n) {
+                std::uint32_t low = 0, high = 0;
+                std::memcpy(&low, data + n * 8, 4);
+                std::memcpy(&high, data + n * 8 + 4, 4);
+                c[n] = gcn_detail::gcn_bc23_alpha(low, high, pixel, true);
             }
             break;
         }
@@ -859,7 +869,7 @@ private:
         if (t.tiling != 8) return fail("tiled image (tile mode " + std::to_string(t.tiling) + ")");
         unsigned bytes;
         if (!imageBytes(t.dfmt, bytes)) return fail("image data format " + std::to_string(t.dfmt));
-        if (t.dfmt >= 35 && t.dfmt <= 37 && (t.nfmt != 0 || t.pitch < t.width))
+        if (t.dfmt >= 35 && t.dfmt <= 39 && (t.nfmt != 0 || t.pitch < t.width))
             return fail("BC" + std::to_string(t.dfmt - 34) + " requires UNORM and pitch >= width");
         if (resource) resource(t.base, imageSize(t, bytes));
         if (imageResource) {
