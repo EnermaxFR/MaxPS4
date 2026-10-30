@@ -111,7 +111,7 @@ public:
     }
     // The rest of the `size` dwords the game reserved, as one NOP: what a
     // writer leaves behind it would otherwise be undefined words.
-    int64_t fill(uint64_t output, uint32_t size, Packet& p) {
+    template <typename P> int64_t fill(uint64_t output, uint32_t size, P& p) {
         if (size > words_limit || size < p.used + 2) return -1;
         if (size > p.used) p.nop(size - p.used - 1);
         return store(output,p);
