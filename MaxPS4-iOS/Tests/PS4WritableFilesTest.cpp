@@ -375,10 +375,36 @@ int main() {
     assert(call(S::sched_priority_max, 0) == kernel_error(inval));
     assert(call(S::sched_param_get, 0, 0x11900, 0x11904) == 0 && value32(0x11900) == 1 && value32(0x11904) == 700);
     assert(call(S::discmap_no_bitmap, 0x10000, 0, 16, 0x11900) == int32_t(0x81100004U));
-    assert(memory.write(0x11900, "ÿÿÿÿÿÿÿÿÿÿÿÿ", 12));
+    const uint8_t ones[12] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
+    assert(memory.write(0x11900, ones, sizeof(ones)));
     assert(kernel.invoke(S::discmap_flags, {0x10000, 0, 16, 0x11900, 0x11904, 0x11908}) == 0);
     assert(value32(0x11900) == 0 && value32(0x11904) == 0 && value32(0x11908) == 0);
     assert(call(S::video_capability, 1, 0x11900) == 0 && value32(0x11900) == 0);
+    // GNM workloads: one stream; begin/end as shadPS4.
+    assert(call(S::gnm_workload_stream, 1, 0x11900) == 0 && value32(0x11900) == 1);
+    assert(call(S::gnm_workload_stream, 0, 0x11900) == 3);
+    assert(call(S::gnm_workload_begin, 1, 0x11900) == 0 && value32(0x11900) == 1 && call(S::gnm_workload_begin, 16, 0x11900) == 1);
+    assert(call(S::gnm_workload_end, 1) == 0 && call(S::gnm_workload_end, 0) == 2 && call(S::gnm_workload_end, 16ULL << 56) == 2);
+    // Without a graphics backend, a workload submission fails like a plain one.
+    assert(call(S::gnm_submit_workload, 1, 1, 0x11900, 0x11910) == call(S::gnm_submit, 1, 0x11900, 0x11910));
+    // A compute ring at 0x11c00 (64 dwords) whose WRITE_DATA stores a label:
+    // DingDong retires it and moves the read pointer.
+    {
+        constexpr uint64_t ring = 0x11c00, read_pointer = 0x11d00, label = 0x11d10;
+        assert(call(S::gnm_map_compute, 7, 0, ring, 64) == int32_t(0x80d17000U));
+        assert(call(S::gnm_map_compute, 1, 0, ring + 4, 64) == int32_t(0x80d17003U));
+        assert(call(S::gnm_map_compute, 1, 0, ring, 48) == int32_t(0x80d17002U));
+        const int64_t vqid = kernel.invoke(S::gnm_map_compute, {1, 2, ring, 64, read_pointer});
+        assert(vqid == 11 && value32(read_pointer) == 0);
+        uint8_t packet[20]{};
+        put_le(packet, 0, 0xc0033700U, 4); put_le(packet, 4, 5U << 8, 4);
+        put_le(packet, 8, label, 4); put_le(packet, 12, 0, 4); put_le(packet, 16, 0xfeedU, 4);
+        assert(memory.write(ring, packet, sizeof(packet)) && memory.write(label, "\0\0\0\0", 4));
+        assert(call(S::gnm_ding_dong, uint64_t(vqid), 5) == 0 && value32(label) == 0xfeed && value32(read_pointer) == 5);
+        assert(call(S::gnm_ding_dong, 99, 5) == 0 && call(S::gnm_unmap_compute, uint64_t(vqid)) == 0);
+        assert(call(S::gnm_ding_dong, uint64_t(vqid), 9) == 0 && value32(read_pointer) == 5); // Unmapped: ignored.
+    }
+    assert(call(S::gnm_tessellation_offchip) == 0x800000);
     kernel.reset();
     assert(call(S::system_param_int, 1, 0x11900) == 0 && value32(0x11900) == 1);
     std::puts("PS4 writable files, positioned I/O and directory checks passed");

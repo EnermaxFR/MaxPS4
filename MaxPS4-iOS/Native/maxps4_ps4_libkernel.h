@@ -115,7 +115,9 @@ enum class PS4KernelService : uint32_t {
     getdents, flexible_available, prt_aperture, aio_read, aio_write, aio_wait,
     pool_reserve, pool_commit, pool_decommit, pool_expand, thread_id, process_id,
     sched_priority_max, sched_priority_min, sched_param_get, net_unavailable,
-    discmap_no_bitmap, discmap_flags, video_capability
+    discmap_no_bitmap, discmap_flags, video_capability,
+    gnm_workload_stream, gnm_workload_begin, gnm_workload_end, gnm_submit_workload, gnm_submit_flip_workload,
+    gnm_map_compute, gnm_unmap_compute, gnm_ding_dong, gnm_tessellation_offchip
 };
 // Token bit of a trampoline whose function follows the POSIX convention: -1
 // with the error in the calling thread's errno (__Error) instead of an Orbis
@@ -227,6 +229,10 @@ private:
     PS4GnmQueue graphics_;
     uint64_t errno_table_ = 0, errno_table_size_ = 0, process_param_ = 0;
     uint64_t heap_trace_ = 0; // sceLibcHeapGetTraceInfo's zeroed tables, mapped on first use.
+    // sceGnmMapComputeQueue rings (vqid = index + 1): base, size and read
+    // pointer the game gave, and how far DingDong has consumed it (dwords).
+    struct ComputeQueue { uint64_t ring = 0, read_pointer = 0; uint32_t size = 0, offset = 0; };
+    std::array<ComputeQueue, 64> compute_{};
     std::map<uint64_t, uint64_t> direct_; // Allocated physical ranges: start -> length.
     std::string save_root_;
     int32_t system_language_ = 1;

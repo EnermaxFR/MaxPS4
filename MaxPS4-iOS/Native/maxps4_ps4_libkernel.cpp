@@ -341,6 +341,20 @@ constexpr Binding bindings[] = {
     {"sceGnmResetVgtControl", "MYRtYhojKdA", PS4KernelService::gnm_reset_vgt, "libSceGnmDriver"},
     {"sceGnmInsertSetMarker", "jiItzS6+22g", PS4KernelService::gnm_set_marker, "libSceGnmDriver"},
     {"sceGnmGetGpuCoreClockFrequency", "Fwvh++m9IQI", PS4KernelService::gnm_clock, "libSceGnmDriver"},
+    // Workloads (one stream, as shadPS4) carry the frames of Unreal Engine 4;
+    // compute queues retire their labels (see PS4GnmQueue::compute).
+    {"sceGnmCreateWorkloadStream", "5udAm+6boVg", PS4KernelService::gnm_workload_stream, "libSceGnmDriver"},
+    {"sceGnmDestroyWorkloadStream", "UtObDRQiGbs", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmBeginWorkload", "ihxrbsoSKWc", PS4KernelService::gnm_workload_begin, "libSceGnmDriver"},
+    {"sceGnmEndWorkload", "Fa3x75OOLRA", PS4KernelService::gnm_workload_end, "libSceGnmDriver"},
+    {"sceGnmSubmitCommandBuffersForWorkload", "jRcI8VcgTz4", PS4KernelService::gnm_submit_workload, "libSceGnmDriver"},
+    {"sceGnmSubmitAndFlipCommandBuffersForWorkload", "Ga6r7H6Y0RI", PS4KernelService::gnm_submit_flip_workload, "libSceGnmDriver"},
+    {"sceGnmMapComputeQueue", "29oKvKXzEZo", PS4KernelService::gnm_map_compute, "libSceGnmDriver"},
+    {"sceGnmMapComputeQueueWithPriority", "A+uGq+3KFtQ", PS4KernelService::gnm_map_compute, "libSceGnmDriver"},
+    {"sceGnmUnmapComputeQueue", "ArSg-TGinhk", PS4KernelService::gnm_unmap_compute, "libSceGnmDriver"},
+    {"sceGnmDingDong", "bX5IbRvECXk", PS4KernelService::gnm_ding_dong, "libSceGnmDriver"},
+    {"sceGnmDingDongForWorkload", "byXlqupd8cE", PS4KernelService::gnm_ding_dong, "libSceGnmDriver"},
+    {"sceGnmGetOffChipTessellationBufferSize", "FFVZcCu3zWU", PS4KernelService::gnm_tessellation_offchip, "libSceGnmDriver"},
     // Resource registration is for the debugger, absent from retail firmware:
     // it fails there too. Garlic flushes and status queries have nothing to do.
     {"sceGnmRegisterResource", "nvEwfYAImTs", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
@@ -696,6 +710,7 @@ void PS4Libkernel::reset() {
     if (dynamic_) dynamic_->reset();
     threads_.reset();
     errno_table_ = errno_table_size_ = process_param_ = heap_trace_ = 0;
+    compute_.fill({});
     save_root_.clear(); save_dir_.clear(); save_dialog_status_ = msg_dialog_status_ = error_dialog_status_ = 0; sandbox_word_ = 0; system_language_ = 1; addcont_.clear(); modules_.clear();
     direct_.clear();
     started_us_ = monotonic_us();
@@ -1817,6 +1832,64 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     case S::gnm_set_marker: return gnm_.set_marker(c.rdi,uint32_t(c.rsi),c.rdx);
     case S::gnm_clock: return 800000000; // Base PS4 GPU clock.
     case S::gnm_unsupported: return signed32(0x8eee00ffU);
+    // CreateWorkloadStream(name, u32* stream), BeginWorkload(stream, u64*
+    // workload), EndWorkload(workload): shadPS4's values (streams below 16).
+    case S::gnm_workload_stream: return c.rdi && c.rsi && write(c.rsi, 1, 4) ? 0 : 3;
+    case S::gnm_workload_begin:
+        if (!c.rsi) return 3;
+        return write(c.rsi, uint32_t(c.rdi) < 16 ? 1 : 0, 8) ? (uint32_t(c.rdi) > 15 ? 1 : 0) : 3;
+    case S::gnm_workload_end: return c.rdi ? (((c.rdi >> 56) & 0xff) > 15 ? 2 : 0) : 2;
+    // Submit(AndFlip)CommandBuffersForWorkload(workload, count, ...): the
+    // same submissions after the workload, so every argument moves one
+    // register (and the flip's stack arguments one slot) down.
+    case S::gnm_submit_workload: case S::gnm_submit_flip_workload: {
+        PS4KernelCall shifted{c.rsi, c.rdx, c.rcx, c.r8, c.r9, 0, c.rsp ? c.rsp + 8 : 0};
+        if (service == S::gnm_submit_flip_workload) {
+            uint8_t handle[8];
+            if (!c.rsp || !memory_.read(c.rsp + 8, handle, 8)) return PS4GnmQueue::error(0x1000);
+            shifted.r9 = get_le(handle, 4);
+        }
+        bool nested = false;
+        return extended(service == S::gnm_submit_workload ? S::gnm_submit : S::gnm_submit_flip, shifted, thread, nested);
+    }
+    // MapComputeQueue(pipe, queue, ring, ring dwords, u32* read pointer[,
+    // priority]): 7 pipes of 8 queues, a 256-byte aligned ring; the vqid.
+    case S::gnm_map_compute: {
+        const uint32_t pipe = uint32_t(c.rdi), queue = uint32_t(c.rsi), size = uint32_t(c.rcx);
+        if (pipe >= 7) return signed32(0x80d17000U);
+        if (queue >= 8) return signed32(0x80d17001U);
+        if (!c.rdx || (c.rdx & 0xff)) return signed32(0x80d17003U);
+        if (!size || (size & (size - 1))) return signed32(0x80d17002U);
+        if (!c.r8 || (c.r8 & 3)) return signed32(0x80d17004U);
+        std::lock_guard<std::mutex> guard(lock_);
+        auto& q = compute_[pipe * 8 + queue];
+        q = {c.rdx, c.r8, size, 0};
+        return write(c.r8, 0, 4) ? int64_t(pipe * 8 + queue + 1) : kernel_error(fault);
+    }
+    case S::gnm_unmap_compute: {
+        std::lock_guard<std::mutex> guard(lock_);
+        if (c.rdi && c.rdi <= compute_.size()) compute_[c.rdi - 1] = {};
+        return 0;
+    }
+    // DingDong(vqid, next offset in dwords): the ring's new commands, up to
+    // two spans when it wraps; the read pointer then reaches the offset.
+    case S::gnm_ding_dong: {
+        std::lock_guard<std::mutex> guard(lock_);
+        if (!c.rdi || c.rdi > compute_.size() || !compute_[c.rdi - 1].ring) return 0;
+        auto& q = compute_[c.rdi - 1];
+        const uint32_t next = uint32_t(c.rsi);
+        if (next > q.size) return 0;
+        int64_t interrupts = 0;
+        auto span = [&](uint32_t from, uint32_t to) {
+            if (to > from) { const int64_t raised = graphics_.compute(q.ring + uint64_t(from) * 4, uint64_t(to - from) * 4); if (raised > 0) interrupts += raised; }
+        };
+        if (next >= q.offset) span(q.offset, next);
+        else { span(q.offset, q.size); span(0, next); }
+        q.offset = next == q.size ? 0 : next;
+        if (interrupts) threads_.graphics_interrupt();
+        return write(q.read_pointer, next, 4) ? 0 : kernel_error(fault);
+    }
+    case S::gnm_tessellation_offchip: return 0x800000;
     case S::process_id: return 1;
     case S::thread_id: return threads_.known(thread) ? int64_t(uint32_t(thread)) : kernel_error(inval);
     // FIFO/round-robin priorities: 256 lowest to 767 highest.
