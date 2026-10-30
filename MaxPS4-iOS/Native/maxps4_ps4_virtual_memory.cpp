@@ -90,6 +90,13 @@ Error PS4VirtualMemory::place(uint64_t hint, uint64_t length, uint64_t alignment
     const bool host = image_.heap(window, window_bytes);
     const uint64_t limit = host ? window_bytes : budget;
     if (size > limit - std::min<uint64_t>(used_, limit) || regions_.size() >= region_limit) return nomem;
+    // Guest and host addresses coincide, so a fixed PS4 address outside the
+    // window cannot be honoured: the span goes elsewhere in the window and the
+    // caller reads it back (Crash Bandicoot 4's libc maps its heap this way).
+    if (fixed && host && size <= window_bytes && (hint < window || hint - window > window_bytes - size)) {
+        fixed = false;
+        hint = 0;
+    }
     if (fixed) {
         // MAP_FIXED replaces whatever the span held, as on the PS4.
         if (!host || hint % page_size || hint < window || size > window_bytes || hint - window > window_bytes - size)

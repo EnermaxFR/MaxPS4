@@ -276,7 +276,9 @@ int main() {
             CHECK(vm.place(0,0xc000,0,3,false,big)==ok && vm.unmap(big+0x4000,0x4000)==ok);
             CHECK(vm.translate(big,1,4) && !vm.translate(big+0x4000,1,4) && vm.translate(big+0x8000,1,4));
             CHECK(vm.place(big+0x4000,0x4000,0,3,true,fixed)==ok && fixed==big+0x4000 && vm.translate(fixed,1,2));
-            CHECK(vm.place(0x1000000,0x4000,0,3,true,unused)==maxps4::ps4::inval);
+            // A fixed address outside the window is placed inside it instead.
+            CHECK(vm.place(0x1000000,0x4000,0,3,true,unused)==ok && unused>=window && unused<window+windowBytes);
+            CHECK(vm.unmap(unused,0x4000)==ok);
             CHECK(vm.place(0,0x4000,0x3000,3,false,unused)==maxps4::ps4::inval);
             vm.reset();
             CHECK(!vm.translate(first,1,4) && !vm.allocated());
