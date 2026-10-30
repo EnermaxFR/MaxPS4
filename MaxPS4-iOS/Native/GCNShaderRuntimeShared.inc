@@ -220,14 +220,17 @@ GCN_FN float4 gcn_sample(GCNMemory M, GCNRes8 t, GCNRes4 s, bool unorm, float u,
     uint width = (t.d[2] & 0x3fffu) + 1u, height = ((t.d[2] >> 14) & 0x3fffu) + 1u;
     uint pitch = ((t.d[4] >> 13) & 0x3fffu) + 1u, dfmt = (t.d[1] >> 20) & 0x3fu;
     uint bytes = dfmt == 1u ? 1u : (dfmt == 2u || dfmt == 3u || (dfmt >= 16u && dfmt <= 19u)) ? 2u : dfmt == 14u ? 16u : 4u;
-    ulong footprint = dfmt == 35u ?
-        (ulong((height + 3u) / 4u - 1u) * ((pitch + 3u) / 4u) + (width + 3u) / 4u) * 8ul :
-        ((ulong(height) - 1ul) * pitch + width) * bytes;
     ulong offset = 0ul;
     // Address modes in gcn_fetch_at constrain every texel to [0,width)x[0,height).
     // Resolve that complete footprint once, not once per tap/channel. Sparse or
     // truncated resources retain the original checked-load path and zero reads.
-    if (gcn_locate(M, base, footprint, offset))
+    if (dfmt == 35u) {
+        ulong footprint = (ulong((height + 3u) / 4u - 1u) * ((pitch + 3u) / 4u) + (width + 3u) / 4u) * 8ul;
+        if (gcn_locate(M, base, footprint, offset))
+            return gcn_sample_at(M, t, s, unorm, u, v, true, offset);
+        return gcn_sample_at(M, t, s, unorm, u, v, false, 0ul);
+    }
+    if (gcn_locate(M, base, ((ulong(height) - 1ul) * pitch + width) * bytes, offset))
         return gcn_sample_at(M, t, s, unorm, u, v, true, offset);
     return gcn_sample_at(M, t, s, unorm, u, v, false, 0ul);
 }
