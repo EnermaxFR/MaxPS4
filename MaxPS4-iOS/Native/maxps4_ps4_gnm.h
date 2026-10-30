@@ -109,6 +109,90 @@ public:
         uint8_t code[4]; ps4::put_le(code, 0, 0x68750003U, 4);
         return memory_.write(output + 4, code, 4) ? 0 : -1;
     }
+    // The rest of the `size` dwords the game reserved, as one NOP: what a
+    // writer leaves behind it would otherwise be undefined words.
+    int64_t fill(uint64_t output, uint32_t size, Packet& p) {
+        if (size > words_limit || size < p.used + 2) return -1;
+        if (size > p.used) p.nop(size - p.used - 1);
+        return store(output,p);
+    }
+    // Set/Update LS, HS, ES and GS shaders (shadPS4 gnmdriver.cpp): program
+    // address, resources and the tessellation/geometry context registers.
+    int64_t ls(uint64_t output, uint32_t size, uint64_t registers, uint32_t modifier) {
+        if (size < 0x17 || !registers) return -1;
+        const uint32_t mask = (modifier & 0xfffffc3fU) == 0 ? 0xfffffc3fU : 0xfcfffc3fU;
+        std::array<uint32_t,4> r{};
+        if ((modifier & mask) || !load(registers,r) || r[1]) return -1;
+        Packet p;
+        p.add(0x76,{0x148,r[0],0}); p.add(0x76,{0x14b,r[3]});
+        p.add(0x76,{0x14a,modifier ? (r[2] & mask) | modifier : r[2],r[3]});
+        return fill(output,size,p);
+    }
+    int64_t hs(uint64_t output, uint32_t size, uint64_t registers, uint32_t config, bool update) {
+        if (size < (update ? 0x1dU : 0x1eU) || !registers) return -1;
+        std::array<uint32_t,7> r{};
+        if (!load(registers,r) || r[1]) return -1;
+        Packet p;
+        p.add(0x76,{0x108,r[0],0}); p.add(0x76,{0x10a,r[2],r[3]});
+        p.add(0x69,{0x286,r[5],r[6]}); p.add(0x69,{0x2db,r[4]}); p.add(0x69,{0x2d6,config});
+        return fill(output,size,p);
+    }
+    int64_t es(uint64_t output, uint32_t size, uint64_t registers, uint32_t modifier) {
+        if (size < 0x14 || !registers || (modifier & 0xfcfffc3fU)) return -1;
+        std::array<uint32_t,4> r{};
+        if (!load(registers,r) || r[1]) return -1;
+        Packet p;
+        p.add(0x76,{0xc8,r[0],0}); p.add(0x76,{0xca,modifier ? (r[2] & 0xfcfffc3fU) | modifier : r[2],r[3]});
+        return fill(output,size,p);
+    }
+    int64_t gs(uint64_t output, uint32_t size, uint64_t registers) {
+        if (size < 0x1d || !registers) return -1;
+        std::array<uint32_t,7> r{};
+        if (!load(registers,r) || r[1]) return -1;
+        Packet p;
+        p.add(0x76,{0x88,r[0],0}); p.add(0x76,{0x8a,r[2],r[3]});
+        p.add(0x69,{0x2e5,r[4]}); p.add(0x69,{0x29b,r[5]}); p.add(0x69,{0x2e4,r[6]});
+        return fill(output,size,p);
+    }
+    // Debug markers and the embedded pixel shader (whose code is not in guest
+    // memory yet): NOPs of the reserved size, so nothing undefined is left.
+    int64_t push_color_marker(uint64_t output, uint32_t size, uint64_t marker) {
+        std::array<char,512> text{};
+        if (!marker || !memory_.read_cstring(marker,text.data(),text.size())) return -1;
+        const size_t length=std::strlen(text.data());
+        if (((length+0xc)>>2) + ((length+0x10)>>3)*2 + 2 != size) return -1;
+        Packet p; return fill(output,size,p);
+    }
+    int64_t nop_fill(uint64_t output, uint32_t size, uint32_t expected) {
+        if (expected && size != expected) return -1;
+        Packet p; return fill(output,size,p);
+    }
+    // ComputeWaitOnAddress(cmdbuf, 14, address, mask, function, reference):
+    // WAIT_REG_MEM on memory (a register below 0x10000).
+    int64_t compute_wait_address(uint64_t output, uint32_t size, uint64_t address, uint32_t mask,
+                                 uint32_t function, uint32_t reference) {
+        if (size != 0xe) return -1;
+        const bool in_memory = address > 0xffff;
+        Packet p;
+        p.add(0x3c,{(in_memory ? 0x10U : 0U) | (function & 7),uint32_t(address & (in_memory ? 0xfffffffcU : 0xffffU)),
+                    uint32_t(address >> 32),reference,mask,10});
+        return fill(output,size,p);
+    }
+    // ComputeWaitSemaphore(cmdbuf, 10, semaphore, flags): MEM_SEMAPHORE wait.
+    int64_t compute_wait_semaphore(uint64_t output, uint32_t size, uint64_t semaphore, uint32_t flags) {
+        if (size != 0xa) return -1;
+        Packet p;
+        p.add(0x39,{uint32_t(semaphore),(flags == 1 ? 0x100000U : 0U) - 0x20000000U + uint32_t(semaphore >> 32)});
+        return fill(output,size,p);
+    }
+    // DispatchIndirectOnMec(cmdbuf, 8, arguments, modifier): DISPATCH_INDIRECT
+    // with a 64-bit argument address, on the compute engine.
+    int64_t dispatch_indirect_mec(uint64_t output, uint32_t size, uint64_t arguments, uint32_t modifier) {
+        if (size != 8 || !arguments || (arguments & 3)) return -1;
+        Packet p;
+        p.add(0x16,{uint32_t(arguments),uint32_t(arguments >> 32),(modifier & 0x18) | 1},compute | (modifier & 1));
+        return fill(output,size,p);
+    }
     int64_t cs(uint64_t output, uint32_t size, uint64_t registers, uint32_t modifier) {
         if (size < 25 || !registers || (modifier & 0xfffffc3fU)) return -1;
         std::array<uint32_t,7> r{};

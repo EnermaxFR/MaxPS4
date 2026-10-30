@@ -120,4 +120,29 @@ int main() {
     assert(memory.write(regs,marker,sizeof(marker))); // The default states above overwrote it.
     assert(gnm.set_marker(out,9,regs)==0); words=load(9); assert(words[1]==0x68750003);
     std::puts("PASS GNM indirect and offset draws, indirect dispatch, compute/context defaults, VGT reset, PS and set markers");
+    // LS/HS/ES/GS, markers and compute waits fill exactly the reserved size.
+    for(size_t i=0;i<12;++i) ps4::put_le(registers,i*4,i==1 ? 0 : 0x120+i,4);
+    assert(memory.write(regs,registers,sizeof(registers)));
+    assert(gnm.ls(out,23,regs,0)==0); words=load(23);
+    assert(words[0]==0xc0027600 && words[1]==0x148 && words[2]==0x120 && words[11]==0xc00a1000 && gpu::decodePM4Type3(words.data(),23));
+    assert(gnm.ls(out,22,regs,0)==-1 && gnm.ls(out,23,0,0)==-1);
+    assert(gnm.hs(out,30,regs,0x55,false)==0); words=load(30);
+    assert(words[0]==0xc0027600 && words[1]==0x108 && gpu::decodePM4Type3(words.data(),30));
+    assert(gnm.hs(out,29,regs,0x55,false)==-1 && gnm.hs(out,29,regs,0x55,true)==0 && gpu::decodePM4Type3(load(29).data(),29));
+    assert(gnm.es(out,20,regs,0)==0 && gpu::decodePM4Type3(load(20).data(),20) && load(20)[1]==0xc8);
+    assert(gnm.gs(out,29,regs)==0); words=load(29);
+    assert(words[1]==0x88 && gpu::decodePM4Type3(words.data(),29));
+    ps4::put_le(registers,4,1,4); assert(memory.write(regs,registers,sizeof(registers)));
+    assert(gnm.gs(out,29,regs)==-1 && gnm.es(out,20,regs,0)==-1); // A program address above 40 bits.
+    assert(gnm.compute_wait_address(out,14,0x123456780ULL,0xff,3,7)==0); words=load(14);
+    assert(words[0]==0xc0053c00 && words[1]==0x13 && words[2]==0x23456780 && words[3]==1 && words[4]==7 && words[5]==0xff);
+    assert(gpu::decodePM4Type3(words.data(),14) && gnm.compute_wait_address(out,13,0x10000,1,3,7)==-1);
+    assert(gnm.compute_wait_semaphore(out,10,0x1000,1)==0 && load(10)[0]==0xc0013900 && gpu::decodePM4Type3(load(10).data(),10));
+    assert(gnm.dispatch_indirect_mec(out,8,0x80,9)==0); words=load(8);
+    assert(words[0]==0xc0021603 && words[1]==0x80 && words[2]==0 && words[3]==9 && words[4]==0xc0021000);
+    assert(gnm.dispatch_indirect_mec(out,8,0x82,0)==-1 && gnm.dispatch_indirect_mec(out,7,0x80,0)==-1);
+    assert(gnm.nop_fill(out,4,4)==0 && load(4)[0]==0xc0021000 && gnm.nop_fill(out,5,4)==-1 && gnm.nop_fill(out,1,0)==-1);
+    assert(memory.write(regs,marker,sizeof(marker)));
+    assert(gnm.push_color_marker(out,9,regs)==-1 && gnm.push_color_marker(out,10,regs)==0 && gpu::decodePM4Type3(load(10).data(),10));
+    std::puts("PASS GNM LS/HS/ES/GS shaders, color and ding-dong markers, compute waits and MEC indirect dispatch");
 }

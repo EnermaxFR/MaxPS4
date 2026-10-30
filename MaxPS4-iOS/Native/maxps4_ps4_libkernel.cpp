@@ -355,6 +355,20 @@ constexpr Binding bindings[] = {
     {"sceGnmDingDong", "bX5IbRvECXk", PS4KernelService::gnm_ding_dong, "libSceGnmDriver"},
     {"sceGnmDingDongForWorkload", "byXlqupd8cE", PS4KernelService::gnm_ding_dong, "libSceGnmDriver"},
     {"sceGnmGetOffChipTessellationBufferSize", "FFVZcCu3zWU", PS4KernelService::gnm_tessellation_offchip, "libSceGnmDriver"},
+    // Command writers that fill the size the game reserved (PS4Gnm::fill).
+    {"sceGnmSetLsShader", "vckdzbQ46SI", PS4KernelService::gnm_ls, "libSceGnmDriver"},
+    {"sceGnmSetHsShader", "VJNjFtqiF5w", PS4KernelService::gnm_hs, "libSceGnmDriver"},
+    {"sceGnmUpdateHsShader", "GNlx+y7xPdE", PS4KernelService::gnm_hs_update, "libSceGnmDriver"},
+    {"sceGnmSetEsShader", "FUHG8sQ3R58", PS4KernelService::gnm_es, "libSceGnmDriver"},
+    {"sceGnmSetGsShader", "UJwNuMBcUAk", PS4KernelService::gnm_gs, "libSceGnmDriver"},
+    {"sceGnmUpdateGsShader", "nLM2i2+65hA", PS4KernelService::gnm_gs, "libSceGnmDriver"},
+    {"sceGnmInsertPushColorMarker", "aPIZJTXC+cU", PS4KernelService::gnm_push_color_marker, "libSceGnmDriver"},
+    {"sceGnmInsertSetColorMarker", "aj3L-iaFmyk", PS4KernelService::gnm_set_color_marker, "libSceGnmDriver"},
+    {"sceGnmInsertDingDongMarker", "NfvOrNzy6sk", PS4KernelService::gnm_ding_dong_marker, "libSceGnmDriver"},
+    {"sceGnmSetEmbeddedPsShader", "X9Omw9dwv5M", PS4KernelService::gnm_embedded_ps, "libSceGnmDriver"},
+    {"sceGnmComputeWaitOnAddress", "ffrNQOshows", PS4KernelService::gnm_compute_wait_address, "libSceGnmDriver"},
+    {"sceGnmComputeWaitSemaphore", "EJapNl2+pgU", PS4KernelService::gnm_compute_wait_semaphore, "libSceGnmDriver"},
+    {"sceGnmDispatchIndirectOnMec", "wED4ZXCFJT0", PS4KernelService::gnm_dispatch_indirect_mec, "libSceGnmDriver"},
     // Resource registration is for the debugger, absent from retail firmware:
     // it fails there too. Garlic flushes and status queries have nothing to do.
     {"sceGnmRegisterResource", "nvEwfYAImTs", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
@@ -1890,6 +1904,17 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
         return write(q.read_pointer, next, 4) ? 0 : kernel_error(fault);
     }
     case S::gnm_tessellation_offchip: return 0x800000;
+    case S::gnm_ls: return gnm_.ls(c.rdi,uint32_t(c.rsi),c.rdx,uint32_t(c.rcx));
+    case S::gnm_hs: case S::gnm_hs_update: return gnm_.hs(c.rdi,uint32_t(c.rsi),c.rdx,uint32_t(c.rcx),service == S::gnm_hs_update);
+    case S::gnm_es: return gnm_.es(c.rdi,uint32_t(c.rsi),c.rdx,uint32_t(c.rcx));
+    case S::gnm_gs: return gnm_.gs(c.rdi,uint32_t(c.rsi),c.rdx);
+    case S::gnm_push_color_marker: return gnm_.push_color_marker(c.rdi,uint32_t(c.rsi),c.rdx);
+    case S::gnm_set_color_marker: case S::gnm_embedded_ps: return gnm_.nop_fill(c.rdi,uint32_t(c.rsi),0);
+    case S::gnm_ding_dong_marker: return gnm_.nop_fill(c.rdi,uint32_t(c.rsi),4);
+    case S::gnm_compute_wait_address:
+        return gnm_.compute_wait_address(c.rdi,uint32_t(c.rsi),c.rdx,uint32_t(c.rcx),uint32_t(c.r8),uint32_t(c.r9));
+    case S::gnm_compute_wait_semaphore: return gnm_.compute_wait_semaphore(c.rdi,uint32_t(c.rsi),c.rdx,uint32_t(c.rcx));
+    case S::gnm_dispatch_indirect_mec: return gnm_.dispatch_indirect_mec(c.rdi,uint32_t(c.rsi),c.rdx,uint32_t(c.rcx));
     case S::process_id: return 1;
     case S::thread_id: return threads_.known(thread) ? int64_t(uint32_t(thread)) : kernel_error(inval);
     // FIFO/round-robin priorities: 256 lowest to 767 highest.
