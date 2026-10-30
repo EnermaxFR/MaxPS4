@@ -518,6 +518,72 @@ constexpr Binding bindings[] = {
     {"sceKernelRename", "52NcYU9+lEo", PS4KernelService::rename},
     {"sceKernelUnlink", "AUXVxWeJU-A", PS4KernelService::unlink},
     {"sceKernelGetdirentries", "taRWhTJFTgE", PS4KernelService::getdirentries},
+    // Crash Bandicoot 4 (Unreal Engine 4), after shadPS4. A cancel, schedule
+    // or timestamp change does nothing here; select only times out.
+    {"getpid", "HoLVWNanBBc", PS4KernelService::process_id, "libkernel", true},
+    {"close", "bY-PO6JhzhQ", PS4KernelService::close, "libkernel", true},
+    {"stat", "E6ao34wPw+U", PS4KernelService::stat, "libkernel", true},
+    {"usleep", "QcteRwbsnV0", PS4KernelService::usleep, "libkernel", true},
+    {"rmdir", "c7ZnT7V1B98", PS4KernelService::rmdir, "libkernel", true},
+    {"select", "T8fER+tIGgk", PS4KernelService::succeed, "libkernel", true},
+    {"pthread_getspecific", "0-KXaS70xy4", PS4KernelService::get_specific, "libkernel", true},
+    {"pthread_getthreadid_np", "EI-5-jlq2dE", PS4KernelService::thread_id, "libkernel", true},
+    {"pthread_getschedparam", "FIs3-UQT9sg", PS4KernelService::sched_param_get, "libkernel", true},
+    {"pthread_setschedparam", "Xs9hdiD7sAA", PS4KernelService::succeed, "libkernel", true},
+    {"sched_get_priority_max", "CBNtXOoef-E", PS4KernelService::sched_priority_max, "libkernel", true},
+    {"sched_get_priority_min", "m0iS6jNsXds", PS4KernelService::sched_priority_min, "libkernel", true},
+    {"pthread_cancel", "0D4-FVvEikw", PS4KernelService::succeed, "libkernel", true},
+    {"scePthreadCancel", "qBDmpCyGssE", PS4KernelService::succeed},
+    {"_sceKernelSetThreadDtors", "rNhWz+lvOMU", PS4KernelService::succeed},
+    {"sceKernelGetdents", "j2AIqSqJP0w", PS4KernelService::getdents},
+    {"sceKernelChmod", "fgIsQ10xYVA", PS4KernelService::succeed},
+    {"sceKernelUtimes", "0Cq8ipKr9n0", PS4KernelService::succeed},
+    {"sceKernelAvailableFlexibleMemorySize", "aNz11fnnzi4", PS4KernelService::flexible_available},
+    {"sceKernelGetPrtAperture", "L0v2Go5jOuM", PS4KernelService::prt_aperture},
+    {"sceKernelAioInitializeImpl", "vYU8P9Td2Zo", PS4KernelService::succeed},
+    {"sceKernelAioInitializeParam", "nu4a0-arQis", PS4KernelService::succeed},
+    {"sceKernelAioDeleteRequest", "5TgME6AYty4", PS4KernelService::succeed},
+    {"sceKernelAioSubmitReadCommands", "HgX7+AORI58", PS4KernelService::aio_read},
+    {"sceKernelAioSubmitWriteCommands", "XQ8C8y+de+E", PS4KernelService::aio_write},
+    {"sceKernelAioWaitRequest", "KOF-oJbQVvc", PS4KernelService::aio_wait},
+    {"sceKernelMemoryPoolReserve", "pU-QydtGcGY", PS4KernelService::pool_reserve},
+    {"sceKernelMemoryPoolCommit", "Vzl66WmfLvk", PS4KernelService::pool_commit},
+    {"sceKernelMemoryPoolDecommit", "LXo1tpFqJGs", PS4KernelService::pool_decommit},
+    {"sceKernelMemoryPoolExpand", "qCSfqDILlns", PS4KernelService::pool_expand},
+    // No network: every socket call fails as if the protocol were unsupported.
+    {"accept", "3e+4Iv7IJ8U", PS4KernelService::net_unavailable, "libkernel", true},
+    {"bind", "KuOmgKoqCdY", PS4KernelService::net_unavailable, "libkernel", true},
+    {"connect", "XVL8So3QJUk", PS4KernelService::net_unavailable, "libkernel", true},
+    {"getpeername", "TXFFFiNldU8", PS4KernelService::net_unavailable, "libkernel", true},
+    {"getsockname", "RenI1lL1WFk", PS4KernelService::net_unavailable, "libkernel", true},
+    {"getsockopt", "6O8EwYOgH9Y", PS4KernelService::net_unavailable, "libkernel", true},
+    {"listen", "pxnCmagrtao", PS4KernelService::net_unavailable, "libkernel", true},
+    {"recv", "Ez8xjo9UF4E", PS4KernelService::net_unavailable, "libkernel", true},
+    {"recvfrom", "lUk6wrGXyMw", PS4KernelService::net_unavailable, "libkernel", true},
+    {"send", "fZOeZIOEmLw", PS4KernelService::net_unavailable, "libkernel", true},
+    {"sendto", "oBr313PppNE", PS4KernelService::net_unavailable, "libkernel", true},
+    {"setsockopt", "fFxGkxF2bVo", PS4KernelService::net_unavailable, "libkernel", true},
+    {"shutdown", "TUuiYS2kE8s", PS4KernelService::net_unavailable, "libkernel", true},
+    {"socket", "TU-d9PfIHPM", PS4KernelService::net_unavailable, "libkernel", true},
+    {"sceVideoOutWaitVblank", "j6RaAUlaLv0", PS4KernelService::succeed, "libSceVideoOut"},
+    {"sceVideoOutGetDeviceCapabilityInfo", "kGVLc3htQE8", PS4KernelService::video_capability, "libSceVideoOut"},
+    {"sceVideoOutConfigureOutputMode_", "N1bEoJ4SRw4", PS4KernelService::succeed, "libSceVideoOut"},
+    {"sceVideoOutModeSetAny_", "pjkDsgxli6c", PS4KernelService::succeed, "libSceVideoOut"},
+    {"sceVideoOutSetWindowModeMargins", "MTxxrOCeSig", PS4KernelService::succeed, "libSceVideoOut"},
+    {"scePadSetLightBar", "RR4novUEENY", PS4KernelService::succeed, "libScePad"},
+    {"scePadResetLightBar", "DscD1i9HX1w", PS4KernelService::succeed, "libScePad"},
+    {"scePadSetVibration", "yFVnOdGxvZY", PS4KernelService::succeed, "libScePad"},
+    {"scePadResetOrientation", "rIZnR6eSpvk", PS4KernelService::succeed, "libScePad"},
+    {"sceSysmoduleIsLoaded", "fMP5NHUOaMk", PS4KernelService::succeed, "libSceSysmodule"},
+    {"sceSysmoduleLoadModuleInternalWithArg", "hHrGoGoNf+s", PS4KernelService::succeed, "libSceSysmodule"},
+    {"sceSysmoduleUnloadModule", "eR2bZFAAU0Q", PS4KernelService::succeed, "libSceSysmodule"},
+    {"sceSysmoduleGetModuleInfoForUnwind", "4fU5yvOkVG4", PS4KernelService::module_info_unwind, "libSceSysmodule"},
+    {"sceDiscMapIsRequestOnHDD", "lbQKqsERhtE", PS4KernelService::discmap_no_bitmap, "libSceDiscMap"},
+    {"Func_7C980FFB0AA27E7A", "fJgP+wqifno", PS4KernelService::discmap_flags, "libSceDiscMap"},
+    {"sceCommonDialogInitialize", "uoUpLGNkygk", PS4KernelService::succeed, "libSceCommonDialog"},
+    {"sceScreenShotEnable", "2xxUtuC-RzE", PS4KernelService::succeed, "libSceScreenShot"},
+    {"sceScreenShotDisable", "tIYf0W5VTi8", PS4KernelService::succeed, "libSceScreenShot"},
+    {"sceNetCtlTerm", "Z4wwCFiBELQ", PS4KernelService::succeed, "libSceNetCtl"},
     // Data objects, filled by PS4Libkernel::initialize_data. "MaxPS4errno" is
     // engine-internal (no game imports it): the per-thread errno cells.
     {"__stack_chk_guard", "f7uOxY9mM1U", PS4KernelService::stack_chk_guard, "libkernel", false, false, 8},
@@ -547,8 +613,9 @@ PS4KernelService resolve_libkernel(std::string_view symbol, std::string_view lib
                                    std::string_view module, uint32_t version) {
     // A binding's library names its module too (libkernel/libkernel).
     if (version != 1 || library != module) return PS4KernelService::unresolved;
+    const std::string_view owner = library == "libScePosix" ? std::string_view("libkernel") : library;
     for (const auto& binding : bindings)
-        if (library == binding.library && (symbol == binding.name || symbol == binding.nid)) return binding.service;
+        if (owner == binding.library && (symbol == binding.name || symbol == binding.nid)) return binding.service;
     return PS4KernelService::unresolved;
 }
 PS4Libkernel::PS4Libkernel(PS4GuestMemory& memory, PS4VirtualMemory* dynamic)
@@ -1695,6 +1762,25 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     case S::gnm_set_marker: return gnm_.set_marker(c.rdi,uint32_t(c.rsi),c.rdx);
     case S::gnm_clock: return 800000000; // Base PS4 GPU clock.
     case S::gnm_unsupported: return signed32(0x8eee00ffU);
+    case S::process_id: return 1;
+    case S::thread_id: return threads_.known(thread) ? int64_t(uint32_t(thread)) : kernel_error(inval);
+    // FIFO/round-robin priorities: 256 lowest to 767 highest.
+    case S::sched_priority_max: case S::sched_priority_min:
+        if (c.rdi != 1 && c.rdi != 3) return kernel_error(inval);
+        return service == S::sched_priority_max ? 767 : 256;
+    // pthread_getschedparam(thread, s32* policy, sched_param*): FIFO, default priority.
+    case S::sched_param_get:
+        return (!c.rsi || write(c.rsi, 1, 4)) && (!c.rdx || write(c.rdx, 700, 4)) ? 0 : kernel_error(fault);
+    case S::net_unavailable: return kernel_error(notsup);
+    // No PRT aperture is set: index, void** address, size_t* size.
+    case S::prt_aperture: return (!c.rsi || write(c.rsi, 0, 8)) && (!c.rdx || write(c.rdx, 0, 8)) ? 0 : kernel_error(fault);
+    // DiscMap: the game files are all installed, so there is no disc bitmap;
+    // Func_7C98(path, offset, size, s32* flags, s32*, s32*) clears all three.
+    case S::discmap_no_bitmap: return signed32(0x81100004U);
+    case S::discmap_flags:
+        return (!c.rcx || write(c.rcx, 0, 4)) && (!c.r8 || write(c.r8, 0, 4)) && (!c.r9 || write(c.r9, 0, 4)) ? 0 : kernel_error(fault);
+    // GetDeviceCapabilityInfo(handle, info*): u64 capability, none (no HDR or VR).
+    case S::video_capability: return write(c.rsi, 0, 8) ? 0 : kernel_error(fault);
     // SetGsRingSizes(esgs, gsvs): 1 MiB multiples in [4, 8] MiB each. Ring sizes
     // do not matter to the emulated GPU.
     case S::gnm_gs_rings: {
@@ -1972,7 +2058,42 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     case S::direct_available: case S::direct_allocate_main: case S::flexible_map_unnamed: case S::flexible_release:
     case S::virtual_query: case S::query_protection: case S::sdk_version: case S::system_version:
     case S::reserve_range: case S::mtype_protect: case S::direct_query:
+    case S::flexible_available: case S::pool_reserve: case S::pool_commit: case S::pool_decommit:
         return memory_service(service, c);
+    // MemoryPoolExpand(start, end, length, alignment, s64* physical): direct memory for the pool.
+    case S::pool_expand: return memory_service(S::direct_allocate, {c.rdi, c.rsi, c.rdx, c.rcx, 0, c.r8});
+    // Getdents(fd, buffer, size): Getdirentries without the position.
+    case S::getdents: {
+        std::lock_guard<std::mutex> guard(lock_);
+        if (!threads_.known(thread)) return kernel_error(inval);
+        try { return file_service(S::getdirentries, {c.rdi, c.rsi, c.rdx, 0}); }
+        catch (const std::bad_alloc&) { return kernel_error(nomem); }
+    }
+    // AioSubmitRead/WriteCommands(requests, count, priority, s32* id): done at
+    // once, as shadPS4. Request (40 bytes): s64 offset, s64 size, void* buffer,
+    // result* {s64 value, u32 state: completed 3, aborted 4}, s32 fd. Every
+    // submission shares id 1, always complete for AioWaitRequest.
+    case S::aio_read: case S::aio_write: {
+        if (!c.rdi || !c.rcx) return kernel_error(fault);
+        const int32_t count = signed32(c.rsi);
+        if (count < 0) return kernel_error(inval);
+        std::lock_guard<std::mutex> guard(lock_);
+        if (!threads_.known(thread)) return kernel_error(inval);
+        for (int32_t i = 0; i < count; ++i) {
+            uint8_t r[40];
+            if (!memory_.read(c.rdi + uint64_t(i) * 40, r, sizeof(r))) return kernel_error(fault);
+            int64_t done;
+            try {
+                done = file_service(service == S::aio_read ? S::pread : S::pwrite,
+                                    {uint64_t(signed32(uint32_t(get_le(r + 32, 4)))), get_le(r + 16, 8), get_le(r + 8, 8), get_le(r, 8)});
+            } catch (const std::bad_alloc&) { done = kernel_error(nomem); }
+            const uint64_t result = get_le(r + 24, 8);
+            if (result && (!write(result, uint64_t(done), 8) || !write(result + 8, done < 0 ? 4 : 3, 4))) return kernel_error(fault);
+        }
+        return write(c.rcx, 1, 4) ? 0 : kernel_error(fault);
+    }
+    // AioWaitRequest(id, s32* state, u32* usec).
+    case S::aio_wait: return write(c.rsi, 3, 4) ? 0 : kernel_error(fault);
     // BatchMap(entries, count, s32* done) / BatchMap2(..., flags): BatchMap maps
     // at the given addresses. Entry (32 bytes): void* start, u64 offset, u64
     // length, u8 protection, u8 type, u16, s32 operation: map direct 0, unmap
@@ -2178,6 +2299,30 @@ int64_t PS4Libkernel::memory_service(PS4KernelService service, const PS4KernelCa
         const Error e = dynamic_->place(hint, c.rsi, c.rcx ? c.rcx : page, 0, (c.rdx & 0x10) != 0, mapped);
         if (e) return kernel_error(e);
         return write_pointer(c.rdi, mapped) ? 0 : (dynamic_->unmap(mapped, c.rsi), kernel_error(fault));
+    }
+    // AvailableFlexibleMemorySize(size_t*): what is left of the mapping budget.
+    case S::flexible_available: {
+        const uint64_t limit = PS4VirtualMemory::host_budget;
+        return write_pointer(c.rdi, limit - std::min<uint64_t>(dynamic_->allocated(), limit)) ? 0 : kernel_error(fault);
+    }
+    // MemoryPoolReserve(address, length, alignment, flags, void** out): no
+    // access until committed; 2 MiB multiples and alignment.
+    case S::pool_reserve: {
+        constexpr uint64_t mb2 = 2 * 1024 * 1024;
+        if (!c.rsi || c.rsi % mb2 || (c.rdx && (c.rdx & (c.rdx - 1)))) return kernel_error(inval);
+        uint64_t mapped = 0;
+        const Error e = dynamic_->place(c.rdi, c.rsi, std::max<uint64_t>(c.rdx, mb2), 0, (c.rcx & 0x10) != 0 && c.rdi, mapped);
+        if (e) return kernel_error(e);
+        return write_pointer(c.r8, mapped) ? 0 : (dynamic_->unmap(mapped, c.rsi), kernel_error(fault));
+    }
+    // MemoryPoolCommit(address, length, type, protection, flags) /
+    // Decommit(address, length, flags): 64 KiB multiples. Decommitted pages
+    // lose their access, not their contents.
+    case S::pool_commit: case S::pool_decommit: {
+        uint32_t protection = 0;
+        if (!c.rdi || !c.rsi || c.rsi % 0x10000) return kernel_error(inval);
+        if (service == S::pool_commit && !cpu(c.rcx, protection)) return kernel_error(inval);
+        return kernel_error(dynamic_->protect(c.rdi, c.rsi, protection));
     }
     // Mtypeprotect(address, length, memory type, protection): the type does
     // not change how the CPU sees the pages.

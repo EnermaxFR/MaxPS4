@@ -1,5 +1,6 @@
 #include "../Native/maxps4_ps4_libkernel.h"
 #include "GuestELFFixture.h"
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <unistd.h>
@@ -178,6 +179,19 @@ int main() {
     assert(invoke(S::batch_map2, {entries, 1, done_out, 0}) == 0);
     assert(memory.permitted(batch_flexible, 0x4000, 6));
     assert(!memory.permitted(batch_direct, 1, 4) && invoke(S::flexible_release, {batch_flexible, 0x4000}) == 0);
+    // Memory pools: a 2 MiB reservation, committed and decommitted by 64 KiB.
+    put_le(word, 0, 0, 8); assert(memory.write(where, word, 8));
+    assert(invoke(S::pool_reserve, {0, 0x200000, 0, 0, where}) == 0 && memory.read(where, word, 8));
+    const uint64_t pool = get_le(word, 8);
+    assert(pool % 0x200000 == 0 && !memory.permitted(pool, 1, 4));
+    assert(invoke(S::pool_commit, {pool, 0x10000, 0, 0x33, 0}) == 0 && memory.permitted(pool, 0x10000, 6));
+    assert(invoke(S::pool_decommit, {pool, 0x10000, 0}) == 0 && !memory.permitted(pool, 1, 4));
+    assert(invoke(S::pool_commit, {pool, 0x8000, 0, 3, 0}) == kernel_error(inval));
+    assert(invoke(S::pool_reserve, {0, 0x100000, 0, 0, where}) == kernel_error(inval));
+    assert(invoke(S::flexible_available, {where}) == 0 && memory.read(where, word, 8));
+    assert(get_le(word, 8) == PS4VirtualMemory::host_budget - std::min<uint64_t>(dynamic.allocated(), PS4VirtualMemory::host_budget));
+    assert(invoke(S::flexible_release, {pool, 0x200000}) == 0);
+    assert(invoke(S::pool_expand, {0, 1ULL << 30, 0x10000, 0, phys}) == 0 && memory.read(phys, word, 8));
     // BatchMap maps at the given address: outside a general image's window, refused.
     entry(0, PS4VirtualMemory::base, 0, 0x4000, 3, 3);
     assert(invoke(S::batch_map, {entries, 1, done_out}) == kernel_error(inval) && memory.read(done_out, word, 4) && get_le(word, 4) == 0);

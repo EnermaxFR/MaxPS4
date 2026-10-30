@@ -58,6 +58,22 @@ int main() {
     assert(call(S::lseek, fd, 0, 1) == 6); // Positioned I/O preserves the offset.
     assert(call(S::pread, fd, 0x11100, 6, 0) == 6);
     assert(memory.read(0x11100, bytes, 6) && std::memcmp(bytes, "ababef", 6) == 0);
+    // AIO reads complete at submission: the result holds the size, state 3 (completed).
+    {
+        uint8_t request[40]{};
+        put_le(request, 0, 1, 8); put_le(request, 8, 4, 8); put_le(request, 16, 0x11180, 8);
+        put_le(request, 24, 0x11440, 8); put_le(request, 32, uint64_t(fd), 4);
+        assert(memory.write(0x11400, request, sizeof(request)));
+        assert(call(S::aio_read, 0x11400, 1, 0, 0x11460) == 0);
+        uint8_t result[12]{}; assert(memory.read(0x11440, result, 12) && get_le(result, 8) == 4 && get_le(result + 8, 4) == 3);
+        assert(memory.read(0x11180, bytes, 4) && std::memcmp(bytes, "babe", 4) == 0);
+        uint8_t id[4]{}; assert(memory.read(0x11460, id, 4));
+        assert(call(S::aio_wait, get_le(id, 4), 0x11468) == 0 && memory.read(0x11468, id, 4) && get_le(id, 4) == 3);
+        put_le(request, 32, 99, 4); assert(memory.write(0x11400, request, sizeof(request)));
+        assert(call(S::aio_read, 0x11400, 1, 0, 0x11460) == 0); // A bad descriptor aborts that request only.
+        assert(memory.read(0x11440, result, 12) && int64_t(get_le(result, 8)) == kernel_error(badf) && get_le(result + 8, 4) == 4);
+        assert(call(S::aio_read, 0x11400, 1, 0, 0) == kernel_error(fault));
+    }
     assert(call(S::pread, fd, 0x11100, 1, UINT64_MAX) == kernel_error(inval));
     assert(call(S::pwrite, fd, 0x11000, 1, UINT64_MAX) == kernel_error(inval));
     assert(call(S::pread, fd, 0x11fff, 4, 0) == kernel_error(fault));
@@ -349,6 +365,20 @@ int main() {
     assert(resolve_libkernel("OxhIB8LB-PQ", "libkernel", "libkernel", 1) == S::thread_create);
     assert(pthread_result(0) == 0 && pthread_result(kernel_error(busy)) == 16 && pthread_result(kernel_error(timedout)) == 60);
     assert(pthread_result(42) == 42);
+    // libScePosix shares libkernel's POSIX functions; sockets fail (no network).
+    assert(resolve_libkernel("bY-PO6JhzhQ", "libScePosix", "libScePosix", 1) == S::close);
+    assert(resolve_libkernel("bY-PO6JhzhQ", "libkernel", "libkernel", 1) == S::close);
+    assert(resolve_libkernel("TU-d9PfIHPM", "libScePosix", "libScePosix", 1) == S::net_unavailable);
+    assert(resolve_libkernel("lbQKqsERhtE", "libSceDiscMap", "libSceDiscMap", 1) == S::discmap_no_bitmap);
+    assert(kernel.invoke(S::net_unavailable, {2, 1, 0}, 1, true) == -1);
+    assert(call(S::sched_priority_max, 1) == 767 && call(S::sched_priority_min, 3) == 256);
+    assert(call(S::sched_priority_max, 0) == kernel_error(inval));
+    assert(call(S::sched_param_get, 0, 0x11900, 0x11904) == 0 && value32(0x11900) == 1 && value32(0x11904) == 700);
+    assert(call(S::discmap_no_bitmap, 0x10000, 0, 16, 0x11900) == int32_t(0x81100004U));
+    assert(memory.write(0x11900, "ÿÿÿÿÿÿÿÿÿÿÿÿ", 12));
+    assert(kernel.invoke(S::discmap_flags, {0x10000, 0, 16, 0x11900, 0x11904, 0x11908}) == 0);
+    assert(value32(0x11900) == 0 && value32(0x11904) == 0 && value32(0x11908) == 0);
+    assert(call(S::video_capability, 1, 0x11900) == 0 && value32(0x11900) == 0);
     kernel.reset();
     assert(call(S::system_param_int, 1, 0x11900) == 0 && value32(0x11900) == 1);
     std::puts("PS4 writable files, positioned I/O and directory checks passed");
