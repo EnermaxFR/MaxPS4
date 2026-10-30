@@ -42,6 +42,12 @@ jobs:
           /tmp/gcn-interpreter-test
           c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PM4SoftwareRendererTest.cpp -o /tmp/pm4-software-test
           /tmp/pm4-software-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PM4DrawCollectorTest.cpp -o /tmp/pm4-collector-test
+          /tmp/pm4-collector-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PM4BlendTest.cpp -o /tmp/pm4-blend-test
+          /tmp/pm4-blend-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PM4PrimitiveTest.cpp -o /tmp/pm4-primitive-test
+          /tmp/pm4-primitive-test
           c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/PM4ResourceScanTest.cpp -o /tmp/pm4-resource-scan-test
           /tmp/pm4-resource-scan-test
           c++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic MaxPS4-iOS/Tests/PM4ResourceScanTest.cpp -o /tmp/pm4-resource-scan-benchmark
@@ -53,6 +59,12 @@ jobs:
           /tmp/gcn-translator-harness
           c++ -std=c++17 -Wall -Wextra -Werror -pedantic -pthread -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/GCNTextureFootprintTest.cpp -o /tmp/gcn-texture-footprint-test
           /tmp/gcn-texture-footprint-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/GCNBC1Test.cpp -o /tmp/gcn-bc1-test
+          /tmp/gcn-bc1-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/GCNBC23Test.cpp -o /tmp/gcn-bc23-test
+          /tmp/gcn-bc23-test
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer MaxPS4-iOS/Tests/GCNBC45Test.cpp -o /tmp/gcn-bc45-test
+          /tmp/gcn-bc45-test
   metal-bridge:
     runs-on: macos-latest
     steps:
