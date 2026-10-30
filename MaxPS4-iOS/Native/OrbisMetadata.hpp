@@ -390,6 +390,7 @@ private:
                 symbols.push_back(std::move(s));
             }
         }
+        std::set<uint64_t> targets;
         auto rela = [&](uint64_t pointerTag, uint64_t sizeTag, bool sony, bool plt) {
             if (!tags.count(pointerTag) && !tags.count(sizeTag)) return;
             require(tags.count(pointerTag) && tags.count(sizeTag), "Paire RELA incomplète");
@@ -415,8 +416,14 @@ private:
                         << " type=" << std::dec << kind;
                     throw std::runtime_error(why.str());
                 }
-                for (const auto& old : relocations) if (kind && old.type)
-                    require(r.target >= old.target+8 || old.target >= r.target+8, "Cibles RELA se chevauchant");
+                // Sorted targets: no 8-byte write may overlap another (a pairwise
+                // scan is quadratic, hours for Unreal Engine's ~800k relocations).
+                if (kind) {
+                    const auto next = targets.lower_bound(r.target);
+                    require((next == targets.end() || *next - r.target >= 8) &&
+                            (next == targets.begin() || r.target - *std::prev(next) >= 8), "Cibles RELA se chevauchant");
+                    targets.insert(r.target);
+                }
                 if (!supported) block("Relocations non prises en charge");
                 relocations.push_back(r);
             }
