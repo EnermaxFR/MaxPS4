@@ -117,7 +117,7 @@ int main() {
     assert(resolve_libkernel("sceKernelRead", "libkernel", "libkernel", 1) == S::read);
     assert(maxps4_ps4_resolve_libkernel("sceKernelRead", "libkernel", "libkernel", 1) == uint32_t(S::read));
     assert(maxps4_ps4_resolve_libkernel(nullptr, "libkernel", "libkernel", 1) == 0);
-    assert(resolve_libkernel("bY-PO6JhzhQ", "libkernel", "libkernel", 1) == S::unresolved);
+    assert(resolve_libkernel("bY-PO6JhzhQ", "libkernel", "libkernel", 1) == S::close); // POSIX close, errno results.
     assert(resolve_libkernel("QOQtbeDqsT4", "libSceAudioOut", "libSceAudioOut", 1) == S::audio_output);
     assert(resolve_libkernel("ekNvsT22rsY", "libSceAudioOut", "libSceAudioOut", 1) == S::audio_open);
     assert(resolve_libkernel("JfEPXVxhFqA", "libSceAudioOut", "libSceAudioOut", 1) == S::audio_init);
