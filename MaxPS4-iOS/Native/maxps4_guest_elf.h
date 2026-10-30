@@ -36,7 +36,8 @@ public:
     // Guest faults are not contained here: the FEX runtime contains those of
     // generated code on ARM64 hosts.
     // generalSpan: the largest image (all modules) a general reservation holds.
-    static constexpr uint64_t generalAlignment = 1024 * 1024, generalStack = 1024 * 1024,
+    // generalStack: each guest thread's stack (Unreal Engine call chains run deep).
+    static constexpr uint64_t generalAlignment = 1024 * 1024, generalStack = 4 * 1024 * 1024,
                               generalSpan = uint64_t(512) * 1024 * 1024;
     // sceKernelMmap window after the stack (PS4 16 KiB pages), PROT_NONE in
     // the host until PS4VirtualMemory maps pages in it.

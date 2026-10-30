@@ -118,6 +118,19 @@ int main() {
     assert(maxps4_ps4_resolve_libkernel("sceKernelRead", "libkernel", "libkernel", 1) == uint32_t(S::read));
     assert(maxps4_ps4_resolve_libkernel(nullptr, "libkernel", "libkernel", 1) == 0);
     assert(resolve_libkernel("bY-PO6JhzhQ", "libkernel", "libkernel", 1) == S::close); // POSIX close, errno results.
+    // libSceLibcInternal's internal_* functions are guest routines.
+    {
+        size_t count = 0;
+        const auto* exports = libkernel_exports(count);
+        size_t routines = 0;
+        for (size_t i = 0; i < count; ++i)
+            if (!std::strcmp(exports[i].library, "libSceLibcInternal") && exports[i].code) {
+                assert(exports[i].code_size && exports[i].code_size <= 4096 && exports[i].code[exports[i].code_size - 1] == 0xc3);
+                ++routines;
+            }
+        assert(routines == 21);
+        assert(resolve_libkernel("Q3VBxCXhUHs", "libSceLibcInternal", "libSceLibcInternal", 1) != S::unresolved);
+    }
     assert(resolve_libkernel("QOQtbeDqsT4", "libSceAudioOut", "libSceAudioOut", 1) == S::audio_output);
     assert(resolve_libkernel("ekNvsT22rsY", "libSceAudioOut", "libSceAudioOut", 1) == S::audio_open);
     assert(resolve_libkernel("JfEPXVxhFqA", "libSceAudioOut", "libSceAudioOut", 1) == S::audio_init);
