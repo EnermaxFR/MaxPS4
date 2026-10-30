@@ -573,6 +573,9 @@ constexpr Binding bindings[] = {
     {"sceKernelRename", "52NcYU9+lEo", PS4KernelService::rename},
     {"sceKernelUnlink", "AUXVxWeJU-A", PS4KernelService::unlink},
     {"sceKernelGetdirentries", "taRWhTJFTgE", PS4KernelService::getdirentries},
+    // Thread names are not kept: an empty one (Unreal Engine 4 logs them).
+    {"scePthreadGetname", "How7B8Oet6k", PS4KernelService::thread_getname},
+    {"pthread_getname_np", "9HzfhdtESio", PS4KernelService::thread_getname, "libkernel", true},
     // libSceLibcInternal (see internal_memcpy_code).
     {"internal_atan", "OXmauLdQ8kY", PS4KernelService::succeed, "libSceLibcInternal", false, false, 0, internal_atan_code, sizeof(internal_atan_code)},
     {"internal_atan2f", "EH-x713A99c", PS4KernelService::succeed, "libSceLibcInternal", false, false, 0, internal_atan2f_code, sizeof(internal_atan2f_code)},
@@ -1916,6 +1919,11 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     case S::gnm_compute_wait_semaphore: return gnm_.compute_wait_semaphore(c.rdi,uint32_t(c.rsi),c.rdx,uint32_t(c.rcx));
     case S::gnm_dispatch_indirect_mec: return gnm_.dispatch_indirect_mec(c.rdi,uint32_t(c.rsi),c.rdx,uint32_t(c.rcx));
     case S::process_id: return 1;
+    // scePthreadGetname(thread, char name[32]).
+    case S::thread_getname: {
+        const uint8_t empty[32] = {};
+        return c.rsi && memory_.write(c.rsi, empty, sizeof(empty)) ? 0 : kernel_error(fault);
+    }
     case S::thread_id: return threads_.known(thread) ? int64_t(uint32_t(thread)) : kernel_error(inval);
     // FIFO/round-robin priorities: 256 lowest to 767 highest.
     case S::sched_priority_max: case S::sched_priority_min:

@@ -405,6 +405,9 @@ int main() {
         assert(call(S::gnm_ding_dong, uint64_t(vqid), 9) == 0 && value32(read_pointer) == 5); // Unmapped: ignored.
     }
     assert(call(S::gnm_tessellation_offchip) == 0x800000);
+    assert(memory.write(0x11900, "named", 6) && call(S::thread_getname, 1, 0x11900) == 0 && value32(0x11900) == 0);
+    assert(call(S::thread_getname, 1, 0) == kernel_error(fault));
+    assert(resolve_libkernel("How7B8Oet6k", "libkernel", "libkernel", 1) == S::thread_getname);
     kernel.reset();
     assert(call(S::system_param_int, 1, 0x11900) == 0 && value32(0x11900) == 1);
     std::puts("PS4 writable files, positioned I/O and directory checks passed");
