@@ -293,6 +293,42 @@ int main() {
             readPixels(device, queue, constantRenderer.target(pm4_blend_test::target), pixels);
             assert(compare("changed blend constants, cached pipeline and batched encoder", pixels, expected));
         }
+        // A real translated pixel shader samples BC1 through copied resource
+        // ranges. Native-texture mode must fall back to the same buffer decoder.
+        {
+            Arena compressed;
+            compressed.bytes = arena.bytes;
+            for (unsigned block = 0; block < width * height / 16; ++block) {
+                compressed.put(image + block * 8, block % 2 ? 0xf80007e0 : 0x07e0f800);
+                compressed.put(image + block * 8 + 4, 0x934e39e4);
+            }
+            Stream bc1;
+            bc1.words = s.words; bc1.words.resize(bc1.words.size() - 6);
+            bc1.set(0x76, 0x0c, {std::uint32_t(image >> 8),35u << 20,(width-1)|((height-1)<<14),
+                0x90800fac,(width-1)<<13,0,0,0,0x12,0,0x500000,0});
+            bc1.words.insert(bc1.words.end(), {0xc0042700,3,std::uint32_t(indexBuffer),0,3,0});
+            PM4SoftwareRenderer reference(compressed.memory);
+            reference.execute(bc1.words.data(), bc1.words.size());
+            assert(reference.stats.rendered == 3 && reference.stats.failed == 0);
+            for (const bool native : {false,true}) {
+                PM4DrawStats stats;
+                PM4DrawCollector collector(compressed.memory,stats);
+                PM4MetalRenderer renderer(device,compressed.memory,nil,0,native);
+                id<MTLCommandBuffer> command = [queue commandBuffer];
+                collector.execute(bc1.words.data(),bc1.words.size(),[&](const PM4Draw& draw) {
+                    if (renderer.encode(draw,command)) ++stats.rendered;
+                    else stats.fail(renderer.error);
+                });
+                [command commit]; [command waitUntilCompleted];
+                assert(command.status == MTLCommandBufferStatusCompleted && !command.error);
+                assert(stats.rendered == 3 && stats.failed == 0 && renderer.lastRanges == 2);
+                assert(renderer.nativeDraws == 0);
+                std::uint8_t pixels[width * height * 4] = {};
+                readPixels(device,queue,renderer.target(targetB),pixels);
+                assert(compare(native ? "BC1 native-texture fallback" : "BC1 translated pixel shader",
+                               pixels,compressed.bytes.data() + (targetB - Arena::start)));
+            }
+        }
         // Prototype native texel reads: same pixels, with scene B's T# read
         // through a texture viewing the draw's buffer whenever Metal accepts
         // its alignment. Per-draw copies, then the whole guest window.

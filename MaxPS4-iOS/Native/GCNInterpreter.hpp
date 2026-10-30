@@ -50,6 +50,9 @@ using GCNCodeCache = std::unordered_map<std::uint64_t, GCNInstruction>;
 using GCNImageCache = std::unordered_map<std::uint64_t, std::vector<std::uint8_t>>;
 
 namespace gcn_detail {
+#define GCN_BC1_SOURCE(...) __VA_ARGS__
+#include "GCNBC1Shared.inc"
+#undef GCN_BC1_SOURCE
 inline float f32(std::uint32_t v) { float f; std::memcpy(&f, &v, 4); return f; }
 inline std::uint32_t u32(float f) { std::uint32_t v; std::memcpy(&v, &f, 4); return v; }
 inline std::uint16_t f16Rtz(float f) {
@@ -740,18 +743,24 @@ private:
         switch (dfmt) {
         case 1: bytes = 1; return true; case 2: case 3: case 16: case 17: case 18: case 19: bytes = 2; return true;
         case 4: case 5: case 10: bytes = 4; return true; case 11: case 12: bytes = 8; return true;
-        case 14: bytes = 16; return true; default: return false;
+        case 14: bytes = 16; return true; case 35: bytes = 8; return true; default: return false;
         }
+    }
+    static std::uint64_t imageSize(const Image& t, unsigned bytes) {
+        return t.dfmt == 35 ? std::uint64_t((t.pitch + 3) / 4) * ((t.height + 3) / 4) * 8 :
+                              std::uint64_t(t.pitch) * t.height * bytes;
     }
     bool texel(const Image& t, int x, int y, float out[4]) {
         unsigned bytes = 0;
         imageBytes(t.dfmt, bytes);
         std::uint8_t data[16] = {};
-        const std::uint64_t offset = (std::uint64_t(std::uint32_t(y)) * t.pitch + std::uint32_t(x)) * bytes;
+        const std::uint64_t offset = t.dfmt == 35 ?
+            (std::uint64_t(std::uint32_t(y) / 4) * ((t.pitch + 3) / 4) + std::uint32_t(x) / 4) * 8 :
+            (std::uint64_t(std::uint32_t(y)) * t.pitch + std::uint32_t(x)) * bytes;
         const std::vector<std::uint8_t>* surface = nullptr;
         if (images) {
             // Whole level 0 read once per cache lifetime (one draw).
-            const std::size_t size = std::size_t(t.pitch) * t.height * bytes;
+            const std::size_t size = std::size_t(imageSize(t, bytes));
             auto found = images->find(t.base);
             if (found == images->end() || found->second.size() != size) {
                 std::vector<std::uint8_t> copy(size);
@@ -767,6 +776,13 @@ private:
         auto unorm = [](std::uint32_t value, unsigned bits) { return float(value) / float((1u << bits) - 1); };
         float c[4] = {0, 0, 0, 1};
         switch (t.dfmt) {
+        case 35: {
+            std::uint32_t selectors = 0;
+            std::memcpy(&selectors, data + 4, 4);
+            const unsigned pixel = (unsigned(y) & 3) * 4 + (unsigned(x) & 3);
+            for (unsigned n = 0; n < 4; ++n) c[n] = gcn_detail::gcn_bc1_component(raw, selectors, pixel, n);
+            break;
+        }
         case 1: c[0] = unorm(raw & 0xff, 8); break;
         case 2: c[0] = t.nfmt == 7 ? gcn_detail::f16(raw & 0xffff) : unorm(raw & 0xffff, 16); break;
         case 3: c[0] = unorm(raw & 0xff, 8); c[1] = unorm((raw >> 8) & 0xff, 8); break;
@@ -834,7 +850,8 @@ private:
         if (t.tiling != 8) return fail("tiled image (tile mode " + std::to_string(t.tiling) + ")");
         unsigned bytes;
         if (!imageBytes(t.dfmt, bytes)) return fail("image data format " + std::to_string(t.dfmt));
-        if (resource) resource(t.base, std::uint64_t(t.pitch) * t.height * bytes);
+        if (t.dfmt == 35 && (t.nfmt != 0 || t.pitch < t.width)) return fail("BC1 requires UNORM and pitch >= width");
+        if (resource) resource(t.base, imageSize(t, bytes));
         if (imageResource) {
             std::array<std::uint32_t, 8> descriptor{};
             std::copy_n(d, 8, descriptor.begin()); imageResource(descriptor);

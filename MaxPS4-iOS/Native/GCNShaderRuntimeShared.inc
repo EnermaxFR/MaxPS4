@@ -2,6 +2,9 @@
 // GCN programs. Write only the common subset of C++ and MSL here: scalar
 // types, functional casts, local arrays, no pointers, no std::, no
 // preprocessor lines inside the macro. Semantics mirror GCNInterpreter.hpp.
+#define GCN_BC1_SOURCE(...) GCN_SHARED_SOURCE(__VA_ARGS__)
+#include "GCNBC1Shared.inc"
+#undef GCN_BC1_SOURCE
 GCN_SHARED_SOURCE(
 GCN_FN uint gcn_f16rtz(float f) {
     uint x = gu(f); uint sign = (x >> 16) & 0x8000u; uint biased = (x >> 23) & 0xffu; uint mant = x & 0x7fffffu;
@@ -125,6 +128,17 @@ GCN_FN float4 gcn_texel_at(GCNMemory M, GCNRes8 t, int x, int y, bool resolved, 
     if (gcn_native_texel(M, t, x, y, native)) return gcn_texture_swizzle(t, native);
     ulong base = (ulong(t.d[0]) | (ulong(t.d[1] & 0xffu) << 32)) << 8;
     uint dfmt = (t.d[1] >> 20) & 0x3fu; uint pitch = ((t.d[4] >> 13) & 0x3fffu) + 1u;
+    if (dfmt == 35u) {
+        if (((t.d[1] >> 26) & 15u) != 0u || pitch < (t.d[2] & 0x3fffu) + 1u)
+            return float4(0.0f, 0.0f, 0.0f, 0.0f);
+        ulong relative = (ulong(uint(y) / 4u) * ((pitch + 3u) / 4u) + uint(x) / 4u) * 8ul;
+        uint endpoints = resolved ? gcn_packed32(M, offset + relative) : gcn_ld32(M, base + relative);
+        uint selectors = resolved ? gcn_packed32(M, offset + relative + 4ul) : gcn_ld32(M, base + relative + 4ul);
+        uint pixel = (uint(y) & 3u) * 4u + (uint(x) & 3u);
+        float4 colour;
+        for (uint c = 0u; c < 4u; ++c) colour[c] = gcn_bc1_component(endpoints, selectors, pixel, c);
+        return gcn_texture_swizzle(t, colour);
+    }
     uint bytes = 4u;
     if (dfmt == 1u) bytes = 1u; else if (dfmt == 2u || dfmt == 3u || (dfmt >= 16u && dfmt <= 19u)) bytes = 2u;
     else if (dfmt == 14u) bytes = 16u;
@@ -206,11 +220,14 @@ GCN_FN float4 gcn_sample(GCNMemory M, GCNRes8 t, GCNRes4 s, bool unorm, float u,
     uint width = (t.d[2] & 0x3fffu) + 1u, height = ((t.d[2] >> 14) & 0x3fffu) + 1u;
     uint pitch = ((t.d[4] >> 13) & 0x3fffu) + 1u, dfmt = (t.d[1] >> 20) & 0x3fu;
     uint bytes = dfmt == 1u ? 1u : (dfmt == 2u || dfmt == 3u || (dfmt >= 16u && dfmt <= 19u)) ? 2u : dfmt == 14u ? 16u : 4u;
+    ulong footprint = dfmt == 35u ?
+        (ulong((height + 3u) / 4u - 1u) * ((pitch + 3u) / 4u) + (width + 3u) / 4u) * 8ul :
+        ((ulong(height) - 1ul) * pitch + width) * bytes;
     ulong offset = 0ul;
     // Address modes in gcn_fetch_at constrain every texel to [0,width)x[0,height).
     // Resolve that complete footprint once, not once per tap/channel. Sparse or
     // truncated resources retain the original checked-load path and zero reads.
-    if (gcn_locate(M, base, ((ulong(height) - 1ul) * pitch + width) * bytes, offset))
+    if (gcn_locate(M, base, footprint, offset))
         return gcn_sample_at(M, t, s, unorm, u, v, true, offset);
     return gcn_sample_at(M, t, s, unorm, u, v, false, 0ul);
 }

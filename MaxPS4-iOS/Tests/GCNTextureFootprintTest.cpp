@@ -7,10 +7,11 @@ int main() {
     unsigned cases = 0;
     constexpr rt::ulong base = 0x100000;
     const float coordinates[] = {-1.25f, -0.01f, 0.0f, 0.37f, 0.5f, 0.75f, 0.99f, 1.25f};
-    for (const unsigned format : {1u,2u,3u,4u,10u,14u,16u,17u,18u,19u}) {
-        const unsigned bytes = format == 1 ? 1 : (format == 2 || format == 3 || format >= 16) ? 2 : format == 14 ? 16 : 4;
+    for (const unsigned format : {1u,2u,3u,4u,10u,14u,16u,17u,18u,19u,35u}) {
+        const unsigned bytes = format == 35 ? 8 : format == 1 ? 1 : (format == 2 || format == 3 || format >= 16) ? 2 : format == 14 ? 16 : 4;
         constexpr unsigned width = 3, height = 2, pitch = 5;
-        const unsigned span = ((height - 1) * pitch + width) * bytes;
+        const unsigned span = format == 35 ? (((height+3)/4-1)*((pitch+3)/4)+(width+3)/4)*8 :
+                                             ((height - 1) * pitch + width) * bytes;
         for (unsigned layout = 0; layout < 5; ++layout) {
             // The last layout omits the last byte physically as well as logically,
             // so ASan catches an unchecked access on the fallback path.
