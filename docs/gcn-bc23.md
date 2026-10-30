@@ -35,7 +35,7 @@ Cygwin GCC 14.4, C++17, warnings treated as errors; no local sanitizers:
 
 Logs: build/toolchain/test-results/*-bc23.log.
 
-## Prepared, not yet executed
+## macOS/Metal and Linux CI validation
 
 GCNTextureFootprintMetalTest adds both formats to actual GPU sampling at 16x8
 and 256x128, checked/resolved output comparisons and CPU/GPU sampled colours.
@@ -43,8 +43,23 @@ PM4MetalRendererTest adds translated pixel-shader scenes for both formats,
 including experimental native-texture fallback versus software-rendered pixels.
 The local PM4 workflow also includes the standalone GCNBC23Test under ASan/UBSan.
 
-These changes have not been published or run on macOS/Metal or an iPhone.
-The earlier BC1 CI pass does not validate this new implementation. No IPA built.
+Published source commit `ea1da3d83eeaaaffadb6290b87611c08d2002110` passed
+[run 40992734442](https://github.com/MaxFRdev/MaxPS4/actions/runs/40992734442):
+
+- Linux ASan/UBSan tests passed, including 1,064,960 footprint comparisons.
+- Actual Metal BC2/BC3 sampling passed at both sizes, including CPU/GPU alpha.
+- BC2/BC3 translated pixel-shader and native-texture fallback scenes each had
+  zero channel difference versus software output. No Metal tests skipped.
+- iPhone ARM64 SDK compilation and Swift checks passed.
+
+The standalone GCNBC23Test remains locally validated: the published workflow
+has not been changed to execute that new standalone test. The existing workflow
+executes the expanded footprint, translation and Metal tests.
+Logs: build/toolchain/macos-bc23-ea1da3d.log and
+build/toolchain/linux-bc23-ea1da3d.log.
+
+No physical iPhone execution or IPA packaging was performed. Spyro playability
+remains unverified. This validation record was updated locally after the run.
 
 Publication payload: GCNBC1Shared.inc, GCNInterpreter.hpp,
 GCNShaderRuntimeShared.inc, GCNBC23Test.cpp, GCNTextureFootprintTest.cpp,

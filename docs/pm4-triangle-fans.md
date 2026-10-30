@@ -46,8 +46,11 @@ locally with Cygwin GCC, C++17 and warnings treated as errors, without sanitizer
 The PM4 workflow includes the new primitive test under ASan/UBSan.
 
 The macOS Metal regression adds the same seven scenes and compares GPU pixels
-against fixed expected bytes and the software result. Local Windows validation
-cannot execute Metal; these GPU checks remain for CI.
+against fixed expected bytes and the software result. All seven GPU scenes
+passed with zero channel difference in
+[run 40988354863](https://github.com/MaxFRdev/MaxPS4/actions/runs/40988354863),
+testing source commit `58b569b`. See the
+[validation report](macos-compatibility-validation.md).
 
 This implements the existing renderer's smooth, single-instance triangle
 subset. Complete provoking-vertex/flat-shading semantics,

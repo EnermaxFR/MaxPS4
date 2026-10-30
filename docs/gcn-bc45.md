@@ -37,7 +37,7 @@ Cygwin GCC 14.4, C++17, warnings treated as errors, without sanitizers:
 
 Logs are in build/toolchain/test-results/*-bc45.log.
 
-## Prepared GPU checks
+## GPU checks and CI results
 
 GCNTextureFootprintMetalTest adds BC4/BC5 sampling at 16x8 and 256x128, independent
 channel patterns, checked/resolved output comparisons and CPU/GPU comparisons.
@@ -46,8 +46,24 @@ native-texture mode disabled/enabled and comparison to software output.
 The local workflow adds GCNBC45Test under ASan/UBSan; workflow edits are not
 part of the publication payload.
 
-This new lot has not been published or tested on macOS/Metal or an iPhone.
-The successful BC2/BC3 CI run does not validate BC4/BC5. No IPA built.
+Published source commit `c43a57af56b6876ab0f8fbf8d1b885e088a7e21e` passed
+[run 40995163063](https://github.com/MaxFRdev/MaxPS4/actions/runs/40995163063):
+
+- Linux ASan/UBSan regressions passed, including 1,228,800 footprint comparisons
+  and translated C++/interpreter equivalence.
+- Actual Metal BC4/BC5 sampling passed at both sizes, with checked/resolved
+  output equality and CPU/GPU channel comparisons.
+- Both translated pixel-shader scenes and both native-texture fallback scenes
+  had zero channel difference versus software output. No Metal tests skipped.
+- iPhone ARM64 SDK compilation and Swift checks passed.
+
+The standalone GCNBC45Test remains locally validated; the published workflow
+executes the expanded existing footprint and Metal tests, rather than this new
+standalone test. Logs: build/toolchain/macos-bc45-c43a57a.log and
+build/toolchain/linux-bc45-c43a57a.log.
+
+No physical iPhone execution or IPA packaging was performed. Spyro remains
+unverified. This validation record was updated locally after the run.
 
 Publication payload (seven files): Native/GCNInterpreter.hpp,
 Native/GCNShaderRuntimeShared.inc, Tests/GCNBC45Test.cpp,

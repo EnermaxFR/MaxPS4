@@ -32,8 +32,12 @@ Of the 24 tests listed by `scripts/test-ps4-system-services.sh`:
 Both C ABI probes compiled with C11 and warnings treated as errors.
 Local logs and exit statuses are in `build/toolchain/test-results`; the full
 result inventory is `summary.json`. Local tests ran without ASan/UBSan.
-Linux/macOS sanitizer tests, FEX execution and the iPhone SDK build remain to be
-validated by CI; no device or game execution is claimed.
+Linux/macOS sanitizer tests, FEX execution and the iPhone SDK build subsequently
+passed in [run 40988358263](https://github.com/MaxFRdev/MaxPS4/actions/runs/40988358263)
+on source commit `58b569b`. All 24 service tests passed on macOS, including the
+general-image integration case that could not run locally under Cygwin.
+See the [macOS validation report](macos-compatibility-validation.md).
+No physical iPhone or game execution is claimed.
 
 ## Bounded test runner
 

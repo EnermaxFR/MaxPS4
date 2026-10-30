@@ -48,6 +48,9 @@ Cygwin GCC, C++17 and warnings treated as errors, without sanitizers.
 The PM4 workflow includes the new test under ASan/UBSan on Linux.
 `PM4MetalRendererTest` uses the same 24 scenes to compare actual GPU pixels
 against fixed expectations and the software result, with its existing
-two-byte tolerance. These Metal checks and iPhone SDK compilation still need
-to run in the existing macOS CI job; they were not executed on this Windows
-host. No Spyro execution or playability is claimed.
+two-byte tolerance. These Metal checks and iPhone SDK compilation passed in
+[run 40988354863](https://github.com/MaxFRdev/MaxPS4/actions/runs/40988354863),
+testing source commit `58b569b`. All 24 scenarios and the dynamic-constant
+regression executed on Metal. See the
+[validation report](macos-compatibility-validation.md).
+No Spyro execution or playability is claimed.

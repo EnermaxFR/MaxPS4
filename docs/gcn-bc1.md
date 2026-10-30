@@ -32,6 +32,22 @@ than width. The translated helper returns zero for these descriptors.
   verifies native-texture fallback against the software image.
 
 Local CPU tests passed with Cygwin GCC, C++17 and warnings treated as errors,
-without sanitizers. Metal execution and sanitizer results for this BC1 extension
-will be recorded after its validation run. This does not establish Spyro
-playability or support for its actual texture layouts.
+without sanitizers. [Run 40991103330](https://github.com/MaxFRdev/MaxPS4/actions/runs/40991103330)
+then passed on source commit `7473e31e222e4016c7162e2a1628133b1f41eb4c`:
+
+- Linux ASan/UBSan regressions, including 901,120 texture-footprint comparisons
+  and translated-C++/interpreter equivalence.
+- Actual Metal BC1 sampling at 16x8 and 256x128, with checked/resolved and
+  CPU/GPU colour/transparency comparisons.
+- The translated BC1 textured scene and native-texture fallback, both with
+  zero channel difference from the software image.
+- iPhone ARM64 SDK compilation and Swift checks.
+
+The initial run exposed a shader-cost probe's dependency on the uncompressed
+sampling expression. The final source retains that path and gives BC1 its own
+footprint branch; the benchmark passed in the final run. Logs are retained in
+`build/toolchain/macos-bc1-7473e31.log` and
+`build/toolchain/linux-bc1-7473e31.log`.
+
+This does not establish Spyro playability or support for its actual texture
+layouts. No physical iPhone execution or IPA packaging was performed.

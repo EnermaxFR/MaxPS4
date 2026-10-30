@@ -33,8 +33,10 @@ Local Cygwin/GCC runs passed `PM4DrawCollectorTest`, `PM4SoftwareRendererTest`
 and `PM4ResourceScanTest` with C++17 and warnings treated as errors, without
 sanitizers. The PM4 CI workflow includes the new
 collector test under ASan/UBSan; the existing macOS Metal job exercises the new
-pixel comparisons. Metal execution and iPhone compilation are not available in
-the local Windows environment.
+pixel comparisons. Metal execution and iPhone compilation passed on macOS in
+[run 40988354863](https://github.com/MaxFRdev/MaxPS4/actions/runs/40988354863),
+testing source commit `58b569b`. Both offset-index scenes had zero channel
+difference. See the [validation report](macos-compatibility-validation.md).
 
 This extends a GPU command path; it does not establish Spyro Reignited Trilogy
 compatibility. Depth/stencil, further shader and texture capabilities and the

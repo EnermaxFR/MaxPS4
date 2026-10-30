@@ -35,7 +35,7 @@ Cygwin GCC 14.4, C++17, warnings treated as errors, without sanitizers:
 
 Logs: build/toolchain/test-results/*-snorm.log.
 
-## Prepared, not yet run
+## macOS/Metal and Linux CI results
 
 GCNTextureFootprintMetalTest adds signed BC4/BC5 at 16x8 and 256x128 with
 independent R/G data, checked/resolved equality and CPU/GPU channel comparison.
@@ -43,8 +43,24 @@ PM4MetalRendererTest adds signed translated pixel-shader scenes, with native
 textures disabled/enabled and software image comparison. Negative decoded
 values are tested directly by the sampling test, before UNORM target clamping.
 
-This lot has not been published or run on macOS/Metal or a physical iPhone.
-Earlier UNORM CI results do not validate SNORM. No IPA built; Spyro unverified.
+Published commit `1eb8d1337ead6b19f613d91462f8927f59fb5477` passed
+[run 40997530350](https://github.com/MaxFRdev/MaxPS4/actions/runs/40997530350):
+
+- Linux ASan/UBSan regressions passed, including 1,843,200 checked/resolved
+  comparisons and generated C++/interpreter equivalence.
+- Actual Metal BC4/BC5 SNORM sampling passed at both sizes with CPU/GPU channel
+  comparisons. The negative values are compared before render-target clamping.
+- Both SNORM translated pixel-shader scenes and native-texture fallback scenes
+  had zero channel difference from software output. No Metal tests skipped.
+- iPhone ARM64 SDK compilation and Swift checks passed.
+
+The standalone GCNBC45Test remains locally validated; the published workflow
+executes the expanded footprint and Metal tests, rather than that standalone
+suite. Logs: build/toolchain/macos-snorm-1eb8d13.log and
+build/toolchain/linux-snorm-1eb8d13.log.
+
+No physical iPhone execution or IPA packaging was performed. Spyro remains
+unverified. This record was updated locally after the run.
 
 Publication payload (eight files): Native/GCNBC1Shared.inc,
 Native/GCNInterpreter.hpp, Native/GCNShaderRuntimeShared.inc,
