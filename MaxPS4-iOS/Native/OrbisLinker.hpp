@@ -611,6 +611,12 @@ private:
             }
             require(hleExports.emplace(key, Export{address, SIZE_MAX}).second, "ambiguous HLE/export");
         }
+        // The system's libSceLibcInternal exports libc's functions under their
+        // libc NIDs (malloc, free, __cxa_atexit...); a game ships libc.prx, so
+        // its "libc" exports serve the PRX modules that import them there.
+        std::map<std::string, std::map<Identity, Export>::const_iterator> libc;
+        for (auto it = exports.cbegin(); it != exports.cend(); ++it)
+            if (it->first.library == "libc") libc.emplace(it->first.nid, it);
         // Resolve every import (including unreferenced/weak imports) before writes.
         std::vector<std::vector<uint64_t>> resolved(dynamic.size());
         std::vector<std::vector<size_t>> owners(dynamic.size()); // Defining module, for TLS module IDs.
@@ -621,6 +627,17 @@ private:
                 else if (j && !s.local) { // Local (section) symbols are never imported.
                     ++report.imports;
                     auto it = exports.find(s.identity);
+                    // An alias link stands for the system module: libc.prx may
+                    // itself depend on the importer (Fios2), so no declared
+                    // dependency or load order is required for it.
+                    bool aliased = false;
+                    if (it == exports.end() && s.identity.library == "libSceLibcInternal") {
+                        const auto alias = libc.find(s.identity.nid);
+                        if (alias != libc.end() && alias->second->first.type == s.identity.type) {
+                            it = exports.find(alias->second->first);
+                            aliased = true;
+                        }
+                    }
                     if (it == exports.end()) {
                         auto key = s.identity;
                         key.moduleVersion = 0;
@@ -630,7 +647,7 @@ private:
                     require(it != exports.end(), out.modules[i].path + ": unresolved NID " + s.identity.nid +
                             " library=" + s.identity.library + " module=" + s.identity.module);
                     const auto owner = it->second.owner;
-                    if (owner != SIZE_MAX && owner != i) {
+                    if (owner != SIZE_MAX && owner != i && !aliased) {
                         const auto& deps = requests[order[i]].dependencies;
                         require(std::find(deps.begin(), deps.end(), out.modules[owner].path) != deps.end(), "import provider missing explicit dependency");
                         require(owner < i, "import provider not loaded first");

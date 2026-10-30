@@ -1475,13 +1475,18 @@ int orbisInputs(const maxps4_orbis_module* modules, size_t count, bool general,
         }
         for (const auto& l : metadata[i].libraries) if (l.exported) exported_libraries.insert(l.name);
     }
+    // libSceLibcInternal imports that libc.prx exports are linked to it (OrbisLinker).
+    std::set<std::string> libc_nids;
+    for (const auto& m : metadata)
+        for (const auto& s : m.symbols) if (s.defined && s.library == "libc") libc_nids.insert(s.nid);
     std::set<std::pair<std::string,std::string>> provided;
     for (const auto& h : hle) provided.insert({h.identity.nid,h.identity.library});
     std::set<maxps4::OrbisLinker::Identity> stubs;
     for (const auto& m : metadata)
         for (const auto& s : m.symbols)
             if (!s.defined && !s.nid.empty() && (s.kind == 1 || s.kind == 2) &&
-                !exported_libraries.count(s.library) && !provided.count({s.nid,s.library}))
+                !exported_libraries.count(s.library) && !provided.count({s.nid,s.library}) &&
+                !(s.library == "libSceLibcInternal" && libc_nids.count(s.nid)))
                 stubs.insert({s.nid,s.library,s.module,s.libraryVersion,s.moduleVersion,s.kind});
     for (const auto& id : stubs) {
         if (id.type == 1) { hle.push_back({id,0,64}); continue; }
@@ -1810,6 +1815,28 @@ extern "C" int32_t maxps4_fex_engine_load_game(maxps4_fex_engine* engine, const 
             for (const auto& needed : m.metadata.needed)
                 for (const auto& other : modules)
                     if (&other != &m && other.name == needed) m.dependencies.push_back(needed);
+            // libSceLibcInternal imports link to libc.prx (OrbisLinker), which
+            // must be loaded and initialized first, as the system module is.
+            const bool internal = std::any_of(m.metadata.libraries.begin(), m.metadata.libraries.end(),
+                [](const auto& l) { return !l.exported && l.name == "libSceLibcInternal"; });
+            if (internal && m.name != "libc.prx" &&
+                std::find(m.dependencies.begin(), m.dependencies.end(), "libc.prx") == m.dependencies.end())
+                for (const auto& other : modules)
+                    if (other.name == "libc.prx") {
+                        // Unless libc.prx needs this module, directly or not (Fios2).
+                        std::set<std::string> seen;
+                        std::vector<std::string> pending(other.metadata.needed.begin(), other.metadata.needed.end());
+                        bool cycle = false;
+                        while (!pending.empty() && !cycle) {
+                            const std::string name = pending.back(); pending.pop_back();
+                            if (!seen.insert(name).second) continue;
+                            cycle = name == m.name;
+                            for (const auto& next : modules)
+                                if (next.name == name) pending.insert(pending.end(), next.metadata.needed.begin(), next.metadata.needed.end());
+                        }
+                        if (!cycle) m.dependencies.push_back(other.name);
+                        break;
+                    }
             for (const auto& d : m.dependencies) m.pointers.push_back(d.c_str());
             table.push_back({m.name.c_str(), m.bytes.data(), m.bytes.size(), bias, m.pointers.data(), m.pointers.size()});
             uint64_t end = 0;
