@@ -1460,11 +1460,12 @@ int orbisInputs(const maxps4_orbis_module* modules, size_t count, bool general,
         if (!general && (maxps4::general_only(e.service) || e.data || e.code)) continue;
         maxps4::OrbisLinker::Identity id{e.nid,e.library,e.module ? e.module : e.library,1,1,uint8_t(e.data ? 1 : 2)};
         if (e.data) { hle.push_back({id,0,e.data}); continue; }
-        // libScePosix exports libkernel's functions under the same NIDs
-        // (Unreal Engine games import pthread_mutex_init and others there).
+        // libScePosix, a library of the libkernel module, exports libkernel's
+        // functions under the same NIDs (Unreal Engine games import
+        // pthread_mutex_init and others there).
         auto posix_alias = [&](maxps4::OrbisLinker::HLE h) {
             if (std::strcmp(e.library, "libkernel")) return;
-            h.identity.library = h.identity.module = "libScePosix";
+            h.identity.library = "libScePosix";
             hle.push_back(std::move(h));
         };
         if (e.code) {
@@ -1493,13 +1494,15 @@ int orbisInputs(const maxps4_orbis_module* modules, size_t count, bool general,
     std::set<std::string> libc_nids;
     for (const auto& m : metadata)
         for (const auto& s : m.symbols) if (s.defined && s.library == "libc") libc_nids.insert(s.nid);
-    std::set<std::pair<std::string,std::string>> provided;
-    for (const auto& h : hle) provided.insert({h.identity.nid,h.identity.library});
+    // The linker matches library and module: an import the HLE lists under
+    // another module still needs its stub.
+    std::set<std::tuple<std::string,std::string,std::string>> provided;
+    for (const auto& h : hle) provided.insert({h.identity.nid,h.identity.library,h.identity.module});
     std::set<maxps4::OrbisLinker::Identity> stubs;
     for (const auto& m : metadata)
         for (const auto& s : m.symbols)
             if (!s.defined && !s.nid.empty() && (s.kind == 1 || s.kind == 2) &&
-                !exported_libraries.count(s.library) && !provided.count({s.nid,s.library}) &&
+                !exported_libraries.count(s.library) && !provided.count({s.nid,s.library,s.module}) &&
                 !(s.library == "libSceLibcInternal" && libc_nids.count(s.nid)))
                 stubs.insert({s.nid,s.library,s.module,s.libraryVersion,s.moduleVersion,s.kind});
     for (const auto& id : stubs) {

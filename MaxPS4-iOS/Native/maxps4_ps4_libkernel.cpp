@@ -519,7 +519,7 @@ constexpr Binding bindings[] = {
     {"sceNpTrophyShowTrophyList", "d9jpdPz5f-8", PS4KernelService::succeed, "libSceNpTrophy"},
     {"sceNpTrophyCaptureScreenshot", "cqGkYAN-gRw", PS4KernelService::succeed, "libSceNpTrophy"},
     {"sceRtcGetTime_t", "BtqmpTRXHgk", PS4KernelService::rtc_time_t, "libSceRtc"},
-    {"sceCoredumpRegisterCoredumpHandler", "8zLSfEfW5AU", PS4KernelService::succeed, "libSceCoredump"},
+    {"sceCoredumpRegisterCoredumpHandler", "8zLSfEfW5AU", PS4KernelService::succeed, "libSceCoredump", false, false, 0, nullptr, 0, "libkernel"},
     // Message and error dialogs have no screen: they finish at once, answered
     // OK/Yes, so a game waiting for FINISHED goes on.
     {"sceMsgDialogInitialize", "lDqxaY1UbEo", PS4KernelService::msg_init, "libSceMsgDialog"},
