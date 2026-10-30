@@ -410,6 +410,21 @@ int main() {
     // The game's stdout/stderr text is kept for the session report.
     assert(memory.write(0x11900, "Fatal error!", 12) && call(S::write, 1, 0x11900, 12) == 12 && call(S::write, 2, 0x11900, 5) == 5);
     assert(kernel.console() == "Fatal error!Fatal");
+    // Trophy queries: zero trophies past each structure's size field.
+    {
+        uint8_t details[0x40]; std::memset(details, 0xff, sizeof(details)); put_le(details, 0, 0x20, 8);
+        assert(memory.write(0x11a00, details, sizeof(details)) && memory.write(0x11a80, details, sizeof(details)));
+        assert(call(S::trophy_game_info, 1, 1, 0x11a00, 0x11a80) == 0);
+        assert(value32(0x11a00) == 0x20 && value32(0x11a08) == 0 && value32(0x11a1c) == 0 && value32(0x11a20) == 0xffffffffU);
+        assert(value32(0x11a88) == 0 && value32(0x11aa0) == 0xffffffffU);
+        assert(memory.write(0x11a00, details, sizeof(details)) && call(S::trophy_unlock_state, 1, 1, 0x11a00, 0x11a10) == 0);
+        assert(value32(0x11a00) == 0 && value32(0x11a0c) == 0 && value32(0x11a10) == 0);
+    }
+    // sceRtcGetTime_t: 2000-01-01 00:00:01 UTC.
+    {
+        uint8_t date[16]{}; put_le(date, 0, 2000, 2); put_le(date, 2, 1, 2); put_le(date, 4, 1, 2); put_le(date, 10, 1, 2);
+        assert(memory.write(0x11a00, date, sizeof(date)) && call(S::rtc_time_t, 0x11a00, 0x11a40) == 0 && value32(0x11a40) == 946684801U);
+    }
     assert(resolve_libkernel("How7B8Oet6k", "libkernel", "libkernel", 1) == S::thread_getname);
     kernel.reset();
     assert(call(S::system_param_int, 1, 0x11900) == 0 && value32(0x11900) == 1);

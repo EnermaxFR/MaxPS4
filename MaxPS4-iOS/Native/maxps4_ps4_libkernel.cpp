@@ -508,6 +508,18 @@ constexpr Binding bindings[] = {
     {"sceNpTrophyCreateHandle", "q7U6tEAQf7c", PS4KernelService::trophy_create_handle, "libSceNpTrophy"},
     {"sceNpTrophyRegisterContext", "TJCAxto9SEU", PS4KernelService::succeed, "libSceNpTrophy"},
     {"sceNpTrophyUnlockTrophy", "28xmRUFao68", PS4KernelService::trophy_unlock, "libSceNpTrophy"},
+    // No trophy data: every query answers zero trophies, nothing unlocked.
+    {"sceNpTrophyGetGameInfo", "YYP3f2W09og", PS4KernelService::trophy_game_info, "libSceNpTrophy"},
+    {"sceNpTrophyGetGroupInfo", "wTUwGfspKic", PS4KernelService::trophy_group_info, "libSceNpTrophy"},
+    {"sceNpTrophyGetTrophyInfo", "qqUVGDgQBm0", PS4KernelService::trophy_group_info, "libSceNpTrophy"},
+    {"sceNpTrophyGetTrophyUnlockState", "LHuSmO3SLd8", PS4KernelService::trophy_unlock_state, "libSceNpTrophy"},
+    {"sceNpTrophyDestroyContext", "E1Wrwd07Lr8", PS4KernelService::succeed, "libSceNpTrophy"},
+    {"sceNpTrophyDestroyHandle", "GNcF4oidY0Y", PS4KernelService::succeed, "libSceNpTrophy"},
+    {"sceNpTrophyAbortHandle", "aTnHs7W-9Uk", PS4KernelService::succeed, "libSceNpTrophy"},
+    {"sceNpTrophyShowTrophyList", "d9jpdPz5f-8", PS4KernelService::succeed, "libSceNpTrophy"},
+    {"sceNpTrophyCaptureScreenshot", "cqGkYAN-gRw", PS4KernelService::succeed, "libSceNpTrophy"},
+    {"sceRtcGetTime_t", "BtqmpTRXHgk", PS4KernelService::rtc_time_t, "libSceRtc"},
+    {"sceCoredumpRegisterCoredumpHandler", "8zLSfEfW5AU", PS4KernelService::succeed, "libSceCoredump"},
     // Message and error dialogs have no screen: they finish at once, answered
     // OK/Yes, so a game waiting for FINISHED goes on.
     {"sceMsgDialogInitialize", "lDqxaY1UbEo", PS4KernelService::msg_init, "libSceMsgDialog"},
@@ -1355,6 +1367,18 @@ int64_t PS4Libkernel::rtc(PS4KernelService service, const PS4KernelCall& c) {
         const uint64_t tick = uint64_t(int64_t(unix_epoch_tick) + days * 86400000000LL) + ((hour * 60 + minute) * 60 + second) * 1000000 + micro;
         return put_tick(c.rsi, tick) ? 0 : bad_pointer;
     }
+    // GetTime_t(const dateTime*, time_t*): seconds since 1970 (UTC).
+    case S::rtc_time_t: {
+        uint8_t wire[16];
+        if (!c.rdi || !c.rsi || !memory_.read(c.rdi, wire, sizeof(wire))) return bad_pointer;
+        const unsigned year = unsigned(get_le(wire, 2)), month = unsigned(get_le(wire + 2, 2)), day = unsigned(get_le(wire + 4, 2));
+        const int64_t hour = int64_t(get_le(wire + 6, 2)), minute = int64_t(get_le(wire + 8, 2)), second = int64_t(get_le(wire + 10, 2));
+        if (!year || year > 9999 || !month || month > 12 || !day || day > 31 || hour > 23 || minute > 59 || second > 59)
+            return invalid;
+        const int64_t seconds = days_from_civil(year, month, day) * 86400 + (hour * 60 + minute) * 60 + second;
+        uint8_t out[8]; put_le(out, 0, uint64_t(seconds), 8);
+        return memory_.write(c.rsi, out, 8) ? 0 : bad_pointer;
+    }
     // SetTick(dateTime*, const tick*).
     case S::rtc_set_tick: {
         uint64_t tick = 0;
@@ -2021,8 +2045,29 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
         return write(c.rsi, c.rdi == 0 ? 3 : 0, 4) ? 0 : signed32(0x80D90002U);
     case S::app_temp_mount: return temp_mount(c.rsi);
     case S::rtc_current_tick: case S::rtc_current_clock: case S::rtc_current_local:
-    case S::rtc_get_tick: case S::rtc_set_tick: case S::rtc_resolution: case S::rtc_utc_to_local:
+    case S::rtc_get_tick: case S::rtc_set_tick: case S::rtc_resolution: case S::rtc_utc_to_local: case S::rtc_time_t:
         return rtc(service, c);
+    // GetGameInfo(context, handle, details*, data*), GetGroupInfo and
+    // GetTrophyInfo(context, handle, id, details*, data*): each structure
+    // starts with its size (u64); everything after it is zeroed.
+    case S::trophy_game_info: case S::trophy_group_info: {
+        auto zero_sized = [&](uint64_t address) {
+            uint8_t wire[8];
+            if (!address) return true;
+            if (!memory_.read(address, wire, 8)) return false;
+            const uint64_t size = std::min<uint64_t>(get_le(wire, 8), 4096);
+            if (size <= 8) return true;
+            const std::vector<uint8_t> zeros(size_t(size - 8), 0);
+            return memory_.write(address + 8, zeros.data(), zeros.size());
+        };
+        const bool game = service == S::trophy_game_info;
+        return zero_sized(game ? c.rdx : c.rcx) && zero_sized(game ? c.rcx : c.r8) ? 0 : signed32(0x80551604U);
+    }
+    // GetTrophyUnlockState(context, handle, flag array* (128 bits), u32* count).
+    case S::trophy_unlock_state: {
+        const uint8_t none[16] = {};
+        return (!c.rdx || memory_.write(c.rdx, none, sizeof(none))) && (!c.rcx || write(c.rcx, 0, 4)) ? 0 : signed32(0x80551604U);
+    }
     // GetDisplaySafeAreaInfo(info*): float ratio 1.0 (the whole screen).
     case S::safe_area: return c.rdi && write(c.rdi, 0x3f800000, 4) ? 0 : signed32(0x80A10003U);
     case S::trophy_create_context: case S::trophy_create_handle:
