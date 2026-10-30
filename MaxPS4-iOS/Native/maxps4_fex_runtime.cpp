@@ -654,7 +654,9 @@ public:
         bool detached = false;
         uint64_t stack = 0;
         if (const auto error = identities.thread_attributes(call.rsi, detached, stack)) return kernel_error(error);
-        if (stack > maxps4::GuestELF::generalStack) return kernel_error(again);
+        // Every slot has a generalStack stack: a larger request gets it rather
+        // than failing (refusing a thread usually ends the game).
+        (void)stack;
         std::unique_lock guard(lock);
         if (stopping) return kernel_error(again);
         reap(guard);
