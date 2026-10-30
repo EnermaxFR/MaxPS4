@@ -1880,6 +1880,13 @@ extern "C" int64_t maxps4_fex_engine_mount(maxps4_fex_engine* engine, const char
     if (engine->staged_ps4.segments().empty()) return maxps4::ps4::kernel_error(maxps4::ps4::inval);
     return engine->libkernel.mount(guest, directory);
 }
+extern "C" int32_t maxps4_fex_engine_memory_layout(maxps4_fex_engine* engine, uint64_t* app_area,
+    uint64_t* app_area_size, uint64_t* window, uint64_t* window_size) {
+    if (!engine || !app_area || !app_area_size || !window || !window_size) return -EINVAL;
+    maxps4::PS4VirtualMemory::app_area(*app_area, *app_area_size);
+    if (!engine->staged_ps4.heap(*window, *window_size)) *window = *window_size = 0;
+    return 0;
+}
 extern "C" int32_t maxps4_fex_engine_console(maxps4_fex_engine* engine, char* text, size_t capacity) {
     if (!engine || !text || !capacity) return -EINVAL;
     std::string out = engine->libkernel.console();

@@ -5,6 +5,26 @@
 
 namespace maxps4 {
 using namespace ps4;
+namespace {
+// PROT_NONE until a fixed mapping commits pages in it; never released.
+struct AppArea {
+    uint64_t base = 0, size = 0;
+    AppArea() {
+        const auto want = reinterpret_cast<void*>(PS4VirtualMemory::app_area_base);
+        void* got = ::mmap(want, size_t(PS4VirtualMemory::app_area_size), PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (got == want) { base = PS4VirtualMemory::app_area_base; size = PS4VirtualMemory::app_area_size; }
+        else if (got != MAP_FAILED) ::munmap(got, size_t(PS4VirtualMemory::app_area_size));
+    }
+};
+const AppArea app_area_reservation;
+bool in_app_area(uint64_t address, uint64_t size) {
+    const auto& a = app_area_reservation;
+    return a.size && address >= a.base && size <= a.size && address - a.base <= a.size - size;
+}
+}
+void PS4VirtualMemory::app_area(uint64_t& base, uint64_t& size) {
+    base = app_area_reservation.base; size = app_area_reservation.size;
+}
 Error PS4VirtualMemory::permissions(uint32_t protection, uint8_t& out) {
     // PS4 PROT_READ=1, WRITE=2, EXEC=4, unlike ELF p_flags.
     if (protection & ~7U) return notsup;
@@ -43,7 +63,7 @@ bool PS4VirtualMemory::rounded(uint64_t length, uint64_t& out) {
 }
 bool PS4VirtualMemory::hosted(const Region& region) const {
     uint64_t window = 0, bytes = 0;
-    if (region.bytes.empty() && region.outside) return true;
+    if (region.bytes.empty() && (region.outside || in_app_area(region.address, region.size))) return true;
     return region.bytes.empty() && image_.heap(window, bytes) &&
            region.address >= window && region.size <= bytes &&
            region.address - window <= bytes - region.size;
@@ -97,6 +117,18 @@ Error PS4VirtualMemory::place(uint64_t hint, uint64_t length, uint64_t alignment
     // the span goes elsewhere in the window and the caller reads it back
     // (Crash Bandicoot 4's libc maps its heap this way).
     if (fixed && host && (hint < window || size > window_bytes || hint - window > window_bytes - size)) {
+        if (hint % page_size == 0 && hint <= UINT64_MAX - size && in_app_area(hint, size)) {
+            // Inside the reserved application area: ours, so its pages are
+            // committed in place (and go back to PROT_NONE when released).
+            release(hint, size);
+            try {
+                regions_.push_back({hint, size, reinterpret_cast<uint8_t*>(hint), {},
+                                    std::vector<uint8_t>(size_t(size / page_size), permission)});
+            } catch (const std::bad_alloc&) { return nomem; }
+            if (!host_protect(hint, size, permission)) { regions_.pop_back(); return nomem; }
+            used_ += size_t(size); result = hint;
+            return ok;
+        }
         if (hint % page_size == 0 && hint <= UINT64_MAX - size) {
             release(hint, size); // What we mapped there before, as MAP_FIXED replaces it.
             void* granted = ::mmap(reinterpret_cast<void*>(hint), size_t(size), PROT_NONE,

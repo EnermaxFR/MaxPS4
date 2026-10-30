@@ -26,6 +26,12 @@ public:
     // addresses outside it: the host only commits the pages a game touches,
     // and iOS bounds those.
     static constexpr uint64_t host_budget = uint64_t(64) << 30;
+    // The start of the PS4 application map area, where games place fixed
+    // mappings (Unreal Engine's memory pool at 0x1000000000): reserved in the
+    // host when the library loads, before other allocations can take it.
+    // Its host span, or {0, 0} when the host did not grant it.
+    static constexpr uint64_t app_area_base = 0x1000000000ULL, app_area_size = uint64_t(16) << 30;
+    static void app_area(uint64_t& base, uint64_t& size);
     static constexpr size_t region_limit = 4096;
     static constexpr uint64_t base = 0x1000000000ULL;
     explicit PS4VirtualMemory(const GuestELF& image) : image_(image) {}

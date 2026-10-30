@@ -156,6 +156,15 @@ final class MaxPS4GameSource: @unchecked Sendable {
         lastBeat = text
         return text
     }
+    // Whether the PS4 application area and the mmap window were granted, and where.
+    private func memoryLayout(_ engine: OpaquePointer) -> String {
+        var area: UInt64 = 0, areaSize: UInt64 = 0, window: UInt64 = 0, windowSize: UInt64 = 0
+        _ = maxps4_fex_engine_memory_layout(engine, &area, &areaSize, &window, &windowSize)
+        let gib = { (bytes: UInt64) in bytes >> 30 }
+        let zone = areaSize == 0 ? "zone PS4 0x1000000000 refusée par iOS"
+            : "zone PS4 0x\(String(area, radix: 16)) (\(gib(areaSize)) Gio)"
+        return "Mémoire : \(zone) · fenêtre 0x\(String(window, radix: 16)) (\(gib(windowSize)) Gio)"
+    }
     // What the game printed last (its own error messages), invalid UTF-8 replaced.
     private func console(_ engine: OpaquePointer) -> String {
         var text = [CChar](repeating: 0, count: 4097)
@@ -433,7 +442,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
                             "Fonctions PS4 manquantes appelées (\(missing.called.count) sur \(missing.total) absentes) :",
                             missing.called.isEmpty ? "aucune" : missing.called.joined(separator: "\n"), "",
                             "Derniers appels PS4 :", recentCalls(opened), "",
-                            "Sortie du jeu :", console(opened), "", live].joined(separator: "\n")
+                            "Sortie du jeu :", console(opened), "", memoryLayout(opened), "", live].joined(separator: "\n")
                 outcome = Outcome(missing: missing.called, crashed: crashed, report: MaxPS4Reports.save(text, for: url))
             }
             return result(of: ran, backend: backend, wasStopped: wasStopped, frames: frames, metal: metal.report, fault: fault, relative: relativeRIP)

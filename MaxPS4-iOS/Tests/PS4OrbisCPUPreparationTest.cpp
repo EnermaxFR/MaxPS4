@@ -287,6 +287,17 @@ int main() {
                 outside[0]=0x7e; CHECK(vm.unmap(unused+0x4000,0x4000)==ok && vm.translate(unused,1,4) && !vm.translate(unused+0x4000,1,4));
             }
             CHECK(vm.unmap(unused,0x4000)==ok && !vm.translate(unused,1,4));
+            // The application area, when the host granted it at load: fixed
+            // mappings inside it land exactly, and go back to PROT_NONE.
+            uint64_t areaBase=0, areaSize=0;
+            maxps4::PS4VirtualMemory::app_area(areaBase,areaSize);
+            CHECK(!areaSize || (areaBase==maxps4::PS4VirtualMemory::app_area_base && areaSize==maxps4::PS4VirtualMemory::app_area_size));
+            if (areaSize) {
+                uint64_t inArea=0;
+                CHECK(vm.place(areaBase+0x10000,0x8000,0,3,true,inArea)==ok && inArea==areaBase+0x10000 && vm.translate(inArea,0x8000,2));
+                CHECK(vm.unmap(inArea,0x8000)==ok && !vm.translate(inArea,1,4));
+                CHECK(vm.place(areaBase+0x10000,0x4000,0,3,true,inArea)==ok && inArea==areaBase+0x10000 && vm.unmap(inArea,0x4000)==ok);
+            }
             uint64_t relocated=0;
             const uint64_t stackPage=(low+0x3fff)&~uint64_t{0x3fff};
             CHECK(vm.place(stackPage,0x4000,0,3,true,relocated)==ok && relocated>=window && relocated<window+windowBytes);

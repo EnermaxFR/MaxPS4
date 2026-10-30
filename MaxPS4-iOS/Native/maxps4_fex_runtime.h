@@ -315,6 +315,10 @@ int32_t maxps4_fex_engine_recent_calls(maxps4_fex_engine *engine, char *text, si
 // The last bytes (at most 4096) the game wrote to its stdout and stderr, as
 // a C string truncated at the front to fit. Returns their length.
 int32_t maxps4_fex_engine_console(maxps4_fex_engine *engine, char *text, size_t capacity);
+// Where game memory lives: the PS4 application area reserved at load (0
+// when the host refused it) and the loaded game's mmap window (0 if none).
+int32_t maxps4_fex_engine_memory_layout(maxps4_fex_engine *engine, uint64_t *app_area,
+    uint64_t *app_area_size, uint64_t *window, uint64_t *window_size);
 // A game directory as the boot probe loads it: <directory>/sce_module/*.prx
 // (sorted) then <directory>/eboot.bin, each module's DT_NEEDED resolved among
 // them, placed 1 MiB aligned and apart from 0x400000, linked with
