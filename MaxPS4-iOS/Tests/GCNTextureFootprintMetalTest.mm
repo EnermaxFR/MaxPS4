@@ -47,14 +47,21 @@ kernel void checked_texture(device const uchar* mem [[buffer(0)]], constant GCND
             pipelines[variant]=[device newComputePipelineStateWithFunction:function error:&error];
             assert(pipelines[variant]);
         }
-        for(const unsigned width : {16u,256u}) for(const unsigned format : {10u,16u,35u}) {
+        for(const unsigned width : {16u,256u}) for(const unsigned format : {10u,16u,35u,36u,37u}) {
         const unsigned height=width/2, bytes=format==10 ? 4 : 2;
-        const unsigned span=format==35 ? ((width+3)/4)*((height+3)/4)*8 : width*height*bytes;
+        const unsigned blockBytes=format==35 ? 8 : 16;
+        const unsigned span=format>=35 ? ((width+3)/4)*((height+3)/4)*blockBytes : width*height*bytes;
         id<MTLBuffer> memory=[device newBufferWithLength:256+span options:MTLResourceStorageModeShared];
         auto* pixels=static_cast<uint8_t*>(memory.contents)+256;
-        if(format==35) for(unsigned k=0;k<span/8;++k) {
+        if(format>=35) for(unsigned k=0;k<span/blockBytes;++k) {
             const uint32_t endpoints=k%2 ? 0xf80007e0u : 0x07e0f800u, selectors=0x934e39e4;
-            std::memcpy(pixels+k*8,&endpoints,4); std::memcpy(pixels+k*8+4,&selectors,4);
+            auto* block=pixels+k*blockBytes;
+            if(format!=35) {
+                const uint64_t alpha=format==36 ? 0xfedcba9876543210ull :
+                    (0xfac688fac688ull<<16) | (k%2 ? 0xff00ull : 0x00ffull);
+                std::memcpy(block,&alpha,8); block+=8;
+            }
+            std::memcpy(block,&endpoints,4); std::memcpy(block+4,&selectors,4);
         }
         else for(unsigned k=0;k<width*height;++k) {
             const uint32_t raw=(k*971u)|0xff000000u;
@@ -88,7 +95,7 @@ kernel void checked_texture(device const uchar* mem [[buffer(0)]], constant GCND
             const float* result=static_cast<const float*>(results[variant].contents);
             for(unsigned k=0;k<count*4;++k) assert(std::fabs(checked[k]-result[k])<0.00001f);
         }
-        if(format==35) {
+        if(format>=35) {
             namespace rt=maxps4::gpu::gcnrt;
             rt::GCNMemory cpu{static_cast<const unsigned char*>(memory.contents),0,0,state.ranges,state.count};
             rt::GCNRes8 texture{}; rt::GCNRes4 sampler{};
@@ -102,7 +109,7 @@ kernel void checked_texture(device const uchar* mem [[buffer(0)]], constant GCND
                 }
                 for(unsigned c=0;c<4;++c) assert(std::fabs(checked[i*4+c]-expected[c])<0.0001f);
             }
-            std::puts("PASS BC1 CPU/Metal sampled colours and transparency");
+            std::printf("PASS BC%u CPU/Metal sampled colours and transparency\n",format-34);
         }
         std::printf("PASS texture footprint GPU: %ux%u format %u, checked %.3f ms, resolved %.3f ms; equal output (not iPhone FPS)\n",width,height,format,times[0],times[1]);
         }
