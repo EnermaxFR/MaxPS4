@@ -42,10 +42,11 @@ public:
     // sceKernelMmap window after the stack (PS4 16 KiB pages), PROT_NONE in
     // the host until PS4VirtualMemory maps pages in it.
     // Only reserved address space: games map their heap and GPU memory there.
-    // The largest of these sizes the host reserves (Unreal Engine games map
-    // GiBs); generalHeap, the smallest, is always required.
+    // The largest of these sizes the host reserves (Unreal Engine games reserve
+    // 8 GiB memory pools); generalHeap, the smallest, is always required.
     static constexpr uint64_t generalHeap = uint64_t(1024) * 1024 * 1024, generalHeapPage = 0x4000;
-    static constexpr uint64_t generalHeapSizes[] = {5 * generalHeap, 3 * generalHeap, generalHeap};
+    static constexpr uint64_t generalHeapSizes[] = {24 * generalHeap, 16 * generalHeap, 12 * generalHeap, 8 * generalHeap,
+                                                    5 * generalHeap, 3 * generalHeap, generalHeap};
     // Child thread slots after the mmap window (scePthreadCreate): each a
     // guarded RW region holding a stack of generalStack bytes with a private
     // copy of the static TLS (blocks, then the TCB) right above it.
