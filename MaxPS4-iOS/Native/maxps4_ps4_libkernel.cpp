@@ -518,7 +518,7 @@ constexpr Binding bindings[] = {
     {"sceKernelRename", "52NcYU9+lEo", PS4KernelService::rename},
     {"sceKernelUnlink", "AUXVxWeJU-A", PS4KernelService::unlink},
     {"sceKernelGetdirentries", "taRWhTJFTgE", PS4KernelService::getdirentries},
-    // Crash Bandicoot 4 (Unreal Engine 4), after shadPS4. A cancel, schedule
+    // Crash Bandicoot 4 (Unreal Engine 4), after shadPS4. A schedule
     // or timestamp change does nothing here; select only times out.
     {"getpid", "HoLVWNanBBc", PS4KernelService::process_id, "libkernel", true},
     {"close", "bY-PO6JhzhQ", PS4KernelService::close, "libkernel", true},
@@ -532,8 +532,6 @@ constexpr Binding bindings[] = {
     {"pthread_setschedparam", "Xs9hdiD7sAA", PS4KernelService::succeed, "libkernel", true},
     {"sched_get_priority_max", "CBNtXOoef-E", PS4KernelService::sched_priority_max, "libkernel", true},
     {"sched_get_priority_min", "m0iS6jNsXds", PS4KernelService::sched_priority_min, "libkernel", true},
-    {"pthread_cancel", "0D4-FVvEikw", PS4KernelService::succeed, "libkernel", true},
-    {"scePthreadCancel", "qBDmpCyGssE", PS4KernelService::succeed},
     {"_sceKernelSetThreadDtors", "rNhWz+lvOMU", PS4KernelService::succeed},
     {"sceKernelGetdents", "j2AIqSqJP0w", PS4KernelService::getdents},
     {"sceKernelChmod", "fgIsQ10xYVA", PS4KernelService::succeed},
