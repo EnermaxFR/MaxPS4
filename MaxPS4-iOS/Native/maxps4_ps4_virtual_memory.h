@@ -22,7 +22,8 @@ public:
     // Byte-vector mappings (bounded images) and host pages of a general
     // image's mmap window: games map hundreds of MiB (heap, GPU memory).
     static constexpr size_t budget = 32 * 1024 * 1024;
-    static constexpr size_t host_budget = size_t(768) * 1024 * 1024;
+    // General images may fill their whole mmap window: the host only commits
+    // the pages a game touches, and iOS bounds those.
     static constexpr size_t region_limit = 4096;
     static constexpr uint64_t base = 0x1000000000ULL;
     explicit PS4VirtualMemory(const GuestELF& image) : image_(image) {}

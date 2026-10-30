@@ -2298,11 +2298,9 @@ int64_t PS4Libkernel::memory_service(PS4KernelService service, const PS4KernelCa
         if (e) return kernel_error(e);
         return write_pointer(c.rdi, mapped) ? 0 : (dynamic_->unmap(mapped, c.rsi), kernel_error(fault));
     }
-    // AvailableFlexibleMemorySize(size_t*): what is left of the mapping budget.
-    case S::flexible_available: {
-        const uint64_t limit = PS4VirtualMemory::host_budget;
-        return write_pointer(c.rdi, limit - std::min<uint64_t>(dynamic_->allocated(), limit)) ? 0 : kernel_error(fault);
-    }
+    // AvailableFlexibleMemorySize(size_t*): the PS4's default flexible memory,
+    // 448 MiB. Flexible use is not counted apart from direct mappings.
+    case S::flexible_available: return write_pointer(c.rdi, uint64_t(448) * 1024 * 1024) ? 0 : kernel_error(fault);
     // MemoryPoolReserve(address, length, alignment, flags, void** out): no
     // access until committed; 2 MiB multiples and alignment.
     case S::pool_reserve: {

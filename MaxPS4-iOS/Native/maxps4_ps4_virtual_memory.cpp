@@ -88,14 +88,14 @@ Error PS4VirtualMemory::place(uint64_t hint, uint64_t length, uint64_t alignment
     // host operation can clobber the app: the window belongs to the image.
     uint64_t window = 0, window_bytes = 0;
     const bool host = image_.heap(window, window_bytes);
-    if (size > (host ? host_budget : budget) - std::min(used_, host ? host_budget : budget) ||
-        regions_.size() >= region_limit) return nomem;
+    const uint64_t limit = host ? window_bytes : budget;
+    if (size > limit - std::min<uint64_t>(used_, limit) || regions_.size() >= region_limit) return nomem;
     if (fixed) {
         // MAP_FIXED replaces whatever the span held, as on the PS4.
         if (!host || hint % page_size || hint < window || size > window_bytes || hint - window > window_bytes - size)
             return inval;
         release(hint, size);
-        if (size > host_budget - std::min(used_, host_budget)) return nomem;
+        if (size > limit - std::min<uint64_t>(used_, limit)) return nomem;
     }
     auto align = [&](uint64_t value) {
         return value > UINT64_MAX - (alignment - 1) ? UINT64_MAX : (value + alignment - 1) & ~(alignment - 1);

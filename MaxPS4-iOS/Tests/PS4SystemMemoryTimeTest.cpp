@@ -189,7 +189,7 @@ int main() {
     assert(invoke(S::pool_commit, {pool, 0x8000, 0, 3, 0}) == kernel_error(inval));
     assert(invoke(S::pool_reserve, {0, 0x100000, 0, 0, where}) == kernel_error(inval));
     assert(invoke(S::flexible_available, {where}) == 0 && memory.read(where, word, 8));
-    assert(get_le(word, 8) == PS4VirtualMemory::host_budget - std::min<uint64_t>(dynamic.allocated(), PS4VirtualMemory::host_budget));
+    assert(get_le(word, 8) == 448ULL << 20);
     assert(invoke(S::flexible_release, {pool, 0x200000}) == 0);
     assert(invoke(S::pool_expand, {0, 1ULL << 30, 0x10000, 0, phys}) == 0 && memory.read(phys, word, 8));
     // BatchMap maps at the given address: outside a general image's window, refused.

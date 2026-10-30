@@ -243,7 +243,10 @@ int main() {
         CHECK(image.translate(low,bytes,6) && !image.translate(low,1,1));
         // sceKernelMmap window: host pages at their own address, after the stack.
         uint64_t window=0, windowBytes=0;
-        CHECK(image.heap(window,windowBytes) && windowBytes==maxps4::GuestELF::generalHeap);
+        CHECK(image.heap(window,windowBytes) && windowBytes>=maxps4::GuestELF::generalHeap);
+        bool listed=false;
+        for (const auto size : maxps4::GuestELF::generalHeapSizes) listed=listed || windowBytes==size;
+        CHECK(listed);
         CHECK(window>=low+bytes+4096 && window%0x4000==0 && !image.translate(window,1,4));
         {
             maxps4::PS4VirtualMemory vm(image);
@@ -259,7 +262,7 @@ int main() {
             CHECK(vm.map(0,0x4000,3,0x1002,-1,0,first)==maxps4::ps4::ok && first==window);
             CHECK(!vm.translate(first,1,4)[0]); // Unmapped pages come back zeroed.
             uint64_t tooLarge=0;
-            CHECK(vm.map(0,maxps4::GuestELF::generalHeap,3,0x1002,-1,0,tooLarge)==maxps4::ps4::nomem);
+            CHECK(vm.map(0,windowBytes,3,0x1002,-1,0,tooLarge)==maxps4::ps4::nomem);
             // Host pages: a hint is a search start, MAP_FIXED replaces what the
             // span held, alignment holds, and a span unmapped inside a region
             // can be mapped again.

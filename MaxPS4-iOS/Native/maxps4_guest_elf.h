@@ -35,16 +35,20 @@ public:
     // stack accesses work unmodified. ET_SCE_EXEC (fixed addresses) is refused.
     // Guest faults are not contained here: the FEX runtime contains those of
     // generated code on ARM64 hosts.
+    // generalSpan: the largest image (all modules) a general reservation holds.
     static constexpr uint64_t generalAlignment = 1024 * 1024, generalStack = 1024 * 1024,
-                              generalSpan = uint64_t(1536) * 1024 * 1024;
+                              generalSpan = uint64_t(512) * 1024 * 1024;
     // sceKernelMmap window after the stack (PS4 16 KiB pages), PROT_NONE in
     // the host until PS4VirtualMemory maps pages in it.
     // Only reserved address space: games map their heap and GPU memory there.
+    // The largest of these sizes the host reserves (Unreal Engine games map
+    // GiBs); generalHeap, the smallest, is always required.
     static constexpr uint64_t generalHeap = uint64_t(1024) * 1024 * 1024, generalHeapPage = 0x4000;
+    static constexpr uint64_t generalHeapSizes[] = {5 * generalHeap, 3 * generalHeap, generalHeap};
     // Child thread slots after the mmap window (scePthreadCreate): each a
     // guarded RW region holding a stack of generalStack bytes with a private
     // copy of the static TLS (blocks, then the TCB) right above it.
-    static constexpr size_t generalThreads = 8;
+    static constexpr size_t generalThreads = 64;
     int prepare_orbis_general(const std::vector<OrbisLinker::Input>& inputs,
                               const std::vector<OrbisLinker::HLE>& hle, const std::string& root,
                               std::string& diagnostic, uint64_t& relocation);
@@ -162,6 +166,7 @@ private:
     void* arena = nullptr;
     size_t arena_size = 0;
     bool identity = false;
+    uint64_t heap_window = 0; // The mmap window size the reservation holds.
     uint64_t stack_address = 0, stack_bytes = 0, heap_address = 0, heap_bytes = 0,
              entry_params_address = 0, threads_address = 0, thread_slot_bytes = 0,
              thread_return_address = 0;

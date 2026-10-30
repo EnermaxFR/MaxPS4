@@ -80,7 +80,7 @@ void GuestELF::clear() {
     arena_size = 0;
     guest_base = guest_entry = thread_pointer = start_address = 0;
     identity = false;
-    stack_address = stack_bytes = heap_address = heap_bytes = entry_params_address = 0;
+    stack_address = stack_bytes = heap_address = heap_bytes = entry_params_address = heap_window = 0;
     threads_address = thread_slot_bytes = thread_return_address = 0;
     tls_image.clear();
     thunks.clear();
@@ -225,12 +225,16 @@ int GuestELF::prepare_orbis_general(const std::vector<OrbisLinker::Input>& input
         // page (see prepare_linked), page rounding, a guard page after the stack
         // and base alignment, then the child thread slots (stack + TLS + guard).
         low &= ~(generalAlignment - 1);
-        const uint64_t tail = 10 * page + OrbisLinker::tlsBudget + 2 * 4096 + generalStack +
-            2 * generalHeapPage + generalHeap +
-            generalThreads * (generalStack + OrbisLinker::tlsBudget + 2 * 4096 + 2 * page);
-        if (high - low > generalSpan - tail - generalAlignment)
+        if (high - low > generalSpan)
             return fail(-E2BIG, "image span exceeds the general address-space reservation");
-        const auto size = static_cast<size_t>(high - low + tail + generalAlignment);
+        uint64_t window = 0, tail = 0;
+        size_t size = 0;
+        auto layout = [&](uint64_t heap) {
+            window = heap;
+            tail = 10 * page + OrbisLinker::tlsBudget + 2 * 4096 + generalStack + 2 * generalHeapPage + heap +
+                generalThreads * (generalStack + OrbisLinker::tlsBudget + 2 * 4096 + 2 * page);
+            size = static_cast<size_t>(high - low + tail + generalAlignment);
+        };
         // GPU-visible memory (the mmap window) must fit the PS4's 40-bit GPU
         // addresses: games keep them >> 8 in 32-bit fields and dereference
         // them on the CPU. Linux places mappings near 2^47 (or above it on a
@@ -246,17 +250,21 @@ int GuestELF::prepare_orbis_general(const std::vector<OrbisLinker::Input>& input
             return MAP_FAILED;
         };
         void* reserved = MAP_FAILED;
-        for (const unsigned bits : {40U, 47U}) {
-            user_end = uint64_t{1} << bits;
-            reserved = reserve(0);
-            for (uint64_t hint = uint64_t{1} << 36; reserved == MAP_FAILED && hint <= user_end - size; hint <<= 1)
-                reserved = reserve(hint);
+        for (const uint64_t heap : generalHeapSizes) {
+            layout(heap);
+            for (const unsigned bits : {40U, 47U}) {
+                user_end = uint64_t{1} << bits;
+                reserved = reserve(0);
+                for (uint64_t hint = uint64_t{1} << 36; reserved == MAP_FAILED && hint <= user_end - size; hint <<= 1)
+                    reserved = reserve(hint);
+                if (reserved != MAP_FAILED) break;
+            }
             if (reserved != MAP_FAILED) break;
         }
         if (reserved == MAP_FAILED) return fail(-ENOMEM, "general address-space reservation failed below 2^47");
         // Owned from here: clear() releases it on every later failure. Guest and
         // host addresses coincide inside it (translate is the identity).
-        arena = reserved; arena_size = size;
+        arena = reserved; arena_size = size; heap_window = window;
         guest_base = reinterpret_cast<uintptr_t>(reserved);
         const uint64_t base = (guest_base + generalAlignment - 1) & ~(generalAlignment - 1);
         if (base + (high - low) + tail > user_end)
@@ -388,7 +396,7 @@ int GuestELF::prepare_linked(const OrbisLinker::Image& linked, const std::string
             const uint64_t after = tp ? tp + 16 : highest;
             stack_low = (after + page - 1) / page * page + page;
             heap_low = (stack_low + generalStack + page + generalHeapPage - 1) / generalHeapPage * generalHeapPage;
-            slots_low = heap_low + generalHeap + page;
+            slots_low = heap_low + heap_window + page;
             slot_stride = (generalStack + tls_bytes.size() + page - 1) / page * page + page;
             // EntryParams sit at the top of the stack; the stub points RDI at
             // them and RSI at its exit function.
@@ -722,7 +730,7 @@ int GuestELF::prepare_linked(const OrbisLinker::Image& linked, const std::string
             entry_params_address = stack_low + generalStack - entryParamsBytes;
             // sceKernelMmap window: after a guard page, PROT_NONE until mapped.
             heap_address = heap_low;
-            heap_bytes = generalHeap;
+            heap_bytes = heap_window;
             // A guard page must follow it inside the reservation.
             if (heap_address + heap_bytes + page > guest_base + arena_size)
                 return fail(-E2BIG,"mmap window outside the general reservation");
