@@ -1,6 +1,7 @@
 #import "PM4MetalRenderer.h"
 #include "GCNTranslator.hpp"
 #include "PM4ResourceScan.hpp"
+#include "PM4Blend.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -14,15 +15,30 @@ struct DrawState { std::uint64_t base, size; std::uint32_t vsUser[16], psUser[17
 static_assert(sizeof(DrawState) == 544, "GCNDrawState layout");
 constexpr std::uint32_t rectList = 1, flipY = 2;
 
-// CB_BLEND factor codes to Metal (ZERO..ONE_MINUS_DST_COLOR); others refused.
+// CB_BLEND factor codes to Metal; dual-source factors remain unsupported.
 bool blendFactor(unsigned code, MTLBlendFactor& out) {
     static const MTLBlendFactor factors[] = {
         MTLBlendFactorZero, MTLBlendFactorOne, MTLBlendFactorSourceColor, MTLBlendFactorOneMinusSourceColor,
         MTLBlendFactorSourceAlpha, MTLBlendFactorOneMinusSourceAlpha, MTLBlendFactorDestinationAlpha,
         MTLBlendFactorOneMinusDestinationAlpha, MTLBlendFactorDestinationColor, MTLBlendFactorOneMinusDestinationColor};
-    if (code >= sizeof(factors) / sizeof(factors[0])) return false;
-    out = factors[code];
-    return true;
+    if (code < sizeof(factors) / sizeof(factors[0])) { out = factors[code]; return true; }
+    switch (code) {
+    case 10: out = MTLBlendFactorSourceAlphaSaturated; return true;
+    case 13: out = MTLBlendFactorBlendColor; return true;
+    case 14: out = MTLBlendFactorOneMinusBlendColor; return true;
+    case 19: out = MTLBlendFactorBlendAlpha; return true;
+    case 20: out = MTLBlendFactorOneMinusBlendAlpha; return true;
+    default: return false;
+    }
+}
+bool blendChannel(PM4BlendChannel channel, MTLBlendOperation& operation,
+                  MTLBlendFactor& source, MTLBlendFactor& destination) {
+    if (!channel.supported()) return false;
+    static const MTLBlendOperation operations[] = {MTLBlendOperationAdd, MTLBlendOperationSubtract,
+        MTLBlendOperationMin, MTLBlendOperationMax, MTLBlendOperationReverseSubtract};
+    operation = operations[channel.operation];
+    if (channel.ignoresFactors()) { source = destination = MTLBlendFactorOne; return true; }
+    return blendFactor(channel.source, source) && blendFactor(channel.destination, destination);
 }
 std::string inputKey(const PM4Draw& d) {
     std::string key(reinterpret_cast<const char*>(d.inputCntl), sizeof d.inputCntl);
@@ -66,17 +82,20 @@ id<MTLRenderPipelineState> PM4MetalRenderer::pipeline(const PM4Draw& d, MTLPixel
     color.writeMask = ((d.mask & 1) ? MTLColorWriteMaskRed : 0) | ((d.mask & 2) ? MTLColorWriteMaskGreen : 0) |
                       ((d.mask & 4) ? MTLColorWriteMaskBlue : 0) | ((d.mask & 8) ? MTLColorWriteMaskAlpha : 0);
     if ((d.blend >> 30) & 1) {
-        const bool separate = (d.blend >> 29) & 1;
-        const unsigned colorFn = (d.blend >> 5) & 7, alphaFn = separate ? (d.blend >> 21) & 7 : colorFn;
+        const auto blend = decodePM4Blend(d.blend);
+        auto alpha = blend.alpha;
+        // Saturation has an alpha factor of one, independently of RGB.
+        if (alpha.source == 10) alpha.source = 1;
+        if (alpha.destination == 10) alpha.destination = 1;
         MTLBlendFactor cs, cd, as, ad;
-        if (colorFn != 0 || alphaFn != 0 || !blendFactor(d.blend & 31, cs) || !blendFactor((d.blend >> 8) & 31, cd) ||
-            !blendFactor(separate ? (d.blend >> 16) & 31 : d.blend & 31, as) ||
-            !blendFactor(separate ? (d.blend >> 24) & 31 : (d.blend >> 8) & 31, ad)) {
+        MTLBlendOperation colorOperation, alphaOperation;
+        if (!blendChannel(blend.rgb, colorOperation, cs, cd) ||
+            !blendChannel(alpha, alphaOperation, as, ad)) {
             fail("blend mode");
             return nil;
         }
         color.blendingEnabled = YES;
-        color.rgbBlendOperation = MTLBlendOperationAdd; color.alphaBlendOperation = MTLBlendOperationAdd;
+        color.rgbBlendOperation = colorOperation; color.alphaBlendOperation = alphaOperation;
         color.sourceRGBBlendFactor = cs; color.destinationRGBBlendFactor = cd;
         color.sourceAlphaBlendFactor = as; color.destinationAlphaBlendFactor = ad;
     }
@@ -227,6 +246,8 @@ bool PM4MetalRenderer::encode(const PM4Draw& d, id<MTLCommandBuffer> commands) {
     if (batching_) { encoder_ = encoder; commands_ = commands; attachment_ = target.texture; }
     }
     [encoder setRenderPipelineState:state];
+    [encoder setBlendColorRed:pm4BlendConstant(d.blendConstant[0]) green:pm4BlendConstant(d.blendConstant[1])
+                        blue:pm4BlendConstant(d.blendConstant[2]) alpha:pm4BlendConstant(d.blendConstant[3])];
     // PA_CL_VPORT: x = xscale * ndc + xoffset. A positive Y scale points NDC +1 down: flip it.
     const float xs = d.viewport[0], xo = d.viewport[1], ys = d.viewport[2], yo = d.viewport[3];
     MTLViewport viewport;

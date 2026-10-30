@@ -314,6 +314,20 @@ constexpr Binding bindings[] = {
     {"sceGnmResetVgtControl", "MYRtYhojKdA", PS4KernelService::gnm_reset_vgt, "libSceGnmDriver"},
     {"sceGnmInsertSetMarker", "jiItzS6+22g", PS4KernelService::gnm_set_marker, "libSceGnmDriver"},
     {"sceGnmGetGpuCoreClockFrequency", "Fwvh++m9IQI", PS4KernelService::gnm_clock, "libSceGnmDriver"},
+    // Resource registration is for the debugger, absent from retail firmware:
+    // it fails there too. Garlic flushes and status queries have nothing to do.
+    {"sceGnmRegisterResource", "nvEwfYAImTs", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmRegisterOwner", "ZFqKFl23aMc", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmRegisterGdsResource", "9Mv61HaMhfA", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmUnregisterResource", "k8EXkhIP+lM", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmUnregisterOwnerAndResources", "fhKwCVVj9nk", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmUnregisterAllResourcesForOwner", "yhFCnaz5daw", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmFlushGarlic", "iBt3Oe00Kvc", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmIsUserPaEnabled", "jg33rEKLfVs", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmGetGpuInfoStatus", "tZCSL5ulnB4", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmGetShaderStatus", "k7iGTvDQPLQ", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmGetNumTcaUnits", "KnldROUkWJY", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmSetGsRingSizes", "jtkqXpAOY6w", PS4KernelService::gnm_gs_rings, "libSceGnmDriver"},
     {"scePadOpen", "xk0AcarP3V4", PS4KernelService::pad_open, "libScePad"},
     {"scePadClose", "6ncge5+l5Qs", PS4KernelService::pad_close, "libScePad"},
     {"scePadRead", "q1cHNfGycLI", PS4KernelService::pad_read, "libScePad"},
@@ -357,6 +371,14 @@ constexpr Binding bindings[] = {
     {"sceKernelAllocateMainDirectMemory", "B+vc2AO2Zrc", PS4KernelService::direct_allocate_main},
     {"sceKernelCheckedReleaseDirectMemory", "hwVSPCmp5tM", PS4KernelService::direct_release},
     {"sceKernelVirtualQuery", "rVjRvHJ0X6c", PS4KernelService::virtual_query},
+    {"sceKernelReserveVirtualRange", "7oxv3PPCumo", PS4KernelService::reserve_range},
+    {"sceKernelMtypeprotect", "9bfdLIyuwCY", PS4KernelService::mtype_protect},
+    {"sceKernelDirectMemoryQuery", "BHouLQzh0X0", PS4KernelService::direct_query},
+    {"sceKernelBatchMap", "2SKEx6bSq-4", PS4KernelService::batch_map},
+    {"sceKernelBatchMap2", "kBJzF8x4SyE", PS4KernelService::batch_map2},
+    // The name (seventh argument) only labels the range.
+    {"sceKernelMapNamedDirectMemory", "NcaWUxfMNIQ", PS4KernelService::direct_map},
+    {"sceKernelSetVirtualRangeName", "DGMG3JshrZU", PS4KernelService::succeed},
     {"sceKernelQueryMemoryProtection", "WFcfL2lzido", PS4KernelService::query_protection},
     {"sceKernelGetCompiledSdkVersion", "WB66evu8bsU", PS4KernelService::sdk_version},
     {"sceKernelGetSystemSwVersion", "Mv1zUObHvXI", PS4KernelService::system_version},
@@ -1672,6 +1694,13 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     case S::gnm_reset_vgt: return gnm_.reset_vgt(c.rdi,uint32_t(c.rsi));
     case S::gnm_set_marker: return gnm_.set_marker(c.rdi,uint32_t(c.rsi),c.rdx);
     case S::gnm_clock: return 800000000; // Base PS4 GPU clock.
+    case S::gnm_unsupported: return signed32(0x8eee00ffU);
+    // SetGsRingSizes(esgs, gsvs): 1 MiB multiples in [4, 8] MiB each. Ring sizes
+    // do not matter to the emulated GPU.
+    case S::gnm_gs_rings: {
+        auto valid = [](uint64_t size) { return size >= 0x400000 && size <= 0x800000 && !(size & 0xfffff); };
+        return valid(uint32_t(c.rdi)) && valid(uint32_t(c.rsi)) ? 0 : 0x08000000;
+    }
     case S::pad_open: return pad_.open(signed32(c.rdi), signed32(c.rsi), signed32(c.rdx), c.rcx);
     case S::pad_close: return pad_.close(signed32(c.rdi));
     case S::pad_handle: return pad_.get_handle(signed32(c.rdi), signed32(c.rsi), signed32(c.rdx));
@@ -1942,7 +1971,39 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     case S::direct_map: case S::flexible_map: case S::posix_mmap:
     case S::direct_available: case S::direct_allocate_main: case S::flexible_map_unnamed: case S::flexible_release:
     case S::virtual_query: case S::query_protection: case S::sdk_version: case S::system_version:
+    case S::reserve_range: case S::mtype_protect: case S::direct_query:
         return memory_service(service, c);
+    // BatchMap(entries, count, s32* done) / BatchMap2(..., flags): BatchMap maps
+    // at the given addresses. Entry (32 bytes): void* start, u64 offset, u64
+    // length, u8 protection, u8 type, u16, s32 operation: map direct 0, unmap
+    // 1, protect 2, map flexible 3, type protect 4. Stops at the first error;
+    // *done counts the entries carried out.
+    case S::batch_map: case S::batch_map2: {
+        const uint64_t flags = service == S::batch_map ? 0x10 : c.rcx;
+        const int32_t count = signed32(c.rsi);
+        if (!c.rdi || count < 0) return kernel_error(inval);
+        int64_t result = 0;
+        int32_t done = 0;
+        for (; done < count; ++done) {
+            // Reject a wrapped guest range before it aliases a low address.
+            if (c.rdi > UINT64_MAX - uint64_t(done) * 32 - 31) { result = kernel_error(fault); break; }
+            const uint64_t entry = c.rdi + uint64_t(done) * 32;
+            uint8_t e[32];
+            if (!memory_.read(entry, e, sizeof(e))) { result = kernel_error(fault); break; }
+            const uint64_t start = get_le(e, 8), offset = get_le(e + 8, 8), length = get_le(e + 16, 8);
+            const uint64_t protection = e[24];
+            switch (signed32(uint32_t(get_le(e + 28, 4)))) {
+            case 0: result = memory_service(S::direct_map, {entry, length, protection, flags, offset, 0}); break;
+            case 1: result = memory_service(S::flexible_release, {start, length}); break;
+            case 2: case 4: result = memory_service(S::mtype_protect, {start, length, e[25], protection}); break;
+            case 3: result = memory_service(S::flexible_map_unnamed, {entry, length, protection, flags}); break;
+            default: result = kernel_error(inval); break;
+            }
+            if (result) break;
+        }
+        if (c.rdx && !write(c.rdx, uint32_t(done), 4)) return kernel_error(fault);
+        return result;
+    }
     case S::proc_param: return int64_t(process_param_);
     // sceLibcHeapGetTraceInfo(info{u64 size; u32 flag, get_segment_info;
     // u64* mspace_atomic_id_mask; u64* mstate_table}), as shadPS4: no segment
@@ -2084,7 +2145,7 @@ int64_t PS4Libkernel::memory_service(PS4KernelService service, const PS4KernelCa
         if (!read_pointer(c.rdi, hint)) return kernel_error(fault);
         if (!c.rsi || !aligned(c.rsi) || !cpu(c.rdx, protection)) return kernel_error(inval);
         uint64_t mapped = 0;
-        const Error e = dynamic_->place(hint, c.rsi, page, protection, (c.rcx & 0x10) != 0 && hint, mapped);
+        const Error e = dynamic_->place(hint, c.rsi, page, protection, (c.rcx & 0x10) != 0, mapped);
         if (e) return kernel_error(e);
         return write_pointer(c.rdi, mapped) ? 0 : (dynamic_->unmap(mapped, c.rsi), kernel_error(fault));
     }
@@ -2102,6 +2163,40 @@ int64_t PS4Libkernel::memory_service(PS4KernelService service, const PS4KernelCa
         put_le(info, 0, start, 8); put_le(info, 8, end, 8);
         put_le(info, 24, protection, 4);
         info[32] = 1 | 16; // Flexible, committed.
+        return memory_.write(c.rdx, info, sizeof(info)) ? 0 : kernel_error(fault);
+    }
+    // ReserveVirtualRange(void** address, length, flags, alignment): pages
+    // with no access, for later fixed mappings; *address is a hint, or exact
+    // with MAP_FIXED.
+    case S::reserve_range: {
+        uint64_t hint = 0;
+        if (!read_pointer(c.rdi, hint)) return kernel_error(fault);
+        if (!c.rsi || !aligned(c.rsi)) return kernel_error(inval);
+        if (c.rcx && (!aligned(c.rcx) || (c.rcx & (c.rcx - 1)) || c.rcx > 0x80000000ULL))
+            return kernel_error(inval);
+        uint64_t mapped = 0;
+        const Error e = dynamic_->place(hint, c.rsi, c.rcx ? c.rcx : page, 0, (c.rdx & 0x10) != 0, mapped);
+        if (e) return kernel_error(e);
+        return write_pointer(c.rdi, mapped) ? 0 : (dynamic_->unmap(mapped, c.rsi), kernel_error(fault));
+    }
+    // Mtypeprotect(address, length, memory type, protection): the type does
+    // not change how the CPU sees the pages.
+    case S::mtype_protect: {
+        uint32_t protection = 0;
+        if (!cpu(c.rcx, protection)) return kernel_error(inval);
+        return kernel_error(dynamic_->protect(c.rdi, c.rsi, protection));
+    }
+    // DirectMemoryQuery(offset, flags, info*, size 24): the allocation holding
+    // `offset` (flags 1: the first at or after it): s64 start, end, s32 type.
+    // Types are not kept: 0.
+    case S::direct_query: {
+        if (!c.rdx || c.rcx != 24) return kernel_error(inval);
+        auto it = direct_.upper_bound(c.rdi);
+        if (it != direct_.begin() && std::prev(it)->first + std::prev(it)->second > c.rdi) --it;
+        else if (signed32(c.rsi) != 1) return kernel_error(noent);
+        if (it == direct_.end()) return kernel_error(noent);
+        uint8_t info[24]{};
+        put_le(info, 0, it->first, 8); put_le(info, 8, it->first + it->second, 8);
         return memory_.write(c.rdx, info, sizeof(info)) ? 0 : kernel_error(fault);
     }
     // QueryMemoryProtection(address, void** start, void** end, s32* protection).
@@ -2131,7 +2226,10 @@ int64_t PS4Libkernel::memory_service(PS4KernelService service, const PS4KernelCa
         if (!read_pointer(c.rdi, hint)) return kernel_error(fault);
         if (!c.rsi || !aligned(c.rsi) || !aligned(c.r8) || !cpu(c.rdx, protection)) return kernel_error(inval);
         auto owner = direct_.upper_bound(c.r8);
-        if (owner == direct_.begin() || std::prev(owner)->first + std::prev(owner)->second < c.r8 + c.rsi)
+        if (owner == direct_.begin()) return kernel_error(inval);
+        --owner;
+        const uint64_t offset = c.r8 - owner->first;
+        if (offset >= owner->second || c.rsi > owner->second - offset)
             return kernel_error(inval);
         uint64_t mapped = 0;
         const Error e = dynamic_->place(hint, c.rsi, std::max<uint64_t>(c.r9, page), protection, (c.rcx & 0x10) != 0, mapped);
@@ -2147,7 +2245,7 @@ int64_t PS4Libkernel::memory_service(PS4KernelService service, const PS4KernelCa
         if (!c.r8 || !memory_.read_cstring(c.r8, name, sizeof(name))) return kernel_error(fault);
         if (!c.rsi || !aligned(c.rsi) || !cpu(c.rdx, protection)) return kernel_error(inval);
         uint64_t mapped = 0;
-        const Error e = dynamic_->place(hint, c.rsi, page, protection, (c.rcx & 0x10) != 0 && hint, mapped);
+        const Error e = dynamic_->place(hint, c.rsi, page, protection, (c.rcx & 0x10) != 0, mapped);
         if (e) return kernel_error(e);
         return write_pointer(c.rdi, mapped) ? 0 : (dynamic_->unmap(mapped, c.rsi), kernel_error(fault));
     }

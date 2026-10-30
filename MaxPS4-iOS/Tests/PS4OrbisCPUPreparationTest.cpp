@@ -279,6 +279,40 @@ int main() {
             CHECK(!vm.translate(first,1,4) && !vm.allocated());
         }
         {
+            // Kernel reservations must support replacing one page with a
+            // fixed direct mapping while both neighbouring pages stay reserved.
+            using S = maxps4::PS4KernelService;
+            maxps4::PS4VirtualMemory vm(image);
+            maxps4::PS4GuestMemory memory(image,&vm);
+            maxps4::PS4Libkernel kernel(memory,&vm);
+            constexpr uint64_t page=0x4000;
+            const uint64_t addressOut=low+0x100, physicalOut=low+0x108;
+            const uint64_t batch=low+0x120, doneOut=low+0x140;
+            uint8_t word[8]{};
+            CHECK(memory.write(addressOut,word,sizeof(word)));
+            CHECK(kernel.invoke(S::reserve_range,{addressOut,3*page,0,0})==0);
+            CHECK(memory.read(addressOut,word,sizeof(word)));
+            const uint64_t reserved=maxps4::ps4::get_le(word,8);
+            CHECK(reserved>=window && !memory.permitted(reserved,3*page,4));
+            CHECK(kernel.invoke(S::direct_allocate_main,{page,0,0,physicalOut})==0);
+            CHECK(memory.read(physicalOut,word,sizeof(word)));
+            uint8_t entry[32]{};
+            maxps4::ps4::put_le(entry,0,reserved+page,8);
+            maxps4::ps4::put_le(entry,8,maxps4::ps4::get_le(word,8),8);
+            maxps4::ps4::put_le(entry,16,page,8);
+            entry[24]=0x33; // CPU and GPU read/write; operation 0 maps direct.
+            CHECK(memory.write(batch,entry,sizeof(entry)));
+            CHECK(kernel.invoke(S::batch_map,{batch,1,doneOut})==0);
+            CHECK(memory.read(doneOut,word,4) && maxps4::ps4::get_le(word,4)==1);
+            CHECK(!memory.permitted(reserved,1,4) && memory.permitted(reserved+page,page,6));
+            CHECK(!memory.permitted(reserved+2*page,1,4) && vm.allocated()==3*page);
+            CHECK(memory.read(reserved+page,word,sizeof(word)) && maxps4::ps4::get_le(word,8)==0);
+            CHECK(kernel.invoke(S::mtype_protect,{reserved,page,0,1})==0);
+            CHECK(memory.permitted(reserved,page,4) && !memory.permitted(reserved,1,2));
+            kernel.reset();
+            CHECK(vm.allocated()==0 && !memory.permitted(reserved+page,1,4));
+        }
+        {
             // Child thread slots after the mmap window: guarded RW stacks (no
             // PT_TLS in this image, so no thread pointer).
             constexpr uint64_t slotStack=maxps4::GuestELF::generalStack;

@@ -109,7 +109,9 @@ enum class PS4KernelService : uint32_t {
     // English console, a foreground application status, no system events.
     system_param_int, system_status, system_event,
     // libSceAudioOut (PS4AudioOut). Output blocks for one buffer's duration.
-    audio_init, audio_open, audio_close, audio_output
+    audio_init, audio_open, audio_close, audio_output,
+    // Append new services to preserve existing trampoline service IDs.
+    reserve_range, mtype_protect, direct_query, batch_map, batch_map2, gnm_unsupported, gnm_gs_rings
 };
 // Token bit of a trampoline whose function follows the POSIX convention: -1
 // with the error in the calling thread's errno (__Error) instead of an Orbis
