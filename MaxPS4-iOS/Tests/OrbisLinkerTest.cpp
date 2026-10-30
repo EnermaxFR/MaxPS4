@@ -49,7 +49,7 @@ int main(int argc, char** argv) {
     put(consumer,0x900,0x20fc); reject(batch(),"relocation target"); consumer=original;
     put(consumer,0x908,(uint64_t{1}<<32)|99); reject(batch(),"unsupported x86-64 relocation"); consumer=original;
     put(consumer,0x908,(uint64_t{99}<<32)|7); reject(batch(),"invalid relocation symbol"); consumer=original;
-    reject(batch(),"memory budget",1023); reject(batch(),"budget exceeds",65*1024*1024);
+    reject(batch(),"memory budget",1023); reject(batch(),"budget exceeds",513*1024*1024);
     put(consumer,64+56+4,4,4); reject(batch(),"relocation target"); consumer=original;
     put(consumer,64+4,7,4); reject(batch(),"writable executable"); consumer=original;
     put(consumer,0x900,0x1000); reject(batch(),"relocation target"); consumer=original;
