@@ -1,5 +1,6 @@
 #pragma once
 #include "PS4PKGRuntimePlan.hpp"
+#include "OrbisMetadata.hpp"
 #include <map>
 #include <set>
 #include <tuple>
@@ -353,7 +354,7 @@ private:
         for (auto index : sorted) {
             const auto& input = inputs[index];
             const auto* b = input.file.bytes; const auto n = input.file.size;
-            require(b && n >= 64 && n <= 64 * 1024 * 1024, "chargeur: invalid ELF file size");
+            require(b && n >= 64 && n <= OrbisMetadata::fileLimit, "chargeur: invalid ELF file size");
             const auto phoff = read(b + 32, 8), phnum = read(b + 56, 2);
             require(phoff >= 64 && phnum && phnum <= 128 && range(phoff, phnum * 56, n), "chargeur: invalid program table");
             for (size_t i = 0; i < phnum; ++i) {
@@ -363,7 +364,7 @@ private:
                 require(size <= budget - planned, "batch memory budget exceeded"); planned += static_cast<size_t>(size);
             }
         }
-        size_t allocated = 0, symbolBudget = 65536, relocationBudget = 65536;
+        size_t allocated = 0, symbolBudget = 4 * OrbisMetadata::symbolLimit, relocationBudget = 2 * OrbisMetadata::relocationLimit;
         for (auto i : order) {
             report.phase = "ELF/segments";
             const auto& in = inputs[sorted[i]];

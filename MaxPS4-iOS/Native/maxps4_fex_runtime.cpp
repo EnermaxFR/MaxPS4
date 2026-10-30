@@ -1403,7 +1403,7 @@ int orbisInputs(const maxps4_orbis_module* modules, size_t count, bool general,
         const auto& m = modules[i];
         if (!m.path || !m.bytes || m.dependency_count > 128 ||
             (m.dependency_count && !m.dependencies)) return -EINVAL;
-        if (::strnlen(m.path,256)>255 || m.size>32*1024*1024) return -E2BIG;
+        if (::strnlen(m.path,256)>255 || m.size>maxps4::OrbisMetadata::fileLimit) return -E2BIG;
         const uint8_t* bytes = m.bytes;
         size_t size = m.size;
         std::vector<uint8_t> elf;
