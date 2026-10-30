@@ -29,4 +29,23 @@ inline float gcn_bc23_alpha(unsigned low, unsigned high, unsigned pixel, bool bc
     if (index >= 6u) return index == 6u ? 0.0f : 1.0f;
     return float((6u - index) * a + (index - 1u) * b) / (5.0f * 255.0f);
 }
+// Signed BC4/BC5 endpoints use -128 as -1, but retain their encoded order.
+inline float gcn_bc45_snorm(unsigned low, unsigned high, unsigned pixel) {
+    int a = int(low & 255u), b = int((low >> 8) & 255u);
+    if (a >= 128) a -= 256;
+    if (b >= 128) b -= 256;
+    bool descending = a > b;
+    if (a == -128) a = -127;
+    if (b == -128) b = -127;
+    unsigned shift = 3u * pixel;
+    unsigned combined = (low >> 16) | (high << 16);
+    unsigned index = shift < 16u ? ((combined >> shift) & 7u) : ((high >> (shift - 16u)) & 7u);
+    if (index == 0u) return float(a) / 127.0f;
+    if (index == 1u) return float(b) / 127.0f;
+    if (!descending && index >= 6u) return index == 6u ? -1.0f : 1.0f;
+    int divisor = descending ? 7 : 5;
+    int weight = int(index) - 1;
+    return float((divisor - weight) * a + weight * b) / (float(divisor) * 127.0f);
+}
+
 )

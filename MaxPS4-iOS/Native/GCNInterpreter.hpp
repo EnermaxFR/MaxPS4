@@ -798,7 +798,8 @@ private:
                 std::uint32_t low = 0, high = 0;
                 std::memcpy(&low, data + n * 8, 4);
                 std::memcpy(&high, data + n * 8 + 4, 4);
-                c[n] = gcn_detail::gcn_bc23_alpha(low, high, pixel, true);
+                c[n] = t.nfmt == 1 ? gcn_detail::gcn_bc45_snorm(low, high, pixel) :
+                    gcn_detail::gcn_bc23_alpha(low, high, pixel, true);
             }
             break;
         }
@@ -814,7 +815,7 @@ private:
         case 14: for (unsigned n = 0; n < 4; ++n) std::memcpy(&c[n], data + 4 * n, 4); break;
         default: return fail("image data format " + std::to_string(t.dfmt));
         }
-        if (t.dfmt != 4 && t.dfmt != 14 && t.nfmt != 0 && t.nfmt != 7 && t.nfmt != 9)
+        if (t.dfmt != 4 && t.dfmt != 14 && !(t.dfmt >= 38 && t.dfmt <= 39 && t.nfmt == 1) && t.nfmt != 0 && t.nfmt != 7 && t.nfmt != 9)
             return fail("image number format " + std::to_string(t.nfmt));
         for (unsigned n = 0; n < 4; ++n) {
             const unsigned sel = t.sel[n];
@@ -869,8 +870,10 @@ private:
         if (t.tiling != 8) return fail("tiled image (tile mode " + std::to_string(t.tiling) + ")");
         unsigned bytes;
         if (!imageBytes(t.dfmt, bytes)) return fail("image data format " + std::to_string(t.dfmt));
-        if (t.dfmt >= 35 && t.dfmt <= 39 && (t.nfmt != 0 || t.pitch < t.width))
-            return fail("BC" + std::to_string(t.dfmt - 34) + " requires UNORM and pitch >= width");
+        if (t.dfmt >= 35 && t.dfmt <= 39 &&
+            ((t.nfmt != 0 && !(t.dfmt >= 38 && t.nfmt == 1)) || t.pitch < t.width))
+            return fail("BC" + std::to_string(t.dfmt - 34) +
+                (t.dfmt >= 38 ? " requires UNORM/SNORM and pitch >= width" : " requires UNORM and pitch >= width"));
         if (resource) resource(t.base, imageSize(t, bytes));
         if (imageResource) {
             std::array<std::uint32_t, 8> descriptor{};

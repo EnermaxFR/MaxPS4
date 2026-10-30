@@ -295,7 +295,8 @@ int main() {
         }
         // A real translated pixel shader samples BC1 through BC5 through copied resource
         // ranges. Native-texture mode must fall back to the same buffer decoder.
-        for (unsigned format : {35u,36u,37u,38u,39u}) {
+        for (unsigned format : {35u,36u,37u,38u,39u}) for (unsigned number : {0u,1u}) {
+            if (number && format < 38) continue;
             const unsigned blockBytes = (format == 35 || format == 38) ? 8 : 16;
             Arena compressed;
             compressed.bytes = arena.bytes;
@@ -304,7 +305,7 @@ int main() {
                 if (format >= 38) {
                     for (unsigned c = 0; c < (format == 38 ? 1u : 2u); ++c) {
                         const std::uint64_t channel = ((c ? 0x053977053977ull : 0xfac688fac688ull) << 16) |
-                            ((block + c) % 2 ? 0xff00ull : 0x00ffull);
+                            (number ? ((block + c) % 2 ? 0x7f80ull : 0x807full) : ((block + c) % 2 ? 0xff00ull : 0x00ffull));
                         compressed.put(at + c * 8, std::uint32_t(channel));
                         compressed.put(at + c * 8 + 4, std::uint32_t(channel >> 32));
                     }
@@ -321,7 +322,7 @@ int main() {
             }
             Stream bc1;
             bc1.words = s.words; bc1.words.resize(bc1.words.size() - 6);
-            bc1.set(0x76, 0x0c, {std::uint32_t(image >> 8),format << 20,(width-1)|((height-1)<<14),
+            bc1.set(0x76, 0x0c, {std::uint32_t(image >> 8),(format << 20) | (number << 26),(width-1)|((height-1)<<14),
                 0x90800fac,(width-1)<<13,0,0,0,0x12,0,0x500000,0});
             bc1.words.insert(bc1.words.end(), {0xc0042700,3,std::uint32_t(indexBuffer),0,3,0});
             PM4SoftwareRenderer reference(compressed.memory);
@@ -342,7 +343,7 @@ int main() {
                 assert(renderer.nativeDraws == 0);
                 std::uint8_t pixels[width * height * 4] = {};
                 readPixels(device,queue,renderer.target(targetB),pixels);
-                const std::string label = "BC" + std::to_string(format - 34) +
+                const std::string label = "BC" + std::to_string(format - 34) + (number ? " SNORM" : " UNORM") +
                     (native ? " native-texture fallback" : " translated pixel shader");
                 assert(compare(label.c_str(),
                                pixels,compressed.bytes.data() + (targetB - Arena::start)));

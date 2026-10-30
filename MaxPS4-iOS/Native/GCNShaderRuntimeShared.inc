@@ -129,7 +129,8 @@ GCN_FN float4 gcn_texel_at(GCNMemory M, GCNRes8 t, int x, int y, bool resolved, 
     ulong base = (ulong(t.d[0]) | (ulong(t.d[1] & 0xffu) << 32)) << 8;
     uint dfmt = (t.d[1] >> 20) & 0x3fu; uint pitch = ((t.d[4] >> 13) & 0x3fffu) + 1u;
     if (dfmt >= 35u && dfmt <= 39u) {
-        if (((t.d[1] >> 26) & 15u) != 0u || pitch < (t.d[2] & 0x3fffu) + 1u)
+        uint number = (t.d[1] >> 26) & 15u;
+        if ((number != 0u && !(dfmt >= 38u && number == 1u)) || pitch < (t.d[2] & 0x3fffu) + 1u)
             return float4(0.0f, 0.0f, 0.0f, 0.0f);
         uint blockBytes = (dfmt == 35u || dfmt == 38u) ? 8u : 16u;
         ulong relative = (ulong(uint(y) / 4u) * ((pitch + 3u) / 4u) + uint(x) / 4u) * blockBytes;
@@ -140,7 +141,7 @@ GCN_FN float4 gcn_texel_at(GCNMemory M, GCNRes8 t, int x, int y, bool resolved, 
                 ulong at = relative + 8ul * c;
                 uint low = resolved ? gcn_packed32(M, offset + at) : gcn_ld32(M, base + at);
                 uint high = resolved ? gcn_packed32(M, offset + at + 4ul) : gcn_ld32(M, base + at + 4ul);
-                colour[c] = gcn_bc23_alpha(low, high, pixel, true);
+                colour[c] = number == 1u ? gcn_bc45_snorm(low, high, pixel) : gcn_bc23_alpha(low, high, pixel, true);
             }
             return gcn_texture_swizzle(t, colour);
         }

@@ -27,7 +27,7 @@ int main() {
             }
             if (layout == 3) { ranges[4] = span - 1; memory = {data.data(), 0, 0, ranges, 2}; }
             if (layout == 4) memory = {data.data(), base + span, 0};
-            for (unsigned number : {0u, 7u}) for (unsigned swizzle : {0xfacu, 0x977u, 0x249u, 0x688u}) {
+            for (unsigned number : {0u, 1u, 7u}) for (unsigned swizzle : {0xfacu, 0x977u, 0x249u, 0x688u}) {
                 rt::GCNRes8 texture{{unsigned(base >> 8), (format << 20) | (number << 26),
                     (width - 1) | ((height - 1) << 14), (8u << 20) | swizzle, (pitch - 1) << 13, 0, 0, 0}};
                 for (unsigned mode = 0; mode < 8; ++mode) for (unsigned linear : {0u, 1u}) for (bool unorm : {false, true}) {
