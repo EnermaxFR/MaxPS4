@@ -121,7 +121,8 @@ enum class PS4KernelService : uint32_t {
     gnm_ls, gnm_hs, gnm_hs_update, gnm_es, gnm_gs, gnm_push_color_marker, gnm_set_color_marker,
     gnm_ding_dong_marker, gnm_embedded_ps, gnm_compute_wait_address, gnm_compute_wait_semaphore,
     gnm_dispatch_indirect_mec, thread_getname,
-    trophy_game_info, trophy_group_info, trophy_unlock_state, rtc_time_t
+    trophy_game_info, trophy_group_info, trophy_unlock_state, rtc_time_t,
+    attr_getschedparam, mutex_reltimedlock
 };
 // Token bit of a trampoline whose function follows the POSIX convention: -1
 // with the error in the calling thread's errno (__Error) instead of an Orbis

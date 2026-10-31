@@ -174,7 +174,7 @@ final class MaxPS4GameSource: @unchecked Sendable {
     }
     // The run's last PS4 calls, oldest first: what a game did before it quit.
     private func recentCalls(_ engine: OpaquePointer) -> String {
-        var text = [CChar](repeating: 0, count: 16384)
+        var text = [CChar](repeating: 0, count: 32768)
         return maxps4_fex_engine_recent_calls(engine, &text, text.count) > 0 ? String(cString: text) : "aucun"
     }
     // The game's imports MaxPS4 stubs: those it called ("<library> <NID> (n appels)"), and how many exist.

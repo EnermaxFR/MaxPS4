@@ -307,7 +307,7 @@ int32_t maxps4_fex_engine_set_import_probe(maxps4_fex_engine *engine, uint32_t e
 // (stubbed, returning 0): one "<library> <NID> <calls>" line each, most
 // called first, as many whole lines as fit. Returns how many there are.
 int32_t maxps4_fex_engine_missing_imports(maxps4_fex_engine *engine, char *text, size_t capacity);
-// The last PS4 calls of the run (at most 64, oldest first; frequent lock, time
+// The last PS4 calls of the run (at most 128, oldest first; lock set-up and use, time
 // and thread-data calls left out): "t<thread> <name>(rdi, rsi, rdx, rcx) =
 // <result>" with the path of an open or stat, as many whole lines as fit.
 // Returns how many calls there are.

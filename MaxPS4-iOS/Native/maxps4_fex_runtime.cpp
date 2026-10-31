@@ -122,7 +122,7 @@ public:
         char path[64] = {};
     };
     std::mutex recent_lock;
-    std::array<RecentCall, 64> recent {};
+    std::array<RecentCall, 128> recent {};
     uint64_t recent_next = 0;
     static bool frequent(maxps4::PS4KernelService s) {
         using S = maxps4::PS4KernelService;
@@ -132,6 +132,10 @@ public:
         case S::rwlock_tryrdlock: case S::rwlock_trywrlock: case S::clock_gettime: case S::gettimeofday:
         case S::process_counter: case S::process_time: case S::get_specific: case S::set_specific: case S::thread_self:
         case S::yield: case S::errno_location: case S::tls_get_addr:
+        // Lock set-up: games create hundreds of locks at start-up.
+        case S::mutex_init: case S::mutex_destroy: case S::cond_init: case S::cond_destroy:
+        case S::mutexattr_init: case S::mutexattr_destroy: case S::mutexattr_settype: case S::mutexattr_gettype:
+        case S::mutexattr_accept: case S::rwlock_init: case S::rwlock_destroy:
             return true;
         default: return false;
         }

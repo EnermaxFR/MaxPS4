@@ -13,6 +13,7 @@
 #include <iterator>
 #include <new>
 #include <random>
+#include <chrono>
 #include <thread>
 #include <strings.h>
 #include <sys/stat.h>
@@ -587,6 +588,9 @@ constexpr Binding bindings[] = {
     {"sceKernelGetdirentries", "taRWhTJFTgE", PS4KernelService::getdirentries},
     // Thread names are not kept: an empty one (Unreal Engine 4 logs them).
     {"scePthreadGetname", "How7B8Oet6k", PS4KernelService::thread_getname},
+    // Imported by the libc games ship (Orbis error codes).
+    {"scePthreadAttrGetschedparam", "FXPWHNk8Of0", PS4KernelService::attr_getschedparam},
+    {"scePthreadMutexReltimedlockNp", "IafI2PxcPnQ", PS4KernelService::mutex_reltimedlock},
     {"pthread_getname_np", "9HzfhdtESio", PS4KernelService::thread_getname, "libkernel", true},
     // libSceLibcInternal (see internal_memcpy_code).
     {"internal_atan", "OXmauLdQ8kY", PS4KernelService::succeed, "libSceLibcInternal", false, false, 0, internal_atan_code, sizeof(internal_atan_code)},
@@ -1948,6 +1952,18 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     case S::gnm_compute_wait_semaphore: return gnm_.compute_wait_semaphore(c.rdi,uint32_t(c.rsi),c.rdx,uint32_t(c.rcx));
     case S::gnm_dispatch_indirect_mec: return gnm_.dispatch_indirect_mec(c.rdi,uint32_t(c.rsi),c.rdx,uint32_t(c.rcx));
     case S::process_id: return 1;
+    // AttrGetschedparam(attr*, sched_param*): the default priority.
+    case S::attr_getschedparam: return c.rdi && c.rsi && write(c.rsi, 700, 4) ? 0 : kernel_error(inval);
+    // MutexReltimedlockNp(mutex*, microseconds): tries until the delay runs out.
+    case S::mutex_reltimedlock: {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::microseconds(c.rsi);
+        for (;;) {
+            const Error e = threads_.trylock(c.rdi, thread);
+            if (e != busy) return kernel_error(e);
+            if (std::chrono::steady_clock::now() >= deadline) return kernel_error(timedout);
+            std::this_thread::sleep_for(std::chrono::microseconds(50));
+        }
+    }
     // scePthreadGetname(thread, char name[32]).
     case S::thread_getname: {
         const uint8_t empty[32] = {};

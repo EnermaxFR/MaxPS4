@@ -420,6 +420,11 @@ int main() {
         assert(memory.write(0x11a00, details, sizeof(details)) && call(S::trophy_unlock_state, 1, 1, 0x11a00, 0x11a10) == 0);
         assert(value32(0x11a00) == 0 && value32(0x11a0c) == 0 && value32(0x11a10) == 0);
     }
+    // MutexReltimedlockNp locks, or times out while another owner holds it.
+    assert(call(S::mutex_init, 0x11b00) == 0 && call(S::mutex_reltimedlock, 0x11b00, 1000) == 0);
+    assert(call(S::mutex_reltimedlock, 0x11b00, 2000) == kernel_error(timedout) || call(S::mutex_reltimedlock, 0x11b00, 2000) == kernel_error(deadlk));
+    assert(call(S::mutex_unlock, 0x11b00) == 0 && call(S::mutex_destroy, 0x11b00) == 0);
+    assert(call(S::attr_getschedparam, 0x11b40, 0x11b48) == 0 && value32(0x11b48) == 700);
     // sceRtcGetTime_t: 2000-01-01 00:00:01 UTC.
     {
         uint8_t date[16]{}; put_le(date, 0, 2000, 2); put_le(date, 2, 1, 2); put_le(date, 4, 1, 2); put_le(date, 10, 1, 2);
