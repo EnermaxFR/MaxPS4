@@ -32,7 +32,8 @@ public:
     // Its host span, or {0, 0} when the host did not grant it.
     static constexpr uint64_t app_area_base = 0x1000000000ULL, app_area_size = uint64_t(16) << 30;
     static void app_area(uint64_t& base, uint64_t& size);
-    static constexpr size_t region_limit = 4096;
+    // Unreal Engine games make thousands of small mappings.
+    static constexpr size_t region_limit = 65536;
     static constexpr uint64_t base = 0x1000000000ULL;
     explicit PS4VirtualMemory(const GuestELF& image) : image_(image) {}
     ps4::Error map(uint64_t hint, uint64_t length, uint32_t protection,
@@ -70,6 +71,11 @@ private:
     static ps4::Error permissions(uint32_t protection, uint8_t& result);
     static bool rounded(uint64_t length, uint64_t& result);
     Region* range(uint64_t address, uint64_t length);
+    // regions_ is sorted by address: the first region ending after `address`
+    // (regions_.size() if none), the one holding it (SIZE_MAX if none).
+    size_t first_ending_after(uint64_t address) const;
+    size_t holding(uint64_t address) const;
+    void insert(Region region);
     void release(uint64_t address, uint64_t size);
     // Host pages of the current image's mmap window (general images only).
     bool hosted(const Region& region) const;

@@ -1,5 +1,6 @@
 #include "maxps4_ps4_virtual_memory.h"
 #include <algorithm>
+#include <iterator>
 #include <new>
 #include <sys/mman.h>
 
@@ -32,18 +33,36 @@ Error PS4VirtualMemory::permissions(uint32_t protection, uint8_t& out) {
     out = uint8_t(((protection & 1U) << 2) | (protection & 2U) | ((protection & 4U) >> 2));
     return ok;
 }
+// regions_ is sorted by address and its regions never overlap.
+size_t PS4VirtualMemory::first_ending_after(uint64_t address) const {
+    auto it = std::upper_bound(regions_.begin(), regions_.end(), address,
+        [](uint64_t value, const Region& region) { return value < region.address; });
+    if (it != regions_.begin()) {
+        const auto& previous = *std::prev(it);
+        if (address - previous.address < previous.size) --it;
+    }
+    return size_t(it - regions_.begin());
+}
+size_t PS4VirtualMemory::holding(uint64_t address) const {
+    const size_t i = first_ending_after(address);
+    return i < regions_.size() && address >= regions_[i].address ? i : SIZE_MAX;
+}
+void PS4VirtualMemory::insert(Region region) {
+    const auto at = std::lower_bound(regions_.begin(), regions_.end(), region.address,
+        [](const Region& r, uint64_t value) { return r.address < value; });
+    regions_.insert(at, std::move(region));
+}
 bool PS4VirtualMemory::query(uint64_t address, bool next, uint64_t& start, uint64_t& end, uint32_t& protection) const {
+    // The page holding `address` or, with `next`, the first mapped one after it.
     const Region* best = nullptr;
     size_t first = 0;
-    for (const auto& region : regions_) {
-        for (size_t i = 0; i < region.pages.size(); ++i) {
-            if (region.pages[i] == 0xff) continue;
-            const uint64_t page_start = region.address + i * page_size;
-            const bool holds = address >= page_start && address < page_start + page_size;
-            if (!holds && (!next || page_start < address)) continue;
-            if (!best || page_start < best->address + first * page_size) { best = &region; first = i; }
-            break;
-        }
+    for (size_t r = first_ending_after(address); r < regions_.size() && !best; ++r) {
+        const Region& region = regions_[r];
+        const size_t from = address > region.address ? size_t((address - region.address) / page_size) : 0;
+        if (!next && (address < region.address || regions_[r].pages[from] == 0xff)) return false;
+        for (size_t i = from; i < region.pages.size(); ++i)
+            if (region.pages[i] != 0xff) { best = &region; first = i; break; }
+        if (!next) break;
     }
     if (!best) return false;
     const uint8_t p = best->pages[first];
@@ -91,9 +110,23 @@ Error PS4VirtualMemory::map(uint64_t hint, uint64_t length, uint32_t protection,
     return place(hint, length, page_size, protection, flags == 0x1012U, result);
 }
 void PS4VirtualMemory::release(uint64_t address, uint64_t size) {
-    // Every mapped page of [address, address + size), whatever its region.
-    for (uint64_t page = address; page < address + size; page += page_size)
-        if (range(page, page_size)) (void)unmap(page, page_size);
+    // Every mapped page of [address, address + size), whatever its region;
+    // whole runs of mapped pages at once.
+    const uint64_t end = address + size;
+    for (size_t r = first_ending_after(address); r < regions_.size() && regions_[r].address < end;) {
+        const Region& region = regions_[r];
+        const uint64_t from = std::max(address, region.address);
+        const uint64_t to = std::min(end, region.address + region.size);
+        size_t page = size_t((from - region.address) / page_size);
+        const size_t stop = size_t((to - region.address + page_size - 1) / page_size);
+        while (page < stop && region.pages[page] == 0xff) ++page;
+        if (page == stop) { ++r; continue; }
+        size_t run = page;
+        while (run < stop && region.pages[run] != 0xff) ++run;
+        const uint64_t at = region.address + page * page_size;
+        (void)unmap(at, (run - page) * page_size); // Re-sorts: look again from here.
+        r = first_ending_after(at);
+    }
 }
 Error PS4VirtualMemory::place(uint64_t hint, uint64_t length, uint64_t alignment, uint32_t protection,
     bool fixed, uint64_t& result) {
@@ -121,11 +154,11 @@ Error PS4VirtualMemory::place(uint64_t hint, uint64_t length, uint64_t alignment
             // Inside the reserved application area: ours, so its pages are
             // committed in place (and go back to PROT_NONE when released).
             release(hint, size);
+            if (!host_protect(hint, size, permission)) return nomem;
             try {
-                regions_.push_back({hint, size, reinterpret_cast<uint8_t*>(hint), {},
-                                    std::vector<uint8_t>(size_t(size / page_size), permission)});
-            } catch (const std::bad_alloc&) { return nomem; }
-            if (!host_protect(hint, size, permission)) { regions_.pop_back(); return nomem; }
+                insert({hint, size, reinterpret_cast<uint8_t*>(hint), {},
+                        std::vector<uint8_t>(size_t(size / page_size), permission)});
+            } catch (const std::bad_alloc&) { host_protect(hint, size, 0xff); return nomem; }
             used_ += size_t(size); result = hint;
             return ok;
         }
@@ -134,13 +167,11 @@ Error PS4VirtualMemory::place(uint64_t hint, uint64_t length, uint64_t alignment
             void* granted = ::mmap(reinterpret_cast<void*>(hint), size_t(size), PROT_NONE,
                                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
             if (granted == reinterpret_cast<void*>(hint)) {
+                if (!host_protect(hint, size, permission)) { ::munmap(granted, size_t(size)); return nomem; }
                 try {
-                    regions_.push_back({hint, size, reinterpret_cast<uint8_t*>(hint), {},
-                                        std::vector<uint8_t>(size_t(size / page_size), permission), true});
+                    insert({hint, size, reinterpret_cast<uint8_t*>(hint), {},
+                            std::vector<uint8_t>(size_t(size / page_size), permission), true});
                 } catch (const std::bad_alloc&) { ::munmap(granted, size_t(size)); return nomem; }
-                if (!host_protect(hint, size, permission)) {
-                    regions_.pop_back(); ::munmap(granted, size_t(size)); return nomem;
-                }
                 used_ += size_t(size); result = hint;
                 return ok;
             }
@@ -160,6 +191,9 @@ Error PS4VirtualMemory::place(uint64_t hint, uint64_t length, uint64_t alignment
     auto align = [&](uint64_t value) {
         return value > UINT64_MAX - (alignment - 1) ? UINT64_MAX : (value + alignment - 1) & ~(alignment - 1);
     };
+    auto page_end = [](uint64_t end) {
+        return end > UINT64_MAX - (page_size - 1) ? UINT64_MAX : (end + page_size - 1) / page_size * page_size;
+    };
     uint64_t start = host ? window : base;
     if (host && hint > window && hint < window + window_bytes) start = hint; // A search start, not a demand.
     uint64_t candidate = fixed ? hint : align(start);
@@ -172,17 +206,18 @@ Error PS4VirtualMemory::place(uint64_t hint, uint64_t length, uint64_t alignment
             candidate = align(window);
             continue;
         }
+        // The first region ending after the candidate is the only one that
+        // can start inside it (regions are sorted and disjoint).
         uint64_t next = candidate;
-        auto exclude = [&](uint64_t address, uint64_t count) {
-            if (count > UINT64_MAX - address) { next = UINT64_MAX; return; }
-            const uint64_t end = address + count;
-            if (candidate < end && address < candidate + size) {
-                if (end > UINT64_MAX - (page_size - 1)) next = UINT64_MAX;
-                else next = std::max(next, (end + page_size - 1) / page_size * page_size);
+        const size_t r = first_ending_after(candidate);
+        if (r < regions_.size() && regions_[r].address < candidate + size)
+            next = page_end(regions_[r].address + regions_[r].size);
+        if (!host)
+            for (const auto& segment : image_.segments()) {
+                if (segment.memory_size > UINT64_MAX - segment.address) { next = UINT64_MAX; break; }
+                if (candidate < segment.address + segment.memory_size && segment.address < candidate + size)
+                    next = std::max(next, page_end(segment.address + segment.memory_size));
             }
-        };
-        for (const auto& region : regions_) exclude(region.address, region.size);
-        if (!host) for (const auto& segment : image_.segments()) exclude(segment.address, segment.memory_size);
         if (next == candidate) break;
         if (fixed) return nomem; // Still in use after release: not ours to replace.
         candidate = align(next);
@@ -197,22 +232,21 @@ Error PS4VirtualMemory::place(uint64_t hint, uint64_t length, uint64_t alignment
             pending.bytes.assign(size_t(size), 0);
             pending.data = pending.bytes.data();
         }
-        regions_.push_back(std::move(pending));
+        insert(std::move(pending));
     } catch (const std::bad_alloc&) { return nomem; }
     used_ += size_t(size); result = candidate;
     return ok;
 }
 PS4VirtualMemory::Region* PS4VirtualMemory::range(uint64_t address, uint64_t size) {
-    for (auto& region : regions_) {
-        if (address < region.address) continue;
-        const uint64_t relative = address - region.address;
-        if (relative >= region.size || size > region.size - relative) continue;
-        const size_t first = size_t(relative / page_size);
-        const size_t last = size_t((relative + size - 1) / page_size);
-        for (size_t i = first; i <= last; ++i) if (region.pages[i] == 0xff) return nullptr;
-        return &region;
-    }
-    return nullptr;
+    const size_t r = holding(address);
+    if (r == SIZE_MAX) return nullptr;
+    Region& region = regions_[r];
+    const uint64_t relative = address - region.address;
+    if (size > region.size - relative) return nullptr;
+    const size_t first = size_t(relative / page_size);
+    const size_t last = size_t((relative + size - 1) / page_size);
+    for (size_t i = first; i <= last; ++i) if (region.pages[i] == 0xff) return nullptr;
+    return &region;
 }
 Error PS4VirtualMemory::unmap(uint64_t address, uint64_t length) {
     uint64_t size;
@@ -225,13 +259,14 @@ Error PS4VirtualMemory::unmap(uint64_t address, uint64_t length) {
         // and after it, so the span can be mapped again (MAP_FIXED included).
         if (region->outside ? ::munmap(reinterpret_cast<void*>(address), size_t(size)) != 0 :
                               !host_protect(address, size, 0xff)) return nomem;
+        const size_t index = size_t(region - regions_.data());
         Region old = std::move(*region);
-        regions_.erase(regions_.begin() + (region - regions_.data()));
+        regions_.erase(regions_.begin() + long(index));
         const size_t last = first + size_t(size / page_size);
         auto keep = [&](size_t from, size_t to) {
             if (from == to) return;
             const uint64_t at = old.address + from * page_size;
-            regions_.push_back({at, (to - from) * page_size, reinterpret_cast<uint8_t*>(at), {},
+            insert({at, (to - from) * page_size, reinterpret_cast<uint8_t*>(at), {},
                 std::vector<uint8_t>(old.pages.begin() + long(from), old.pages.begin() + long(to)), old.outside});
         };
         keep(0, first);
@@ -241,12 +276,12 @@ Error PS4VirtualMemory::unmap(uint64_t address, uint64_t length) {
     }
     for (size_t i = first; i < first + size / page_size; ++i) {
         region->pages[i] = 0xff;
-        if (!region->bytes.empty()) std::fill_n(region->bytes.begin() + i * page_size, page_size, uint8_t(0));
+        if (!region->bytes.empty()) std::fill_n(region->bytes.begin() + long(i * page_size), page_size, uint8_t(0));
     }
     if (std::all_of(region->pages.begin(), region->pages.end(), [](uint8_t p) { return p == 0xff; })) {
         used_ -= size_t(region->size);
         const size_t index = size_t(region - regions_.data());
-        regions_.erase(regions_.begin() + index);
+        regions_.erase(regions_.begin() + long(index));
     }
     return ok;
 }
@@ -260,7 +295,7 @@ Error PS4VirtualMemory::protect(uint64_t address, uint64_t length, uint32_t prot
     if (!region) return nomem;
     if (hosted(*region) && !host_protect(address, size, permission)) return nomem;
     const size_t first = size_t((address - region->address) / page_size);
-    std::fill_n(region->pages.begin() + first, size_t(size / page_size), permission);
+    std::fill_n(region->pages.begin() + long(first), size_t(size / page_size), permission);
     return ok;
 }
 void PS4VirtualMemory::reset() {
@@ -274,24 +309,20 @@ void PS4VirtualMemory::reset() {
 }
 size_t PS4VirtualMemory::contiguous(uint64_t address, size_t limit, uint32_t permissions) const {
     if (!limit || !permissions || (permissions & ~7U)) return 0;
-    for (const auto& region : regions_) {
-        if (address < region.address) continue;
-        const uint64_t relative = address - region.address;
-        if (relative >= region.size) continue;
-        const size_t first = size_t(relative / page_size);
-        size_t last = first;
-        while (last < region.pages.size() && region.pages[last] != 0xff &&
-               (region.pages[last] & permissions) == permissions) ++last;
-        if (last == first) return 0;
-        return std::min(limit, size_t(last * page_size - relative));
-    }
-    return 0;
+    const size_t r = holding(address);
+    if (r == SIZE_MAX) return 0;
+    const Region& region = regions_[r];
+    const uint64_t relative = address - region.address;
+    const size_t first = size_t(relative / page_size);
+    size_t last = first;
+    while (last < region.pages.size() && region.pages[last] != 0xff &&
+           (region.pages[last] & permissions) == permissions) ++last;
+    if (last == first) return 0;
+    return std::min(limit, size_t(last * page_size - relative));
 }
 const uint8_t* PS4VirtualMemory::translate(uint64_t address, size_t size, uint32_t permissions) const {
     if (!size || contiguous(address, size, permissions) != size) return nullptr;
-    for (const auto& region : regions_)
-        if (address >= region.address && address - region.address < region.size)
-            return region.data + (address - region.address);
-    return nullptr;
+    const size_t r = holding(address);
+    return r == SIZE_MAX ? nullptr : regions_[r].data + (address - regions_[r].address);
 }
 } // namespace maxps4
