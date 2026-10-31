@@ -686,6 +686,193 @@ constexpr Binding bindings[] = {
     {"sceScreenShotEnable", "2xxUtuC-RzE", PS4KernelService::succeed, "libSceScreenShot"},
     {"sceScreenShotDisable", "tIYf0W5VTi8", PS4KernelService::succeed, "libSceScreenShot"},
     {"sceNetCtlTerm", "Z4wwCFiBELQ", PS4KernelService::succeed, "libSceNetCtl"},
+    // Mortal Kombat: Legacy Kollection (Digital Eclipse), after shadPS4.
+    // POSIX names the PlayFab and Party libraries import from libScePosix.
+    {"open", "wuCroIGjt2g", PS4KernelService::open, "libkernel", true},
+    {"read", "AqBioC2vF3I", PS4KernelService::read, "libkernel", true},
+    {"write", "FN4gaPmuFV8", PS4KernelService::write, "libkernel", true},
+    {"lseek", "Oy6IpwgtYOk", PS4KernelService::lseek, "libkernel", true},
+    {"fstat", "mqQMh1zPPT8", PS4KernelService::fstat, "libkernel", true},
+    {"ftruncate", "ih4CD9-gghM", PS4KernelService::ftruncate, "libkernel", true},
+    {"munmap", "UqDGjXA5yUM", PS4KernelService::munmap, "libkernel", true},
+    {"mprotect", "YQOfxL4QfeU", PS4KernelService::mprotect, "libkernel", true},
+    {"mlock", "mTBZfEal2Bw", PS4KernelService::succeed, "libkernel", true},
+    {"madvise", "Jahsnh4KKkg", PS4KernelService::succeed, "libkernel", true},
+    {"flock", "9eMlfusH4sU", PS4KernelService::succeed, "libkernel", true},
+    {"fcntl", "8nY19bKoiZk", PS4KernelService::succeed, "libkernel", true},
+    {"clock_getres", "smIj7eqzZE8", PS4KernelService::clock_getres, "libkernel", true},
+    {"pthread_equal", "7Xl257M4VNI", PS4KernelService::thread_equal, "libkernel", true},
+    {"pthread_condattr_setclock", "EjllaAqAPZo", PS4KernelService::succeed, "libkernel", true},
+    {"sem_init", "pDuPEf3m4fI", PS4KernelService::sem_init, "libkernel", true},
+    {"sem_destroy", "cDW233RAwWo", PS4KernelService::sem_destroy, "libkernel", true},
+    {"sem_wait", "YCV5dGGBcCo", PS4KernelService::sem_wait, "libkernel", true},
+    {"sem_post", "IKP8typ0QUk", PS4KernelService::sem_post, "libkernel", true},
+    {"recvmsg", "hI7oVeOluPM", PS4KernelService::net_unavailable, "libkernel", true},
+    {"sendmsg", "aNeavPDNKzA", PS4KernelService::net_unavailable, "libkernel", true},
+    {"inet_ntop", "5jRCs2axtr4", PS4KernelService::net_ntop, "libkernel", true},
+    {"inet_pton", "4n51s0zEf0c", PS4KernelService::net_pton, "libkernel", true},
+    {"sceKernelUuidCreate", "Xjoosiw+XPI", PS4KernelService::uuid_create},
+    {"sceKernelCheckReachability", "uWyW3v98sU4", PS4KernelService::succeed},
+    // libSceNet without a network: sockets and the resolver fail, the rest is accepted.
+    {"sceNetAccept", "PIWqhn9oSxc", PS4KernelService::net_unavailable, "libSceNet"},
+    {"sceNetBind", "bErx49PgxyY", PS4KernelService::net_unavailable, "libSceNet"},
+    {"sceNetConnect", "OXXX4mUk3uk", PS4KernelService::net_unavailable, "libSceNet"},
+    {"sceNetGetsockname", "hoOAofhhRvE", PS4KernelService::net_unavailable, "libSceNet"},
+    {"sceNetGetsockopt", "xphrZusl78E", PS4KernelService::net_unavailable, "libSceNet"},
+    {"sceNetListen", "kOj1HiAGE54", PS4KernelService::net_unavailable, "libSceNet"},
+    {"sceNetRecvmsg", "wvuUDv0jrMI", PS4KernelService::net_unavailable, "libSceNet"},
+    {"sceNetSendmsg", "2eKbgcboJso", PS4KernelService::net_unavailable, "libSceNet"},
+    {"sceNetSetsockopt", "2mKX2Spso7I", PS4KernelService::net_unavailable, "libSceNet"},
+    {"sceNetShutdown", "TSM6whtekok", PS4KernelService::net_unavailable, "libSceNet"},
+    {"sceNetSocket", "Q4qBuN-c0ZM", PS4KernelService::net_unavailable, "libSceNet"},
+    {"sceNetResolverCreate", "C4UgDHHPvdw", PS4KernelService::net_unavailable, "libSceNet"},
+    {"sceNetResolverStartNtoaMultipleRecords", "RCCY01Xd+58", PS4KernelService::net_unavailable, "libSceNet"},
+    {"sceNetSocketClose", "45ggEzakPJQ", PS4KernelService::succeed, "libSceNet"},
+    {"sceNetTerm", "cTGkc6-TBlI", PS4KernelService::succeed, "libSceNet"},
+    {"sceNetPoolDestroy", "K7RlrTkI-mw", PS4KernelService::succeed, "libSceNet"},
+    {"sceNetResolverDestroy", "kJlYH5uMAWI", PS4KernelService::succeed, "libSceNet"},
+    {"sceNetResolverGetError", "J5i3hiLJMPk", PS4KernelService::succeed, "libSceNet"},
+    {"sceNetErrnoLoc", "HQOwnfMGipQ", PS4KernelService::errno_location, "libSceNet"},
+    {"sceNetInetNtop", "9vA2aW+CHuA", PS4KernelService::net_ntop, "libSceNet"},
+    {"sceNetInetPton", "8Kcp5d-q1Uo", PS4KernelService::net_pton, "libSceNet"},
+    // HTTP, HTTP/2 and Web API contexts open; every request fails (offline).
+    {"sceHttpInit", "A9cVMUtEp4Y", PS4KernelService::net_pool, "libSceHttp"},
+    {"sceHttpTerm", "Ik-KpLTlf7Q", PS4KernelService::succeed, "libSceHttp"},
+    {"sceHttpDeleteTemplate", "4I8vEpuEhZ8", PS4KernelService::succeed, "libSceHttp"},
+    {"sceHttpDeleteConnection", "P6A3ytpsiYc", PS4KernelService::succeed, "libSceHttp"},
+    {"sceHttpDeleteRequest", "qe7oZ+v4PWA", PS4KernelService::succeed, "libSceHttp"},
+    {"sceHttpAbortRequest", "hvG6GfBMXg8", PS4KernelService::succeed, "libSceHttp"},
+    {"sceHttpCreateTemplate", "0gYjPTR-6cY", PS4KernelService::net_unavailable, "libSceHttp"},
+    {"sceHttpCreateConnectionWithURL", "qgxDBjorUxs", PS4KernelService::net_unavailable, "libSceHttp"},
+    {"sceHttpCreateRequestWithURL", "Aeu5wVKkF9w", PS4KernelService::net_unavailable, "libSceHttp"},
+    {"sceHttpAddRequestHeader", "EY28T2bkN7k", PS4KernelService::net_unavailable, "libSceHttp"},
+    {"sceHttpSendRequest", "1e2BNwI-XzE", PS4KernelService::net_unavailable, "libSceHttp"},
+    {"sceHttpReadData", "P5pdoykPYTk", PS4KernelService::net_unavailable, "libSceHttp"},
+    {"sceHttpGetStatusCode", "0a2TBNfE3BU", PS4KernelService::net_unavailable, "libSceHttp"},
+    {"sceHttpGetResponseContentLength", "yuO2H2Uvnos", PS4KernelService::net_unavailable, "libSceHttp"},
+    {"sceHttpSetRequestContentLength", "PTiFIUxCpJc", PS4KernelService::net_unavailable, "libSceHttp"},
+    {"sceHttp2Init", "3JCe3lCbQ8A", PS4KernelService::net_pool, "libSceHttp2"},
+    {"sceHttp2Term", "YiBUtz-pGkc", PS4KernelService::succeed, "libSceHttp2"},
+    {"sceHttp2DeleteTemplate", "pDom5-078DA", PS4KernelService::succeed, "libSceHttp2"},
+    {"sceHttp2DeleteRequest", "c8D9qIjo8EY", PS4KernelService::succeed, "libSceHttp2"},
+    {"sceHttp2CreateTemplate", "+wCt7fCijgk", PS4KernelService::net_unavailable, "libSceHttp2"},
+    {"sceHttp2CreateRequestWithURL", "mmyOCxQMVYQ", PS4KernelService::net_unavailable, "libSceHttp2"},
+    {"sceHttp2AddRequestHeader", "nrPfOE8TQu0", PS4KernelService::net_unavailable, "libSceHttp2"},
+    {"sceHttp2SendRequestAsync", "A+NVAFu4eCg", PS4KernelService::net_unavailable, "libSceHttp2"},
+    {"sceHttp2ReadDataAsync", "bGN-6zbo7ms", PS4KernelService::net_unavailable, "libSceHttp2"},
+    {"sceHttp2WaitAsync", "MOp-AUhdfi8", PS4KernelService::net_unavailable, "libSceHttp2"},
+    {"sceHttp2GetStatusCode", "9XYJwCf3lEA", PS4KernelService::net_unavailable, "libSceHttp2"},
+    {"sceHttp2GetAllResponseHeaders", "-rdXUi2XW90", PS4KernelService::net_unavailable, "libSceHttp2"},
+    {"sceNpWebApi2Initialize", "+o9816YQhqQ", PS4KernelService::net_pool, "libSceNpWebApi2"},
+    {"sceNpWebApi2Terminate", "bEvXpcEk200", PS4KernelService::succeed, "libSceNpWebApi2"},
+    {"sceNpWebApi2DeleteUserContext", "9X9+cneTGUU", PS4KernelService::succeed, "libSceNpWebApi2"},
+    {"sceNpWebApi2DeleteRequest", "vvzWO-DvG1s", PS4KernelService::succeed, "libSceNpWebApi2"},
+    {"sceNpWebApi2PushEventDeleteFilter", "KJdPcOGmK58", PS4KernelService::succeed, "libSceNpWebApi2"},
+    {"sceNpWebApi2PushEventDeleteHandle", "fIATVMo4Y1w", PS4KernelService::succeed, "libSceNpWebApi2"},
+    {"sceNpWebApi2PushEventDeletePushContext", "QafxeZM3WK4", PS4KernelService::succeed, "libSceNpWebApi2"},
+    {"sceNpWebApi2PushEventUnregisterCallback", "hOnIlcGrO6g", PS4KernelService::succeed, "libSceNpWebApi2"},
+    {"sceNpWebApi2PushEventUnregisterPushContextCallback", "PmyrbbJSFz0", PS4KernelService::succeed, "libSceNpWebApi2"},
+    {"sceNpWebApi2AddWebTraceTag", "MgsTa76wlEk", PS4KernelService::succeed, "libSceNpWebApi2"},
+    {"sceNpWebApi2CreateUserContext", "sk54bi6FtYM", PS4KernelService::np_signed_out, "libSceNpWebApi2"},
+    {"sceNpWebApi2CreateRequest", "3EI-OSJ65Xc", PS4KernelService::np_signed_out, "libSceNpWebApi2"},
+    {"sceNpWebApi2AddHttpRequestHeader", "egOOvrnF6mI", PS4KernelService::np_signed_out, "libSceNpWebApi2"},
+    {"sceNpWebApi2SendRequest", "lQOCF84lvzw", PS4KernelService::np_signed_out, "libSceNpWebApi2"},
+    {"sceNpWebApi2ReadData", "OOY9+ObfKec", PS4KernelService::np_signed_out, "libSceNpWebApi2"},
+    {"sceNpWebApi2GetHttpResponseHeaderValue", "hksbskNToEA", PS4KernelService::np_signed_out, "libSceNpWebApi2"},
+    {"sceNpWebApi2PushEventCreateFilter", "MsaFhR+lPE4", PS4KernelService::np_signed_out, "libSceNpWebApi2"},
+    {"sceNpWebApi2PushEventCreateHandle", "WV1GwM32NgY", PS4KernelService::np_signed_out, "libSceNpWebApi2"},
+    {"sceNpWebApi2PushEventCreatePushContext", "NNVf18SlbT8", PS4KernelService::np_signed_out, "libSceNpWebApi2"},
+    {"sceNpWebApi2PushEventRegisterCallback", "fY3QqeNkF8k", PS4KernelService::np_signed_out, "libSceNpWebApi2"},
+    {"sceNpWebApi2PushEventRegisterPushContextCallback", "lxtHJMwBsaU", PS4KernelService::np_signed_out, "libSceNpWebApi2"},
+    {"sceNpWebApi2PushEventStartPushContextCallback", "AAj9X+4aGYA", PS4KernelService::np_signed_out, "libSceNpWebApi2"},
+    {"sceSslInit", "hdpVEUDFW3s", PS4KernelService::net_pool, "libSceSsl"},
+    {"sceSslTerm", "0K1yQ6Lv-Yc", PS4KernelService::succeed, "libSceSsl"},
+    {"sceNetCtlGetResult", "0cBgduPRR+M", PS4KernelService::netctl_info, "libSceNetCtl"},
+    // Voice chat: no microphone, so no port opens.
+    {"sceVoiceInit", "9TrhuGzberQ", PS4KernelService::succeed, "libSceVoice"},
+    {"sceVoiceEnd", "Oo0S5PH7FIQ", PS4KernelService::succeed, "libSceVoice"},
+    {"sceVoiceStart", "54phPH2LZls", PS4KernelService::succeed, "libSceVoice"},
+    {"sceVoiceStop", "Ao2YNSA7-Qo", PS4KernelService::succeed, "libSceVoice"},
+    {"sceVoiceDeletePort", "b7kJI+nx2hg", PS4KernelService::succeed, "libSceVoice"},
+    {"sceVoiceSetVolume", "QBFoAIjJoXQ", PS4KernelService::succeed, "libSceVoice"},
+    {"sceVoiceDisconnectIPortFromOPort", "ajVj3QG2um4", PS4KernelService::succeed, "libSceVoice"},
+    {"sceVoiceCreatePort", "nXpje5yNpaE", PS4KernelService::net_unavailable, "libSceVoice"},
+    {"sceVoiceConnectIPortToOPort", "oV9GAdJ23Gw", PS4KernelService::net_unavailable, "libSceVoice"},
+    {"sceVoiceGetPortInfo", "CrLqDwWLoXM", PS4KernelService::net_unavailable, "libSceVoice"},
+    {"sceVoiceReadFromOPort", "cQ6DGsQEjV4", PS4KernelService::net_unavailable, "libSceVoice"},
+    {"sceVoiceWriteToIPort", "YeJl6yDlhW0", PS4KernelService::net_unavailable, "libSceVoice"},
+    {"sceNpCheckCallback", "3Zl8BePTh9Y", PS4KernelService::succeed, "libSceNpManager"},
+    {"sceNpNotifyPlusFeature", "Gaxrp3EWY-M", PS4KernelService::succeed, "libSceNpManager"},
+    {"sceNpRegisterNpReachabilityStateCallback", "hw5KNqAAels", PS4KernelService::succeed, "libSceNpManager"},
+    {"sceNpRegisterStateCallbackA", "qQJfO8HAiaY", PS4KernelService::succeed, "libSceNpManager"},
+    {"sceNpSetContentRestriction", "A2CQ3kgSopQ", PS4KernelService::succeed, "libSceNpManager"},
+    {"sceNpGetParentalControlInfoA", "m9L3O6yst-U", PS4KernelService::np_signed_out, "libSceNpManager"},
+    {"sceNpAuthCreateRequest", "6bwFkosYRQg", PS4KernelService::np_create_request, "libSceNpAuth"},
+    {"sceNpAuthDeleteRequest", "H8wG9Bk-nPc", PS4KernelService::succeed, "libSceNpAuth"},
+    {"sceNpAuthGetAuthorizationCodeV3", "KI4dHLlTNl0", PS4KernelService::np_signed_out, "libSceNpAuth"},
+    // The store and the PlayGo dialog finish at once, like message dialogs.
+    {"sceNpCommerceDialogInitialize", "0aR2aWmQal4", PS4KernelService::msg_init, "libSceNpCommerce"},
+    {"sceNpCommerceDialogOpen", "DfSCDRA3EjY", PS4KernelService::msg_open, "libSceNpCommerce"},
+    {"sceNpCommerceDialogUpdateStatus", "LR5cwFMMCVE", PS4KernelService::msg_status, "libSceNpCommerce"},
+    {"sceNpCommerceDialogGetResult", "r42bWcQbtZY", PS4KernelService::msg_result, "libSceNpCommerce"},
+    {"sceNpCommerceDialogTerminate", "m-I92Ab50W8", PS4KernelService::msg_term, "libSceNpCommerce"},
+    {"scePlayGoDialogInitialize", "fECamTJKpsM", PS4KernelService::msg_init, "libScePlayGoDialog"},
+    {"scePlayGoDialogOpen", "kHd72ukqbxw", PS4KernelService::msg_open, "libScePlayGoDialog"},
+    {"scePlayGoDialogUpdateStatus", "Yb60K7BST48", PS4KernelService::msg_status, "libScePlayGoDialog"},
+    {"scePlayGoDialogGetResult", "wx9TDplJKB4", PS4KernelService::msg_result, "libScePlayGoDialog"},
+    {"scePlayGoDialogTerminate", "okgIGdr5Iz0", PS4KernelService::msg_term, "libScePlayGoDialog"},
+    // No on-screen keyboard: the IME dialog does not open.
+    {"sceImeDialogInit", "NUeBrN7hzf0", PS4KernelService::net_unavailable, "libSceImeDialog"},
+    {"sceImeDialogGetResult", "x01jxu+vxlc", PS4KernelService::net_unavailable, "libSceImeDialog"},
+    {"sceImeDialogGetStatus", "IADmD4tScBY", PS4KernelService::succeed, "libSceImeDialog"},
+    {"sceImeDialogTerm", "gyTyVn+bXMw", PS4KernelService::succeed, "libSceImeDialog"},
+    // GPU debugging, validation and resource registration: off and empty.
+    {"sceGnmDebugHardwareStatus", "qpGITzPE+Zc", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmDisableMipStatsReport", "HHo1BAljZO8", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmDriverCaptureInProgress", "TLV4mswiZ4A", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmDriverTraceInProgress", "R6z1xM3pW-w", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmDriverTriggerCapture", "d88anrgNoKY", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmRequestMipStatsReportAndReset", "f85orjx7qts", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmSetupMipStatsReport", "+xuDhxlWRPg", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmSetWaveLimitMultipliers", "XiyzNZ9J4nQ", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmValidateDisableDiagnostics", "SXw4dZEkgpA", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmValidateDisableDiagnostics2", "BgM3t3LvcNk", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmValidateDispatchCommandBuffers", "qGP74T5OWJc", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmValidateDrawCommandBuffers", "hsZPf1lON7E", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmValidateGetDiagnosticInfo", "RX7XCNSaL6I", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmValidateGetDiagnostics", "5SHGNwLXBV4", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmValidateGetVersion", "HzMN7ANqYEc", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmValidateOnSubmitEnabled", "rTIV11nMQuM", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmValidateResetState", "MBMa6EFu4Ko", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmValidationRegisterMemoryCheckCallback", "Q7t4VEYLafI", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceRazorCaptureImmediate", "u9YKpRRHe-M", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceRazorIsLoaded", "f33OrruQYbM", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmSetResourceRegistrationUserMemory", "q-qhDxP67Hg", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmQueryResourceRegistrationUserMemoryRequirements", "6IMbpR7nTzA", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmSetResourceUserData", "K3BKBBYKUSE", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmGetGpuBlockStatus", "oL4hGI1PMpw", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmGetLastWaitedAddress", "iFirFzgYsvw", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmGetEqTimeStamp", "H7-fgvEutM0", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmGetProtectionFaultTimeStamp", "fzJdEihTFV4", PS4KernelService::succeed, "libSceGnmDriver"},
+    {"sceGnmFindResourcesPublic", "4Mv9OXypBG8", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmGetOwnerName", "QJjPjlmPAL0", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmGetResourceBaseAddressAndSizeInBytes", "4PKnYXOhcx4", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmGetResourceName", "O0S96YnD04U", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmGetResourceShaderGuid", "UBv7FkVfzcQ", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmGetResourceType", "bdqdvIkLPIU", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmGetResourceUserData", "UoBuWAhKk7U", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmGetShaderProgramBaseAddress", "nEyFbYUloIM", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmGetPhysicalCounterFromVirtualized", "dewXw5roLs0", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmGetTheTessellationFactorRingBufferBaseAddress", "ln33zjBrfjk", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmLogicalCuIndexToPhysicalCuIndex", "26PM5Mzl8zc", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmLogicalCuMaskToPhysicalCuMask", "RU74kek-N0c", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmLogicalTcaUnitToPhysical", "Kl0Z3LH07QI", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmDrawIndexIndirectCountMulti", "thbPcG7E7qk", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmDrawIndirectCountMulti", "cUCo8OvArrw", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmDrawIndexMultiInstanced", "jHdPvIzlpKc", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmDrawOpaqueAuto", "stDSYW2SBVM", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmRequestFlipAndSubmitDone", "gObODli-OH8", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
+    {"sceGnmRequestFlipAndSubmitDoneForWorkload", "6YRHhh5mHCs", PS4KernelService::gnm_unsupported, "libSceGnmDriver"},
     // Data objects, filled by PS4Libkernel::initialize_data. "MaxPS4errno" is
     // engine-internal (no game imports it): the per-thread errno cells.
     {"__stack_chk_guard", "f7uOxY9mM1U", PS4KernelService::stack_chk_guard, "libkernel", false, false, 8},
@@ -1968,6 +2155,52 @@ int64_t PS4Libkernel::extended(PS4KernelService service, const PS4KernelCall& c,
     case S::thread_getname: {
         const uint8_t empty[32] = {};
         return c.rsi && memory_.write(c.rsi, empty, sizeof(empty)) ? 0 : kernel_error(fault);
+    }
+    // POSIX semaphores: sem_t holds a kernel semaphore's handle.
+    case S::sem_init:
+        if (c.rsi) return kernel_error(notsup); // Shared between processes.
+        if (c.rdx > uint64_t(INT32_MAX)) return kernel_error(inval);
+        return kernel_error(threads_.sema_create(c.rdi, 0, signed32(c.rdx), INT32_MAX));
+    case S::sem_destroy: case S::sem_wait: case S::sem_post: {
+        uint8_t cell[8];
+        if (!c.rdi || !memory_.read(c.rdi, cell, sizeof(cell))) return kernel_error(inval);
+        const uint64_t handle = get_le(cell, 8);
+        if (service == S::sem_destroy) return kernel_error(threads_.sema_delete(handle));
+        if (service == S::sem_post) return kernel_error(threads_.sema_signal(handle, 1));
+        return kernel_error(threads_.sema_wait(handle, 1, 0, false));
+    }
+    // sceKernelUuidCreate(SceKernelUuid*): a random version 4 UUID.
+    case S::uuid_create: {
+        if (!c.rdi) return kernel_error(inval);
+        std::random_device device;
+        uint8_t uuid[16];
+        for (auto& byte : uuid) byte = uint8_t(device());
+        uuid[6] = uint8_t((uuid[6] & 0x0f) | 0x40); uuid[8] = uint8_t((uuid[8] & 0x3f) | 0x80);
+        return memory_.write(c.rdi, uuid, sizeof(uuid)) ? 0 : kernel_error(fault);
+    }
+    // inet_pton(af, const char*, void*) and inet_ntop(af, const void*, char*,
+    // size): IPv4 (AF_INET, 2) only, so 0/null for anything else.
+    case S::net_pton: {
+        if (c.rdi != 2) return 0;
+        char text[16] = {};
+        for (size_t i = 0; i < sizeof(text); ++i) {
+            if (!memory_.read(c.rsi + i, &text[i], 1)) return kernel_error(fault);
+            if (!text[i]) break;
+        }
+        if (text[sizeof(text) - 1]) return 0;
+        unsigned part[4]; char end = 0;
+        if (std::sscanf(text, "%u.%u.%u.%u%c", &part[0], &part[1], &part[2], &part[3], &end) != 4) return 0;
+        uint8_t address[4];
+        for (int i = 0; i < 4; ++i) { if (part[i] > 255) return 0; address[i] = uint8_t(part[i]); }
+        return memory_.write(c.rdx, address, sizeof(address)) ? 1 : kernel_error(fault);
+    }
+    case S::net_ntop: {
+        uint8_t address[4];
+        if (c.rdi != 2 || !memory_.read(c.rsi, address, sizeof(address))) return 0;
+        char text[16];
+        const int length = std::snprintf(text, sizeof(text), "%u.%u.%u.%u", address[0], address[1], address[2], address[3]);
+        if (uint64_t(length) >= c.rcx || !memory_.write(c.rdx, text, size_t(length) + 1)) return 0;
+        return int64_t(c.rdx);
     }
     case S::thread_id: return threads_.known(thread) ? int64_t(uint32_t(thread)) : kernel_error(inval);
     // FIFO/round-robin priorities: 256 lowest to 767 highest.

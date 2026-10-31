@@ -139,6 +139,27 @@ int main() {
     assert(resolve_libkernel("sceKernelOpen", "libkernel", "libkernel", 2) == S::unresolved);
     assert(resolve_libkernel("1G3lF1Gg1k8#A#B", "libkernel", "libkernel", 1) == S::unresolved);
     assert(call(S::unresolved) == kernel_error(nosys));
+    // POSIX semaphores over kernel ones; a UUID; IPv4 text and back.
+    assert(call(S::sem_init, 0x11100, 0, 1) == 0);
+    assert(call(S::sem_wait, 0x11100) == 0 && call(S::sem_post, 0x11100) == 0 && call(S::sem_wait, 0x11100) == 0);
+    assert(call(S::sem_init, 0x11108, 1, 0) == kernel_error(notsup));
+    assert(call(S::sem_destroy, 0x11100) == 0 && call(S::sem_post, 0x11100) == kernel_error(srch));
+    assert(call(S::uuid_create, 0x11200) == 0);
+    {
+        uint8_t uuid[16];
+        assert(memory.read(0x11200, uuid, sizeof(uuid)) && (uuid[6] >> 4) == 4 && (uuid[8] >> 6) == 2);
+    }
+    path("192.168.0.42");
+    assert(call(S::net_pton, 2, 0x10000, 0x11300) == 1);
+    assert(kernel.invoke(S::net_ntop, {2, 0x11300, 0x11400, 16}) == 0x11400);
+    {
+        char text[13];
+        assert(memory.read(0x11400, text, sizeof(text)) && std::strcmp(text, "192.168.0.42") == 0);
+    }
+    assert(kernel.invoke(S::net_ntop, {2, 0x11300, 0x11400, 12}) == 0);
+    path("1.2.3.256");
+    assert(call(S::net_pton, 2, 0x10000, 0x11300) == 0 && call(S::net_pton, 28, 0x10000, 0x11300) == 0);
+    assert(resolve_libkernel("Q4qBuN-c0ZM", "libSceNet", "libSceNet", 1) == S::net_unavailable);
     kernel.reset();
     assert(call(S::close, 3) == kernel_error(badf));
     for (const char* name : {"data.bin", "link", "escape", "fifo"})
