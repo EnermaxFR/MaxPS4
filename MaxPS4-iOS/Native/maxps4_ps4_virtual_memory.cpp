@@ -1,20 +1,49 @@
 #include "maxps4_ps4_virtual_memory.h"
 #include <algorithm>
 #include <iterator>
+#include <cerrno>
 #include <new>
 #include <sys/mman.h>
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#endif
 
 namespace maxps4 {
 using namespace ps4;
 namespace {
+// PROT_NONE host pages at exactly [address, address + size), never replacing
+// a mapping: Darwin's mmap may ignore an address hint even for a free span,
+// so iOS asks vm_allocate for that fixed span (it fails if anything is
+// there). `status` is the host's answer (0: granted).
+bool reserve_exact(uint64_t address, uint64_t size, int& status) {
+#if defined(__APPLE__)
+    vm_address_t at = vm_address_t(address);
+    const kern_return_t kr = ::vm_allocate(::mach_task_self(), &at, vm_size_t(size), VM_FLAGS_FIXED);
+    status = int(kr);
+    if (kr != KERN_SUCCESS) return false;
+    if (at != vm_address_t(address) || ::mprotect(reinterpret_cast<void*>(address), size_t(size), PROT_NONE) != 0) {
+        ::vm_deallocate(::mach_task_self(), at, vm_size_t(size));
+        status = -1;
+        return false;
+    }
+    return true;
+#else
+    const auto want = reinterpret_cast<void*>(address);
+    void* got = ::mmap(want, size_t(size), PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (got == want) { status = 0; return true; }
+    status = got == MAP_FAILED ? errno : -1;
+    if (got != MAP_FAILED) ::munmap(got, size_t(size));
+    return false;
+#endif
+}
 // PROT_NONE until a fixed mapping commits pages in it; never released.
 struct AppArea {
     uint64_t base = 0, size = 0;
+    int status = 0;
     AppArea() {
-        const auto want = reinterpret_cast<void*>(PS4VirtualMemory::app_area_base);
-        void* got = ::mmap(want, size_t(PS4VirtualMemory::app_area_size), PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (got == want) { base = PS4VirtualMemory::app_area_base; size = PS4VirtualMemory::app_area_size; }
-        else if (got != MAP_FAILED) ::munmap(got, size_t(PS4VirtualMemory::app_area_size));
+        if (reserve_exact(PS4VirtualMemory::app_area_base, PS4VirtualMemory::app_area_size, status)) {
+            base = PS4VirtualMemory::app_area_base; size = PS4VirtualMemory::app_area_size;
+        }
     }
 };
 const AppArea app_area_reservation;
@@ -23,8 +52,8 @@ bool in_app_area(uint64_t address, uint64_t size) {
     return a.size && address >= a.base && size <= a.size && address - a.base <= a.size - size;
 }
 }
-void PS4VirtualMemory::app_area(uint64_t& base, uint64_t& size) {
-    base = app_area_reservation.base; size = app_area_reservation.size;
+void PS4VirtualMemory::app_area(uint64_t& base, uint64_t& size, int& status) {
+    base = app_area_reservation.base; size = app_area_reservation.size; status = app_area_reservation.status;
 }
 Error PS4VirtualMemory::permissions(uint32_t protection, uint8_t& out) {
     // PS4 PROT_READ=1, WRITE=2, EXEC=4, unlike ELF p_flags.
@@ -164,9 +193,9 @@ Error PS4VirtualMemory::place(uint64_t hint, uint64_t length, uint64_t alignment
         }
         if (hint % page_size == 0 && hint <= UINT64_MAX - size) {
             release(hint, size); // What we mapped there before, as MAP_FIXED replaces it.
-            void* granted = ::mmap(reinterpret_cast<void*>(hint), size_t(size), PROT_NONE,
-                                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-            if (granted == reinterpret_cast<void*>(hint)) {
+            int status = 0;
+            if (reserve_exact(hint, size, status)) {
+                auto* granted = reinterpret_cast<void*>(hint);
                 if (!host_protect(hint, size, permission)) { ::munmap(granted, size_t(size)); return nomem; }
                 try {
                     insert({hint, size, reinterpret_cast<uint8_t*>(hint), {},
@@ -175,7 +204,6 @@ Error PS4VirtualMemory::place(uint64_t hint, uint64_t length, uint64_t alignment
                 used_ += size_t(size); result = hint;
                 return ok;
             }
-            if (granted != MAP_FAILED) ::munmap(granted, size_t(size));
         }
         if (size > window_bytes) return nomem;
         fixed = false;

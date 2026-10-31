@@ -29,9 +29,10 @@ public:
     // The start of the PS4 application map area, where games place fixed
     // mappings (Unreal Engine's memory pool at 0x1000000000): reserved in the
     // host when the library loads, before other allocations can take it.
-    // Its host span, or {0, 0} when the host did not grant it.
+    // Its host span, or {0, 0} when the host did not grant it, and the
+    // host's answer (0: granted; a Mach kern_return_t on iOS, errno elsewhere).
     static constexpr uint64_t app_area_base = 0x1000000000ULL, app_area_size = uint64_t(16) << 30;
-    static void app_area(uint64_t& base, uint64_t& size);
+    static void app_area(uint64_t& base, uint64_t& size, int& status);
     // Unreal Engine games make thousands of small mappings.
     static constexpr size_t region_limit = 65536;
     static constexpr uint64_t base = 0x1000000000ULL;

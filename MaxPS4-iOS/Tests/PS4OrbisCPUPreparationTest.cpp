@@ -289,8 +289,9 @@ int main() {
             CHECK(vm.unmap(unused,0x4000)==ok && !vm.translate(unused,1,4));
             // The application area, when the host granted it at load: fixed
             // mappings inside it land exactly, and go back to PROT_NONE.
-            uint64_t areaBase=0, areaSize=0;
-            maxps4::PS4VirtualMemory::app_area(areaBase,areaSize);
+            uint64_t areaBase=0, areaSize=0; int areaStatus=0;
+            maxps4::PS4VirtualMemory::app_area(areaBase,areaSize,areaStatus);
+            CHECK(areaSize ? areaStatus==0 : areaStatus!=0);
             CHECK(!areaSize || (areaBase==maxps4::PS4VirtualMemory::app_area_base && areaSize==maxps4::PS4VirtualMemory::app_area_size));
             if (areaSize) {
                 uint64_t inArea=0;

@@ -159,9 +159,10 @@ final class MaxPS4GameSource: @unchecked Sendable {
     // Whether the PS4 application area and the mmap window were granted, and where.
     private func memoryLayout(_ engine: OpaquePointer) -> String {
         var area: UInt64 = 0, areaSize: UInt64 = 0, window: UInt64 = 0, windowSize: UInt64 = 0
-        _ = maxps4_fex_engine_memory_layout(engine, &area, &areaSize, &window, &windowSize)
+        var status: Int32 = 0
+        _ = maxps4_fex_engine_memory_layout(engine, &area, &areaSize, &window, &windowSize, &status)
         let gib = { (bytes: UInt64) in bytes >> 30 }
-        let zone = areaSize == 0 ? "zone PS4 0x1000000000 refusée par iOS"
+        let zone = areaSize == 0 ? "zone PS4 0x1000000000 refusée par iOS (code \(status))"
             : "zone PS4 0x\(String(area, radix: 16)) (\(gib(areaSize)) Gio)"
         return "Mémoire : \(zone) · fenêtre 0x\(String(window, radix: 16)) (\(gib(windowSize)) Gio)"
     }
